@@ -82,6 +82,7 @@
 </head>
 <body>
 <h1>The m2py directive language — examples</h1>
+<p><strong>Note (this build):</strong> this is the public, BYOK-only build — there is no login, no registered/protected data sources, no server-side remote execution, and no homomorphic (HE) tier. Sections 1, 2, 4, 7 and 11 below (public registry ids and plain URLs) apply as written. Sections 3, 5, 6, 8, 9, 10 and 12 describe the Anvil-registered-source, variable-level-assembly and HE behavior of the full/advanced sibling app — a bare name that isn't a known registry id is simply an error here, not a routed remote source.</p>
 <p>Directives are plain comments at the start of a line, understood by <code>js/data-directives.js</code> before any script actually runs. The comment marker can be <code>#</code>, <code>--</code>, or <code>//</code> (whichever the active mode uses) — the parser treats them identically.</p>
 <h2>Grammar</h2>
 <pre><code>directive   := connect | load | require | create-dataset | import | join
