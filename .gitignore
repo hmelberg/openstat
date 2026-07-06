@@ -1,0 +1,40 @@
+# Helper docs (Word/PDF/Excel reference material — not tracked)
+helper docs/
+
+# Python cache + test artifacts
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Scratch test files in repo root only (committed tests live in tests/)
+/test_*.py
+/run_test.py
+
+# Local working notes (not tracked)
+Notater og mulige issues.md
+
+# Editor / IDE
+.claude/
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local env
+.env
+.venv/
+venv/
+.netlify/
+
+# Generated static data export (build_static_data.py).
+# The light web build (static_data/*.parquet + manifest.json) IS committed so the
+# deployed app can load it; the big DuckDB bundle and CSV copies are not, and the
+# full local 100k build is kept out of git.
+static_data/microdata.duckdb
+static_data/*.csv
+static_data_100k_full/

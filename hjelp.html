@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Microdata Script Runner – Dokumentasjon</title>
+<style>
+  :root {
+    --accent: #2563eb;
+    --accent-light: #eff6ff;
+    --accent-dark: #1d4ed8;
+    --text: #1e293b;
+    --text-muted: #64748b;
+    --bg: #f8fafc;
+    --bg-card: #ffffff;
+    --bg-code: #f1f5f9;
+    --border: #e2e8f0;
+    --radius: 10px;
+    --shadow: 0 1px 4px rgba(15,23,42,0.08), 0 4px 16px rgba(15,23,42,0.05);
+    --tag-micro: #0ea5e9;
+    --tag-py: #7c3aed;
+    --tag-r: #059669;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --accent: #3b82f6;
+      --accent-light: #1e3a5f;
+      --text: #e2e8f0;
+      --text-muted: #94a3b8;
+      --bg: #0f172a;
+      --bg-card: #1e293b;
+      --bg-code: #0f172a;
+      --border: #334155;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 15px;
+    line-height: 1.65;
+  }
+
+  /* ── Layout ── */
+  .page { display: flex; min-height: 100vh; }
+  nav {
+    width: 220px; flex-shrink: 0; position: sticky; top: 0; height: 100vh;
+    overflow-y: auto; border-right: 1px solid var(--border);
+    background: var(--bg-card); padding: 24px 0 32px;
+    scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+  }
+  nav::-webkit-scrollbar { width: 4px; }
+  nav::-webkit-scrollbar-track { background: transparent; }
+  nav::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+  .nav-logo {
+    padding: 0 18px 20px; font-size: 13px; font-weight: 700;
+    color: var(--accent); letter-spacing: 0.02em; text-transform: uppercase;
+  }
+  .nav-section { padding: 6px 18px 2px; font-size: 10px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); }
+  nav a {
+    display: block; padding: 5px 18px; font-size: 13.5px; color: var(--text-muted);
+    text-decoration: none; border-radius: 0; transition: color .15s, background .15s;
+  }
+  nav a:hover, nav a.active { color: var(--accent); background: var(--accent-light); }
+  main { flex: 1; min-width: 0; max-width: 860px; padding: 48px 40px 80px; margin: 0 auto; }
+
+  @media (max-width: 700px) {
+    nav { display: none; }
+    main { padding: 28px 18px 60px; }
+  }
+
+  /* ── Typography ── */
+  h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; color: var(--text); }
+  h2 { font-size: 20px; font-weight: 700; margin: 48px 0 14px; padding-top: 8px;
+       border-top: 1px solid var(--border); color: var(--text); }
+  h3 { font-size: 15px; font-weight: 700; margin: 24px 0 8px; color: var(--text); }
+  p { margin-bottom: 12px; }
+  ul, ol { padding-left: 20px; margin-bottom: 12px; }
+  li { margin-bottom: 4px; }
+  a { color: var(--accent); }
+  a:hover { color: var(--accent-dark); }
+  .lead { font-size: 16px; color: var(--text-muted); margin-bottom: 32px; line-height: 1.7; }
+
+  /* ── Code ── */
+  code {
+    font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', monospace;
+    font-size: 13px; background: var(--bg-code); border: 1px solid var(--border);
+    border-radius: 4px; padding: 1px 5px; color: var(--accent);
+  }
+  pre {
+    background: var(--bg-code); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 14px 16px; overflow-x: auto; margin: 10px 0 16px;
+    scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+  }
+  pre::-webkit-scrollbar { height: 5px; }
+  pre::-webkit-scrollbar-track { background: transparent; }
+  pre::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+  pre code {
+    background: none; border: none; padding: 0; font-size: 13px;
+    color: var(--text); line-height: 1.6; display: block;
+  }
+
+  /* ── Cards ── */
+  .card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 18px 20px; margin-bottom: 14px;
+    box-shadow: var(--shadow);
+  }
+  .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .card-title { font-weight: 700; font-size: 14px; margin-bottom: 4px; }
+  .card-body { font-size: 13px; color: var(--text-muted); line-height: 1.55; }
+
+  /* ── Mode badges ── */
+  .badge {
+    display: inline-block; font-size: 11px; font-weight: 700; border-radius: 4px;
+    padding: 2px 7px; letter-spacing: 0.03em; vertical-align: middle; margin-right: 4px;
+    text-transform: uppercase;
+  }
+  .badge-micro { background: #e0f2fe; color: #0369a1; }
+  .badge-py    { background: #ede9fe; color: #6d28d9; }
+  .badge-r     { background: #d1fae5; color: #065f46; }
+  @media (prefers-color-scheme: dark) {
+    .badge-micro { background: #0c3347; color: #7dd3fc; }
+    .badge-py    { background: #2d1b69; color: #c4b5fd; }
+    .badge-r     { background: #064e3b; color: #6ee7b7; }
+  }
+
+  /* ── Table ── */
+  .doc-table { width: 100%; border-collapse: collapse; margin: 12px 0 20px; font-size: 13.5px; }
+  .doc-table th { text-align: left; padding: 8px 12px; background: var(--bg-code);
+    border-bottom: 2px solid var(--border); font-weight: 600; color: var(--text-muted);
+    font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .doc-table td { padding: 7px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  .doc-table tr:last-child td { border-bottom: none; }
+  .doc-table tr:hover td { background: var(--bg-code); }
+
+  /* ── Callout ── */
+  .callout {
+    border-left: 3px solid var(--accent); background: var(--accent-light);
+    padding: 12px 16px; border-radius: 0 var(--radius) var(--radius) 0;
+    margin: 14px 0; font-size: 13.5px; color: var(--text);
+  }
+  .callout.tip { border-color: #059669; background: #f0fdf4; }
+  @media (prefers-color-scheme: dark) {
+    .callout.tip { background: #052e16; }
+  }
+
+  /* ── Header strip ── */
+  .doc-header {
+    background: linear-gradient(135deg, var(--accent) 0%, #7c3aed 100%);
+    color: #fff; border-radius: var(--radius); padding: 28px 32px; margin-bottom: 36px;
+    box-shadow: 0 4px 24px rgba(37,99,235,0.18);
+  }
+  .doc-header h1 { color: #fff; margin-bottom: 6px; }
+  .doc-header .lead { color: rgba(255,255,255,0.85); margin-bottom: 0; font-size: 15px; }
+
+  /* ── kbd ── */
+  kbd {
+    font-family: inherit; font-size: 12px; background: var(--bg-card);
+    border: 1px solid var(--border); border-radius: 4px;
+    box-shadow: 0 1px 0 var(--border); padding: 2px 6px;
+    color: var(--text);
+  }
+
+  /* ── Section anchor offset ── */
+  section { scroll-margin-top: 20px; }
+</style>
+</head>
+<body>
+<div class="page">
+
+<nav>
+  <div class="nav-logo">Script Runner</div>
+  <a href="hjelp.en.html" style="font-size:12px;color:var(--text-muted)">In English</a>
+  <div class="nav-section">Kom i gang</div>
+  <a href="#intro">Hva er dette?</a>
+  <a href="#running">Kjøre og oversette</a>
+  <a href="#microdata">Microdata-kommandoer</a>
+  <div class="nav-section">Editoren</div>
+  <a href="#editor">Editor og snarveier</a>
+  <a href="#tab-intro">Tab-autocomplete</a>
+  <a href="#sidebar">Datasett-panel</a>
+  <div class="nav-section">Lagre og dele</div>
+  <a href="#lagre-dele">Lagre, dele og hente</a>
+  <div class="nav-section">Skrittvis kjøring</div>
+  <a href="#forklar">Kjør skrittvis</a>
+  <a href="#widgets">Widgets</a>
+  <div class="nav-section">AI assistent</div>
+  <a href="#ai">AI assistent</a>
+  <div class="nav-section">Andre moduser</div>
+  <a href="#modes">Moduser</a>
+  <a href="#python">Python (Pyodide)</a>
+  <a href="#r">R (WebR)</a>
+  <a href="#hybrid">Hybrid-skript</a>
+  <div class="nav-section">Referanse</div>
+  <a href="#tab-full">Tab-autocomplete (detalj)</a>
+</nav>
+
+<main>
+
+  <div class="doc-header">
+    <h1>Microdata Script Runner</h1>
+    <p class="lead">Skriv og kjør microdata.no-kode, Python og R direkte i nettleseren — uten installasjon.</p>
+  </div>
+
+  <!-- ── INTRO ── -->
+  <section id="intro">
+    <h2>Hva er dette?</h2>
+    <p>Script Runner er et verktøy for å skrive og kjøre kode mot norske registerdata fra <strong>microdata.no</strong>. Du kan skrive microdata-kommandoer og se resultater umiddelbart, oversette mellom Python/R og microdata-syntaks, og kjøre hybridskript der ulike språk samarbeider.</p>
+
+    <div class="callout">
+      <strong>NB:</strong> Dette er et hobbyprosjekt og er ikke laget av microdata.no selv. Siden inneholder ikke ekte tall, og det gis ingen garantier for at analysene er korrekt implementert.
+    </div>
+
+    <p>Alt skjer i nettleseren — ingen data forlater maskinen din.</p>
+
+    <div class="callout tip">
+      <strong>Hurtigstart:</strong> Skriv microdata-kommandoer i tekstfeltet, trykk <kbd>Ctrl</kbd>+<kbd>Enter</kbd> eller knappen <strong>Kjør</strong>. Bruk <kbd>Tab</kbd> for forslag til kommandoer og variabler.
+    </div>
+  </section>
+
+  <!-- ── RUNNING ── -->
+  <section id="running">
+    <h2>Kjøre og oversette</h2>
+
+    <h3>Kjøre direkte</h3>
+    <p>Trykk <kbd>Ctrl</kbd>+<kbd>Enter</kbd> eller knappen <strong>Kjør</strong>. Resultater vises i outputfeltet. Tabeller, diagrammer og tekst vises automatisk.</p>
+
+    <h3>Oversette</h3>
+    <p>Knappen <strong>Oversett</strong> (pil-ikon) konverterer Python- eller R-kode til microdata-syntaks. Resultatet vises i outputfeltet — for å <strong>kjøre</strong> den oversatte koden må du enten kopiere den inn i editoren og bytte til microdata-modus, eller skrive den om til microdata direkte.</p>
+
+    <h3>Stoppe / avbryte</h3>
+    <p>Trykk <strong>Kjør</strong>-knappen igjen under kjøring for å avbryte.</p>
+  </section>
+
+  <!-- ── MICRODATA ── -->
+  <section id="microdata">
+    <h2>Microdata-kommandoer</h2>
+    <p>Microdata-syntaksen ligner på Stata. Her er de viktigste kommandoene:</p>
+
+    <h3>Datainnlasting</h3>
+    <table class="doc-table">
+      <thead><tr><th>Kommando</th><th>Beskrivelse</th></tr></thead>
+      <tbody>
+        <tr><td><code>require no.ssb.fdb:52 as db</code></td><td>Koble til en datakilde og gi den et navn</td></tr>
+        <tr><td><code>create-dataset navn</code></td><td>Opprett tomt datasett</td></tr>
+        <tr><td><code>import db/VARIABEL [dato] as alias</code></td><td>Importer variabel fra registerdata</td></tr>
+        <tr><td><code>import-event db/VARIABEL dato1 to dato2 as alias</code></td><td>Importer hendelsesdata</td></tr>
+        <tr><td><code>use datasett</code></td><td>Bytt aktivt datasett</td></tr>
+        <tr><td><code>merge datasett, by(var)</code></td><td>Slå sammen to datasett</td></tr>
+        <tr><td><code>clone-dataset nytt [fra]</code></td><td>Kopier datasett</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Transformasjoner</h3>
+    <table class="doc-table">
+      <thead><tr><th>Kommando</th><th>Beskrivelse</th></tr></thead>
+      <tbody>
+        <tr><td><code>generate ny = uttrykk</code></td><td>Lag ny variabel</td></tr>
+        <tr><td><code>rename gammel ny</code></td><td>Gi variabel nytt navn</td></tr>
+        <tr><td><code>replace var = uttrykk [if betingelse]</code></td><td>Erstatt verdier</td></tr>
+        <tr><td><code>recode var (gammelt=nytt) ...</code></td><td>Rekode kategorier</td></tr>
+        <tr><td><code>keep var1 var2 ...</code></td><td>Behold kun disse variablene</td></tr>
+        <tr><td><code>drop var1 var2 ...</code></td><td>Fjern variabler</td></tr>
+        <tr><td><code>destring var</code></td><td>Konverter tekst til tall</td></tr>
+        <tr><td><code>collapse (stat) var [-> navn] ..., by(gruppevar)</code></td><td>Aggreger til gruppenivå</td></tr>
+        <tr><td><code>aggregate (stat) var -> nyvar, by(gruppevar)</code></td><td>Legg til aggregert kolonne (beholder alle rader)</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Statistikk og visualisering</h3>
+    <table class="doc-table">
+      <thead><tr><th>Kommando</th><th>Beskrivelse</th></tr></thead>
+      <tbody>
+        <tr><td><code>summarize [variabler]</code></td><td>Deskriptiv statistikk</td></tr>
+        <tr><td><code>tabulate var [var2]</code></td><td>Frekvens- / krysstabell</td></tr>
+        <tr><td><code>correlate [variabler]</code></td><td>Korrelasjonsmatrise</td></tr>
+        <tr><td><code>regress y x1 x2 ...</code></td><td>OLS-regresjon</td></tr>
+        <tr><td><code>logit / probit y x1 x2</code></td><td>Logistisk / probit regresjon</td></tr>
+        <tr><td><code>ci var</code></td><td>Konfidensintervall</td></tr>
+        <tr><td><code>anova y x</code></td><td>Variansanalyse</td></tr>
+        <tr><td><code>barchart / histogram / scatter / boxplot var, by(gruppevar)</code></td><td>Diagrammer</td></tr>
+        <tr><td><code>kaplan-meier / cox / weibull</code></td><td>Overlevelsesanalyse</td></tr>
+      </tbody>
+    </table>
+
+    <h3>collapse-statistikk</h3>
+    <p>Tilgjengelige statistikkmål for <code>collapse</code> og <code>aggregate</code>:</p>
+    <p><code>mean</code> · <code>min</code> · <code>max</code> · <code>median</code> · <code>sum</code> · <code>count</code> · <code>sd</code> · <code>semean</code> · <code>sebinomial</code> · <code>percent</code> · <code>iqr</code> · <code>gini</code></p>
+    <p><em>NB:</em> <code>collapse (first)</code> og <code>collapse (last)</code> er <strong>ikke</strong> støttet i microdata.no — bruk i stedet en aggregert statistikk.</p>
+    <p><em>Multi-key:</em> kun ÉN variabel i <code>by()</code> og <code>on</code>. Lag composite-nøkkel først:
+       <code>generate composite = string(k1) ++ "_" ++ string(k2)</code>.</p>
+
+    <h3>Pseudonym-variabler</h3>
+    <p>Variabler som identifiserer enheter (typisk variabler med navn som slutter på <code>_FNR</code> — f.eks. <code>BEFOLKNING_MOR_FNR</code>) er <strong>pseudonymer</strong>. I microdata.no kan disse kun brukes som nøkkel i <code>collapse(by)</code> eller <code>merge(on)</code> — ikke i <code>generate</code>/<code>replace</code>, sammenligninger eller andre transformasjoner.</p>
+
+    <h3>Kontrollflyt</h3>
+    <p>For-løkker bruker prod-grammatikk: range med <code>n : m</code> (inklusiv), eller verdiliste (komma- eller whitespace-separert). Bruk <code>$i</code> for substitusjon. Ikke bruk parentes rundt iterator-listen eller literal ellipsis <code>...</code>.</p>
+    <pre><code>for i in 2018 : 2020
+  import db/INNTEKT_WLONN $i-01-01 as inntekt_$i
+end
+
+for forelder in mor, far
+  // ...
+end
+
+let maks = 200000
+generate hoy = (inntekt &gt; maks)</code></pre>
+
+    <h3>Avsløringskontroll</h3>
+    <p>m2py emulerer microdata.no sine regler som standard — både <em>syntaks/validering</em> (slik at skriptet ditt kjører i prod) og <em>sensurering av output</em> (slik at du ser samme tall som i prod). Du kan skru av alt i hamburger-menyen ("Avsløringskontroll: AV") for å eksperimentere uten begrensninger, men da risikerer du å skrive skript som ikke kjører i microdata.no. Konkrete regler:</p>
+    <ul>
+      <li><strong>Pseudonym-validering.</strong> Variabler som slutter på <code>_FNR</code> kan kun brukes som nøkkel i <code>collapse(by)</code> eller <code>merge(on)</code> — ikke i <code>generate</code>, <code>replace</code>, sammenligninger osv.</li>
+      <li><strong>Type-sjekk.</strong> Alfanumeriske variabler (f.eks. <code>BEFOLKNING_KJOENN</code>) avvises for numeriske operasjoner som <code>min</code>, <code>max</code>, <code>mean</code>, <code>sum</code>, <code>median</code>.</li>
+      <li><strong>For-løkker:</strong> bruk <code>$i</code>-substitusjon og enten range (<code>1998 : 2009</code>) eller komma/whitespace-liste. Parentes rundt verdier og literal <code>...</code> er ikke gyldig.</li>
+      <li><strong>Missing-verdier.</strong> Tildeling med <code>.</code> er OK (<code>generate x = .</code>). <strong>Sammenligning med</strong> <code>.</code> er derimot ikke gyldig — <code>keep if y == .</code> avvises i microdata.no. Bruk <code>sysmiss(y)</code> for å teste om en verdi er missing.</li>
+      <li><strong>Min populasjon 1000.</strong> <code>keep if</code>, <code>drop if</code> og <code>sample</code> kan ikke etterlate færre enn 1000 enheter.</li>
+      <li><strong>Tabeller med for mange små celler skjules.</strong> <code>tabulate</code> stoppes hvis mer enn 50 % av cellene har frekvens lavere enn 5.</li>
+      <li><strong>Endringer må påvirke ≥10 enheter.</strong> <code>generate</code>, <code>replace</code> og <code>recode</code> avvises hvis endringen påvirker 1–9 rader (eller alle bortsett fra 1–9).</li>
+      <li><strong>Deskriptiv statistikk krever ≥10 enheter.</strong> <code>summarize</code>, <code>correlate</code>, <code>ci</code>, <code>anova</code>, <code>normaltest</code> stoppes på populasjoner under 10.</li>
+      <li><strong>Median/persentiler vises med 3 signifikante sifre.</strong> I <code>summarize</code> blir f.eks. 47 238 til 47 200 og 2,7183 til 2,72.</li>
+      <li><strong>Winsorisering 1/99 %.</strong> Numeriske variabler kuttes ved 1- og 99-persentilen før visning av gjennomsnitt og standardavvik i <code>summarize</code>, og før plotting i <code>histogram</code>, <code>scatter</code> og <code>boxplot</code>. Median og kvartiler er ikke påvirket. Regresjon og collapse bruker rå data.</li>
+    </ul>
+
+    <h4>Per-script-overstyring</h4>
+    <p>Du kan også styre avsløringskontroll fra selve scriptet med et magisk direktiv øverst i koden. Direktivet er en vanlig kommentar (<code>//</code>) som ignoreres av microdata.no-produksjon, men leses av m2py før kjøring og slås tilbake igjen etterpå (påvirker ikke andre script):</p>
+    <pre><code>// m2py: disclosure-control=off
+create-dataset bef
+import db/BEFOLKNING_KJOENN as kjonn
+summarize kjonn</code></pre>
+    <p>Verdier: <code>on</code>/<code>off</code>, <code>true</code>/<code>false</code>, <code>1</code>/<code>0</code>, <code>yes</code>/<code>no</code>. Kortform <code>dc</code> aksepteres også: <code>// m2py: dc=off</code>. Nyttig i API-/script-bruk der man vil styre modus uten å endre globale innstillinger.</p>
+
+    <h2 id="hjelp-dataminimering">Dataminimering-vurdering</h2>
+    <p>
+      m2py kan be en AI vurdere om scriptet ditt praktiserer dataminimering —
+      prinsippet om å hente og bruke kun det minimum av data som trengs for
+      problemstillingen. Funksjonen er rådgivende; endelig vurdering ligger hos
+      forsker og dataansvarlig.
+    </p>
+    <p>
+      Vurderingen forankres i:
+    </p>
+    <ul>
+      <li>Personvernforordningen art. 5(1)(c) — dataminimering</li>
+      <li>Helseregisterloven § 6 — graden av personidentifikasjon</li>
+      <li>Personvernforordningen art. 89(1) — vitenskapelig forskning</li>
+      <li>Personvernforordningen art. 9 — særlige kategorier (sensitive opplysninger)</li>
+    </ul>
+
+    <h3>Slik fungerer det</h3>
+    <p>
+      Klikk hamburger-meny → "Vurder dataminimering". Første gang du bruker
+      funksjonen vises en bekreftelse på at scriptet sendes til Anthropic. Faktiske
+      mikrodata-verdier sendes aldri.
+    </p>
+    <p>
+      I valgmodalen kan du:
+    </p>
+    <ul>
+      <li><strong>Velge språk</strong> (auto / microdata / R / Python) — auto detekterer fra scriptet</li>
+      <li><strong>Velge rapportlengde</strong>: Kort (raske observasjoner) eller Lang (alle dimensjoner med oppfølgings­spørsmål)</li>
+      <li><strong>Be om revidert script</strong> — AI legger ved en konservativ revidert versjon på slutten av svaret, som du kan kopiere eller erstatte editoren med</li>
+      <li><strong>Spesifisere formål og kontekst</strong> — valgfritt; gir mer presis vurdering</li>
+    </ul>
+
+    <h3>Innlogging</h3>
+    <p>
+      AI-vurderingen krever at du er logget inn i m2py. Bruk Logg inn-knappen
+      øverst og følg lenken på epost. Når du er logget inn (via FHI- eller annen
+      godkjent epost-adresse), har du tilgang til dataminimering-funksjonen
+      automatisk — ingen separat tilgangsnøkkel trengs.
+    </p>
+
+    <h3>Sensitive variabler</h3>
+    <p>
+      AI flagger automatisk variabler som faller inn under <em>særlige kategorier</em>
+      (GDPR art. 9): etnisitet, religion, seksuell legning, særskilt sensitive
+      helseopplysninger (abort, kjønnssykdommer, psykiatri etc.), lov- og
+      straffeopplysninger. For disse kreves høyere begrunnelsesterskel.
+    </p>
+
+    <h3>Personvern-kommentarer i scriptet</h3>
+    <p>
+      Du kan legge til strukturerte begrunnelser direkte i scriptet:
+    </p>
+    <pre>// personvern blokk start
+// formål: Studere sammenheng mellom utdanning og inntekt
+// tidsperiode: 1970-1980 fordi kohorten skal være ferdig utdannet
+// geografi: kommune nødvendig for å se regionale forskjeller
+// sensitive grupper: nei
+// alternativer vurdert: SSB-tabell A-04 var for grovkornet
+// personvern blokk slutt</pre>
+    <p>
+      Eller fri tekst:
+    </p>
+    <pre>// personvern blokk start
+// Formål: studere sammenheng mellom utdanning og inntekt for kohort 1970-1980.
+// Tidsperioden valgt fordi kohorten skal være ferdig utdannet ved analyseslutt.
+// Kommune nødvendig for regionale forskjeller.
+// personvern blokk slutt</pre>
+    <p>
+      Hvis du huker av "Lagre som personvern-blokk" i sekundær-modalen, skriver
+      m2py innholdet inn i scriptet automatisk etter vurderingen.
+    </p>
+    <p>
+      Enkeltlinjer fungerer også:
+    </p>
+    <pre>// personvern: kuttet datoer til måned for å unngå unødig presisjon</pre>
+    <p>
+      Du kan også bruke <code>#</code> i stedet for <code>//</code> i Python/R-script.
+    </p>
+
+    <h3>Direktiver i scriptet</h3>
+    <p>
+      Du kan styre AI-oppførselen direkte i scriptet:
+    </p>
+    <pre>// personvern: revider-script: ja</pre>
+    <p>
+      Da slår AI på revidert-script-output uansett hva du velger i UI-en. Nyttig
+      hvis du har et template som alltid skal revideres.
+    </p>
+  </section>
+
+  <!-- ── EDITOR ── -->
+  <section id="editor">
+    <h2>Editor og tastatursnarveier</h2>
+
+    <table class="doc-table">
+      <thead><tr><th>Snarvei</th><th>Handling</th></tr></thead>
+      <tbody>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>Enter</kbd></td><td>Kjør scriptet</td></tr>
+        <tr><td><kbd>Tab</kbd></td><td>Autofullfør (kommando, variabel, metode)</td></tr>
+        <tr><td><kbd>Esc</kbd></td><td>Lukk autocomplete-liste</td></tr>
+        <tr><td>Klikk linjenummer</td><td>Sett / fjern stoppunkt (rød prikk) for Kjør skrittvis</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Stoppunkter</h3>
+    <p>Klikk på et linjenummer for å sette et rød stoppunkt. Under <strong>Kjør skrittvis</strong> vil kjøringen pause ved stoppunktet og vente på at du trykker videre.</p>
+  </section>
+
+  <!-- ── TAB INTRO ── -->
+  <section id="tab-intro">
+    <h2>Tab-autocomplete</h2>
+    <p>Trykk <kbd>Tab</kbd> i editoren for kontekstbevisste forslag: kommandoer, variabelnavn, DataFrame-metoder og mer. Etter <code>/</code> (f.eks. <code>import db/</code>) foreslås microdata-variabler fra katalogen. På tom linje foreslås kommandoer.</p>
+
+    <div class="callout tip">
+      <strong>Tips:</strong> Trykk <kbd>Tab</kbd> midt i et ord for å filtrere listen etter det du allerede har skrevet. Se <a href="#tab-full">fullstendig referanse</a> for alle kontekstregler.
+    </div>
+  </section>
+
+  <!-- ── SIDEBAR ── -->
+  <section id="sidebar">
+    <h2>Datasett-panel (høyre sidemeny)</h2>
+    <p>Sidemenyen til høyre viser alle datasett som er lastet inn i gjeldende kjøring.</p>
+    <ul>
+      <li><strong>Antall variabler og rader</strong> per datasett</li>
+      <li><strong>Variabelliste</strong> med type-ikon: <code>ABC</code> tekst, <code>123</code> numerisk, skjold-ikon for pseudonymisert ID</li>
+      <li>Klikk på en variabel for <strong>detaljvisning</strong>: navn, type, beskrivelse og lenke til microdata-katalogen</li>
+    </ul>
+    <p>Sidemenyen oppdateres automatisk etter hver kjøring og etter hvert blokk i Kjør skrittvis-modus.</p>
+  </section>
+
+  <!-- ── LAGRE OG DELE ── -->
+  <section id="lagre-dele">
+    <h2>Lagre, dele og hente scripts</h2>
+    <p>Alle valgene under ligger i <strong>hamburgermenyen</strong> øverst til venstre. De kjører i sin helhet i nettleseren din — vi lagrer aldri scriptene dine på en server.</p>
+
+    <h3>Last ned kode / Last inn fil</h3>
+    <p><strong>Last ned kode</strong> laster ned scriptet som en <code>.txt</code>-fil til maskinen din. <strong>Last inn fil (lokal)</strong> åpner en slik fil igjen. Dette er ren lokal fil-håndtering.</p>
+
+    <h3>Del (kopier lenke)</h3>
+    <p>Lager en lenke som inneholder <em>hele scriptet</em>, komprimert inn i selve adressen (etter <code>#</code>). Lenken kopieres til utklippstavlen — send den i e-post, Slack eller lim den inn hvor du vil. Den som åpner lenken får scriptet rett inn i editoren.</p>
+    <ul>
+      <li>Ingenting lagres hos oss, og mottakeren trenger ikke å logge inn.</li>
+      <li>Lenken er et <strong>frosset øyeblikksbilde</strong> — endrer du scriptet etterpå, må du dele en ny lenke.</li>
+      <li>Passer for scripts opp til noen tusen tegn. Er scriptet for stort for en URL, får du beskjed — bruk «Last ned kode» (fil) eller GitHub i stedet.</li>
+    </ul>
+
+    <h3>Åpne fra URL</h3>
+    <p>Lim inn en <strong>direkte lenke</strong> til en tekstfil, så hentes innholdet inn i editoren. De siste URL-ene du har brukt huskes lokalt for rask gjenåpning.</p>
+    <ul>
+      <li>Fungerer med <strong>GitHub «raw»-lenker</strong>, <strong>GitHub gist</strong> (raw) og <strong>Dropbox</strong>.</li>
+      <li>Vanlige delelenker (f.eks. en Google Drive- eller GitHub-<em>side</em>) virker <em>ikke</em> — du må bruke den rå fil-lenken. Får du en feilmelding, er det nesten alltid fordi kilden ikke tillater direkte henting (CORS).</li>
+      <li>Filendelsen styrer modus: <code>.py</code> → Python, <code>.r</code> → R, ellers Microdata.</li>
+    </ul>
+
+    <h3>GitHub (for viderekomne)</h3>
+    <p>Lar deg <strong>lagre og hente</strong> scripts direkte i ditt eget GitHub-repo — med versjonshistorikk og mulighet for samarbeid. Alt ligger under <strong>GitHub-undermenyen</strong> i hamburgermenyen.</p>
+
+    <p><strong>1. Innstillinger (engangs).</strong> Fyll inn personlig tilgangstoken (PAT), repo (<code>eier/navn</code>) og branch. Trykk <strong>Test tilkobling</strong> for å bekrefte, og <strong>Lagre innstillinger</strong>. Opplysningene huskes lokalt i nettleseren. Du trenger <em>ikke</em> oppgi noen filsti her — det er repoet du kobler til, ikke en enkeltfil.</p>
+    <p><strong>Flere profiler.</strong> Har du flere repos eller kontoer (f.eks. jobb og privat), kan du lagre dem som egne <em>profiler</em> og bytte mellom dem i nedtrekksmenyen øverst i dialogen («Ny» for å legge til, «Slett» for å fjerne). Den valgte profilen styrer Åpne/Lagre. Med <strong>Vis</strong> og <strong>Kopier</strong> kan du se eller kopiere tokenet — nyttig når du skal sette opp samme profil på en annen maskin.</p>
+    <p><strong>Slik lager du et token:</strong> GitHub → Settings → Developer settings → Fine-grained tokens → Generate new token. Gi det tilgang til <em>kun</em> det aktuelle repoet, og sett <strong>Repository permissions → Contents → Read and write</strong>. Kopier tokenet (vises bare én gang) og lim det inn i appen. Sett gjerne en utløpsdato; du kan når som helst trekke tokenet tilbake på samme side.</p>
+
+    <p><strong>2. Daglig bruk.</strong> Når tilkoblingen er satt opp:</p>
+    <ul>
+      <li><strong>Åpne fil…</strong> viser en <em>filvelger</em> med alle filene i repoet. Filtrer i søkefeltet og klikk en fil for å hente den inn i editoren.</li>
+      <li><strong>Lagre</strong> skriver til den filen du sist åpnet eller lagret (den <em>gjeldende</em> filen, markert med et sky-symbol ☁ ved siden av scriptnavnet). Har du ikke en gjeldende fil ennå, oppfører den seg som «Lagre som». Åpner du et nytt eller annet script (Nytt, lokal fil, eksempel, lenke eller URL), kobles sky-symbolet bort så du ikke ved et uhell overskriver feil fil.</li>
+      <li><strong>Lagre som…</strong> lar deg skrive en ny filsti (eksisterende mapper foreslås). Endelsen <code>.txt</code> legges til automatisk hvis du ikke skriver en.</li>
+      <li><strong>Hent på nytt</strong> henter den gjeldende filen på nytt fra GitHub (leser — lagrer ikke). Ulagrede lokale endringer går tapt, så du blir bedt om å bekrefte.</li>
+    </ul>
+
+    <ul>
+      <li><strong>Ett token, mange filer:</strong> tokenet gjelder hele repoet — du trenger ikke et token per fil.</li>
+      <li><strong>Offentlig vs. privat</strong> styrer du via repoets egen innstilling på GitHub — ikke i appen.</li>
+      <li><strong>Deling:</strong> ligger scriptet i et offentlig repo, deler du bare den rå fil-lenken; mottakeren bruker «Åpne fra URL».</li>
+      <li><strong>Tokenet er en hemmelighet</strong> og lagres i klartekst i nettleseren din. Bruk en delt maskin med omhu, og trekk tilbake tokenet hvis du mister tilgang til maskinen.</li>
+    </ul>
+
+    <h3>Nylig brukt</h3>
+    <p>Et lite pil-ned-ikon (▾) ved siden av filnavnet viser de siste GitHub- og URL-scriptene du har åpnet, slik at du kan hente dem inn igjen med ett klikk uten å skrive hele adressen. (Lokale filer kan ikke gjenåpnes av nettleseren.)</p>
+
+    <h3>Hvor lagres ting — og fungerer det på flere maskiner?</h3>
+    <p>Det er nyttig å skille <em>filen</em> fra <em>maskinen</em>:</p>
+    <ul>
+      <li><strong>Scripts lagret i GitHub</strong> ligger i skyen og er tilgjengelige fra hvor som helst. På en ny maskin limer du bare inn det <em>samme</em> tokenet én gang (eller ingenting hvis repoet er offentlig — da bruker du «Åpne fra URL»).</li>
+      <li><strong>Delelenker</strong> bærer scriptet i seg selv og virker på enhver maskin.</li>
+      <li><strong>Det som er knyttet til én maskin</strong> er bare lokale ting i nettleseren: listen over «nylige URL-er» og det innlimte GitHub-tokenet. Selve scriptene dine i GitHub er <em>ikke</em> låst til maskinen.</li>
+    </ul>
+  </section>
+
+  <!-- ── FORKLAR ── -->
+  <section id="forklar">
+    <h2>Kjør skrittvis — steg-for-steg gjennomgang</h2>
+    <p><strong>Kjør skrittvis</strong>-knappen kjører scriptet ett <em>blokk</em> om gangen og leser opp kommentarene med tale. Alle kommentarlinjer som starter med <code>//</code> (microdata) eller <code>#</code> (Python/R) blir lest høyt — kode-linjene utføres uten kommentar. Nyttig for presentasjoner og undervisning.</p>
+
+    <h3>Blokker</h3>
+    <p>En blokk er en gruppe sammenhengende linjer uten tomlinjer imellom. Én eller flere tomlinjer separerer blokker.</p>
+    <pre><code>// Denne kommentaren leses OPP før koden kjøres
+create-dataset df
+import db/BEFOLKNING_KJOENN as kjonn
+
+// Dette er neste blokk
+summarize kjonn
+// Denne kommentaren leses etter at resultatet vises</code></pre>
+
+    <h3>Kommentarsyntaks</h3>
+    <table class="doc-table">
+      <thead><tr><th>Syntaks</th><th>Modus</th><th>Effekt</th></tr></thead>
+      <tbody>
+        <tr><td><code>// tekst</code></td><td><span class="badge badge-micro">Microdata</span></td><td>Leses som tale; foranstilt kommentar leses FØR koden, etterhengt leses ETTER</td></tr>
+        <tr><td><code># tekst</code></td><td><span class="badge badge-py">Python</span> <span class="badge badge-r">R</span></td><td>Samme som ovenfor</td></tr>
+        <tr><td><code>//-</code> eller <code>#-</code></td><td>Alle</td><td>Stille kommentar — første kodeord leses <em>ikke</em> høyt, og tekst etter <code>-</code> leses heller ikke</td></tr>
+        <tr><td><code>//(lang=nb-NO,rate=1.2) tekst</code></td><td>Alle</td><td>Tale med tilpassede parametere (språk, hastighet, stemme, toneleie)</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Pause, navigasjon og stoppunkter</h3>
+    <ul>
+      <li>Trykk <strong>Kjør skrittvis</strong> igjen for å pause/fortsette</li>
+      <li>Pil-knappene hopper til forrige/neste blokk</li>
+      <li>Stoppunkter (klikk på linjenummer) gjør at kjøringen pauser automatisk</li>
+    </ul>
+  </section>
+
+  <!-- ── WIDGETS ── -->
+  <section id="widgets">
+    <h2>Widgets i Kjør skrittvis</h2>
+    <p>Widgets er interaktive kort som vises mens scriptet kjøres skrittvis. De settes inn som spesielle kommentarlinjer og er tilgjengelig i alle moduser.</p>
+
+    <h3>Syntaks</h3>
+    <pre><code>// microdata:
+//widget NAVN { ...json... }
+
+# python eller R:
+#widget NAVN { ...json... }</code></pre>
+
+    <h3>Blokk-syntaks for lengre innhold</h3>
+    <p>For HTML, SVG og markdown med flere linjer kan du bruke blokk-syntaks i stedet for JSON:</p>
+    <pre><code>//start_widget:html(title="Eksempel", speak="Her ser du HTML-innhold.")
+&lt;div style="text-align:center"&gt;
+  &lt;h2&gt;Hei fra HTML&lt;/h2&gt;
+  &lt;p&gt;Flere linjer uten escaping.&lt;/p&gt;
+&lt;/div&gt;
+//end_widget</code></pre>
+
+    <h3>Tilgjengelige widgets</h3>
+    <table class="doc-table">
+      <thead><tr><th>Widget</th><th>Eksempel</th><th>Beskrivelse</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>title</code></td>
+          <td><code>//widget title {"text":"Kapittel 1","size":"full"}</code></td>
+          <td>Stor tittelkort med animasjon. <code>size</code>: <code>"full"</code>, <code>"medium"</code>, <code>"small"</code></td>
+        </tr>
+        <tr>
+          <td><code>markdown</code></td>
+          <td><code>//widget markdown {"text":"# Hei\nDette er **fet** tekst"}</code></td>
+          <td>Rendret Markdown-innhold</td>
+        </tr>
+        <tr>
+          <td><code>question</code></td>
+          <td><code>//widget question {"q":"Hva er p-verdien?","options":["&lt;0.05","&gt;0.05"],"answer":0}</code></td>
+          <td>Flervalgsspørsmål med tilbakemelding. <code>"require_correct": true</code> gir prøv-igjen-modus</td>
+        </tr>
+        <tr>
+          <td><code>image</code></td>
+          <td><code>//widget image {"src":"bilde.png","caption":"Figur 1"}</code></td>
+          <td>Bildevisning med valgfri bildetekst</td>
+        </tr>
+        <tr>
+          <td><code>html</code></td>
+          <td><code>//start_widget:html</code> ... <code>//end_widget</code></td>
+          <td>Rå HTML-innhold i en modal</td>
+        </tr>
+        <tr>
+          <td><code>svg</code></td>
+          <td><code>//start_widget:svg(title="Figur")</code> ... <code>//end_widget</code></td>
+          <td>SVG-grafikk med valgfri tittel og bildetekst</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="callout">
+      Alle widgets støtter <code>speak="tekst"</code> for parallell taleopplesning mens widgeten vises, og <code>auto_advance_ms=3000</code> for automatisk lukking etter angitt tid.
+    </div>
+  </section>
+
+  <!-- ── AI ── -->
+  <section id="ai">
+    <h2>AI assistent</h2>
+    <p>Et eksperimentelt sidepanel med en AI-assistent som kan svare på spørsmål om microdata-syntaks, foreslå variabler og generere eller revidere skript. Åpnes med stjerne-ikonet øverst til høyre eller <kbd>Ctrl</kbd>+<kbd>I</kbd>.</p>
+
+    <div class="callout">
+      <strong>Krever API-nøkkel.</strong> Klikk tannhjul-ikonet i AI-panelet og lim inn en nøkkel. Nøkkelen lagres lokalt i nettleseren (localStorage) og sendes som <code>X-API-Key</code>-header til Anvil-API-et. Ta kontakt med utvikleren for å få en nøkkel.
+    </div>
+
+    <h3>Hva assistenten kan gjøre</h3>
+    <p>Assistenten klassifiserer spørsmålet og svarer på én av tre måter:</p>
+    <ul>
+      <li><strong>Spørsmål</strong> — forklarer kommandoer, syntaks og bruk («Hva gjør reshape long?»)</li>
+      <li><strong>Variabel-søk</strong> — finner relevante variabler i microdata-katalogen («Hvilke variabler finnes for utdanning?»)</li>
+      <li><strong>Skript-generering</strong> — lager et komplett microdata-skript fra et naturlig spørsmål («Vis sammendragsstatistikk for inntekt og kjønn»)</li>
+    </ul>
+
+    <h3>Revidere et eksisterende skript</h3>
+    <p>For å la assistenten endre på skriptet i editoren <em>må</em> du huke av <strong>«Inkluder skript fra editor (revider)»</strong> rett over tekstfeltet før du sender. Da brukes innholdet i editoren som utgangspunkt, og forespørselen tolkes som en revisjon — for eksempel «Legg til logaritmisk inntekt» eller «Filtrer på alder over 25».</p>
+    <p>Uten denne avhukingen lages et nytt skript fra bunnen, selv om editoren har innhold.</p>
+
+    <h3>Knapper på genererte skript</h3>
+    <p>Når assistenten returnerer et skript, vises tre knapper under kodeblokken:</p>
+    <ul>
+      <li><strong>📋 Kopier</strong> — kopierer skriptet til utklippstavlen</li>
+      <li><strong>⬇ Erstatt skript</strong> — bytter ut alt i editoren med det genererte skriptet</li>
+      <li><strong>+ Legg til</strong> — føyer skriptet til nederst i editoren</li>
+    </ul>
+
+    <h3>Valideringsadvarsler</h3>
+    <p>Genererte skript kjøres gjennom statisk validering før de vises. Hvis det finnes ukjente variabler, ukjente kommandoer eller parsingsfeil, vises disse som klikkbare brikker (chips) under skriptet. Klikk på en brikke for å forfatte en oppfølgingsmelding som ber assistenten fikse akkurat den feilen.</p>
+
+    <h3>Tidsbruk</h3>
+    <p>Spørsmål og variabel-søk svarer som regel på under 5 sekunder. Skript-generering og revisjon kan ta 20–60 sekunder, opptil ~3 minutter for kompliserte forespørsler — du ser en «Tenker… Ns»-teller mens jobben kjører i bakgrunnen.</p>
+
+    <h3>Andre kontroller</h3>
+    <ul>
+      <li><strong>Tannhjul</strong> — endre API-nøkkel og base-URL</li>
+      <li><strong>Søppelbøtte</strong> — tøm samtalen (sletter ikke noe på serveren)</li>
+      <li><strong>×</strong> — lukk panelet</li>
+      <li><kbd>Enter</kbd> sender, <kbd>Shift</kbd>+<kbd>Enter</kbd> gir ny linje</li>
+    </ul>
+
+    <h3>Personvern</h3>
+    <p>Det som sendes til API-et er kun spørsmålsteksten din, og — hvis avhuket — innholdet i skripteditoren. Datafiler, kjøreresultater, output og widget-innhold sendes ikke. Norsk eller engelsk språk gjettes automatisk fra spørsmålet.</p>
+
+    <div class="callout">
+      <strong>Eksperimentell.</strong> AI-assistenten kan ta feil, foreslå variabler som ikke finnes, eller generere skript som ikke kjører. Sjekk alltid resultatet før bruk.
+    </div>
+  </section>
+
+  <!-- ── MODES ── -->
+  <section id="modes">
+    <h2>Moduser</h2>
+    <p>Velg modus fra dropdown-menyen i bunnbaren, eller bruk modusveksler-linjer i scriptet for å veksle underveis (se <a href="#hybrid">Hybrid-skript</a>).</p>
+
+    <div class="card-grid">
+      <div class="card">
+        <div class="card-title"><span class="badge badge-micro">Microdata</span> Standard</div>
+        <div class="card-body">Microdata.no-syntaks. Laster registerdata, oppretter datasett, kjører statistikk og diagrammer.</div>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="badge badge-py">Python</span> Pyodide</div>
+        <div class="card-body">Komplett Python i nettleseren. Pandas, NumPy, Matplotlib, Scikit-learn, SciPy osv. er tilgjengelig.</div>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="badge badge-r">R</span> WebR</div>
+        <div class="card-body">Komplett R i nettleseren. Tidyverse, ggplot2, dplyr, survival m.m. installeres automatisk ved bruk.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── PYTHON ── -->
+  <section id="python">
+    <h2>Python (Pyodide)</h2>
+    <p>Python kjøres i nettleseren via <a href="https://pyodide.org" target="_blank" rel="noopener">Pyodide</a> (WebAssembly). Ingen installasjon nødvendig. Tilgjengelige pakker inkluderer:</p>
+    <ul>
+      <li><strong>pandas</strong>, <strong>NumPy</strong>, <strong>SciPy</strong></li>
+      <li><strong>Matplotlib</strong>, <strong>Seaborn</strong>, <strong>Plotly</strong></li>
+      <li><strong>Scikit-learn</strong>, <strong>statsmodels</strong>, <strong>lifelines</strong></li>
+    </ul>
+
+    <h3>Spesielle funksjoner</h3>
+    <table class="doc-table">
+      <thead><tr><th>Funksjon</th><th>Beskrivelse</th></tr></thead>
+      <tbody>
+        <tr><td><code>show(objekt)</code></td><td>Vis DataFrame, plot eller verdi i outputfeltet</td></tr>
+        <tr><td><code>to_microdata(df, "navn")</code></td><td>Send en pandas DataFrame tilbake til microdata-tolken som et navngitt datasett</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Oversettelse til microdata</h3>
+    <p>Følgende Python-mønstre oversettes godt av <em>py2m</em>:</p>
+    <ul>
+      <li><code>df = pd.read_csv(...)</code> → <code>import</code>-kommandoer</li>
+      <li><code>df.groupby("x")["y"].mean()</code> → <code>collapse (mean) y, by(x)</code></li>
+      <li><code>df[df["x"] &gt; 0]</code> → <code>keep if x &gt; 0</code></li>
+      <li><code>df["ny"] = df["x"] + df["y"]</code> → <code>generate ny = x + y</code></li>
+      <li><code>df.rename(columns={"a": "b"})</code> → <code>rename a b</code></li>
+      <li><code>df.merge(df2, on="id")</code> → <code>merge</code></li>
+    </ul>
+    <p>Kode som bruker egendefinerte klasser, list comprehensions, rekursjon, asynkron logikk eller komplekse lambda-uttrykk oversettes ikke og må skrives om.</p>
+  </section>
+
+  <!-- ── R ── -->
+  <section id="r">
+    <h2>R (WebR)</h2>
+    <p>R kjøres via <a href="https://docs.r-wasm.org/webr/latest/" target="_blank" rel="noopener">WebR</a> (WebAssembly). Pakker installeres automatisk første gang de brukes (<code>library(dplyr)</code> osv.).</p>
+
+    <h3>Oversettelse til microdata</h3>
+    <p>Følgende R-mønstre oversettes godt av <em>r2m</em>:</p>
+    <ul>
+      <li><code>df %&gt;% filter(x &gt; 0)</code> → <code>keep if x &gt; 0</code></li>
+      <li><code>df %&gt;% select(x, y)</code> → <code>keep x y</code></li>
+      <li><code>df %&gt;% mutate(ny = x + y)</code> → <code>generate ny = x + y</code></li>
+      <li><code>df %&gt;% group_by(g) %&gt;% summarise(m = mean(x))</code> → <code>collapse (mean) x -> m, by(g)</code></li>
+      <li><code>df %&gt;% rename(ny = gammel)</code> → <code>rename gammel ny</code></li>
+      <li><code>left_join(df, df2, by = "id")</code> → <code>merge</code></li>
+    </ul>
+    <p>Kode som bruker <code>purrr</code>, egendefinerte R6-klasser, Shiny, miljømanipulasjon eller komplekse NSE-uttrykk oversettes ikke automatisk.</p>
+  </section>
+
+  <!-- ── HYBRID ── -->
+  <section id="hybrid">
+    <h2>Hybrid-skript</h2>
+    <p>Du kan blande microdata, Python og R i samme script ved å bruke <strong>modusveksler-linjer</strong>.</p>
+
+    <h3>Vekslerlinjer</h3>
+    <table class="doc-table">
+      <thead><tr><th>Linje</th><th>Effekt</th></tr></thead>
+      <tbody>
+        <tr><td><code>## microdata</code> / <code>#micro</code> / <code>// microdata</code></td><td>Bytt til microdata-modus</td></tr>
+        <tr><td><code>## python</code> / <code>#py</code></td><td>Bytt til Python-modus</td></tr>
+        <tr><td><code>## r</code> / <code>#r</code></td><td>Bytt til R-modus</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Eksempel: microdata + Python</h3>
+    <pre><code>## microdata
+require no.ssb.fdb:52 as db
+create-dataset df
+import db/BEFOLKNING_FOEDSELS_AAR_MND as faarmnd
+import db/INNTEKT_WLONN 2022-01-01 as inntekt
+generate alder = 2022 - int(faarmnd / 100)
+keep if inrange(alder, 25, 67)
+keep if inntekt > 0
+
+## python
+import matplotlib.pyplot as plt
+df.plot.scatter(x="alder", y="inntekt", alpha=0.3, s=8)
+plt.tight_layout()
+show(plt.gcf())</code></pre>
+
+    <h3>Eksempel: microdata + R</h3>
+    <pre><code># microdata
+require no.ssb.fdb:52 as db
+create-dataset df
+import db/BEFOLKNING_KJOENN as kjonn
+import db/INNTEKT_WLONN 2022-01-01 as inntekt
+
+#r
+library(dplyr)
+df %>% group_by(kjonn) %>%
+  summarise(snitt = mean(inntekt, na.rm = TRUE))</code></pre>
+
+    <p>Datasettene fra microdata-seksjonen overføres automatisk til Python som pandas DataFrames og til R som data frames.</p>
+  </section>
+
+  <!-- ── TAB FULL ── -->
+  <section id="tab-full">
+    <h2>Tab-autocomplete — fullstendig referanse</h2>
+    <p>Trykk <kbd>Tab</kbd> i editoren for kontekstbevisste forslag. Reglene er de samme i alle moduser:</p>
+
+    <table class="doc-table">
+      <thead><tr><th>Kontekst</th><th>Forslag</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>Etter <code>/</code> (f.eks. <code>import db/</code>)</td>
+          <td>Microdata-variabelnavn fra katalogen</td>
+        </tr>
+        <tr>
+          <td>Tomt linjebegynnelse</td>
+          <td>
+            <span class="badge badge-micro">Microdata</span> kommandoer<br>
+            <span class="badge badge-py">Python</span> nøkkelord + innebygde funksjoner<br>
+            <span class="badge badge-r">R</span> base R- og tidyverse-funksjoner
+          </td>
+        </tr>
+        <tr>
+          <td>Bare mellomrom til venstre</td>
+          <td>Setter inn 2 ekstra mellomrom (innrykk)</td>
+        </tr>
+        <tr>
+          <td><span class="badge badge-py">Python</span> <code>df.</code></td>
+          <td>Kolonner i <code>df</code> (om kjent), ellers pandas DataFrame-metoder</td>
+        </tr>
+        <tr>
+          <td><span class="badge badge-r">R</span> <code>df$</code></td>
+          <td>Kolonner i <code>df</code></td>
+        </tr>
+        <tr>
+          <td><span class="badge badge-py">Python</span> <code>import </code></td>
+          <td>Vanlige data science-bibliotek (pandas, numpy, sklearn ...)</td>
+        </tr>
+        <tr>
+          <td><span class="badge badge-r">R</span> <code>library(</code></td>
+          <td>Vanlige R-pakker; pakkenavnet settes inn med parenteser</td>
+        </tr>
+        <tr>
+          <td>Ingen treff ellers</td>
+          <td>Alle kjente kolonnenavn fra innlastede datasett</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>Variabelinformasjon</h3>
+    <p>Når du velger et microdata-variabelnavn fra autocomplete-listen, vises en liten popup med navn, type og beskrivelse fra katalogen. Klikk <strong>Mer info</strong> for å åpne full dokumentasjon på microdata.no.</p>
+  </section>
+
+</main>
+</div>
+
+<script>
+  // Highlight nav link matching current scroll position
+  const sections = document.querySelectorAll('section[id]');
+  const navLinks = document.querySelectorAll('nav a');
+  function updateNav() {
+    let current = '';
+    sections.forEach(s => {
+      if (window.scrollY >= s.offsetTop - 60) current = s.id;
+    });
+    navLinks.forEach(a => {
+      a.classList.toggle('active', a.getAttribute('href') === '#' + current);
+    });
+  }
+  window.addEventListener('scroll', updateNav, { passive: true });
+  updateNav();
+</script>
+</body>
+</html>
