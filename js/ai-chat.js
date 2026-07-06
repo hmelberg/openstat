@@ -3,11 +3,7 @@
        =================================================================== */
     (function aiModule() {
       var T = window.t || function (s, p) { return p ? s.replace(/\{(\w+)\}/g, function (m, k) { return k in p ? p[k] : m; }) : s; };
-      const LS_KEY_BASE = 'md_ai_api_base';
-      const LS_KEY_APIKEY = 'md_ai_api_key';
       const LS_KEY_ANTHROPIC = 'md_anthropic_key';   // BYOK: brukerens egen Anthropic-nøkkel
-      const LS_KEY_AIMODE = 'md_ai_mode';   // 'fast' | 'anvil'
-      const DEFAULT_BASE = 'https://mdataapi.anvil.app';
 
       // key(<literal>) i scriptet er en hemmelighet — maskeres før scriptet
       // sendes til AI-endepunkter (spec 2026-07-05 §5). key(ask) beholdes.
@@ -19,39 +15,18 @@
       const state = {
         sending: false,
         history: [],   // {role, html|text, raw}
-        get apiBase() { return (localStorage.getItem(LS_KEY_BASE) || DEFAULT_BASE).replace(/\/+$/, ''); },
-        get apiKey()  { return localStorage.getItem(LS_KEY_APIKEY) || ''; },
         get anthropicKey() { return localStorage.getItem(LS_KEY_ANTHROPIC) || ''; },
-        // AI mode: 'fast' = rask edge-funksjon, 'anvil' = full vurdering via
-        // Anvil-API. Web (agentisk web-søk + generering; admin-only,
-        // python/r/duckdb) is NOT part of this menu cycle — it has its own
-        // dedicated send button (aiSendWebBtn) and never touches md_ai_mode;
-        // see webModeEligible()/syncWebBtnVisibility() below. A legacy 'web'
-        // value from before that button existed collapses to 'fast' here.
-        get aiMode() {
-          const v = localStorage.getItem(LS_KEY_AIMODE);
-          return v === 'anvil' ? v : 'fast';
-        },
-        set aiMode(v) { localStorage.setItem(LS_KEY_AIMODE, v); },
-        get anvilMode() { return this.aiMode === 'anvil'; },   // back-compat: existing callers keep working
       };
 
-      // Web mode requires admin OR a user-supplied Anthropic key (BYOK — the
-      // agentic search then runs on the user's own account), and only makes
-      // sense in python/r/duckdb editor modes (no `# connect`/`# load` story
-      // for microdata). Surfaced only via its own send button
+      // Web mode requires a user-supplied Anthropic key (BYOK — the agentic
+      // search then runs on the user's own account), and only makes sense in
+      // python/r/duckdb editor modes (no `# connect`/`# load` story for
+      // microdata). Surfaced only via its own send button
       // (syncWebBtnVisibility() shows/hides #aiSendWebBtn).
       function webModeEligible() {
-        const auth = window.mdAuth;
-        const isAdmin = !!(auth && auth.user && auth.user.is_admin);
         const hasByok = !!state.anthropicKey;
         const mode = (typeof activeEditorMode !== 'undefined' && activeEditorMode) ? activeEditorMode : 'microdata';
-        return (isAdmin || hasByok) && (mode === 'python' || mode === 'r' || mode === 'duckdb');
-      }
-      // Kept for back-compat with existing call sites (menu label + cycle);
-      // now just mirrors state.aiMode since 'web' is no longer a cycle value.
-      function effectiveAiMode() {
-        return state.aiMode;
+        return hasByok && (mode === 'python' || mode === 'r' || mode === 'duckdb');
       }
 
       const md = (window.markdownit ? window.markdownit({ breaks: true, linkify: true }) : null);
@@ -61,10 +36,9 @@
       function cacheDom() {
         ['aiToggleBtn','aiSidebar','aiCloseBtn','aiSettingsBtn','aiClearBtn',
          'aiThread','aiInput','aiSendFastBtn','aiSendV2Btn','aiSendWebBtn','aiAbortBtn',
-         'aiIncludeScript','menuAiMode',
-         'aiSettingsBackdrop','aiCfgBaseUrl','aiCfgApiKey','aiCfgAnthropicKey','aiCfgSave','aiCfgCancel',
-         'aiCfgLoggedIn','aiCfgLoggedOut','aiCfgUserEmail','aiCfgUserMeta',
-         'aiCfgLogout','aiCfgAdmin','aiCfgLogin','aiCfgByokStored','aiCfgByokRemove',
+         'aiIncludeScript',
+         'aiSettingsBackdrop','aiCfgAnthropicKey','aiCfgSave','aiCfgCancel',
+         'aiCfgByokStored','aiCfgByokRemove',
          'sidebarRight','sidebarOpenTab','scriptInput'
         ].forEach(id => { dom[id] = $(id); });
         dom.containers = document.querySelectorAll('.container');
@@ -121,7 +95,7 @@
           btn.addEventListener('click', () => {
             dom.aiInput.value = btn.dataset.q;
             autoresize();
-            sendMessage(true);
+            sendMessage();
           });
         });
       }
@@ -416,84 +390,13 @@
         dom.aiThread.scrollTop = dom.aiThread.scrollHeight;
       }
 
-      // Headers for edge-funksjonene (/api/*): innloggingstoken har forrang,
-      // deretter brukerens egen Anthropic-nøkkel (BYOK), til slutt service-token.
+      // Headers for edge-funksjonene (/api/*): kun BYOK Anthropic-nøkkel.
       function edgeAuthHeaders() {
-        const auth = window.mdAuth;
-        const token = auth && auth.token;
-        if (token) return { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
         if (state.anthropicKey) return { 'X-Anthropic-Key': state.anthropicKey, 'Content-Type': 'application/json' };
-        return { 'X-API-Key': state.apiKey, 'Content-Type': 'application/json' };
-      }
-
-      async function callApi(path, body) {
-        const auth = window.mdAuth;
-        const token = auth && auth.token;
-        if (!token && !state.apiKey) {
-          if (state.anthropicKey) {
-            // BYOK gjelder kun edge-funksjonene, ikke Anvil-APIet (full vurdering).
-            throw new Error(T('Denne funksjonen krever innlogging — egen Anthropic-nøkkel gjelder kun Rask AI, tolkning og Web.'));
-          }
-          // Defer to caller to handle (sendMessage triggers login modal)
-          throw new Error(T('Ikke logget inn'));
-        }
-        const isGet = body == null;
-        const opts = {
-          method: isGet ? 'GET' : 'POST',
-          headers: token
-            ? { 'Authorization': 'Bearer ' + token }
-            : { 'X-API-Key': state.apiKey },
-        };
-        if (!isGet) {
-          opts.headers['Content-Type'] = 'application/json';
-          opts.body = JSON.stringify(body);
-        }
-        const res = await fetch(state.apiBase + '/_/api' + path, opts);
-        const text = await res.text();
-        let json;
-        try { json = JSON.parse(text); } catch (e) { json = { error: text }; }
-        if (!res.ok) {
-          const msg = json.error || ('HTTP ' + res.status);
-          const err = new Error(msg);
-          err.payload = json;
-          err.status = res.status;
-          // 401 with bearer → token expired/revoked; clear and prompt re-login
-          if (res.status === 401 && token && auth) {
-            auth.logout();
-            auth.showLogin();
-          }
-          throw err;
-        }
-        return json;
+        return { 'Content-Type': 'application/json' };
       }
 
       function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-      async function pollTask(taskId, onTick) {
-        const maxWaitMs = 180000;       // 3-minute ceiling
-        const intervalMs = 1500;
-        const start = Date.now();
-        while (Date.now() - start < maxWaitMs) {
-          await sleep(intervalMs);
-          const elapsed = Math.round((Date.now() - start) / 1000);
-          if (onTick) onTick(elapsed);
-          let status;
-          try {
-            status = await callApi('/task_status?task_id=' + encodeURIComponent(taskId), null);
-          } catch (e) {
-            if (e.status === 404) {
-              throw new Error('Bakgrunnsoppgaven ble ikke funnet (task_id ugyldig).');
-            }
-            throw e;
-          }
-          if (status.status === 'completed') return status.result;
-          if (status.status === 'failed' || status.status === 'killed') {
-            throw new Error('Bakgrunnsoppgave feilet: ' + (status.error || status.status));
-          }
-          // 'running' → loop
-        }
-        throw new Error(T('Bakgrunnsoppgaven brukte mer enn 3 min — avbrutt.'));
-      }
 
       function detectLang(text) {
         // Crude: if it has Norwegian chars or common NO words, treat as 'no', else 'en'.
@@ -505,15 +408,13 @@
         return (window.M2PY_LANG === 'en') ? 'en' : 'no';
       }
 
-      async function sendMessage(fast, useV2) {
+      async function sendMessage(useV2) {
         if (state.sending) return;
         const text = dom.aiInput.value.trim();
         if (!text) return;
-        // Gate on login: if neither bearer token nor legacy API-key, show login modal.
-        const auth = window.mdAuth;
-        const isAuthed = (auth && auth.token) || state.apiKey || state.anthropicKey;
-        if (!isAuthed) {
-          if (auth) auth.showLogin();
+        // Gate on BYOK: no Anthropic key configured yet → open Settings to add one.
+        if (!state.anthropicKey) {
+          openSettings();
           return;
         }
         state.sending = true;
@@ -533,94 +434,21 @@
 
         const includeScript = dom.aiIncludeScript.checked && dom.scriptInput && dom.scriptInput.value.trim();
 
-        // Fast path: single-shot, no-repair edge function. Streams markdown;
-        // the result is validated locally via Pyodide+m2py (see runFastQuery).
-        if (fast) {
-          const ctrl = new AbortController();
-          state.abortCtrl = ctrl;
-          if (dom.aiAbortBtn) dom.aiAbortBtn.style.display = '';
-          try {
-            const meta = useV2
-              ? await runFastQueryV2(text, lang, includeScript ? scrubScript(dom.scriptInput.value) : '', thinkingNode, ctrl.signal)
-              : await runFastQuery(text, lang, includeScript ? scrubScript(dom.scriptInput.value) : '', thinkingNode, ctrl.signal);
-            state.history.push({ role: 'assistant', meta });
-          } catch (e) {
-            if (e.name !== 'AbortError') appendError(thinkingNode, '✗ ' + e.message);
-          } finally {
-            state.abortCtrl = null;
-            if (dom.aiAbortBtn) dom.aiAbortBtn.style.display = 'none';
-            state.sending = false;
-            if (dom.aiSendFastBtn) dom.aiSendFastBtn.disabled = false;
-            if (dom.aiSendWebBtn) dom.aiSendWebBtn.disabled = false;
-            dom.aiInput.focus();
-          }
-          return;
-        }
-
+        // Single-shot, no-repair edge function. Streams markdown; the result
+        // is validated locally via Pyodide+m2py (see runFastQuery).
+        const ctrl = new AbortController();
+        state.abortCtrl = ctrl;
+        if (dom.aiAbortBtn) dom.aiAbortBtn.style.display = '';
         try {
-          let resp, intent, result;
-          if (includeScript) {
-            resp = await callApi('/revise', {
-              script: scrubScript(dom.scriptInput.value),
-              revision: text,
-              lang,
-              max_repair: 1,
-            });
-            intent = resp.intent || 'revise';
-          } else {
-            resp = await callApi('/query', { question: text, lang });
-            intent = resp.intent || 'qa';
-          }
-
-          // Async path: poll background task until it completes.
-          if (resp.task_id) {
-            const tickEl = thinkingNode.querySelector('.ai-thinking');
-            const finalEnv = await pollTask(resp.task_id, (sec) => {
-              if (!tickEl) return;
-              let elapsed = tickEl.querySelector('.ai-tick-elapsed');
-              if (!elapsed) {
-                elapsed = document.createElement('span');
-                elapsed.className = 'ai-tick-elapsed';
-                elapsed.style.marginLeft = '4px';
-                elapsed.style.opacity = '0.7';
-                tickEl.appendChild(elapsed);
-              }
-              elapsed.textContent = ' ' + sec + 's';
-            });
-            result = (finalEnv && finalEnv.result) || {};
-            intent = (finalEnv && finalEnv.intent) || intent;
-            if (finalEnv && !finalEnv.classifier && resp.classifier) finalEnv.classifier = resp.classifier;
-            resp = Object.assign({}, resp, finalEnv);
-          } else {
-            result = resp.result || resp;
-          }
-
-          const meta = {
-            intent,
-            model: result.model || (resp.classifier && resp.classifier.model),
-            latency_ms: resp.latency_ms,
-            validation: result.validation,
-          };
-
-          if (intent === 'script_gen' || intent === 'revise') {
-            const script = result.script || '';
-            const rationale = result.rationale || '';
-            if (script) {
-              appendAssistantScript(thinkingNode, script, rationale, meta);
-            } else {
-              appendAssistantText(thinkingNode, rationale || 'Ingen skript ble generert.', meta);
-            }
-          } else if (intent === 'variable_search') {
-            appendAssistantVariableList(thinkingNode, result.variables || [], meta);
-          } else {
-            // qa or unknown
-            const answer = result.answer || result.rationale || '(tomt svar)';
-            appendAssistantText(thinkingNode, answer, meta);
-          }
+          const meta = useV2
+            ? await runFastQueryV2(text, lang, includeScript ? scrubScript(dom.scriptInput.value) : '', thinkingNode, ctrl.signal)
+            : await runFastQuery(text, lang, includeScript ? scrubScript(dom.scriptInput.value) : '', thinkingNode, ctrl.signal);
           state.history.push({ role: 'assistant', meta });
         } catch (e) {
-          appendError(thinkingNode, '✗ ' + e.message);
+          if (e.name !== 'AbortError') appendError(thinkingNode, '✗ ' + e.message);
         } finally {
+          state.abortCtrl = null;
+          if (dom.aiAbortBtn) dom.aiAbortBtn.style.display = 'none';
           state.sending = false;
           if (dom.aiSendFastBtn) dom.aiSendFastBtn.disabled = false;
           if (dom.aiSendWebBtn) dom.aiSendWebBtn.disabled = false;
@@ -642,8 +470,6 @@
       }
 
       async function runFastQuery(text, lang, scriptContext, thinkingNode, signal) {
-        const auth = window.mdAuth;
-        const token = auth && auth.token;
         const headers = edgeAuthHeaders();
         const t0 = Date.now();
         const resp = await fetch('/api/kode-svar', {
@@ -653,11 +479,7 @@
           signal,
         });
         if (resp.status === 401) {
-          if (token && auth) { auth.logout(); auth.showLogin(); }
-          if (!token && state.anthropicKey) {
-            throw new Error(T('Ugyldig Anthropic-nøkkel. Sjekk nøkkelen i AI-innstillingene.'));
-          }
-          throw new Error(T('Innloggingen er utløpt. Logg inn på nytt.'));
+          throw new Error(T('Ugyldig Anthropic-nøkkel. Sjekk nøkkelen i AI-innstillingene.'));
         }
         if (!resp.ok || !resp.body) {
           throw new Error('HTTP ' + resp.status + ' ' + (await resp.text()));
@@ -744,18 +566,12 @@
       // `bubble`. Returns { accumulated, tokens }. Mirrors runFastQuery's stream
       // parsing; factored out so the repair round can call it again.
       async function streamKodeSvarV2(payload, bubble, signal) {
-        const auth = window.mdAuth;
-        const token = auth && auth.token;
         const headers = edgeAuthHeaders();
         const resp = await fetch('/api/kode-svar-v2', {
           method: 'POST', headers, body: JSON.stringify(payload), signal,
         });
         if (resp.status === 401) {
-          if (token && auth) { auth.logout(); auth.showLogin(); }
-          if (!token && state.anthropicKey) {
-            throw new Error(T('Ugyldig Anthropic-nøkkel. Sjekk nøkkelen i AI-innstillingene.'));
-          }
-          throw new Error(T('Innloggingen er utløpt. Logg inn på nytt.'));
+          throw new Error(T('Ugyldig Anthropic-nøkkel. Sjekk nøkkelen i AI-innstillingene.'));
         }
         if (!resp.ok || !resp.body) {
           throw new Error('HTTP ' + resp.status + ' ' + (await resp.text()));
@@ -929,8 +745,6 @@
       // Tolk resultater: strøm en tolkning av output (kommandoer + resultater)
       // inn i en assistent-boble. Speiler runFastQuery, men mot /api/tolk-resultat.
       async function runInterpretQuery(payload, thinkingNode, signal) {
-        const auth = window.mdAuth;
-        const token = auth && auth.token;
         const headers = edgeAuthHeaders();
         const resp = await fetch('/api/tolk-resultat', {
           method: 'POST',
@@ -944,11 +758,7 @@
           signal,
         });
         if (resp.status === 401) {
-          if (token && auth) { auth.logout(); auth.showLogin(); }
-          if (!token && state.anthropicKey) {
-            throw new Error(T('Ugyldig Anthropic-nøkkel. Sjekk nøkkelen i AI-innstillingene.'));
-          }
-          throw new Error(T('Innloggingen er utløpt. Logg inn på nytt.'));
+          throw new Error(T('Ugyldig Anthropic-nøkkel. Sjekk nøkkelen i AI-innstillingene.'));
         }
         if (!resp.ok || !resp.body) {
           throw new Error('HTTP ' + resp.status + ' ' + (await resp.text()));
@@ -1059,9 +869,7 @@
         bubble.className = 'ai-bubble';
         thinkingNode.appendChild(bubble);
 
-        const auth = window.mdAuth;
-        const token = auth && auth.token;
-        if (!token && !state.anthropicKey) throw new Error(T('Web-modus krever innlogging eller egen Anthropic-nøkkel.'));
+        if (!state.anthropicKey) throw new Error(T('Web-modus krever egen Anthropic-nøkkel.'));
         const mode = (typeof activeEditorMode !== 'undefined' && activeEditorMode) ? activeEditorMode : 'python';
 
         // Continuation protocol: Netlify caps CPU per edge invocation, so the
@@ -1087,10 +895,9 @@
             }),
           });
           if (resp.status === 401) {
-            if (token && auth) { auth.logout(); auth.showLogin(); throw new Error(T('Innloggingen er utløpt. Logg inn på nytt.')); }
             throw new Error(T('Ugyldig Anthropic-nøkkel. Sjekk nøkkelen i AI-innstillingene.'));
           }
-          if (resp.status === 403) throw new Error(T('Web-modus krever admin eller egen Anthropic-nøkkel.'));
+          if (resp.status === 403) throw new Error(T('Web-modus krever egen Anthropic-nøkkel.'));
           if (!resp.ok || !resp.body) throw new Error('HTTP ' + resp.status + ' ' + (await resp.text()));
 
           let cont = null;
@@ -1127,7 +934,7 @@
             sources = ev.sources;
           } else if (ev.type === 'error') {
             let msg = ev.message || 'ukjent feil';
-            if (!token && state.anthropicKey && msg.indexOf('Anthropic API error 401') !== -1) {
+            if (state.anthropicKey && msg.indexOf('Anthropic API error 401') !== -1) {
               msg = T('Ugyldig Anthropic-nøkkel. Sjekk nøkkelen i AI-innstillingene.');
             }
             throw new Error(msg);
@@ -1281,14 +1088,13 @@
       // Full send flow for Web mode: auth gate, user bubble, thinking node,
       // then the answer+auto-run+repair loop. Mirrors sendMessage()'s
       // boilerplate (see above) but dispatches to runWebAnswer/webAnswerWithRepair
-      // instead of the fast/anvil API paths.
+      // instead of the fast API path.
       async function sendWebMessage() {
         if (state.sending) return;
         const text = dom.aiInput.value.trim();
         if (!text) return;
-        const auth = window.mdAuth;
-        if (!(auth && auth.token) && !state.anthropicKey) {
-          if (auth) auth.showLogin();
+        if (!state.anthropicKey) {
+          openSettings();
           return;
         }
         state.sending = true;
@@ -1433,62 +1239,18 @@
         ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';  // ~5 linjer maks, så scroller den
       }
 
-      function categoryLabel(cat) {
-        return ({ internal: 'Internal', kurs: 'Kurs', credits: 'Credits', free: 'Free' }[cat] || cat || '?');
-      }
-
       function refreshUserPanel() {
-        const auth = window.mdAuth;
-        const user = auth && auth.user;
-        if (user) {
-          dom.aiCfgLoggedIn.style.display = '';
-          dom.aiCfgLoggedOut.style.display = 'none';
-          dom.aiCfgUserEmail.textContent = user.email || '';
-          const bits = [];
-          bits.push(T('Kategori: {cat}', { cat: categoryLabel(user.category) }));
-          if (typeof user.credits === 'number') bits.push(T('Saldo: {n}', { n: user.credits }));
-          if (user.is_superuser) bits.push('Superuser');
-          if (user.is_admin) bits.push('Admin');
-          if (user.expires_at) bits.push(T('Utløper: {date}', { date: user.expires_at.slice(0, 10) }));
-          dom.aiCfgUserMeta.textContent = bits.join(' · ');
-          dom.aiCfgAdmin.style.display = user.is_admin ? '' : 'none';
-          // B6: innloggede skal kunne se og fjerne en lagret BYOK-nøkkel
-          // (feltet for å legge den inn ligger kun i utlogget-panelet).
-          if (dom.aiCfgByokStored) dom.aiCfgByokStored.style.display = state.anthropicKey ? '' : 'none';
-        } else {
-          dom.aiCfgLoggedIn.style.display = 'none';
-          dom.aiCfgLoggedOut.style.display = '';
-        }
-        // Keep admin hamburger menu section in sync
-        const adminSec = document.getElementById('adminMenuSection');
-        if (adminSec) {
-          adminSec.style.display = (user && user.is_admin) ? '' : 'none';
-        }
-        const offlineWrap = document.getElementById('offlineMenuWrap');
-        if (offlineWrap) {
-          offlineWrap.style.display = (user && user.is_admin) ? '' : 'none';
-        }
-        // Admin status just (re)synced — re-check dedicated Web send button eligibility.
+        if (dom.aiCfgByokStored) dom.aiCfgByokStored.style.display = state.anthropicKey ? '' : 'none';
         if (window.mdSyncWebBtnVisibility) window.mdSyncWebBtnVisibility();
       }
 
       function openSettings() {
-        dom.aiCfgBaseUrl.value = state.apiBase;
-        dom.aiCfgApiKey.value = state.apiKey;
         if (dom.aiCfgAnthropicKey) dom.aiCfgAnthropicKey.value = state.anthropicKey;
         refreshUserPanel();
-        // Refresh /auth/me in background so the displayed credits/category are up-to-date
-        if (window.mdAuth && window.mdAuth.token) {
-          window.mdAuth.refreshMe().then(refreshUserPanel);
-        }
         dom.aiSettingsBackdrop.classList.add('open');
       }
       function closeSettings() { dom.aiSettingsBackdrop.classList.remove('open'); }
       function saveSettings() {
-        const base = dom.aiCfgBaseUrl.value.trim() || DEFAULT_BASE;
-        const key = dom.aiCfgApiKey.value.trim();
-        localStorage.setItem(LS_KEY_BASE, base);
-        localStorage.setItem(LS_KEY_APIKEY, key);
         const akey = dom.aiCfgAnthropicKey ? dom.aiCfgAnthropicKey.value.trim() : '';
         if (akey) localStorage.setItem(LS_KEY_ANTHROPIC, akey);
         else localStorage.removeItem(LS_KEY_ANTHROPIC);
@@ -1516,24 +1278,6 @@
           if (e.target === dom.aiSettingsBackdrop) closeSettings();
         });
 
-        // Auth-related buttons in the settings modal
-        if (dom.aiCfgLogin) {
-          dom.aiCfgLogin.addEventListener('click', () => {
-            closeSettings();
-            if (window.mdAuth) window.mdAuth.showLogin();
-          });
-        }
-        if (dom.aiCfgLogout) {
-          dom.aiCfgLogout.addEventListener('click', async () => {
-            if (window.mdAuth) await window.mdAuth.logout();
-            refreshUserPanel();
-          });
-        }
-        if (dom.aiCfgAdmin) {
-          dom.aiCfgAdmin.addEventListener('click', () => {
-            window.location.href = 'admin.html';
-          });
-        }
         if (dom.aiCfgByokRemove) {
           dom.aiCfgByokRemove.addEventListener('click', () => {
             localStorage.removeItem(LS_KEY_ANTHROPIC);
@@ -1543,16 +1287,15 @@
           });
         }
 
-        // Send uses the AI mode chosen in the hamburger menu: fast edge-fn or
-        // full Anvil-path. Web mode is never reached through this path — it
-        // has its own dedicated button (aiSendWebBtn) below.
+        // Web mode is never reached through this path — it has its own
+        // dedicated button (aiSendWebBtn) below.
         function sendCurrent() {
-          sendMessage(!state.anvilMode);
+          sendMessage();
         }
         if (dom.aiSendFastBtn) dom.aiSendFastBtn.addEventListener('click', sendCurrent);
-        if (dom.aiSendV2Btn) dom.aiSendV2Btn.addEventListener('click', () => sendMessage(true, true));
-        // Web is a dedicated send button (admin-only, python/r/duckdb), not a
-        // hidden state of the fast/anvil menu cycler — see syncWebBtnVisibility().
+        if (dom.aiSendV2Btn) dom.aiSendV2Btn.addEventListener('click', () => sendMessage(true));
+        // Web is a dedicated send button (python/r/duckdb, BYOK-eligible only),
+        // not a hidden state of the fast menu cycler — see syncWebBtnVisibility().
         // It consumes the same textarea/state.sending discipline as the other
         // send buttons; sendWebMessage() itself does its own auth/sending gate.
         if (dom.aiSendWebBtn) dom.aiSendWebBtn.addEventListener('click', () => { sendWebMessage(); });
@@ -1575,28 +1318,6 @@
         window.mdSyncWebBtnVisibility = syncWebBtnVisibility;
         syncWebBtnVisibility();
 
-        // AI-modus-bryter i hamburgermenyen — sykler fast ↔ anvil. Web is not
-        // part of this cycle; it has its own send button (see above).
-        function updateAiModeLabel() {
-          if (!dom.menuAiMode) return;
-          const eff = effectiveAiMode();
-          const label = eff === 'anvil' ? T('Anvil (full vurdering)') : T('Rask');
-          dom.menuAiMode.textContent = T('AI-svar: {label}', { label: label });
-        }
-        if (dom.menuAiMode) {
-          dom.menuAiMode.addEventListener('click', () => {
-            state.aiMode = effectiveAiMode() === 'fast' ? 'anvil' : 'fast';
-            updateAiModeLabel();
-            const dd = document.getElementById('hamburgerDropdown');
-            if (dd) dd.classList.remove('open');
-          });
-        }
-        updateAiModeLabel();
-        // Exposed so index.html's general settings dialog (which hosts this
-        // button) can refresh the label right before it opens — eligibility
-        // (admin/editor mode) may have changed since the label was last set.
-        window.mdRefreshAiModeLabel = updateAiModeLabel;
-
         // Keyboard shortcut Ctrl+I
         document.addEventListener('keydown', (e) => {
           if ((e.ctrlKey || e.metaKey) && (e.key === 'i' || e.key === 'I')) {
@@ -1618,7 +1339,8 @@
         }
 
         // Auth gate is in sendMessage; no auto-open of settings on first AI-panel
-        // toggle. Users see the panel and the empty state; only Send triggers login.
+        // toggle. Users see the panel and the empty state; only Send triggers
+        // the Settings dialog to collect a BYOK key.
 
         // Offentlig: åpne AI-panelet og send et spørsmål (brukes av hurtigspør-boksen i toppen).
         window.mdAskAi = function(question) {
@@ -1626,7 +1348,7 @@
           setOpen(true);
           dom.aiInput.value = question;
           autoresize();
-          sendMessage(!state.anvilMode);
+          sendMessage();
         };
 
         // Offentlig: åpne AI-panelet og tolk resultatene (output) fra forrige kjøring.
@@ -1634,9 +1356,7 @@
           payload = payload || {};
           if (!payload.output || !payload.output.trim()) return;
           if (state.sending) return;
-          const auth = window.mdAuth;
-          const isAuthed = (auth && auth.token) || state.apiKey || state.anthropicKey;
-          if (!isAuthed) { if (auth) auth.showLogin(); return; }
+          if (!state.anthropicKey) { openSettings(); return; }
           setOpen(true);
           if (state.history.length === 0) dom.aiThread.innerHTML = '';
           appendUserMessage(T('Tolk resultatene fra forrige kjøring.'));
