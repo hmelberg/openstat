@@ -54,15 +54,13 @@ Deno.test("resolve: alias expansion, registry id, proxy flags", () => {
   assertEquals(r[3].viaProxy, true);   // explicit /api/hent
 });
 
-Deno.test("resolve: unknown alias errors; unknown registry id becomes anvil", () => {
+Deno.test("resolve: unknown alias errors; unknown registry id errors", () => {
   const p = DD.parse("# load ukjent/sti.csv as x\n# connect finnesikke");
   const r = DD.resolve(p, REG);
   if (!r[0].error) throw new Error("ventet feil for ukjent alias");
-  // Ukjent register-id er nå en Anvil-kilde (spec §1, regel 3) — feilen kommer
-  // først ved /source_access-oppslaget (404 med norsk melding).
   const p2 = DD.parse("# connect finnesikke as fk\n# load fk/x.csv as y");
   const r2 = DD.resolve(p2, REG);
-  assertEquals(r2[0].anvil, "finnesikke");
+  if (!r2[0].error) throw new Error("ventet feil for ukjent register-id");
 });
 
 Deno.test("options: key() and exec() parse on connect and load", () => {
@@ -77,7 +75,7 @@ Deno.test("options: key() and exec() parse on connect and load", () => {
   assertEquals(p.loads[0].options, { key: "abcDEF123" });
 });
 
-Deno.test("resolve: bare name not in registry becomes anvil source", () => {
+Deno.test("resolve: bare name not in registry errors", () => {
   const script = [
     "# connect helse2025 as h, key(ask)",
     "# load h as df",
@@ -85,13 +83,13 @@ Deno.test("resolve: bare name not in registry becomes anvil source", () => {
     "# load s/tables as t",
   ].join("\n");
   const r = DD.resolve(DD.parse(script), REG);
-  assertEquals(r[0], { alias: "df", anvil: "helse2025", key: "ask", exec: undefined });
+  if (!r[0].error) throw new Error("ventet feil for ukjent kilde «helse2025»");
   assertEquals(r[1].viaProxy, false);            // ssb stays a registry source
-  if (r[1].anvil) throw new Error("registry-id skal ikke bli anvil-kilde");
+  if (r[1].error) throw new Error("registry-id skal fortsatt løses");
 });
 
 Deno.test("resolve: load-level key overrides connect-level key", () => {
-  const p = DD.parse("# connect helse2025 as h, key(K1)\n# load h as df, key(K2)");
+  const p = DD.parse("# connect ssb as h, key(K1)\n# load h as df, key(K2)");
   const r = DD.resolve(p, REG);
   assertEquals(r[0].key, "K2");
 });

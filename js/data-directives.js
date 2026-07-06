@@ -1,7 +1,7 @@
 // connect/load-direktiver for Web-modus (spec 5b/5c i
 // docs/superpowers/specs/2026-07-03-web-data-svar-design.md, utvidet av
 // docs/superpowers/specs/2026-07-05-encrypted-external-sources-design.md §1).
-//   # connect <base-url|register-id|anvil-navn> [as alias] [, key(...)][, exec(...)]
+//   # connect <base-url|register-id> [as alias] [, key(...)][, exec(...)]
 //   # load <url|alias/sti> as navn [, key(...)]  — uttrekk (hel ramme)
 //   # require <url> as navn                      — legacy-alias for load (D1)
 // Ren parsing/resolusjon — ingen fetch her. Brukes av index.html
@@ -89,8 +89,7 @@
       } else {
         var src = findRegistrySource(registry, conn.target);
         if (!src) {
-          // Ikke i web-registeret: en registrert Anvil-kilde (spec §1, regel 3).
-          return { alias: l.alias, anvil: conn.target, key: key, exec: exec };
+          return { alias: l.alias, url: '', viaProxy: false, error: 'ukjent kilde «' + conn.target + '» (finnes ikke i kilderegisteret)' };
         }
         base = src.base_url;
         viaProxy = !!src.auth || src.cors === false;
