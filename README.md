@@ -1,4 +1,9 @@
-# openstat — microdata.no emulator (public, BYOK-only build)
+# OpenStat — microdata.no emulator (public, BYOK-only build)
+
+> Sister project: [SafeStat](https://github.com/hmelberg/safestat) — the full
+> build with login, protected/encrypted data sources, restricted (strict)
+> execution, and server-side remote analysis. OpenStat is the open subset;
+> engine fixes land in SafeStat first and are ported here.
 
 A browser app that emulates [microdata.no](https://microdata.no): it translates
 microdata scripts to Python and runs them in the browser via Pyodide, generates

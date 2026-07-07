@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Microdata script runner</title>
+  <title>OpenStat — microdata script runner</title>
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="preconnect" href="https://cdn.plot.ly" crossorigin>
   <link rel="preload" as="script" href="https://cdn.jsdelivr.net/pyodide/v0.29.3/full/pyodide.js">
@@ -294,14 +294,16 @@
   </div>
   <div class="ai-modal-backdrop" id="welcomeBackdrop">
     <div class="ai-modal" style="max-width:600px;">
-      <h3 style="font-size:20px;" data-i18n>Velkommen!</h3>
+      <h3 style="font-size:20px;" data-i18n>Velkommen til OpenStat!</h3>
       <p style="margin:0 0 10px 0; font-size:16px; line-height:1.5;" data-i18n>
-        Dette er en side der du kan øve på å kjøre analyser i microdata.no-stil.
+        OpenStat er en åpen side der du kan øve på å kjøre analyser i microdata.no-stil.
       </p>
       <div class="ai-modal-help" style="margin-bottom:14px; font-size:14px; line-height:1.5;" data-i18n-html>
-        Denne siden inneholder ikke ekte tall. Det er et hobbyprosjekt og er
+        OpenStat inneholder ikke ekte tall. Det er et hobbyprosjekt og er
         <strong>ikke</strong> laget av microdata.no selv. Den kommer uten garantier
-        for at analysene er korrekt implementert.
+        for at analysene er korrekt implementert. Søsterversjonen
+        <a href="https://github.com/hmelberg/safestat" target="_blank" rel="noopener">SafeStat</a>
+        støtter i tillegg kryptert, beskyttet og ekstern analyse.
       </div>
       <div style="margin:14px 0; padding:12px 14px; background:var(--bg-code);
                   border-left:3px solid var(--accent); border-radius:4px;">
@@ -5535,11 +5537,11 @@ json.dumps(out)
 
     // ── B1: kopier/last ned enkeltresultater + "kopier alt" ────────────────
     // Generisk post-render-forsterkning: finner resultatblokker inni #outputArea
-    // (table, pre, .plotly-container, .safestat-result) og legger en liten
+    // (table, pre, .plotly-container) og legger en liten
     // hover-synlig kopier-knapp over hver av dem. Kalles etter hver rendering
     // via en debounced MutationObserver på #outputArea (se lenger ned), så vi
     // trenger ikke endre alle stedene som setter outputArea.innerHTML.
-    var RESULT_COPY_SELECTOR = 'table, pre, .plotly-container, .safestat-result';
+    var RESULT_COPY_SELECTOR = 'table, pre, .plotly-container';
 
     function copyPlainTextToClipboard(text) {
       if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -5584,7 +5586,7 @@ json.dumps(out)
     }
 
     // Tekstrepresentasjon av ett resultatelement: tabell → TSV (rad/celle-tekst),
-    // alt annet (pre, .safestat-result) → textContent. Knappen selv ligger
+    // alt annet (pre) → textContent. Knappen selv ligger
     // utenfor elementet (søsken i .result-copy-wrap), så den er aldri med i teksten.
     function resultElementToText(el) {
       if (el.tagName === 'TABLE') {
@@ -5620,7 +5622,7 @@ json.dumps(out)
     // Går fra el og opp til (men ikke forbi) container: true hvis en forfeder
     // matcher RESULT_COPY_SELECTOR eller allerede er en .result-copy-wrap —
     // da skal el IKKE få sin egen knapp (unngår doble knapper, f.eks. en
-    // <table> inni et .safestat-result, eller en tabell SafeStat sitt eget df-html).
+    // <table> inni en annen resultatblokk).
     function isNestedResultCandidate(el, container) {
       var p = el.parentElement;
       while (p && p !== container) {
