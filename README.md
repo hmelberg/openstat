@@ -1,4 +1,4 @@
-# micro — microdata.no emulator (public, BYOK-only build)
+# openstat — microdata.no emulator (public, BYOK-only build)
 
 A browser app that emulates [microdata.no](https://microdata.no): it translates
 microdata scripts to Python and runs them in the browser via Pyodide, generates
