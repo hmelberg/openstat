@@ -3316,10 +3316,12 @@
           b.classList.toggle('active', b.dataset.mode === activeEditorMode);
         });
       }
-      // Oversett-knapp: kun synlig i Python/R-modus
-      var _shows = !!(currentMode().translate && currentMode().translate.showsButton);
+      // Oversett + Vurder personvern: for now only in microdata mode.
+      var _shows = (activeEditorMode === 'microdata');
       var oBtn = document.getElementById('oversettBtn');
       if (oBtn) oBtn.style.display = _shows ? '' : 'none';
+      var dmB = document.getElementById('btnDmQuick');
+      if (dmB) dmB.style.display = _shows ? 'inline-flex' : 'none';
       if (typeof updateModeGuiBar==='function') updateModeGuiBar();
     }
 
@@ -3532,7 +3534,7 @@
       const tolk = document.getElementById('btnTolkFooter');
       if (tolk) tolk.style.display = '';
       const dm = document.getElementById('btnDmQuick');
-      if (dm) dm.style.display = 'inline-flex';
+      if (dm) dm.style.display = (activeEditorMode === 'microdata') ? 'inline-flex' : 'none';
     })();
 
     const outputScrollWrap = document.getElementById('outputScrollWrap');
