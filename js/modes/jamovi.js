@@ -15,6 +15,14 @@
     // Cleared at the same two hooks as jmvDialogGen++ above (jamoviSwitchDataset/jamoviLoadExample)
     // since cached levels belong to a specific dataset's column values.
     var jmvLevelCache = {};
+    // Race fix: jamoviRefreshDatasetPicker() is fired-and-forgotten at module load and again
+    // from onActivate (it does Pyodide round-trips to populate window.lastDatasetInfo for
+    // datasets created outside jamovi). openJmvAnalysis() reads jamoviVariables(), which reads
+    // window.lastDatasetInfo synchronously — if a user clicks an analysis immediately after
+    // switching into jamovi mode, it can run before the in-flight refresh has populated that
+    // info, producing an empty variable list / "Lag/importer data først" alert. jmvPickerP holds
+    // the latest refresh's promise so openJmvAnalysis can await it first.
+    var jmvPickerP = null;
 
     // Write a single edited cell back to the engine's pandas DataFrame.
     async function jamoviWriteBack(cell) {
@@ -184,18 +192,49 @@
 
     // Active-dataset picker (top menu, right). jamovi works on one dataset at a time;
     // microdata/python/r can create many in e.datasets.
-    async function jamoviRefreshDatasetPicker() {
-      var sel = document.getElementById('jamoviDatasetSelect');
-      if (!sel) return;
-      try {
-        var py = await M.loadPyodideAndM2py();
-        var json = String(await py.runPythonAsync('import json as _j\n_j.dumps({"names": list(map(str, e.datasets.keys())), "active": (str(e.active_name) if e.active_name is not None else "")})'));
-        var d = JSON.parse(json);
-        sel.innerHTML = '';
-        if (!d.names.length) { var o = document.createElement('option'); o.textContent = T('(ingen datasett)'); o.disabled = true; sel.appendChild(o); return; }
-        d.names.forEach(function(n){ var op = document.createElement('option'); op.value = n; op.textContent = n; if (n === d.active) op.selected = true; sel.appendChild(op); });
-        if (d.active) window.activeDatasetName = d.active;
-      } catch (e) { /* engine not ready yet */ }
+    function jamoviRefreshDatasetPicker() {
+      var p = (async function () {
+        var sel = document.getElementById('jamoviDatasetSelect');
+        if (!sel) return;
+        try {
+          var py = await M.loadPyodideAndM2py();
+          var json = String(await py.runPythonAsync('import json as _j\n_j.dumps({"names": list(map(str, e.datasets.keys())), "active": (str(e.active_name) if e.active_name is not None else "")})'));
+          var d = JSON.parse(json);
+          sel.innerHTML = '';
+          if (!d.names.length) { var o = document.createElement('option'); o.textContent = T('(ingen datasett)'); o.disabled = true; sel.appendChild(o); window.activeDatasetName = null; return; }
+          // Fix 3a: a dataset created elsewhere (e.g. python) can be active in the engine
+          // (e.active_name) but jamovi has never loaded it, so window.lastDatasetInfo — the
+          // dialogs' only source of variables — has no entry for it. Also, if the engine has
+          // no active_name at all (or a stale one), don't leave jamovi's picker/state
+          // disagreeing with reality: fall back to the previously-tracked active dataset if it
+          // still exists, else the first dataset.
+          var active = (d.active && d.names.indexOf(d.active) !== -1) ? d.active
+            : (window.activeDatasetName && d.names.indexOf(window.activeDatasetName) !== -1) ? window.activeDatasetName
+            : d.names[0];
+          d.names.forEach(function(n){ var op = document.createElement('option'); op.value = n; op.textContent = n; if (n === active) op.selected = true; sel.appendChild(op); });
+          window.activeDatasetName = active;
+          if (active !== d.active) {
+            // Keep the engine's active_name in sync with the picker so python/other modes
+            // agree with jamovi about which dataset is active.
+            py.globals.set('_ds_name', active);
+            await py.runPythonAsync('e.active_name = _ds_name');
+          }
+          // Populate window.lastDatasetInfo for the active dataset if it's missing — this is
+          // what was silently breaking the analysis dialogs (empty variable list) when a
+          // dataset made in python/microdata became active in jamovi without ever going
+          // through jamoviSwitchDataset/jamoviLoadExample.
+          if (!window.lastDatasetInfo || !window.lastDatasetInfo[active]) {
+            py.globals.set('_ds_name', active);
+            var infoJson = String(await py.runPythonAsync(
+              'import json as _j\n_df = e.datasets[_ds_name]\n_j.dumps({"columns": list(map(str,_df.columns)), "dtypes": {str(c): str(_df[c].dtype) for c in _df.columns}, "nrows": int(len(_df))})'
+            ));
+            window.lastDatasetInfo = window.lastDatasetInfo || {};
+            window.lastDatasetInfo[active] = JSON.parse(infoJson);
+          }
+        } catch (e) { /* engine not ready yet */ }
+      })();
+      jmvPickerP = p;
+      return p;
     }
     async function jamoviSwitchDataset(name) {
       if (!name) return;
@@ -1328,7 +1367,12 @@
 
     // Åpne en jamovi 2.0-analyse: dialog generert fra spec'en, dokket til venstre for
     // resultatene, med live-kjøring (debounce) hver gang en rolle/opsjon endres.
-    function openJmvAnalysis(name, presets) {
+    async function openJmvAnalysis(name, presets) {
+      // Race fix: an analysis opened right after switching into jamovi mode (or right after
+      // module load) can beat jamoviRefreshDatasetPicker()'s in-flight Pyodide round-trips,
+      // which is what populates window.lastDatasetInfo for datasets created outside jamovi.
+      // jamoviVariables() below reads that synchronously, so wait for the refresh first.
+      if (jmvPickerP) { try { await jmvPickerP; } catch (e) {} }
       var myGen = ++jmvDialogGen; // Fix B: identifies this dialog's live-update loop
       var spec = window.JMV_SPECS && window.JMV_SPECS[name];
       if (!spec) { alert(T('Analyse ikke funnet: {id}', { id: name })); return; }
@@ -1726,6 +1770,24 @@
       document.addEventListener('click', function(){ apanel.querySelectorAll('.jmv-group').forEach(function(x){x.classList.remove('open');}); if (appMenu) appMenu.hidden = true; });
     })();
 
-    M.registerMode({ id:'jamovi', label:'jamovi', hlConfig:M.R_HL_CFG, handleTab:M.handleRTab, topGui:'jamovi', onActivate:function(){ if(!M.isWebRReady()) M.loadWebR(); M.updateModeGuiBar(); jamoviRefreshDatasetPicker(); }, translate:{showsButton:false}, runSelf:async function(script,ctx){ await M.runHybridR(script, ctx.py, {showCommands:true}); } });
+    M.registerMode({ id:'jamovi', label:'jamovi', hlConfig:M.R_HL_CFG, handleTab:M.handleRTab, topGui:'jamovi', onActivate:function(){
+      if(!M.isWebRReady()) M.loadWebR();
+      M.updateModeGuiBar();
+      // Fix 3c: clear whatever the previous mode left in the output window on every
+      // entry into jamovi — the jamovi workspace DOM (#jamoviResults etc.) is recreated
+      // lazily by jamoviResultsContainer() the moment an analysis/Data/Variables card is
+      // shown, so there's nothing jamovi itself needs to preserve here. Only touches
+      // onActivate for THIS mode; switching to any other mode is untouched.
+      if (M.outputArea) {
+        if (typeof window.purgePlots === 'function') window.purgePlots(M.outputArea);
+        M.outputArea.innerHTML = '';
+      }
+      // Not deduped against the module-load call above (~line 1768): that one runs once at
+      // ribbon-build time regardless of whether jamovi is the active mode, this one runs on
+      // every entry into jamovi mode. If they land close together (e.g. jamovi is the initial
+      // mode on load) the second simply replaces jmvPickerP — harmless thanks to the
+      // promise-sharing openJmvAnalysis() awaits on.
+      jamoviRefreshDatasetPicker();
+    }, translate:{showsButton:false}, runSelf:async function(script,ctx){ await M.runHybridR(script, ctx.py, {showCommands:true}); } });
     M.updateModeGuiBar();
 })();
