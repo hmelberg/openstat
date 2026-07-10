@@ -67,6 +67,17 @@ def _execute_code(code):
         # whose tail (header + body) cannot compile as 'eval' (a for/if/def
         # is not a valid expression), so it plain-execs instead of evaling
         # the inner line out of context.
+        #
+        # Two bounds guard against pathological inputs while staying correct
+        # for editor-sized scripts: the scan cap (1000) bounds how many
+        # column-0 lines get probed — compiling ~1000 small string slices is
+        # negligible cost, and real scripts don't run deeper than that. But
+        # a single trailing expression can still legitimately spill more
+        # than 1000 unindented lines (e.g. a long literal list, one item per
+        # line); if the cap is hit before line 0 is reached, line 0 itself
+        # is appended as a final fallback candidate (whole code as tail,
+        # head='pass'), so a single-statement script is always found
+        # regardless of length.
         lines = code.split(chr(10))
         while lines and lines[-1].strip() == '':
             lines.pop()
@@ -78,8 +89,10 @@ def _execute_code(code):
                 line = lines[i]
                 if line and line[:1] not in (' ', chr(9)):
                     candidates.append(i)
-                    if len(candidates) >= 50:
+                    if len(candidates) >= 1000:
                         break
+            if 0 not in candidates:
+                candidates.append(0)
             for i in candidates:
                 tail_src = chr(10).join(lines[i:])
                 tail_stripped = tail_src.strip()

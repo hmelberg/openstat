@@ -133,6 +133,17 @@ def test_trailing_multiline_string_assignment_not_misdisplayed():
     assert out == ''
     assert br._get_last_error() == ''
 
+def test_long_trailing_expression_beyond_scan_cap_displays():
+    # A single trailing expression spanning many column-0 lines (one list
+    # item per line, unindented) — more than the scan cap. The capped
+    # upward scan alone would exhaust its candidates before reaching line 0
+    # (the expression's true start), silently dropping the display. The
+    # whole-code fallback candidate (index 0) must catch this.
+    expr = 'sum([' + chr(10).join(str(i) + ',' for i in range(60)) + chr(10) + '])'
+    out = br._execute_code(expr)
+    assert str(sum(range(60))) in out
+    assert br._get_last_error() == ''
+
 if __name__ == '__main__':
     # NOTE: iterate in declaration order (not sorted alphabetically) — several
     # tests share state via module globals (e.g. test_figure_embed_marker
