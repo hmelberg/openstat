@@ -360,7 +360,7 @@
       </button>
       <div style="width:1px;height:20px;background:var(--border);margin:0 6px;flex-shrink:0"></div>
       <div class="mode-dropdown-wrap">
-        <button type="button" class="mode-dropdown-btn" id="editorModeBtn" data-i18n-title title="Velg modus (Microdata, Python, R, Statx, Jamovi, Jamovi light, DuckDB)">
+        <button type="button" class="mode-dropdown-btn" id="editorModeBtn" data-i18n-title title="Velg modus (Microdata, Python, R, Statx, Jamovi, Jamovi light, DuckDB, Brython)">
           <span id="editorModeLabel">Microdata</span>
           <span class="chevron">▲</span>
         </button>
@@ -372,6 +372,7 @@
           <button type="button" data-mode="jamovi">Jamovi</button>
           <button type="button" data-mode="jamovilight">Jamovi light</button>
           <button type="button" data-mode="duckdb">DuckDB</button>
+          <button type="button" data-mode="brython">Brython</button>
         </div>
       </div>
       <button type="button" class="btn btn-tolk" id="btnDmQuick" style="display:none;gap:6px" data-i18n-title title="Vurder personvern: sjekk om scriptet henter mer detaljerte data enn n&#248;dvendig (dataminimering), og f&#229; forslag til &#229; aggregere/forenkle. Krever egen Anthropic-n&#248;kkel.">
@@ -2915,6 +2916,15 @@
       try { return __arrowToColumns(await conn.query(sql)); }
       finally { await conn.close(); }
     };
+    // Brython-modus: konverter vilkårlige parquet-bytes til kolonne-arrays via
+    // DuckDB-WASM (lastes lat — kun når en brython-kjøring faktisk laster parquet).
+    window.__brythonParquetColumns = async function (bytes) {
+      const db = await __ensureDuckDB();
+      await db.registerFileBuffer('_brython_tmp.parquet', bytes);
+      const conn = await db.connect();
+      try { return __arrowToColumns(await conn.query("SELECT * FROM read_parquet('_brython_tmp.parquet')")); }
+      finally { await conn.close(); try { await db.dropFile('_brython_tmp.parquet'); } catch (e) {} }
+    };
     // Column lists per static table (so routing knows what's materialised).
     window.runStaticSchemas = async function (base) {
       const db = await __ensureDuckDB();
@@ -3330,6 +3340,26 @@
         runSelf: async function (script, ctx) { await runStatxScript(script, ctx); } },
       duckdb: { id: 'duckdb', label: 'DuckDB', hlConfig: SQL_HL_CFG, handleTab: microdataHandleTab,
         translate: { showsButton: false }, runDefault: 'duckdb' },
+      brython: { id: 'brython', label: 'Brython', hlConfig: PY_HL_CFG, handleTab: handlePythonTab,
+        translate: { showsButton: false },
+        onActivate: function () { if (window.BrythonEngine) window.BrythonEngine.load().catch(function () {}); },
+        runSelf: async function (script, ctx) {
+          setStatus(ctx.rightStatus, t('Laster Brython…'));
+          var _dl = await window.DataLoader.resolveAndFetchLoads(script,
+            { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey });
+          setStatus(ctx.rightStatus, t('Kjører…'));
+          var res = await window.BrythonEngine.run(script, { loads: _dl.loads });
+          var _omEl = document.querySelector('input[name="outputMode"]:checked');
+          renderOutput(res.text || '', !_omEl || _omEl.value === 'html',
+            (typeof suppressEmbedded !== 'undefined' && suppressEmbedded) ? !!suppressEmbedded.checked : false);
+          if (res.error) {
+            var _pre = document.createElement('pre');
+            _pre.className = 'error';
+            _pre.textContent = res.error;
+            outputArea.appendChild(_pre);
+          }
+          setStatus(ctx.rightStatus, res.error ? t('Feil') : t('Ferdig'));
+        } },
     };
     function currentMode() {
       return modeRegistry[activeEditorMode] || modeRegistry.microdata;
@@ -3358,7 +3388,7 @@
     // (plan 2026-07-09: R uten Pyodide, fremtidig brython/subdomene-boot).
     var RUNTIME_FOR_MODE = { python: 'pyodide', microdata: 'pyodide', duckdb: 'pyodide',
                              jamovi: 'pyodide', jamovilight: 'pyodide', statx: 'pyodide',
-                             safestat: 'pyodide', r: 'webr' };
+                             safestat: 'pyodide', brython: 'brython', r: 'webr' };
     function runtimeForMode(id) { return RUNTIME_FOR_MODE[id] || 'pyodide'; }  // ukjent → trygt valg
 
     function switchEditorMode(newMode) {
@@ -3700,7 +3730,19 @@
       'barplot(table(iris$species), main = "Iris — count per species", ylab = "count")',
     ].join('\n');
 
-    const STARTUP_EXAMPLES = { python: _STARTUP_PY, r: _STARTUP_R, microdata: _PLACEHOLDER_MICRODATA };
+    const _STARTUP_BRYTHON = [
+      '# OpenStat — Brython: lettvekts-Python som laster på et par sekunder.',
+      '# Bra for dashboards. Full pandas/statistikk: bytt til Python-modus.',
+      '# load ' + _DATA_RAW + 'iris.csv as iris',
+      'import pandas_brython as pd',
+      'import plotly_express_brython as pe',
+      '',
+      'show(iris.head())',
+      'pe.scatter(iris, x="sepal_length", y="sepal_width", color="species",',
+      '           title="Iris — begerbladlengde mot -bredde")',
+    ].join('\n');
+
+    const STARTUP_EXAMPLES = { python: _STARTUP_PY, r: _STARTUP_R, microdata: _PLACEHOLDER_MICRODATA, brython: _STARTUP_BRYTHON };
 
     // ── Hurtigspør-boks i toppen: Enter åpner AI-panelet og sender spørsmålet ──
     (function initTopbarAsk() {
@@ -3763,8 +3805,8 @@
     let dashboardPendingParsed = null;
     // ── Editor mode (always-on, controlled by bottom-bar dropdown) ──────
     let activeEditorMode  = 'microdata'; // 'microdata' | 'python' | 'r'
-    const editorContent   = { microdata: '', python: '', r: '', statx: '', jamovi: '', duckdb: '' };
-    const editorBP        = { microdata: new Set(), python: new Set(), r: new Set(), statx: new Set(), jamovi: new Set(), duckdb: new Set() };
+    const editorContent   = { microdata: '', python: '', r: '', statx: '', jamovi: '', duckdb: '', brython: '' };
+    const editorBP        = { microdata: new Set(), python: new Set(), r: new Set(), statx: new Set(), jamovi: new Set(), duckdb: new Set(), brython: new Set() };
     // B4/B5 (docs/REVIEW_2026-07-07.md §3): switchEditorMode() persists
     // md_editor_mode but nothing ever read it back, so a reload always
     // landed on 'microdata'. Restore it here, synchronously, as part of this
@@ -8397,6 +8439,12 @@ options(width = 200)
         if (webRReady) runtimeReadyBootstrap(null);
         // lastefeil: loadWebR har alt vist feilmelding; knappene står idle.
       });
+    } else if (runtimeForMode(activeEditorMode) === 'brython') {
+      window.BrythonEngine.load().then(function () {
+        runtimeReadyBootstrap(null);
+      }).catch(function (e) {
+        setStatus(leftStatus, 'Load failed: ' + (e && e.message ? e.message : String(e)), true);
+      });
     } else {
       loadPyodideAndM2py()
         .then(runtimeReadyBootstrap)
@@ -9333,6 +9381,7 @@ def _run_microdata_chunk(_code):
   <script src="js/data-loader.js"></script>
   <script src="js/ai-chat.js"></script>
   <script src="js/github-storage.js"></script>
+  <script src="js/brython-engine.js"></script>
 
   <div id="dmResultBackdrop" class="ai-modal-backdrop" style="display:none;">
     <div class="ai-modal" style="max-width: 780px; max-height: 80vh; display: flex; flex-direction: column;">
