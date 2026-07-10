@@ -360,12 +360,11 @@
       </div>
       <div style="width:1px;height:20px;background:var(--border);margin:0 6px;flex-shrink:0"></div>
       <div class="mode-dropdown-wrap">
-        <button type="button" class="mode-dropdown-btn" id="editorModeBtn" data-i18n-title title="Velg modus (Microdata, Python, R, Statx, Jamovi, SQL - DuckDB, Brython)">
-          <span id="editorModeLabel">Microdata</span>
+        <button type="button" class="mode-dropdown-btn" id="editorModeBtn" data-i18n-title title="Velg modus (Python, R, Statx, Jamovi, SQL - DuckDB, Brython)">
+          <span id="editorModeLabel">Python</span>
           <span class="chevron">▲</span>
         </button>
         <div class="mode-dropdown-menu" id="editorModeMenu">
-          <button type="button" data-mode="microdata" class="active">Microdata</button>
           <button type="button" data-mode="python">Python</button>
           <button type="button" data-mode="r">R</button>
           <button type="button" data-mode="statx">Statx</button>
@@ -3473,6 +3472,10 @@
     (function restoreEditorMode() {
       var saved = null;
       try { saved = localStorage.getItem('md_editor_mode'); } catch (e) {}
+      // Microdata-modus er gated av i openstat (fase 0, 2026-07-11): emulatoren
+      // bor i microdata-repoen og safestat beholder modusen for beskyttede
+      // data. Lagret microdata-modus faller tilbake til hostname-default.
+      if (saved === 'microdata') saved = null;
       var mode = (saved && Object.prototype.hasOwnProperty.call(modeRegistry, saved))
         ? saved
         : (window.NotebookLinks ? window.NotebookLinks.hostnameMode(location.hostname) : 'python');
