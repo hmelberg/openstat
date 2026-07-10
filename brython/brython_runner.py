@@ -40,24 +40,51 @@ def _execute_code(code):
     old = sys.stdout
     sys.stdout = buf
     try:
-        lines = code.rstrip().split(chr(10))
-        last_raw = lines[-1] if lines else ''
-        last = last_raw.strip()
+        # Statement-aware trailing-expression detection (no `ast` — must run
+        # under Brython 3.12 too). REPL semantics: if the code's final
+        # top-level statement is itself an expression, display its value.
+        # A top-level statement always starts at column 0 (no leading
+        # space/tab); continuation lines of a wrapped call/expression are
+        # indented (or at least never mistaken for a *new* top-level
+        # statement start under normal formatting). So: find the LAST
+        # physical line that starts at column 0 — that's where the final
+        # top-level statement begins — and take everything from there to
+        # the end as the "tail". If the tail compiles in 'eval' mode it's
+        # an expression: exec everything before it, then eval+display the
+        # tail (this also covers multi-line trailing expressions, e.g. a
+        # call whose arguments wrap across lines). If the tail is a
+        # statement (for/if/def/assignment/...), compiling it as 'eval'
+        # raises SyntaxError and we fall back to plain-exec of the whole
+        # code with no display — identical to today's behavior. This also
+        # keeps indented-last-line-inside-a-block safe: the nearest
+        # column-0 line is the block header, whose tail (header + body)
+        # cannot compile as 'eval' either, so it plain-execs instead of
+        # evaling the inner line out of context.
+        lines = code.split(chr(10))
+        while lines and lines[-1].strip() == '':
+            lines.pop()
         result = None
-        # Try exec-all-but-last + eval-last so the final expression displays
-        # (REPL semantics). Only safe when the last line is top-level (no
-        # leading whitespace) — an indented last line belongs to a block
-        # (if/for/while/with) and evaling it alone would run it out of
-        # context. Fall back to plain exec for statements and indented lines.
-        if last and not last.startswith('#') and last_raw[:1] not in (' ', chr(9)):
-            try:
-                body = compile(chr(10).join(lines[:-1]) or 'pass', '<brython>', 'exec')
-                tail = compile(last, '<brython>', 'eval')
-                exec(body, _shared_vars)
-                result = eval(tail, _shared_vars)
-            except SyntaxError:
-                exec(compile(code, '<brython>', 'exec'), _shared_vars)
-        else:
+        displayed = False
+        if lines:
+            last_idx = None
+            for i in range(len(lines) - 1, -1, -1):
+                line = lines[i]
+                if line and line[:1] not in (' ', chr(9)):
+                    last_idx = i
+                    break
+            if last_idx is not None:
+                tail_src = chr(10).join(lines[last_idx:])
+                tail_stripped = tail_src.strip()
+                if tail_stripped and not tail_stripped.startswith('#'):
+                    try:
+                        tail_code = compile(tail_src, '<brython>', 'eval')
+                        head_src = chr(10).join(lines[:last_idx]) or 'pass'
+                        exec(compile(head_src, '<brython>', 'exec'), _shared_vars)
+                        result = eval(tail_code, _shared_vars)
+                        displayed = True
+                    except SyntaxError:
+                        pass
+        if not displayed:
             exec(compile(code, '<brython>', 'exec'), _shared_vars)
         out = buf.getvalue()
         shown = _fmt(result)

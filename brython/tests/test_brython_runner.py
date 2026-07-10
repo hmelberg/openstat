@@ -59,6 +59,34 @@ def test_indented_last_line_in_for_loop_not_displayed():
     assert br._get_last_error() == ''
     assert '30' not in out
 
+def test_multiline_trailing_call_displays_figure():
+    # Reproduces the app's own starter example: a trailing call whose
+    # arguments wrap across two physical lines, second line indented.
+    # The last PHYSICAL line ('           title="t")') is indented, so a
+    # purely line-based last-line check misses it entirely and the figure
+    # is silently dropped. Statement-aware detection must find the call's
+    # start (column 0) and eval the whole multi-line tail.
+    br._execute_code('import pandas_brython as pd\nimport plotly_express_brython as pe\n'
+                      'df_ml = pd.DataFrame({"x": [1, 2], "y": [3, 4]})')
+    out = br._execute_code(
+        'pe.scatter(df_ml, x="x", y="y",\n'
+        '           title="t")'
+    )
+    assert (ES + 'figure__') in out and EE in out
+    assert br._get_last_error() == ''
+
+def test_multiline_trailing_expression_with_earlier_lines():
+    # Earlier top-level statement, then a trailing multi-line parenthesized
+    # arithmetic expression — must exec the earlier line and eval+display
+    # the multi-line tail.
+    out = br._execute_code(
+        'a_ml = 3\n'
+        '(a_ml +\n'
+        ' 4)'
+    )
+    assert '7' in out
+    assert br._get_last_error() == ''
+
 if __name__ == '__main__':
     # NOTE: iterate in declaration order (not sorted alphabetically) — several
     # tests share state via module globals (e.g. test_figure_embed_marker
