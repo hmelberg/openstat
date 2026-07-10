@@ -39,7 +39,6 @@ statement.
 | `functions.py` | microdata functions used in generate/replace/if expressions. |
 | `protect.py` | `scrub-*` data-protection verbs (noise, swap, k-anon, risk, …) — a local disclosure-control toolkit you can call on your own scripts; no server involved. |
 | `mockdata_export.py`, `static_source.py`, `build_static_data.py` | Static synthetic-data build (Parquet/DuckDB) + the static data source. |
-| `py2m/`, `r2m/` | Python→microdata and R→microdata translators (each with its own runner + tests). |
 | `netlify/edge-functions/` | The AI endpoints (`dm-vurder`, `kode-svar`, `kode-svar-v2`, `tolk-resultat`, `data-svar`, `hent`) + shared `_lib/`. All accept a BYOK Anthropic key (`X-Anthropic-Key`) — no account/token required. |
 | `manual_scripts/` | End-to-end example scripts run as a smoke suite. |
 | `tests/` | pytest suite (engine, regressions, equivalence, mock-data, performance). |
@@ -54,9 +53,11 @@ remote execution. Those features (and their supporting files —
 not needed for the public/lite use case.
 
 The **three** repos (safestat, openstat, microdata) share a core engine —
-`m2py.py`, `functions.py`, `m2py_translate.py`, `m2py_runtime/`, `py2m/`,
-`r2m/`, `protect.py`, and most of `index.html`'s mode-switching/editor/
-run-pipeline logic. There is no shared package or submodule between them
+`m2py.py`, `functions.py`, `m2py_translate.py`, `m2py_runtime/`,
+`protect.py`, and most of `index.html`'s mode-switching/editor/
+run-pipeline logic. (The `py2m/`/`r2m/` translators and the Oversett button
+were removed from openstat/safestat 2026-07-10 — they live in the
+`microdata` repo only.) There is no shared package or submodule between them
 (deliberately, to avoid infrastructure this project doesn't need yet) — when
 you fix a bug in one of those files, check whether the sibling repos have the
 same bug. Engine fixes land in SafeStat first and are ported out. The
@@ -73,10 +74,6 @@ should not be blind-synced.
 # End-to-end smoke suite (exits non-zero on any CRASH/PARTIAL)
 .venv/bin/python manual_scripts/run_manual_scripts.py
 
-# Translator tests
-.venv/bin/python -m pytest py2m/tests/
-Rscript r2m/test_r2m.R
-
 # Edge functions (Deno)
 cd netlify/edge-functions && deno check *.ts _lib/*.ts && deno test --allow-all _lib/
 
@@ -84,7 +81,7 @@ cd netlify/edge-functions && deno check *.ts _lib/*.ts && deno test --allow-all 
 .venv/bin/python build_static_data.py --persons 100000 --from 2015 --to 2023
 ```
 
-CI lives in `.github/workflows/` (pytest + manual scripts, py2m, r2m, edge).
+CI lives in `.github/workflows/` (pytest + manual scripts, edge).
 
 ## Deployment
 
