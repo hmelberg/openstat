@@ -72,7 +72,9 @@ på tvers av moduser; output-rens ved inngang.
       - Nivå 2 (senere, hvis nivå 1 ikke fanger nok): sandkasse-prøvekjøring mot
         kopi av aktivt datasett med timeout; send runtime-feilen til
         reparasjonsrunden. Utfordringer: bivirkninger, nettkall, kjøretid.
-- [ ] Vurdere Send⚗︎-flyten (v2) også for openstat-brukere på ikke-micro-URL-er
+- [x] Vurdere Send⚗︎-flyten (v2) også for openstat-brukere på ikke-micro-URL-er
+      — løst 2026-07-10: Send rutes nå av aktiv modus (microdata-modus → v2),
+      ikke av URL-en
       (i dag går de til data-svar som er admin-gated — bevisst valg 9/7, men verdt
       å revurdere hvis vanlige brukere trenger AI-hjelp uten egen nøkkel)
 

@@ -1,16 +1,25 @@
-# OpenStat — microdata.no emulator (public, BYOK-only build)
+# OpenStat — browser statistics workbench (public, BYOK-only build)
 
-> Sister project: [SafeStat](https://github.com/hmelberg/safestat) — the full
+> Sister projects: [SafeStat](https://github.com/hmelberg/safestat) — the full
 > build with login, protected/encrypted data sources, restricted (strict)
-> execution, and server-side remote analysis. OpenStat is the open subset;
-> engine fixes land in SafeStat first and are ported here.
+> execution, and server-side remote analysis — and
+> [Microdata](https://github.com/hmelberg/microdata) — the dedicated
+> microdata.no emulator (persona locked on, UI tracking microdata.no).
+> OpenStat is the open general workbench; engine fixes land in SafeStat first
+> and are ported to the siblings.
 
-A browser app that emulates [microdata.no](https://microdata.no): it translates
-microdata scripts to Python and runs them in the browser via Pyodide, generates
-synthetic register data from metadata, and adds tools around it — Python/R
-runners, Python/R → microdata translators, an editor that mimics microdata.no,
-a step-by-step tutorial mode, and AI features (code generation, a
-data-minimization/privacy review, and result interpretation).
+A browser app for running statistics scripts in several languages — microdata,
+Python, R, DuckDB, Brython, jamovi, Statx — with the microdata language powered
+by an engine that emulates [microdata.no](https://microdata.no): it translates
+microdata scripts to Python and runs them in the browser via Pyodide, and
+generates synthetic register data from metadata. Around it: Python/R runners,
+Python/R → microdata translators, a step-by-step tutorial mode, and AI features
+(code generation, a data-minimization/privacy review, and result
+interpretation). Microdata is an ordinary mode here (its special UI shows only
+while microdata mode is active); the always-on emulator experience lives in the
+`microdata` sibling repo. The default mode is chosen per subdomain
+(`js/notebook-links.js` `hostnameMode()`: py.* → python, r.* → r,
+duck.* → duckdb, micro… → microdata), with **python** as the fallback.
 
 This is the **public, lite** version: no login, no accounts, no protected/
 sensitive data sources, and no server-side remote execution. The AI features
@@ -44,12 +53,16 @@ remote execution. Those features (and their supporting files —
 `vendor/safepy.zip`, `sync_to_api.py`) were removed here on purpose; they are
 not needed for the public/lite use case.
 
-The two repos share a core engine — `m2py.py`, `functions.py`,
-`m2py_translate.py`, `m2py_runtime/`, `py2m/`, `r2m/`, `protect.py`, and most of
-`index.html`'s mode-switching/editor/run-pipeline logic. There is no shared
-package or submodule between them (deliberately, to avoid infrastructure this
-project doesn't need yet) — when you fix a bug in one of those files, check
-whether the sibling repo has the same bug.
+The **three** repos (safestat, openstat, microdata) share a core engine —
+`m2py.py`, `functions.py`, `m2py_translate.py`, `m2py_runtime/`, `py2m/`,
+`r2m/`, `protect.py`, and most of `index.html`'s mode-switching/editor/
+run-pipeline logic. There is no shared package or submodule between them
+(deliberately, to avoid infrastructure this project doesn't need yet) — when
+you fix a bug in one of those files, check whether the sibling repos have the
+same bug. Engine fixes land in SafeStat first and are ported out. The
+`microdata` repo was cloned from this one 2026-07-10 with full git history
+(`git cherry-pick` works across them); its UI drifts toward microdata.no and
+should not be blind-synced.
 
 ## Common commands
 

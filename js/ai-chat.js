@@ -1367,11 +1367,12 @@
           });
         }
 
-        // Send is routed by the URL (urlHasMicro): "micro" → microdata AI
+        // Send is routed by the active mode: microdata-modus → microdata AI
         // (kode-svar); otherwise the agentic data-svar flow (search data → script
         // in the active mode's language → run → revise).
         function sendCurrent() {
-          if (window.NotebookLinks && window.NotebookLinks.urlHasMicro(location.href)) {
+          var _m = window.M2PY && window.M2PY.currentMode && window.M2PY.currentMode();
+          if (_m && _m.id === 'microdata') {
             // v2-flyten (2-stegs variabelvalg + auto-retting) gir best svar;
             // den gamle enstegsflyten nås ikke lenger fra UI.
             sendMessage(true);
@@ -1380,7 +1381,7 @@
           }
         }
         if (dom.aiSendFastBtn) dom.aiSendFastBtn.addEventListener('click', sendCurrent);
-        // Send⚗︎ er nå bakt inn i Send (micro-URL → v2); knappen holdes skjult.
+        // Send⚗︎ er nå bakt inn i Send (microdata-modus → v2); knappen holdes skjult.
         if (dom.aiSendV2Btn) { dom.aiSendV2Btn.style.display = 'none'; dom.aiSendV2Btn.addEventListener('click', () => sendMessage(true)); }
         // The old Web button is subsumed by the URL-routed Send; keep it hidden.
         if (dom.aiSendWebBtn) { dom.aiSendWebBtn.style.display = 'none'; dom.aiSendWebBtn.addEventListener('click', () => { sendWebMessage(); }); }

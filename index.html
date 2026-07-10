@@ -3461,15 +3461,18 @@
           b.classList.toggle('active', b.dataset.mode === activeEditorMode);
         });
       }
-      // Oversett + Vurder personvern are URL-gated (applyMicroGating), not mode-gated.
+      // Oversett + Vurder personvern m.m. are mode-gated (applyMicroGating).
       if (window.mdApplyMicroGating) window.mdApplyMicroGating();
       if (typeof updateModeGuiBar==='function') updateModeGuiBar();
     }
 
-    // Microdata-specific UI is shown only when the URL (before any #) contains
-    // "micro". OpenStat has no login, so btnDmQuick is purely micro-gated here.
+    // Microdata-specific UI is shown only while the active mode is microdata
+    // (2026-07-10: was URL-gated via urlHasMicro; the dedicated emulator now
+    // lives in the sibling `microdata` repo). Runs on every mode switch via
+    // updateModeButtonsUi(), plus once after restoreEditorMode() — it can't
+    // run earlier: activeEditorMode is a `let` declared further down (TDZ).
     function applyMicroGating() {
-      var micro = !!(window.NotebookLinks && window.NotebookLinks.urlHasMicro(location.href));
+      var micro = (activeEditorMode === 'microdata');
       ['oversettBtn', 'btnDmQuick', 'menuSokData', 'menuOfflineBtn'].forEach(function (id) {
         var el = document.getElementById(id);
         if (el) el.style.display = micro ? '' : 'none';
@@ -3481,7 +3484,8 @@
       });
     }
     window.mdApplyMicroGating = applyMicroGating;
-    applyMicroGating();
+    // NB: ikke kall applyMicroGating() her — activeEditorMode er i TDZ til
+    // deklarasjonen lenger ned; boot-kallet skjer etter restoreEditorMode().
 
     function updateModeGuiBar() {
       var bar = document.getElementById('modeGuiBar');
@@ -3779,7 +3783,7 @@
       ask.style.display = '';
       const tolk = document.getElementById('btnTolkFooter');
       if (tolk) tolk.style.display = '';
-      // btnDmQuick visibility is handled by applyMicroGating() (URL-gated).
+      // btnDmQuick visibility is handled by applyMicroGating() (mode-gated).
     })();
 
     const outputScrollWrap = document.getElementById('outputScrollWrap');
@@ -3856,6 +3860,10 @@
       if (mode && mode !== activeEditorMode && Object.prototype.hasOwnProperty.call(modeRegistry, mode)) {
         switchEditorMode(mode);
       }
+      // Boot-gating: switchEditorMode() over dekker bytte-tilfellet, men når
+      // lagret modus === init-verdien skjer ingen switch — kall eksplisitt så
+      // micro-UI-et (Oversett, Søk om data, …) matcher modusen fra start.
+      applyMicroGating();
     })();
 
     // ── Starteksempel og auto-fokus ─────────────────────────────────────────
