@@ -8436,8 +8436,6 @@ options(width = 200)
           // "# use …" håndteres nå på SEGMENTNIVÅ (plan 2026-07-11 i
           // safestat): use-linjene parses/strippes per blokk og
           // materialiseres ved blokkgrensen i kjøringsløkka lenger ned.
-          // openstats python-glue har ellers aldri parquet-loads — sikre motoren
-          if (_useP.uses.length) await ensurePyarrowFor(py);
           if (_rawLoads.some(function (l) { return l.bytes; })) py.FS.mkdirTree('/home/pyodide/_webdata');
           _pyLoads = _rawLoads.map(function (l) {
             var _path = '/home/pyodide/_webdata/' + l.alias + '.' + l.format;
