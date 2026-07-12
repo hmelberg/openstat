@@ -43,6 +43,7 @@
               <button type="button" data-example="py03_statsmodels_regression.txt" data-mode="python" data-i18n>statsmodels &mdash; OLS regression</button>
               <button type="button" data-example="py04_pandas_plot.txt" data-mode="python">matplotlib + #micro</button>
               <button type="button" data-example="py05_duckdb_block.txt" data-mode="python" data-i18n>pandas + #duckdb (SQL block)</button>
+              <button type="button" data-example="py06_dashboard.txt" data-mode="python" data-i18n>Dashboard &mdash; fordelingsutforsker</button>
               <button type="button" data-example="ex_csv_iris.txt" data-mode="python" data-i18n>Load a CSV from GitHub</button>
               <button type="button" data-example="ex_columns_penguins.txt" data-mode="python" data-i18n>Select columns &rarr; focused dataset</button>
               <button type="button" data-example="ex_api_worldbank.txt" data-mode="python" data-i18n>Live data &mdash; World Bank API</button>
@@ -57,6 +58,7 @@
               <button type="button" data-example="r06_base_r_idioms.txt" data-mode="r" data-i18n>base R &mdash; subset/transform/aggregate</button>
               <button type="button" data-example="r07_regresjon.txt" data-mode="r" data-i18n>regression &mdash; lm + glm</button>
               <button type="button" data-example="r08_across_sample.txt" data-mode="r" data-i18n>dplyr &mdash; across + slice_sample</button>
+              <button type="button" data-example="r09_dashboard.txt" data-mode="r" data-i18n>Dashboard &mdash; fordelingsutforsker</button>
               <button type="button" data-example="rex_csv_iris.txt" data-mode="r" data-i18n>Load a CSV from GitHub</button>
               <button type="button" data-example="rex_columns_penguins.txt" data-mode="r" data-i18n>Select columns &rarr; focused dataset</button>
               <button type="button" data-example="rex_ext_csv.txt" data-mode="r" data-i18n>Read an external CSV</button>
@@ -652,6 +654,8 @@
   <script src="https://cdn.jsdelivr.net/pyodide/v314.0.2/full/pyodide.js"></script>
   <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
   <script src="js/brython-engine.js"></script>
+  <script src="js/dash.js"></script>
+  <script src="js/dash-webr.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tabulator-tables@6.3.1/dist/js/tabulator.min.js" defer></script>
   <script src="widgets/forklar-widgets.js"></script>
@@ -667,8 +671,8 @@
     // grådig og ville ellers dratt ";ds=..." inn som del av URL-en.
     // Kjøres synkront her, tidligst mulig under parsing — lenge før 'load'-eventet
     // som openFromFragment venter på, og før senere inline-skript som selv leser
-    // location.hash. dash.js (lastes lazy via LIB_REGISTRY først når et
-    // dashboard-script faktisk kjører) leser den avstrippede verdien fra
+    // location.hash. dash.js (lastes eagert siden fase 2 — pyodide/R trenger
+    // den utenom LIB_REGISTRY) leser den avstrippede verdien fra
     // window.__DASH_DS_INIT__ i stedet for location.hash, siden hashen da alt
     // er renset for ds-suffikset.
     (function () {
@@ -687,7 +691,7 @@
     window.t = window.t || function (s) { return s; };
     window.i18nField = window.i18nField || function (obj, field) { return obj && obj[field]; };
 
-    window.M2PY_VERSION = '2026-07-11a';
+    window.M2PY_VERSION = '2026-07-12a';
 
     // One-time migration: remove obsolete localStorage keys from previous milestones
     // Safe to delete this snippet after a few months when most users have re-loaded
@@ -3093,6 +3097,11 @@
       python:    { id: 'python',    label: 'Python', hlConfig: PY_HL_CFG, handleTab: handlePythonTab,
         runDefault: 'pyodide',
         preRun: async function (script, ctx) {
+          // dash-import registreres FØR pakke-sjekkene under — se __ensurePyDash.
+          if (/^\s*(?:import|from)\s+dash\b/m.test(script)) {
+            try { await __ensurePyDash(ctx.py); }
+            catch (e) { console.warn('pyodide/dash.py:', e); }
+          }
           try {
             setStatus(ctx.rightStatus, t('Sjekker pakker…'));
             await ctx.py.loadPackagesFromImports(script, {
@@ -7612,6 +7621,18 @@ json.dumps(out)
         }
       }
 
+      // dash v2: definer R-adapteret + nullstill registeret FØR segmentene
+      // kjører (scriptet kaller dashboard()/add() under kjøringen). Gates på
+      // en billig tekst-sjekk så vanlige R-kjøringer ikke betaler fetch/eval.
+      if (window.DashWebR && /\bdashboard\s*\(/.test(src)) {
+        try {
+          await window.DashWebR.ensureDefs();
+          await window.DashWebR.reset();
+        } catch (e) {
+          outputParts.push({ type: 'error', text: 'dash: ' + ((e && e.message) || e) });
+        }
+      }
+
       // ── Phase 2: run R segments via captureR — interleaved code/output/plot
       // For hver R-blokk: splitt i top-level statements via R-parser, kjor hver
       // for seg med autoprint, og rendrer kode-echo → R sin konsoll-output (rett
@@ -7675,10 +7696,17 @@ json.dumps(out)
       }
 
       renderROutputParts(outputParts);
+      // dash v2: bygg dashboardet (om noe) etter at tekst-output er rendret.
+      // mount() venter på førsterenders i egen Shelter, så purgen under er trygg.
+      if (window.DashWebR) {
+        try { await window.DashWebR.mount(); }
+        catch (e) { console.warn('dash-webr mount:', e); }
+      }
       // Frigjør R-objektene captureR allokerte i denne kjøringen — uten purge
       // vokser WebR-minnet monotont for hver kjøring i økten.
       if (webRShelter) { try { await webRShelter.purge(); } catch (e) {} }
       await refreshDatasetSidebarFromR();
+      setStatus(rightStatus, '');
       setRunButtonsUi('idle');
       scriptRunInProgress = false;
     }
@@ -7702,6 +7730,30 @@ json.dumps(out)
         })
         .catch(function (e) { __duckBridgeP = null; throw e; });
       return __duckBridgeP;
+    }
+
+    // ── python-modus: registrer pyodide/dash.py som modulen `dash` (lazy) ──
+    // Samme mønster som __ensureDuckBridge. MÅ kjøres FØR micropip-løkka i
+    // python-modusens preRun — ellers feiler find_spec('dash') og micropip
+    // installerer PyPI-pakken `dash` (plotly sin — feil og diger).
+    var __pyDashP = null;
+    function __ensurePyDash(py) {
+      if (__pyDashP) return __pyDashP;
+      var base = window.location.href.replace(/[^/]+$/, '');
+      __pyDashP = fetch(base + 'pyodide/dash.py?v=' + (window.M2PY_VERSION || '1'))
+        .then(function (r) { if (!r.ok) throw new Error('pyodide/dash.py: ' + r.status); return r.text(); })
+        .then(function (code) {
+          return py.runPythonAsync(
+            'import sys, importlib.util\n' +
+            'def _reg_dash(src):\n' +
+            '    spec = importlib.util.spec_from_loader("dash", loader=None)\n' +
+            '    mod = importlib.util.module_from_spec(spec)\n' +
+            '    sys.modules["dash"] = mod\n' +
+            '    exec(compile(src, "dash.py", "exec"), mod.__dict__)\n' +
+            '_reg_dash(' + JSON.stringify(code) + ')');
+        })
+        .catch(function (e) { __pyDashP = null; throw e; });
+      return __pyDashP;
     }
 
     async function runStatxScript(script, ctx) {
