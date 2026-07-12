@@ -83,6 +83,23 @@ cd netlify/edge-functions && deno check *.ts _lib/*.ts && deno test --allow-all 
 
 CI lives in `.github/workflows/` (pytest + manual scripts, edge).
 
+## Examples
+
+Built-in examples live in `examples/<mode>/` — one folder per editor mode
+(`micropython/`, …), with an optional one level of subfolders for categories
+(they render as sub-headings in the menu). Add or remove a `.txt` file, then
+regenerate the manifest:
+
+```bash
+# Rebuild examples/manifest.json from the folder tree
+.venv/bin/python examples/generate_manifest.py
+```
+
+`index.html` builds the Examples menu from `examples/manifest.json` (fetched
+lazily the first time the menu opens — no startup cost). Each example's menu
+label comes from a `# label: <text>` line in the file (else `#options.title`,
+else the filename). No `index.html` edit is needed to add or remove examples.
+
 ## Deployment
 
 The site deploys on Netlify (`netlify.toml`): static files + the edge
