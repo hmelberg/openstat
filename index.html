@@ -108,6 +108,11 @@
 <button type="button" data-example="bry22_dashboard_duckdb.txt" data-mode="brython" data-i18n>Dashboard &mdash; DuckDB (SQL)</button>
               <button type="button" data-example="bry23_sklearn.txt" data-mode="brython" data-i18n>sklearn &mdash; KMeans, PCA, regresjon</button>
             </div>
+            <div class="examples-section" data-section-mode="micropython">
+              <button type="button" data-example="mp01_pandas_basics.txt" data-mode="micropython" data-i18n>pandas_mpy &mdash; basics</button>
+              <button type="button" data-example="mp02_plotly.txt" data-mode="micropython" data-i18n>plotly_express_mpy &mdash; grafer</button>
+              <button type="button" data-example="mp03_dashboard.txt" data-mode="micropython" data-i18n>Dashboard &mdash; salg</button>
+            </div>
             <button type="button" id="menuWebExamples" data-i18n>Flere eksempler p&#229; web</button>
           </div>
         </div>
@@ -166,6 +171,7 @@
         <div class="export-dropdown-title" data-i18n>Eksporter skriptresultatene</div>
         <button type="button" id="exportCopy" data-i18n>Kopier til utklippstavlen</button>
         <button type="button" id="exportPrint" data-i18n>Skriv ut</button>
+        <button type="button" id="exportPublish" data-mode-only="brython micropython" data-i18n-title title="Last ned en HTML-fil med dette scriptet forhåndsutfylt og satt til å kjøre automatisk — data hentet via # load er bakt inn i fila, så dashboardet ikke trenger datakildene. Fila må likevel ligge i/serveres fra samme app-mappe (f.eks. GitHub Pages) for å fungere; den virker ikke åpnet direkte fra disk (file://) eller kopiert alene til en annen host." data-i18n>Publiser dashboard (HTML)</button>
       </div>
     </div>
     <div class="topbar-theme-wrap">
@@ -384,6 +390,7 @@
           <button type="button" data-mode="jamovi">Jamovi</button>
           <button type="button" data-mode="duckdb">SQL - DuckDB</button>
           <button type="button" data-mode="brython">Brython</button>
+          <button type="button" data-mode="micropython">MicroPython</button>
         </div>
       </div>
       <button type="button" class="btn btn-tolk" id="btnDmQuick" data-mode-only="microdata" style="display:none;gap:6px" data-i18n-title title="Vurder personvern: sjekk om scriptet henter mer detaljerte data enn n&#248;dvendig (dataminimering), og f&#229; forslag til &#229; aggregere/forenkle. Krever egen Anthropic-n&#248;kkel.">
@@ -654,6 +661,7 @@
   <script src="https://cdn.jsdelivr.net/pyodide/v314.0.2/full/pyodide.js"></script>
   <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
   <script src="js/brython-engine.js"></script>
+  <script src="js/micropython-engine.js"></script>
   <script src="js/dash.js"></script>
   <script src="js/dash-webr.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js"></script>
@@ -1594,7 +1602,7 @@
             if (!r.ok) throw new Error(r.status);
             return r.text();
           }).then(function(text) {
-            if (mode && (mode === 'microdata' || mode === 'python' || mode === 'r' || mode === 'statx' || mode === 'duckdb' || mode === 'brython')
+            if (mode && (mode === 'microdata' || mode === 'python' || mode === 'r' || mode === 'statx' || mode === 'duckdb' || mode === 'brython' || mode === 'micropython')
                 && typeof switchEditorMode === 'function'
                 && typeof activeEditorMode !== 'undefined') {
               if (typeof editorContent !== 'undefined') editorContent[mode] = text;
@@ -2072,7 +2080,7 @@
           var _wanted = _mm[1].toLowerCase();
           if (_wanted === 'py') _wanted = 'python';
           var _cur = window.M2PY && window.M2PY.currentMode && window.M2PY.currentMode();
-          if (['python', 'r', 'duckdb', 'microdata', 'jamovi', 'brython'].indexOf(_wanted) < 0) _wanted = _cur && _cur.id;
+          if (['python', 'r', 'duckdb', 'microdata', 'jamovi', 'brython', 'micropython'].indexOf(_wanted) < 0) _wanted = _cur && _cur.id;
           if (_wanted && (!_cur || _cur.id !== _wanted)) {
             var _txt = _si.value;
             window.switchEditorMode(_wanted);
@@ -2137,6 +2145,132 @@
         // Enkel variant: skriv ut hele siden (inkl. output)
         window.print();
         exportDropdown.classList.remove('open');
+      });
+
+      // «Publiser dashboard (HTML)» — Brython/MicroPython (data-mode-only, se
+      // applyModeVisibility()). Laster ned en kopi av denne siden med (1) det
+      // aktive scriptet forhåndsutfylt og satt til å kjøre automatisk ved
+      // åpning, og (2) data som scriptets «# load»-linjer hentet i siste
+      // kjøring baked inn som <script type="application/json"
+      // id="brythondata_<navn>"|"mpydata_<navn>">-tags. «# load»-linjene
+      // fjernes fra det publiserte scriptet slik at siden ikke prøver å
+      // hente dataene på nytt over nett — men filen refererer fortsatt
+      // js/dash.js, micropython/*.py, pyodide/brython wasm osv. via
+      // relative/CDN-stier, så den må ligge i/serveres fra samme app-mappe
+      // (f.eks. GitHub Pages); den virker IKKE fra file:// eller kopiert
+      // alene til en fremmed host.
+      //
+      // Embed-tag-format (lest av buildDatasetSpec() i
+      // js/brython-engine.js og js/micropython-engine.js):
+      //   {"kind":"csv","payload":"<rå CSV-tekst>"}       — bundet via samme
+      //     read_csv-vei (hel-kolonne-typeinferens) som en levende «# load»
+      //     av en .csv-kilde, for full fidelity med det brukeren testet.
+      //   {"kind":"columns","payload":{<kolonne>: [...]}} — allerede
+      //     kolonneformet (json-/parquet-kilder er kolonner fra
+      //     getLastDatasetSpec()).
+      //   et objekt UTEN "kind"-felt tolkes som rå kolonner (bakoverkompatibelt
+      //   med tags skrevet før dette formatet fantes).
+
+      async function publishStandaloneDashboard() {
+        var mode = (typeof activeEditorMode !== 'undefined') ? activeEditorMode
+          : (window.M2PY && window.M2PY.currentMode && window.M2PY.currentMode().id);
+        if (mode !== 'brython' && mode !== 'micropython') {
+          alert(t('Publisering av dashboard (HTML) støtter bare Brython- og MicroPython-modus.'));
+          return;
+        }
+        var engine = mode === 'brython' ? window.BrythonEngine : window.MicroPythonEngine;
+        var prefix = mode === 'brython' ? 'brythondata_' : 'mpydata_';
+        if (!engine || typeof engine.getLastDatasetSpec !== 'function') {
+          alert(t('Motoren er ikke lastet ennå — kjør scriptet minst én gang først.'));
+          return;
+        }
+        var __si = document.getElementById('scriptInput');
+        var rawScript = __si ? __si.value : '';
+        if (!rawScript.trim()) { alert(t('Editoren er tom — ingenting å publisere.')); return; }
+        var spec = engine.getLastDatasetSpec() || {};
+        var hasLoadLines = /^[ \t]*#[ \t]*load\b/mi.test(rawScript);
+        if (hasLoadLines && !Object.keys(spec).length) {
+          if (!confirm(t('Scriptet har «# load»-linjer, men ingen data er hentet ennå i denne økten (kjør scriptet først for å bake dem inn). Publisere uten data likevel?'))) return;
+        }
+
+        var tags = '';
+        for (var name in spec) {
+          var entry = spec[name];
+          var tagPayload;
+          if (entry.kind === 'csv') {
+            // Bak rå CSV-teksten inn med kind-felt slik at leser-siden binder
+            // den via samme read_csv-vei (hel-kolonne-typeinferens) som en
+            // levende «# load» — se kommentaren over for tag-formatet.
+            tagPayload = { kind: 'csv', payload: entry.payload };
+          } else if (entry.kind === 'columns') {
+            tagPayload = entry.payload;   // allerede kolonneformet — ingen wrapper nødvendig
+          } else {
+            continue;   // ukjent kind — buildDatasetSpec produserer kun columns/csv
+          }
+          tags += '<script type="application/json" id="' + prefix + name + '">' +
+            JSON.stringify(tagPayload).replace(/</g, '\\u003c') + '<\/script>\n    ';
+        }
+
+        var publishedScript = rawScript.replace(/^[ \t]*#[ \t]*load\b.*$/gmi,
+          '# ' + t('(fjernet ved publisering — data er baked inn som «{prefix}<navn>»-tag)', { prefix: prefix }));
+
+        var pageResp = await fetch(location.pathname || 'index.html');
+        if (!pageResp.ok) { alert(t('Kunne ikke hente siden for publisering (HTTP {code}).', { code: pageResp.status })); return; }
+        var html = await pageResp.text();
+
+        var scriptJson = JSON.stringify(publishedScript).replace(/</g, '\\u003c');
+        var modeJson = JSON.stringify(mode);
+        var autorun = '\n    <script id="mdPublishAutorun">\n(function () {\n' +
+          '  var MODE = ' + modeJson + ';\n' +
+          '  var SCRIPT = ' + scriptJson + ';\n' +
+          '  function tryRun(triesLeft) {\n' +
+          '    var si = document.getElementById("scriptInput");\n' +
+          '    var btn = document.getElementById("btnRun");\n' +
+          '    if (!si || !btn || typeof window.switchEditorMode !== "function" || !window.M2PY || !window.M2PY.currentMode) {\n' +
+          '      if (triesLeft > 0) setTimeout(function () { tryRun(triesLeft - 1); }, 200);\n' +
+          '      return;\n' +
+          '    }\n' +
+          '    var cur = window.M2PY.currentMode();\n' +
+          '    if (!cur || cur.id !== MODE) window.switchEditorMode(MODE);\n' +
+          '    si.value = SCRIPT;\n' +
+          '    if (window.updateLineNumbers) window.updateLineNumbers();\n' +
+          '    if (btn.disabled) {\n' +
+          '      if (triesLeft > 0) setTimeout(function () { tryRun(triesLeft - 1); }, 300);\n' +
+          '      return;\n' +
+          '    }\n' +
+          '    btn.click();\n' +
+          '  }\n' +
+          '  function boot() { tryRun(150); }\n' +
+          '  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();\n' +
+          '})();\n<\/script>\n';
+
+        var headClose = html.indexOf('</head>');
+        var bodyClose = html.lastIndexOf('</body>');
+        if (headClose === -1 || bodyClose === -1) {
+          alert(t('Fant ikke </head> eller </body> i siden — publisering avbrutt.'));
+          return;
+        }
+        html = html.slice(0, headClose) + tags + html.slice(headClose);
+        // </body> er nå forskjøvet med lengden av tags (satt inn FØR den) —
+        // slå opp på nytt i den oppdaterte strengen fremfor å justere indeksen manuelt.
+        bodyClose = html.lastIndexOf('</body>');
+        html = html.slice(0, bodyClose) + autorun + html.slice(bodyClose);
+
+        var __sn = document.getElementById('scriptName');
+        var baseName = ((__sn && __sn.value) || 'dashboard').trim().replace(/[^\w.\- æøåÆØÅ]/g, '_') || 'dashboard';
+        var blob = new Blob([html], { type: 'text/html' });
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = baseName + '_publisert.html';
+        a.click();
+        URL.revokeObjectURL(a.href);
+      }
+
+      document.getElementById('exportPublish').addEventListener('click', function () {
+        exportDropdown.classList.remove('open');
+        publishStandaloneDashboard().catch(function (e) {
+          alert(t('Publisering feilet: {msg}', { msg: (e && e.message) || String(e) }));
+        });
       });
     })();
 
@@ -3166,6 +3300,34 @@
           }
           setStatus(ctx.rightStatus, res.error ? t('Feil') : t('Ferdig'));
         } },
+      micropython: { id: 'micropython', label: 'MicroPython', hlConfig: PY_HL_CFG, handleTab: handlePythonTab,
+        onActivate: function () { if (window.MicroPythonEngine) window.MicroPythonEngine.load().catch(function () {}); },
+        runSelf: async function (script, ctx) {
+          setStatus(ctx.rightStatus, t('Laster MicroPython…'));
+          var _dl = await window.DataLoader.resolveAndFetchLoads(script,
+            { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey });
+          setStatus(ctx.rightStatus, t('Kjører…'));
+          // Samme dash v2-forbehold som Brython-raden over: js/dash.js skriver
+          // DOM direkte til #outputArea under kjøring — tøm FØR, ikke etter.
+          purgePlots(outputArea);
+          outputArea.innerHTML = '';
+          var res = await window.MicroPythonEngine.run(script, { loads: _dl.loads });
+          var _omEl = document.querySelector('input[name="outputMode"]:checked');
+          var _asHtml = !_omEl || _omEl.value === 'html';
+          var _suppress = (typeof suppressEmbedded !== 'undefined' && suppressEmbedded) ? !!suppressEmbedded.checked : false;
+          if (outputArea.querySelector('.dash')) {
+            appendOutput(res.text || '', _asHtml, _suppress);
+          } else {
+            renderOutput(res.text || '', _asHtml, _suppress);
+          }
+          if (res.error) {
+            var _pre = document.createElement('pre');
+            _pre.className = 'error';
+            _pre.textContent = res.error;
+            outputArea.appendChild(_pre);
+          }
+          setStatus(ctx.rightStatus, res.error ? t('Feil') : t('Ferdig'));
+        } },
     };
     function currentMode() {
       return modeRegistry[activeEditorMode] || modeRegistry.microdata;
@@ -3194,7 +3356,7 @@
     // (plan 2026-07-09: R uten Pyodide, fremtidig brython/subdomene-boot).
     var RUNTIME_FOR_MODE = { python: 'pyodide', microdata: 'pyodide', duckdb: 'duckdb',
                              jamovi: 'pyodide', statx: 'pyodide',
-                             safestat: 'pyodide', brython: 'brython', r: 'webr' };
+                             safestat: 'pyodide', brython: 'brython', micropython: 'micropython', r: 'webr' };
     function runtimeForMode(id) { return RUNTIME_FOR_MODE[id] || 'pyodide'; }  // ukjent → trygt valg
 
     function switchEditorMode(newMode) {
@@ -3552,8 +3714,8 @@
     let scriptRunInProgress = false;
     // ── Editor mode (always-on, controlled by bottom-bar dropdown) ──────
     let activeEditorMode  = 'microdata'; // 'microdata' | 'python' | 'r'
-    const editorContent   = { microdata: '', python: '', r: '', statx: '', jamovi: '', duckdb: '', brython: '' };
-    const editorBP        = { microdata: new Set(), python: new Set(), r: new Set(), statx: new Set(), jamovi: new Set(), duckdb: new Set(), brython: new Set() };
+    const editorContent   = { microdata: '', python: '', r: '', statx: '', jamovi: '', duckdb: '', brython: '', micropython: '' };
+    const editorBP        = { microdata: new Set(), python: new Set(), r: new Set(), statx: new Set(), jamovi: new Set(), duckdb: new Set(), brython: new Set(), micropython: new Set() };
     // B4/B5 (docs/REVIEW_2026-07-07.md §3): switchEditorMode() persists
     // md_editor_mode but nothing ever read it back, so a reload always
     // landed on 'microdata'. Restore it here, synchronously, as part of this
@@ -8308,6 +8470,12 @@ options(width = 200)
       });
     } else if (runtimeForMode(activeEditorMode) === 'brython' && window.BrythonEngine) {
       window.BrythonEngine.load().then(function () {
+        runtimeReadyBootstrap(null);
+      }).catch(function (e) {
+        setStatus(leftStatus, 'Load failed: ' + (e && e.message ? e.message : String(e)), true);
+      });
+    } else if (runtimeForMode(activeEditorMode) === 'micropython' && window.MicroPythonEngine) {
+      window.MicroPythonEngine.load().then(function () {
         runtimeReadyBootstrap(null);
       }).catch(function (e) {
         setStatus(leftStatus, 'Load failed: ' + (e && e.message ? e.message : String(e)), true);
