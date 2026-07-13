@@ -191,7 +191,7 @@
     var NB = { root: null, cells: [], docMode: 'python', layout: 'columns',
                rawOverride: false, activeFlag: false, lastSerialized: null,
                plan: [], runSinks: null, trailing: null, chip: null,
-               editTimer: null, tickHandle: null };
+               editTimer: null, tickHandle: null, lastUserInput: 0 };
 
     function $(id) { return document.getElementById(id); }
     function el(tag, cls, text) {
@@ -210,7 +210,13 @@
 
     C.init = function (docMode) {
       NB.docMode = docMode;
-      if (!NB.tickHandle) NB.tickHandle = setInterval(tick, 1000);
+      if (!NB.tickHandle) {
+        NB.tickHandle = setInterval(tick, 1000);
+        var ta0 = $('scriptInput');
+        // Spor aktiv skriving separat fra programmatiske .value-endringer
+        // (delt av tick(), se der).
+        if (ta0) ta0.addEventListener('input', function () { NB.lastUserInput = Date.now(); });
+      }
       var ta = $('scriptInput');
       if (ta && C.supportedMode(docMode) && C.hasMarkers(ta.value)) C.enter(appLayout());
     };
@@ -375,6 +381,12 @@
           if (C.hasMarkers(ta.value)) render();
           else C.exit();
         }
+      } else if (C.hasMarkers(ta.value) && C.supportedMode(NB.docMode) && !NB.rawOverride &&
+                 (Date.now() - NB.lastUserInput > 2000)) {
+        // Programmatisk innlasting (share-lenke, eksempler, i18n-gjenoppretting) →
+        // gå rett til cellevisning (spec §3.2). Aktiv skriving i rå-editoren
+        // (lastUserInput fersk) → kun hint-chip, ikke auto-inngang.
+        C.enter(appLayout());
       } else updateChip();
     }
 
