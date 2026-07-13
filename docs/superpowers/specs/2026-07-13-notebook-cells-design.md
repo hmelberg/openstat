@@ -16,15 +16,13 @@ text. A script without markers is a valid single-cell document with exactly
 today's behavior, so every existing script, example, and share link is
 unchanged. Cell-aware behavior is opt-in by using `#%%` at all.
 
-Two views of the same document:
-
-1. **Kolonner + celler** — the existing Kolonner (columns) view
-   auto-upgrades when `#%%` markers are present: one script buffer on the
-   left (native editing, undo, cross-cell selection), per-cell outputs
-   grouped on the right, per-cell run buttons in the gutter. Pattern proven
-   by VS Code's Python Interactive mode.
-2. **Celler** — a new fifth view mode: Jupyter-style vertical cell list,
-   each cell a small editor with its output directly beneath.
+**Notebook is a document property, not a view mode** (revision 2026-07-13):
+a document containing at least one `#%%` marker *is* a notebook; without
+markers it is a script. The existing view modes (Kolonner, Stablet, Kun
+output, Skrittvis) stay unchanged in the dropdown — each simply gets a
+notebook rendering when the document is a notebook (see §3). There is no
+new view mode and no separate "cell mode" toggle; typing `#%%` is the
+opt-in.
 
 ## Goals
 
@@ -115,15 +113,15 @@ New **`js/cells.js`**, mirroring the `dash.js` convention:
 - **Pure half** (node-testable, no DOM): `parseCells(text)` →
   `[{type, attrs, source, span:{startLine,endLine}, headerRaw}]`,
   `serializeCells(cells)`, attr parsing/serializing, id validation.
-- **DOM half**: the Celler view (cell list, per-cell editors, toolbar) and
-  the Kolonner upgrade (gutter buttons, boundary overlays, output grouping,
-  active-cell sync).
+- **DOM half**: the notebook renderer — one cell-list component with three
+  CSS layouts (columns / stacked / output-only), per-cell editors and
+  output slots, the raw-text toggle, and the notebook-detection hint.
 
 Hooks into existing `index.html` code are deliberately thin:
 
 | Touch point | Change |
 |---|---|
-| view-mode dropdown (~3424) | add "Celler" entry (~10 lines) |
+| view-mode dropdown (~3426) | route Kolonner/Stablet/Kun output to notebook layouts when a notebook is active (~10 lines) |
 | marker normalizer (~7413) | `## lang` → `#%%` mapping (~10 lines) |
 | embedded Python core (~6815) | guarded `display='last'` flag (~10 lines) |
 | output rendering | render-target threading (§5 — the designated hard part) |
@@ -132,43 +130,65 @@ CSS lives in `app.css` (additive). Everything else is new files.
 
 ## 3. Views
 
-### 3.1 Kolonner auto-upgrade (single buffer + per-cell outputs)
+Notebook rendering maps onto the **existing** view modes:
 
-When the parser finds ≥1 marker, the Kolonner view gains:
+| View | Script (no markers) | Notebook (`#%%` present) |
+|---|---|---|
+| Kolonner | editor left, output right | one scrolling list; each cell is a grid **row**: input cell left, its output cell right — alignment is free because input and output share a row; md/html cells span the full width |
+| Stablet | editor top, output bottom | classic Jupyter: input cell with its output cell directly beneath |
+| Kun output | output only | output cells only — md/html rendered, code hidden: the report/publish view (and the substrate for spec 3's presentation mode) |
+| Skrittvis | blank-line block playback | cell-by-cell playback (**phase B**; phase A keeps today's behavior) |
 
-- **Cell boundaries** drawn as separator lines over the editor and **run
-  buttons** in the gutter at each header (positioning via the same
-  line-range→pixel technique as the forklar highlight band).
-- **Right pane** groups output into one slot per cell, in document order.
-- **Active-cell sync** instead of strict row alignment (which is a tarpit —
-  output heights never match code heights): panes scroll independently; the
-  output slot of the cell containing the cursor is highlighted and scrolled
-  into view; clicking an output slot jumps the editor to that cell.
-- Re-parse on input (debounced ~150 ms); boundaries and slots follow edits.
+### 3.1 Notebook renderer
 
-No markers → the view is pixel-identical to today.
+One renderer (the `cells.js` DOM half) with three CSS layouts — there is no
+separate "Jupyter view" component. Per cell: header chip (type + attrs),
+auto-sizing source editor, output slot. Details:
 
-### 3.2 Celler view (Jupyter-style list)
-
-Fifth view mode. Vertical list; per cell: header chip (type + attrs),
-editable code area, output beneath. Details:
-
-- **Hover toolbar:** run, add above/below, delete, move up/down, change
-  type, edit attrs; split/merge as in §1.
-- **Keyboard:** Shift+Enter = run + advance (creates a trailing cell at the
-  end), Ctrl/Cmd+Enter = run in place.
 - **md/html cells** render by default; double-click flips to the editor,
-  blur/re-run flips back.
+  blur re-renders.
 - **`hide-code`** shows output only (an unobtrusive affordance reveals the
   code); **`hide-output`** the inverse; **`skip`** cells are dimmed and
   never executed.
 - **`style=note|warn|card`** applies preset frames/backgrounds to the cell.
-- **Stale tint:** a cell edited since its last run gets a subtle tint —
-  information, not nagging.
-- Edits serialize back to the canonical text; switching view modes is
-  always lossless (the raw editor is authoritative).
+- **Phase B:** hover toolbar (run, add above/below, delete, move up/down,
+  change type, split/merge as in §1), Shift+Enter = run + advance,
+  Ctrl/Cmd+Enter = run in place, stale tint on cells edited since last run.
+- Edits serialize back to the canonical text (debounced); switching view
+  modes is always lossless (the text is authoritative).
+
+### 3.2 Raw-text escape and transitions
+
+- **"Rå tekst" toggle** (visible only when the document is a notebook):
+  switches to the ordinary script editor and back. Bulk edits,
+  search/replace, and cross-cell selection live there — it compensates for
+  losing the single continuous buffer in notebook rendering. While the raw
+  override is on, auto-notebook is suppressed.
+- **Managed transitions:** notebook rendering engages at document load
+  (restore, share link, examples). While typing in the raw editor, a
+  debounced detector shows a discreet hint ("Notatbok oppdaget — vis som
+  celler") instead of flipping the editor mid-keystroke.
+
+### 3.3 Mode support (phase A)
+
+Notebook rendering engages in **python / r / duckdb / microdata** modes
+(the hybrid-segment family). In other modes (brython, micropython, statx,
+jamovi) `#%%` lines are inert comments and the document renders as a plain
+script, until those runners gain cell support in a later phase.
 
 ## 4. Execution
+
+### Document → runnable text
+
+Before a run, the notebook text is transformed (pure function in
+`cells.js`): each **code cell's** `#%%` header line is rewritten to the
+corresponding legacy segment marker (`## python`, `## r`, …) so the
+existing hybrid pipeline segments it; each **non-code cell's** (md/html/
+skip) header and body lines are replaced by *blank lines*. Line counts are
+preserved exactly, so error line numbers still point into the real
+document. The runtime never sees non-code content — md/html cells are
+rendered by the view layer, not the engine. A document without markers
+passes through unchanged.
 
 ### Sessions
 
@@ -235,22 +255,25 @@ run's output rendered into **that cell's slot**. Design:
 
 ## 6. Phasing
 
-- **Phase A — parser + views on Run All only.** `cells.js` pure half with
-  full test coverage; Celler view and Kolonner upgrade rendering cells and
-  outputs, where "run" is today's whole-document run and outputs are
-  **sliced into per-cell slots afterward** (the existing pipeline already
-  produces output in segment order). No changes to execution or output
-  threading. Independently shippable: a real notebook view.
-- **Phase B — per-cell run.** Sessions, hoisted loads, render-target
-  threading (§5), gutter buttons, last-expression display flag, Run
-  above/Restart, stale tint, cell toolbar editing operations.
+- **Phase A — parser + notebook rendering on Run All only.** `cells.js`
+  pure half (parse/serialize/runnable-text transform) with full test
+  coverage; the notebook renderer with all three layouts; raw-text toggle
+  and detection hint; "run" is today's whole-document run, with per-cell
+  output attribution via the existing JS segment loops (python/duckdb/
+  microdata; R falls back to a combined trailing slot if its runner proves
+  single-shot); an example notebook. Independently shippable.
+- **Phase B — per-cell run.** Sessions, hoisted loads, full render-target
+  threading (§5, incl. dashboards/enhancers), per-cell run buttons +
+  keyboard shortcuts, last-expression display flag, Run above/Restart,
+  stale tint, cell toolbar editing operations, skrittvis cell playback.
 
 If phase B stalls, phase A remains a shippable feature.
 
 ## 7. Compatibility, sync, risks
 
-- **Gating:** all new code paths require `#%%` markers or the Celler view.
-  No markers + old views = no new code executes.
+- **Gating:** all new code paths require `#%%` markers (plus a supported
+  mode, §3.3). No markers = no new code executes; the app is
+  pixel-identical to today.
 - **Documents are still scripts:** `#%%` headers are comments to every
   runtime; a broken cell view cannot corrupt a document; any notebook can be
   pasted into microdata.no-style tooling minus the marker lines.
@@ -286,10 +309,13 @@ If phase B stalls, phase A remains a shippable feature.
   code2web `#tag.*` lines (code2web's separators/ideas mined; its `#tag.*`
   vocabulary, auto type-inference, and large `ui.*` surface deliberately
   not adopted).
-- Jupyter-style cell list for the Celler view — chosen over two-pane-only
-  and read-only-first variants.
-- Kolonner auto-upgrades on marker presence (opt-in via using `#%%`) —
-  folded into spec 1; no separate dropdown entry.
+- **Revision (same day):** notebook is a *document property* derived from
+  `#%%` presence, not a view mode — the existing view modes each get a
+  notebook rendering (Kolonner = aligned input|output grid rows, Stablet =
+  Jupyter-style, Kun output = report view). This replaced the earlier
+  "fifth view mode + Kolonner upgrade" design: conceptually cleaner, one
+  renderer instead of two, and the single-buffer gutter-overlay machinery
+  is dropped in favor of a "Rå tekst" escape toggle.
 - Per-cell incremental run accepted incl. stale-state tradeoff; last-line
   display confirmed with the microdata exemption.
 - Three specs: core (this) → widgets → presentation.
