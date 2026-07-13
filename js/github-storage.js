@@ -34,6 +34,11 @@
           if (si) si.value = text;
         }
         if (window.updateLineNumbers) window.updateLineNumbers();
+        // Nytt dokument levert (share-lenke/GitHub, samme- og kryssmodus):
+        // eksplisitt signal så notatbok-dokumenter auto-åpnes (tick-
+        // heuristikken ser ikke kryssmodus-lasting — switchEditorMode
+        // resynker basislinjen).
+        if (window.Cells) window.Cells.contentLoaded();
       }
       function langFromPath(p) {
         const s = (p || '').toLowerCase().split('?')[0];

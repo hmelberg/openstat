@@ -187,6 +187,54 @@ test('syncTickBaseline() etter modusbytte-gjenoppretting sluker endringen: neste
   assert.strictEqual(C.hasMarkers(scriptInputEl.value), true);
 });
 
+test('contentLoaded() etter kryssmodus eksempel-lasting → auto-åpner (speiler loadExampleFile-mønsteret)', () => {
+  const { C, scriptInputEl, tick } = freshEnv();
+  scriptInputEl.value = 'print("plain python")\n';
+  C.init('python');
+  assert.strictEqual(C.active(), false, 'inaktiv på ren python');
+
+  // loadExampleFile av et r-modus-notatbok-eksempel: editorContent[r] settes,
+  // switchEditorMode('r') kjører → restore + setDocMode + syncTickBaseline,
+  // deretter settes verdien (samme tekst) og contentLoaded() signaliseres.
+  const rNotebook = '#%% r\nsummary(iris)\n#%% md\nhei\n';
+  scriptInputEl.value = rNotebook;   // switchEditorMode-restore av editorContent.r
+  C.setDocMode('r');
+  C.syncTickBaseline();
+  // switchEditorMode alene skal ikke auto-åpne …
+  tick();
+  assert.strictEqual(C.active(), false, 'modusbytte-heuristikken sluker gjenopprettingen');
+  // … men det eksplisitte innlastingssignalet skal:
+  C.contentLoaded();
+  assert.strictEqual(C.active(), true, 'contentLoaded auto-åpner notatbok-dokument uavhengig av tick-heuristikken');
+});
+
+test('contentLoaded() nullstiller rawOverride: nytt dokument re-åpner etter Rå tekst-exit', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python\nprint(1)\n';
+  C.init('python');
+  assert.strictEqual(C.active(), true);
+
+  C.exit({ raw: true });
+  assert.strictEqual(C.active(), false);
+
+  // Nytt dokument med markører leveres (eksempel/share) → rawOverride
+  // gjaldt det FORRIGE dokumentet og nullstilles.
+  scriptInputEl.value = '#%% python\nprint(2)\n#%% md\nny\n';
+  C.contentLoaded();
+  assert.strictEqual(C.active(), true, 'nytt dokument skal re-åpne selv etter Rå tekst-valg');
+});
+
+test('contentLoaded() uten markører mens aktiv → forlater notatboken (rent dokument lastet)', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python\nprint(1)\n';
+  C.init('python');
+  assert.strictEqual(C.active(), true);
+
+  scriptInputEl.value = 'print("plain doc")\n';
+  C.contentLoaded();
+  assert.strictEqual(C.active(), false, 'rent dokument skal ikke bli stående i cellevisning');
+});
+
 test('C.init slår opp #scriptInput kun én gang (finding 3: gjenbruk referanse)', () => {
   const { C, scriptInputEl } = freshEnv();
   const original = global.document.getElementById;

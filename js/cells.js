@@ -217,6 +217,19 @@
       NB.lastTickTime = Date.now();
     };
 
+    // Eksplisitt signal fra innlastingsstedene (eksempler, share/GitHub):
+    // nytt dokument er lastet → auto-åpne notatboken hvis dokumentet er en,
+    // uavhengig av tick-heuristikken. Nytt dokument nullstiller Rå tekst-valget.
+    C.contentLoaded = function () {
+      NB.rawOverride = false;
+      var ta = $('scriptInput');
+      if (!ta) return;
+      if (NB.activeFlag) { if (C.hasMarkers(ta.value)) render(); else C.exit(); }
+      else if (C.hasMarkers(ta.value) && C.supportedMode(NB.docMode)) { C.enter(appLayout()); }
+      else { updateChip(); }
+      C.syncTickBaseline();
+    };
+
     C.init = function (docMode) {
       NB.docMode = docMode;
       var ta = $('scriptInput');

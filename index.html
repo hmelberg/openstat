@@ -1510,6 +1510,10 @@
           if (window.mdClearOutput) window.mdClearOutput();
           if (window.mdGithubClearCurrent) window.mdGithubClearCurrent();
           if (window.updateLineNumbers) window.updateLineNumbers();
+          // Nytt dokument levert (samme- og kryssmodus): eksplisitt signal så
+          // notatbok-dokumenter auto-åpnes (tick-heuristikken alene ser ikke
+          // kryssmodus-lasting — switchEditorMode resynker basislinjen).
+          if (window.Cells) window.Cells.contentLoaded();
           dropdown.classList.remove('open');
           scriptInput.focus();
           scriptInput.selectionStart = scriptInput.selectionEnd = 0;
