@@ -3257,10 +3257,15 @@
       editorBP[activeEditorMode] = new Set(bp);
       // Switch
       activeEditorMode = newMode;
-      if (window.Cells) window.Cells.setDocMode(activeEditorMode);
       try { localStorage.setItem('md_editor_mode', newMode); } catch(e) {}
       // Restore new mode
       if (si) si.value = editorContent[newMode];
+      // setDocMode must see the NEW mode, and the tick baseline must be taken
+      // from the RESTORED value — both after the restore above, else the next
+      // tick sees a value change with no input event and misreads this
+      // programmatic restore as a share-link-style injection, auto-entering
+      // the notebook (finding 1). The hint chip decides instead.
+      if (window.Cells) { window.Cells.setDocMode(activeEditorMode); window.Cells.syncTickBaseline(); }
       if (window.setBreakpoints) window.setBreakpoints(editorBP[newMode]);
       if (window.updateLineNumbers) window.updateLineNumbers();
       // Hide autocomplete

@@ -209,21 +209,28 @@
       if (NB.activeFlag && !C.supportedMode(mode)) C.exit();
     };
 
+    // Kalles etter programmatiske editor-oppdateringer som IKKE skal
+    // auto-åpne notatboken (modusbytte-gjenoppretting): resynk tick-basislinjen.
+    C.syncTickBaseline = function () {
+      var ta = $('scriptInput');
+      NB.lastTickValue = ta ? ta.value : null;
+      NB.lastTickTime = Date.now();
+    };
+
     C.init = function (docMode) {
       NB.docMode = docMode;
+      var ta = $('scriptInput');
       if (!NB.tickHandle) {
         NB.tickHandle = setInterval(tick, 1000);
-        var ta0 = $('scriptInput');
         // Spor aktiv skriving separat fra programmatiske .value-endringer
         // (delt av tick(), se der).
-        if (ta0) ta0.addEventListener('input', function () { NB.lastUserInput = Date.now(); });
+        if (ta) ta.addEventListener('input', function () { NB.lastUserInput = Date.now(); });
         // Startpunkt for per-tikk-attribusjon: en endring som lander mellom
         // init og første tikk (f.eks. share-lenke på 'load') må regnes som
         // programmatisk, ikke som skriving.
-        NB.lastTickValue = ta0 ? ta0.value : null;
+        NB.lastTickValue = ta ? ta.value : null;
         NB.lastTickTime = Date.now();
       }
-      var ta = $('scriptInput');
       if (ta && C.supportedMode(docMode) && C.hasMarkers(ta.value)) C.enter(appLayout());
     };
 
