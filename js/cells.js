@@ -191,7 +191,7 @@
     var NB = { root: null, cells: [], docMode: 'python', layout: 'columns',
                rawOverride: false, activeFlag: false, lastSerialized: null,
                plan: [], runSinks: null, trailing: null, chip: null,
-               editTimer: null };
+               editTimer: null, tickHandle: null };
 
     function $(id) { return document.getElementById(id); }
     function el(tag, cls, text) {
@@ -210,7 +210,7 @@
 
     C.init = function (docMode) {
       NB.docMode = docMode;
-      setInterval(tick, 1000);
+      if (!NB.tickHandle) NB.tickHandle = setInterval(tick, 1000);
       var ta = $('scriptInput');
       if (ta && C.supportedMode(docMode) && C.hasMarkers(ta.value)) C.enter(appLayout());
     };
@@ -224,10 +224,11 @@
     C.enter = function (layout) {
       var ta = $('scriptInput');
       if (!ta || !C.supportedMode(NB.docMode) || !C.hasMarkers(ta.value)) return false;
+      var container = document.querySelector('.container');
+      if (!container) return false;
       NB.activeFlag = true;
       NB.rawOverride = false;
       if (layout) NB.layout = layout;
-      var container = document.querySelector('.container');
       if (container) container.classList.add('nb-hidden');
       if (!NB.root) {
         NB.root = el('div', 'nb-root');
