@@ -161,9 +161,12 @@ test('segmentPlan: preambel leder, deretter kjørbare celler i rekkefølge', () 
   assert.deepStrictEqual(C.segmentPlan(doc, 'python'), [0, 2, 3]);
 });
 
-test('segmentPlan: md først (ingen preambel) eier leder-segmentet', () => {
+test('segmentPlan: md først (ingen preambel) blankes helt — ingen leder-segment', () => {
+  // executableSource blanker HELE md-cellen (header+body); parseHybridScripts
+  // flush() dropper et segment som trimmer til tomt, så det finnes ingen
+  // reell segment 0 å tilskrive — kun python-cellen kjører (verifisert Task 6).
   const doc = '#%% md\ntekst\n#%% python\n1';
-  assert.deepStrictEqual(C.segmentPlan(doc, 'python'), [0, 1]);
+  assert.deepStrictEqual(C.segmentPlan(doc, 'python'), [1]);
 });
 
 test('segmentPlan: dokument som starter rett på kodecelle', () => {

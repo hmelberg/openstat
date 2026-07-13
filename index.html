@@ -5767,18 +5767,21 @@ json.dumps(out)
       return frag;
     }
 
-    function renderOutput(raw, asHtml, suppress) {
+    function renderOutput(raw, asHtml, suppress, target) {
+      var host = target || outputArea;
       const frag = buildOutputNodes(raw, asHtml, suppress);
-      purgePlots(outputArea);
-      outputArea.innerHTML = '';
-      outputArea.appendChild(frag);
+      purgePlots(host);
+      host.innerHTML = '';
+      host.appendChild(frag);
     }
 
     // Inkrementell variant: legg nye output-deler til uten å røre det som
-    // allerede er rendret (brukes av den segmentvise kjøringen).
-    function appendOutput(raw, asHtml, suppress) {
+    // allerede er rendret (brukes av den segmentvise kjøringen). Valgfri
+    // `target` (Task 6): notatbok-kjøring rendrer til cellens .nb-output
+    // i stedet for #outputArea; default uendret for alle eksisterende kall.
+    function appendOutput(raw, asHtml, suppress, target) {
       if (!raw || !raw.trim()) return;
-      outputArea.appendChild(buildOutputNodes(raw, asHtml, suppress));
+      (target || outputArea).appendChild(buildOutputNodes(raw, asHtml, suppress));
     }
 
     // Frigjør Plotly-interne ressurser (handlers/WebGL) før innholdet
@@ -5970,17 +5973,25 @@ json.dumps(out)
     // Debounced MutationObserver: fanger opp alle stedene i koden som setter
     // outputArea.innerHTML/appendChild uten at vi må endre hvert enkelt sted.
     // Idempotent via data-copybtn-done, så gjentatte kall er billige no-ops.
+    // Eksponert som window.mdScheduleResultEnhance (Task 6): notatbokens
+    // egen MutationObserver på #notebookRoot (js/cells.js, C.enter) kaller
+    // denne — samme debounce, generalisert til å dekke celle-outputene også.
+    var _resultEnhancePending = null;
+    function scheduleResultEnhance() {
+      if (_resultEnhancePending) clearTimeout(_resultEnhancePending);
+      _resultEnhancePending = setTimeout(function() {
+        _resultEnhancePending = null;
+        attachResultCopyButtons(outputArea);
+        var nbRoot = document.getElementById('notebookRoot');
+        if (nbRoot) attachResultCopyButtons(nbRoot);
+        updateCopyAllResultsVisibility();
+      }, 150);
+    }
+    window.mdScheduleResultEnhance = scheduleResultEnhance;
+
     (function observeOutputAreaForCopyButtons() {
       if (!outputArea || typeof MutationObserver === 'undefined') return;
-      var pending = null;
-      var observer = new MutationObserver(function() {
-        if (pending) clearTimeout(pending);
-        pending = setTimeout(function() {
-          pending = null;
-          attachResultCopyButtons(outputArea);
-          updateCopyAllResultsVisibility();
-        }, 150);
-      });
+      var observer = new MutationObserver(scheduleResultEnhance);
       observer.observe(outputArea, { childList: true, subtree: true });
       attachResultCopyButtons(outputArea);
       updateCopyAllResultsVisibility();
@@ -7139,7 +7150,7 @@ async def _run_duck_sql(_sql):
     }
     // Kjører en #r-blokk inne i et python-familie-script: materialiser
     // blokkens uses, kjør via captureR, og legg output/plot rett i outputArea.
-    async function runInlineRSegment(seg) {
+    async function runInlineRSegment(seg, target) {
       if (!webRReady) await loadWebR();
       for (var _iu = 0; _iu < (seg.uses || []).length; _iu++) {
         var _u3 = seg.uses[_iu];
@@ -7153,7 +7164,7 @@ async def _run_duck_sql(_sql):
         .map(function (o) { return String(o.data); }).join('\n');
       if (_lines.trim()) _parts.push({ type: 'text', text: _lines, className: 'm2py-stmt-output' });
       (_cap.images || []).forEach(function (bm) { _parts.push({ type: 'image', bitmap: bm }); });
-      outputArea.appendChild(buildROutputNodes(_parts));
+      (target || outputArea).appendChild(buildROutputNodes(_parts));
     }
 
     // R-motstykket til refreshDatasetSidebarFromPy: sidepanelet var før et
@@ -8423,7 +8434,13 @@ options(width = 200)
         performRunInterrupt();
         return;
       }
-      const rawScript = scriptInput.value;
+      // Notatbok aktiv (Task 6): #%%-celler → legacy '## lang'-segmentmarkører
+      // (linjetall bevares, så breakpoint-linjenumre under forblir gyldige).
+      // Gates på active(), IKKE hasMarkers(): med Rå tekst-valget på ser
+      // brukeren ren tekst og får dagens atferd (#%%-linjer er kommentarer).
+      const rawScript = (window.Cells && window.Cells.active())
+        ? window.Cells.executableSource(scriptInput.value, activeEditorMode)
+        : scriptInput.value;
       // Respekter breakpoint: trunkér script til og med første breakpoint-linje
       let effectiveScript = rawScript;
       if (window.getBreakpoints) {
@@ -8658,15 +8675,22 @@ async def _m2py_run_segment(_seg_json):
         purgePlots(outputArea);
         outputArea.innerHTML = '';
         incrementalStarted = true;
+        // Notatbok aktiv (Task 6): per-celle output-slots for segmentløkken.
+        // beginRun returnerer null ved plan-avvik (f.eks. en '## python'
+        // skrevet manuelt inni en celle) — sinkForSegment faller da tilbake
+        // til den samlede trailing-sloten, aldri en krasj.
+        const _nbActive = !!(window.Cells && window.Cells.active());
+        const _nbSinks = _nbActive ? window.Cells.beginRun(segments.length) : null;
         let renderedLen = 0;
         for (let i = 0; i < segments.length; i++) {
           if (segments.length > 1) setStatus(rightStatus, t('Kjører del {i} av {n}…', { i: i + 1, n: segments.length }));
+          var _sink = _nbActive ? window.Cells.sinkForSegment(i) : null;
           // #r-blokker kjøres JS-side mot webR (før 2026-07-11 ble de STILLE
           // ignorert her — python-runneren har ingen r-gren).
           if (segments[i].kind === 'r') {
-            appendOutput(stdout.slice(renderedLen), asHtml, suppress);
+            appendOutput(stdout.slice(renderedLen), asHtml, suppress, _sink);
             renderedLen = stdout.length;
-            await runInlineRSegment(segments[i]);
+            await runInlineRSegment(segments[i], _sink);
             continue;
           }
           // Materialiser blokkens use-kopier inn i python-familien først.
@@ -8676,7 +8700,7 @@ async def _m2py_run_segment(_seg_json):
           }
           py.globals.set('_m2py_seg_json', JSON.stringify(segments[i]));
           const rc = await py.runPythonAsync('await _m2py_run_segment(_m2py_seg_json)');
-          appendOutput(stdout.slice(renderedLen), asHtml, suppress);
+          appendOutput(stdout.slice(renderedLen), asHtml, suppress, _sink);
           renderedLen = stdout.length;
           if (rc === 'stop') break;
         }
@@ -8696,7 +8720,10 @@ async def _m2py_run_segment(_seg_json):
         const pre = document.createElement('pre');
         pre.className = 'error';
         pre.textContent = lastOutput;
-        outputArea.appendChild(pre);
+        // Notatbok aktiv (Task 6): feilen havner i samle-sloten nederst,
+        // ikke i den skjulte #outputArea — tidligere cellers output beholdes.
+        const _errHost = (window.Cells && window.Cells.active() && window.Cells.errorHost()) || outputArea;
+        _errHost.appendChild(pre);
         setStatus(rightStatus, 'Run failed.', true);
         window.lastDatasetInfo = {};
         updateSidebarDatasets({});

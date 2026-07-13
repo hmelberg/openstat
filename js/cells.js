@@ -136,8 +136,11 @@
   };
 
   // Språk → legacy segmentmarkør slik parseHybridScript i index.html forventer.
-  // VERIFISER stavemåtene mot segmenteringen (~index.html:6024 og
-  // normalizeren ~7413-7428) i Task 6, og juster her om nødvendig.
+  // Verifisert i Task 6 mot matchHybridMarker (index.html ~6028-6037, case-
+  // insensitiv) og normalizeBlockMarkers (~7437-7450): '## python' matcher
+  // (pyodide|python|py) og gir kind:'pyodide'; '## r' → kind:'r';
+  // '## duckdb' matcher (duckdb|duck|sql) → kind:'duckdb'; '## microdata'
+  // matcher (microdata|micro) → kind:'microdata'. Stavemåtene under stemmer.
   var SEG_MARKER = { python: '## python', r: '## r', duckdb: '## duckdb',
                      microdata: '## microdata' };
   C.SEG_MARKER = SEG_MARKER;
@@ -165,23 +168,31 @@
     return out.join('\n');
   };
 
-  // Forventet segmentrekkefølge → celleindekser. Segment 0 er alt før første
-  // '## lang'-markør (preambel + ev. blankede celler) og tilskrives den
-  // FØRSTE cellen i det spennet. Deretter ett segment per kjørbar celle.
-  // Blankede celler etter første markør smelter inn i forrige segment.
+  // Forventet segmentrekkefølge → celleindekser. Verifisert mot faktisk
+  // kjøretidsatferd i Task 6: parseHybridScripts flush() DROPPER et segment
+  // hvis bufferet trimmer til tomt (index.html ~6044-6047). executableSource
+  // blanker HELE cellen (header + body) for enhver ikke-kjørbar celle —
+  // eneste unntak er en ekte preambel (headerRaw === null), som kjøres
+  // uendret. Dermed kan KUN en preambel med ikke-blankt innhold gi opphav
+  // til et lederseament (segment 0); en ledende ikke-kjørbar CELLE (f.eks.
+  // '#%% md' først, ingen preambel) blankes helt og gir INGEN egen segment —
+  // motsatt av en tidligere antakelse her (se historikk/test-fiks Task 6).
+  // Deretter ett segment per kjørbar celle. Blankede celler etter første
+  // markør smelter (som blanke linjer) inn i forrige segment.
   C.segmentPlan = function (text, docMode) {
     var parsed = C.parseCells(text);
     var plan = [];
-    var leadingIdx = null;
-    var seen = false;
-    for (var i = 0; i < parsed.cells.length; i++) {
+    var start = 0;
+    if (parsed.cells.length && parsed.cells[0].headerRaw === null) {
+      if (parsed.cells[0].source && parsed.cells[0].source.trim() !== '') plan.push(0);
+      start = 1;
+    }
+    for (var i = start; i < parsed.cells.length; i++) {
       var c = parsed.cells[i];
       var type = C.resolveType(c, docMode);
       var runnable = c.headerRaw !== null && C.isCodeType(type) && !!SEG_MARKER[type];
-      if (runnable) { seen = true; plan.push(i); continue; }
-      if (!seen && leadingIdx === null) leadingIdx = i;
+      if (runnable) plan.push(i);
     }
-    if (leadingIdx !== null) plan.unshift(leadingIdx);
     return plan;
   };
 
@@ -266,6 +277,15 @@
         NB.root = el('div', 'nb-root');
         NB.root.id = 'notebookRoot';
         container.parentNode.insertBefore(NB.root, container.nextSibling);
+        // Kopier-knapper (tabell/pre/plotly) på resultater rendret inn i
+        // celle-outputene, samme mekanisme som #outputArea (index.html).
+        // MutationObserver mangler i test-harnessets lette DOM-fake — bare
+        // ekte browsere (og jsdom) trenger/har denne forsterkningen.
+        if (typeof global.MutationObserver === 'function') {
+          new global.MutationObserver(function () {
+            if (global.mdScheduleResultEnhance) global.mdScheduleResultEnhance();
+          }).observe(NB.root, { childList: true, subtree: true });
+        }
       }
       NB.root.hidden = false;
       render();
@@ -437,6 +457,44 @@
       }
       NB.chip.hidden = !(!NB.activeFlag && ta && C.hasMarkers(ta.value) && C.supportedMode(NB.docMode));
     }
+
+    // ---- kjøring (Task 6): per-celle output-slots ----
+    // beginRun kalles fra segmentløkken i index.html med antall segmenter.
+    // Returnerer sink-listen, eller null (→ samlet fallback-slot nederst)
+    // når planen ikke matcher — f.eks. ##-markører skrevet manuelt i en celle.
+    C.beginRun = function (segmentCount) {
+      if (!NB.activeFlag) return null;
+      var outs = NB.root.querySelectorAll('.nb-cell .nb-output');
+      for (var i = 0; i < outs.length; i++) {
+        var cellEl = outs[i].parentNode;
+        if (cellEl.classList.contains('nb-noncode')) continue;   // md/html beholder rendringen
+        purge(outs[i]);
+        outs[i].innerHTML = '';
+      }
+      if (NB.trailing) { NB.trailing.remove(); NB.trailing = null; }
+      if (segmentCount !== NB.plan.length) { NB.runSinks = null; return null; }
+      NB.runSinks = [];
+      for (var s = 0; s < NB.plan.length; s++) {
+        var node = NB.root.querySelector('.nb-cell[data-idx="' + NB.plan[s] + '"] .nb-output');
+        NB.runSinks.push(node || null);
+      }
+      return NB.runSinks;
+    };
+
+    C.sinkForSegment = function (i) {
+      if (NB.runSinks && NB.runSinks[i]) return NB.runSinks[i];
+      return C.errorHost();
+    };
+
+    // Samle-slot nederst: fallback ved planavvik og vert for feilmeldinger.
+    C.errorHost = function () {
+      if (!NB.activeFlag) return null;
+      if (!NB.trailing || !NB.trailing.isConnected) {
+        NB.trailing = el('div', 'nb-output nb-trailing');
+        NB.root.appendChild(NB.trailing);
+      }
+      return NB.trailing;
+    };
   })();
 
   global.Cells = C;
