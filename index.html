@@ -7536,10 +7536,15 @@ json.dumps(out)
       return frag;
     }
 
-    function renderROutputParts(outputParts) {
-      purgePlots(outputArea);
-      outputArea.innerHTML = '';
-      outputArea.appendChild(buildROutputNodes(outputParts));
+    // Valgfri `target` (Task 7, speiler renderOutput i index.html ~5770):
+    // runHybridR er en samlet single-shot-rendring (alle segmenter bygger én
+    // outputParts-liste, rendret ÉN gang til slutt — se løkka over) — derfor
+    // 2b-grenen (trailing-slot fallback), ikke per-celle-attribusjon.
+    function renderROutputParts(outputParts, target) {
+      var host = target || outputArea;
+      purgePlots(host);
+      host.innerHTML = '';
+      host.appendChild(buildROutputNodes(outputParts));
     }
 
     async function runHybridR(src, py, runOpts) {
@@ -7615,6 +7620,14 @@ json.dumps(out)
       var microdataSegs = _rSegsAll.filter(function(s) { return s.kind === 'microdata' && (s.text || '').trim(); });
       var rSegs        = _rSegsAll.filter(function(s) { return s.kind !== 'microdata' && (s.text || '').trim(); });
       var outputParts  = [];
+
+      // Notatbok aktiv (Task 7): tøm forrige kjørings per-celle-output FØR
+      // denne kjøringen begynner å skrive. R-modus bygger ÉN samlet
+      // outputParts-liste og rendrer den ÉN gang til slutt (se
+      // renderROutputParts-kallet nederst) — per-celle-attribusjon er Fase B.
+      // Count 0 er bevisst: matcher aldri NB.plan.length, så sinks forblir
+      // av og alt R-output havner i trailing-sloten (errorHost) i stedet.
+      if (window.Cells && window.Cells.active()) window.Cells.beginRun(0);
 
       // ── Phase 1: run all microdata segments with a shared interpreter ────
       // Runs silently (setup). Datasets exported to WebR as typed tibbles via
@@ -7783,7 +7796,11 @@ json.dumps(out)
         }
       }
 
-      renderROutputParts(outputParts);
+      // Trailing-slot fallback (Task 7, 2b): samlet R-output havner i
+      // notatbokens errorHost-slot nederst når notatbok er aktiv, ellers
+      // uendret i #outputArea.
+      renderROutputParts(outputParts,
+        (window.Cells && window.Cells.active() && window.Cells.errorHost()) || null);
       // dash v2: bygg dashboardet (om noe) etter at tekst-output er rendret.
       // mount() venter på førsterenders i egen Shelter, så purgen under er trygg.
       if (window.DashWebR) {
