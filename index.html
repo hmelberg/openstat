@@ -3257,6 +3257,7 @@
       editorBP[activeEditorMode] = new Set(bp);
       // Switch
       activeEditorMode = newMode;
+      if (window.Cells) window.Cells.setDocMode(activeEditorMode);
       try { localStorage.setItem('md_editor_mode', newMode); } catch(e) {}
       // Restore new mode
       if (si) si.value = editorContent[newMode];
@@ -3447,6 +3448,11 @@
         b.addEventListener('click', function () {
           menu.classList.remove('open');
           var v = b.dataset.view;
+          if (window.Cells && window.Cells.active() && v !== 'forklar') {
+            window.Cells.setLayout(v === 'output' ? 'output' : v);
+            setActive(v);
+            return;
+          }
           if (v === 'forklar') {
             // Skrittvis er en KJØRING, ikke en tilstand — ikke endre label.
             var fk = document.getElementById('btnForklar');
@@ -3662,6 +3668,7 @@
     scriptInput.scrollTop = 0;
     scriptInput.selectionStart = scriptInput.selectionEnd = 0;
     scriptInput.focus();
+    if (window.Cells) window.Cells.init(activeEditorMode);
 
     let pdexplorerReady = false, pdexplorerLoading = false;
     let explainAbortRef = null;
