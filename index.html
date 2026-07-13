@@ -7551,7 +7551,21 @@ json.dumps(out)
       runOpts = runOpts || {};
       var showCommands = runOpts.showCommands !== false; // default true
       if (!webRReady) {
-        outputArea.innerHTML = '<pre class="error">WebR er ikke klar. Vent til R er lastet og pr\u00f8v igjen.</pre>';
+        // Notatbok aktiv (Task 7-oppfølging): #outputArea ligger skjult bak
+        // .nb-hidden — meldingen må til trailing-sloten, ellers ser brukeren
+        // ingenting. En fersk pre APPENDES der (ikke innerHTML-wipe: sloten
+        // kan holde forrige kjørings samlede output); utenfor notatbok
+        // beholdes dagens erstatt-alt-adferd i #outputArea uendret.
+        var _nbEarlyHost = window.Cells && window.Cells.active() && window.Cells.errorHost();
+        var _wrMsg = 'WebR er ikke klar. Vent til R er lastet og pr\u00f8v igjen.';
+        if (_nbEarlyHost) {
+          var _wrPre = document.createElement('pre');
+          _wrPre.className = 'error';
+          _wrPre.textContent = _wrMsg;
+          _nbEarlyHost.appendChild(_wrPre);
+        } else {
+          outputArea.innerHTML = '<pre class="error">' + _wrMsg + '</pre>';
+        }
         setRunButtonsUi('idle');
         scriptRunInProgress = false;
         return;
