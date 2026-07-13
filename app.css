@@ -1048,3 +1048,37 @@
     .mode-gui-bar { position:fixed; top:var(--topbar-h); left:0; right:0; z-index:99; background:#f3f4f6; border-bottom:1px solid #d8dbe0; }
     .bottombar-center { flex:1; display:flex; justify-content:center; align-items:center; min-width:0; padding:0 8px; }
     .bottombar-ask { width:min(420px,100%); padding:5px 10px; border:1px solid var(--border); border-radius:6px; font:13px/1.2 inherit; background:var(--bg-input,#fff); color:inherit; }
+
+/* ── Notatbok-celler (js/cells.js, spec 2026-07-13) ─────────────────────── */
+.container.nb-hidden { display: none !important; }
+.nb-root { flex: 1 1 auto; overflow-y: auto; padding: 12px 16px 40px; }
+.nb-bar { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
+.nb-raw-btn { font-size: 12px; padding: 3px 10px; border: 1px solid var(--border);
+  border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
+.nb-warnings { font-size: 12px; opacity: .75; }
+.nb-cell { display: grid; gap: 10px; margin-bottom: 12px; border: 1px solid var(--border);
+  border-radius: 6px; padding: 10px; }
+.nb-layout-columns .nb-cell { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.nb-layout-columns .nb-cell.nb-noncode,
+.nb-layout-columns .nb-cell.nb-hide-code,
+.nb-layout-columns .nb-cell.nb-rendered-only { grid-template-columns: 1fr; }
+.nb-layout-stacked .nb-cell { grid-template-columns: 1fr; }
+.nb-layout-output .nb-cell { grid-template-columns: 1fr; border: none; padding: 4px 0; }
+.nb-layout-output .nb-input { display: none; }
+.nb-rendered-only .nb-input { display: none; }
+.nb-hide-code .nb-input { display: none; }
+.nb-hide-output .nb-output { display: none; }
+.nb-skip { opacity: .55; }
+.nb-head { font-size: 11px; opacity: .65; margin-bottom: 4px; }
+.nb-src { width: 100%; min-height: 1.6em; resize: none; border: 1px solid var(--border);
+  border-radius: 4px; background: var(--bg-code); color: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px;
+  line-height: 1.45; padding: 6px 8px; box-sizing: border-box; }
+.nb-output { min-width: 0; overflow-x: auto; }
+.nb-output.nb-trailing { border-top: 1px dashed var(--border); padding-top: 8px; }
+.nb-style-note { border-left: 4px solid #4a90d9; }
+.nb-style-warn { border-left: 4px solid #d9a54a; }
+.nb-style-card { box-shadow: 0 1px 4px rgba(0,0,0,.15); }
+.nb-chip { position: absolute; right: 12px; top: 8px; z-index: 6; font-size: 12px;
+  padding: 3px 10px; border: 1px solid var(--border); border-radius: 12px;
+  background: var(--bg-code); color: inherit; cursor: pointer; }

@@ -185,6 +185,215 @@
     return plan;
   };
 
+  // ---------- DOM-halvdel (kun browser) ----------
+  if (typeof document !== 'undefined') (function () {
+    var t = typeof global.t === 'function' ? global.t : function (s) { return s; };
+    var NB = { root: null, cells: [], docMode: 'python', layout: 'columns',
+               rawOverride: false, activeFlag: false, lastSerialized: null,
+               plan: [], runSinks: null, trailing: null, chip: null,
+               editTimer: null };
+
+    function $(id) { return document.getElementById(id); }
+    function el(tag, cls, text) {
+      var n = document.createElement(tag);
+      if (cls) n.className = cls;
+      if (text != null) n.textContent = text;
+      return n;
+    }
+    function purge(node) { if (typeof global.purgePlots === 'function') global.purgePlots(node); }
+
+    C.active = function () { return NB.activeFlag; };
+    C.setDocMode = function (mode) {
+      NB.docMode = mode;
+      if (NB.activeFlag && !C.supportedMode(mode)) C.exit();
+    };
+
+    C.init = function (docMode) {
+      NB.docMode = docMode;
+      setInterval(tick, 1000);
+      var ta = $('scriptInput');
+      if (ta && C.supportedMode(docMode) && C.hasMarkers(ta.value)) C.enter(appLayout());
+    };
+
+    function appLayout() {
+      if (global.mdIsInputHidden && global.mdIsInputHidden()) return 'output';
+      if (global.mdIsStackedLayout && global.mdIsStackedLayout()) return 'stacked';
+      return 'columns';
+    }
+
+    C.enter = function (layout) {
+      var ta = $('scriptInput');
+      if (!ta || !C.supportedMode(NB.docMode) || !C.hasMarkers(ta.value)) return false;
+      NB.activeFlag = true;
+      NB.rawOverride = false;
+      if (layout) NB.layout = layout;
+      var container = document.querySelector('.container');
+      if (container) container.classList.add('nb-hidden');
+      if (!NB.root) {
+        NB.root = el('div', 'nb-root');
+        NB.root.id = 'notebookRoot';
+        container.parentNode.insertBefore(NB.root, container.nextSibling);
+      }
+      NB.root.hidden = false;
+      render();
+      updateChip();
+      return true;
+    };
+
+    C.exit = function (opts) {
+      if (opts && opts.raw) NB.rawOverride = true;
+      NB.activeFlag = false;
+      if (NB.root) { purge(NB.root); NB.root.hidden = true; }
+      var container = document.querySelector('.container');
+      if (container) container.classList.remove('nb-hidden');
+      if (global.updateLineNumbers) global.updateLineNumbers();
+      if (global.refreshPlotlyAfterLayout) global.refreshPlotlyAfterLayout();
+      updateChip();
+    };
+
+    C.setLayout = function (layout) {
+      NB.layout = layout;
+      if (NB.root) {
+        NB.root.classList.remove('nb-layout-columns', 'nb-layout-stacked', 'nb-layout-output');
+        NB.root.classList.add('nb-layout-' + layout);
+        if (global.refreshPlotlyAfterLayout) global.refreshPlotlyAfterLayout();
+      }
+    };
+
+    C.refreshFromScript = function () { if (NB.activeFlag) render(); else updateChip(); };
+
+    function render() {
+      var ta = $('scriptInput');
+      var parsed = C.parseCells(ta.value);
+      NB.cells = parsed.cells;
+      NB.lastSerialized = ta.value;
+      NB.plan = C.segmentPlan(ta.value, NB.docMode);
+      NB.runSinks = null; NB.trailing = null;
+      purge(NB.root);
+      NB.root.innerHTML = '';
+      NB.root.className = 'nb-root nb-layout-' + NB.layout;
+      var bar = el('div', 'nb-bar');
+      var rawBtn = el('button', 'nb-raw-btn', t('Rå tekst'));
+      rawBtn.type = 'button';
+      rawBtn.title = t('Rediger notatboken som ren tekst');
+      rawBtn.addEventListener('click', function () { C.exit({ raw: true }); });
+      bar.appendChild(rawBtn);
+      if (parsed.warnings.length) bar.appendChild(el('span', 'nb-warnings', parsed.warnings.join(' · ')));
+      NB.root.appendChild(bar);
+      for (var i = 0; i < NB.cells.length; i++) NB.root.appendChild(cellNode(NB.cells[i], i));
+    }
+
+    function cellNode(c, idx) {
+      var type = C.resolveType(c, NB.docMode);
+      var nonCode = !C.isCodeType(type);
+      var wrap = el('div', 'nb-cell');
+      wrap.dataset.idx = String(idx);
+      if (c.attrs.style && /^(note|warn|card)$/.test(c.attrs.style)) wrap.classList.add('nb-style-' + c.attrs.style);
+      if (type === 'skip') wrap.classList.add('nb-skip');
+      if (nonCode) wrap.classList.add('nb-noncode');
+      if (c.attrs['hide-code']) wrap.classList.add('nb-hide-code');
+      if (c.attrs['hide-output']) wrap.classList.add('nb-hide-output');
+
+      var input = el('div', 'nb-input');
+      var head = el('div', 'nb-head');
+      head.appendChild(el('span', 'nb-type', type + (c.attrs.id ? ' · ' + c.attrs.id : '')));
+      input.appendChild(head);
+      var ta = el('textarea', 'nb-src');
+      ta.value = c.source;
+      ta.spellcheck = false;
+      ta.addEventListener('input', function () { autoSize(ta); onEdit(idx, ta.value); });
+      input.appendChild(ta);
+
+      var out = el('div', 'nb-output');
+      if (nonCode && type !== 'skip') {
+        wrap.classList.add('nb-rendered-only');
+        renderNonCode(out, type, c.source);
+        out.addEventListener('dblclick', function () {
+          wrap.classList.remove('nb-rendered-only');
+          autoSize(ta); ta.focus();
+        });
+        ta.addEventListener('blur', function () {
+          renderNonCode(out, type, ta.value);
+          wrap.classList.add('nb-rendered-only');
+        });
+      }
+      wrap.appendChild(input);
+      wrap.appendChild(out);
+      requestAnimationFrame(function () { autoSize(ta); });
+      return wrap;
+    }
+
+    function renderNonCode(out, type, src) {
+      purge(out);
+      out.innerHTML = '';
+      if (type === 'md') {
+        var md = typeof global.markdownit === 'function' ? global.markdownit({ breaks: true }) : null;
+        var div = el('div', 'output-markdown');
+        if (md) div.innerHTML = md.render(src); else div.textContent = src;
+        out.appendChild(div);
+      } else {
+        var host = el('div', 'nb-html');
+        host.innerHTML = src;   // html-celle: brukerens eget dokument, samme tillit som kode
+        out.appendChild(host);
+      }
+    }
+
+    function autoSize(ta) {
+      ta.style.height = 'auto';
+      ta.style.height = (ta.scrollHeight + 2) + 'px';
+    }
+
+    function onEdit(idx, value) {
+      var c = NB.cells[idx];
+      c.source = value;
+      c.hasBody = true;
+      if (NB.editTimer) clearTimeout(NB.editTimer);
+      NB.editTimer = setTimeout(function () {
+        var ta = $('scriptInput');
+        var text = C.serializeCells(NB.cells);
+        NB.lastSerialized = text;
+        ta.value = text;
+        NB.plan = C.segmentPlan(text, NB.docMode);
+        if (global.updateLineNumbers) global.updateLineNumbers();
+        // Skrev brukeren en ny #%%-markør inni cellen? Da har strukturen
+        // endret seg — full re-rendring (bevisst handling, fokus-hopp ok).
+        var lines = String(value).split('\n');
+        for (var i = 0; i < lines.length; i++) {
+          if (C.isMarkerLine(lines[i])) { render(); return; }
+        }
+      }, 250);
+    }
+
+    // Én tikker: aktiv → fang programmatiske endringer i #scriptInput
+    // (eksempler/AI setter .value uten input-event); inaktiv → vis/skjul hint.
+    function tick() {
+      var ta = $('scriptInput');
+      if (!ta) return;
+      if (NB.activeFlag) {
+        if (ta.value !== NB.lastSerialized) {
+          if (C.hasMarkers(ta.value)) render();
+          else C.exit();
+        }
+      } else updateChip();
+    }
+
+    function updateChip() {
+      var ta = $('scriptInput');
+      if (!NB.chip) {
+        var wrap = document.querySelector('.code-input-wrap');
+        if (!wrap) return;
+        NB.chip = el('button', 'nb-chip', t('Notatbok — vis som celler'));
+        NB.chip.type = 'button';
+        NB.chip.addEventListener('click', function () {
+          NB.rawOverride = false;
+          C.enter(appLayout());
+        });
+        wrap.appendChild(NB.chip);
+      }
+      NB.chip.hidden = !(!NB.activeFlag && ta && C.hasMarkers(ta.value) && C.supportedMode(NB.docMode));
+    }
+  })();
+
   global.Cells = C;
   if (typeof module !== 'undefined' && module.exports) module.exports = C;
 })(typeof window !== 'undefined' ? window : globalThis);

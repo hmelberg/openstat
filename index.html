@@ -574,6 +574,7 @@
   <script src="js/brython-engine.js"></script>
   <script src="js/micropython-engine.js"></script>
   <script src="js/dash.js"></script>
+  <script src="js/cells.js"></script>
   <script src="js/dash-webr.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tabulator-tables@6.3.1/dist/js/tabulator.min.js" defer></script>
@@ -5772,6 +5773,7 @@ json.dumps(out)
         try { Plotly.purge(el); } catch (e) {}
       });
     }
+    window.purgePlots = purgePlots;
 
     // ── B1: kopier/last ned enkeltresultater + "kopier alt" ────────────────
     // Generisk post-render-forsterkning: finner resultatblokker inni #outputArea
