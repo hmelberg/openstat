@@ -191,7 +191,8 @@
     var NB = { root: null, cells: [], docMode: 'python', layout: 'columns',
                rawOverride: false, activeFlag: false, lastSerialized: null,
                plan: [], runSinks: null, trailing: null, chip: null,
-               editTimer: null, tickHandle: null, lastUserInput: 0 };
+               editTimer: null, tickHandle: null, lastUserInput: 0,
+               lastTickValue: null, lastTickTime: 0 };
 
     function $(id) { return document.getElementById(id); }
     function el(tag, cls, text) {
@@ -216,6 +217,11 @@
         // Spor aktiv skriving separat fra programmatiske .value-endringer
         // (delt av tick(), se der).
         if (ta0) ta0.addEventListener('input', function () { NB.lastUserInput = Date.now(); });
+        // Startpunkt for per-tikk-attribusjon: en endring som lander mellom
+        // init og første tikk (f.eks. share-lenke på 'load') må regnes som
+        // programmatisk, ikke som skriving.
+        NB.lastTickValue = ta0 ? ta0.value : null;
+        NB.lastTickTime = Date.now();
       }
       var ta = $('scriptInput');
       if (ta && C.supportedMode(docMode) && C.hasMarkers(ta.value)) C.enter(appLayout());
@@ -376,18 +382,24 @@
     function tick() {
       var ta = $('scriptInput');
       if (!ta) return;
+      var v = ta.value;
       if (NB.activeFlag) {
-        if (ta.value !== NB.lastSerialized) {
-          if (C.hasMarkers(ta.value)) render();
+        if (v !== NB.lastSerialized) {
+          if (C.hasMarkers(v)) render();
           else C.exit();
         }
-      } else if (C.hasMarkers(ta.value) && C.supportedMode(NB.docMode) && !NB.rawOverride &&
-                 (Date.now() - NB.lastUserInput > 2000)) {
-        // Programmatisk innlasting (share-lenke, eksempler, i18n-gjenoppretting) →
-        // gå rett til cellevisning (spec §3.2). Aktiv skriving i rå-editoren
-        // (lastUserInput fersk) → kun hint-chip, ikke auto-inngang.
+      } else if (v !== NB.lastTickValue && NB.lastUserInput < NB.lastTickTime &&
+                 C.hasMarkers(v) && C.supportedMode(NB.docMode) && !NB.rawOverride) {
+        // Per-tikk-attribusjon: verdien endret seg siden forrige tikk UTEN at
+        // noen input-event fyrte i samme vindu → endringen er programmatisk
+        // (share-lenke, eksempler, i18n-gjenoppretting) → rett til celle-
+        // visning (spec §3.2). Fyrte en input-event, er det aktiv skriving →
+        // kun hint-chip, aldri auto-inngang — uansett hvor lenge brukeren
+        // pauser mellom tastetrykk.
         C.enter(appLayout());
       } else updateChip();
+      NB.lastTickValue = v;
+      NB.lastTickTime = Date.now();
     }
 
     function updateChip() {
