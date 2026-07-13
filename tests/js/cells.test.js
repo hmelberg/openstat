@@ -123,3 +123,50 @@ test('cellBlock: redigert celle serialiseres med header', () => {
   p.cells[0].hasBody = true;
   assert.strictEqual(C.serializeCells(p.cells), '#%% python\nx = 2');
 });
+
+test('executableSource: uten markører → uendret', () => {
+  assert.strictEqual(C.executableSource('x = 1\ny = 2', 'python'), 'x = 1\ny = 2');
+});
+
+test('executableSource: kodecelle-header → ## lang, md blankes, linjetall bevares', () => {
+  const doc = '# pre\n#%% md\n# En **tittel**\nmer tekst\n#%% python\n1 + 1\n#%% r\nsummary(x)';
+  const out = C.executableSource(doc, 'python');
+  const inLines = doc.split('\n'), outLines = out.split('\n');
+  assert.strictEqual(outLines.length, inLines.length);          // linjetall bevart
+  assert.strictEqual(outLines[0], '# pre');                     // preambel urørt
+  assert.strictEqual(outLines[1], '');                          // md-header blanket
+  assert.strictEqual(outLines[2], '');                          // md-innhold blanket
+  assert.strictEqual(outLines[3], '');
+  assert.strictEqual(outLines[4], '## python');                 // header → segmentmarkør
+  assert.strictEqual(outLines[5], '1 + 1');
+  assert.strictEqual(outLines[6], '## r');
+  assert.strictEqual(outLines[7], 'summary(x)');
+});
+
+test('executableSource: default-type følger docMode', () => {
+  const out = C.executableSource('#%%\nsummary(x)', 'r');
+  assert.strictEqual(out.split('\n')[0], '## r');
+});
+
+test('executableSource: skip og usegmenterbare språk blankes', () => {
+  const doc = '#%% skip\nhemmelig()\n#%% brython\nalert(1)\n#%% python\n1';
+  const out = C.executableSource(doc, 'python').split('\n');
+  assert.deepStrictEqual(out.slice(0, 4), ['', '', '', '']);
+  assert.strictEqual(out[4], '## python');
+});
+
+test('segmentPlan: preambel leder, deretter kjørbare celler i rekkefølge', () => {
+  const doc = '# pre\n#%% md\ntekst\n#%% python\n1\n#%% r\n2';
+  // celleindekser: 0=preambel, 1=md, 2=python, 3=r
+  assert.deepStrictEqual(C.segmentPlan(doc, 'python'), [0, 2, 3]);
+});
+
+test('segmentPlan: md først (ingen preambel) eier leder-segmentet', () => {
+  const doc = '#%% md\ntekst\n#%% python\n1';
+  assert.deepStrictEqual(C.segmentPlan(doc, 'python'), [0, 1]);
+});
+
+test('segmentPlan: dokument som starter rett på kodecelle', () => {
+  const doc = '#%% python\n1\n#%% python\n2';
+  assert.deepStrictEqual(C.segmentPlan(doc, 'python'), [0, 1]);
+});

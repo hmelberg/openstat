@@ -135,6 +135,56 @@
     return out.join('\n');
   };
 
+  // Språk → legacy segmentmarkør slik parseHybridScript i index.html forventer.
+  // VERIFISER stavemåtene mot segmenteringen (~index.html:6024 og
+  // normalizeren ~7413-7428) i Task 6, og juster her om nødvendig.
+  var SEG_MARKER = { python: '## python', r: '## r', duckdb: '## duckdb',
+                     microdata: '## microdata' };
+  C.SEG_MARKER = SEG_MARKER;
+
+  function blankLike(s) {
+    return String(s).split('\n').map(function () { return ''; }).join('\n');
+  }
+
+  // Dokument → kjørbar tekst (spec §4 "Document → runnable text"):
+  // kode-cellers header → '## lang', ikke-kode (md/html/skip) og språk uten
+  // segmentstøtte blankes. Linjetall bevares eksakt.
+  C.executableSource = function (text, docMode) {
+    if (!C.hasMarkers(text)) return String(text == null ? '' : text);
+    var parsed = C.parseCells(text);
+    var out = [];
+    for (var i = 0; i < parsed.cells.length; i++) {
+      var c = parsed.cells[i];
+      if (c.headerRaw === null) { out.push(c.source); continue; }   // preambel kjører som den er
+      var type = C.resolveType(c, docMode);
+      var runnable = C.isCodeType(type) && !!SEG_MARKER[type];
+      if (!runnable) { out.push(blankLike(C.cellBlock(c))); continue; }
+      if (!c.hasBody && c.source === '') { out.push(SEG_MARKER[type]); continue; }
+      out.push(SEG_MARKER[type] + '\n' + c.source);
+    }
+    return out.join('\n');
+  };
+
+  // Forventet segmentrekkefølge → celleindekser. Segment 0 er alt før første
+  // '## lang'-markør (preambel + ev. blankede celler) og tilskrives den
+  // FØRSTE cellen i det spennet. Deretter ett segment per kjørbar celle.
+  // Blankede celler etter første markør smelter inn i forrige segment.
+  C.segmentPlan = function (text, docMode) {
+    var parsed = C.parseCells(text);
+    var plan = [];
+    var leadingIdx = null;
+    var seen = false;
+    for (var i = 0; i < parsed.cells.length; i++) {
+      var c = parsed.cells[i];
+      var type = C.resolveType(c, docMode);
+      var runnable = c.headerRaw !== null && C.isCodeType(type) && !!SEG_MARKER[type];
+      if (runnable) { seen = true; plan.push(i); continue; }
+      if (!seen && leadingIdx === null) leadingIdx = i;
+    }
+    if (leadingIdx !== null) plan.unshift(leadingIdx);
+    return plan;
+  };
+
   global.Cells = C;
   if (typeof module !== 'undefined' && module.exports) module.exports = C;
 })(typeof window !== 'undefined' ? window : globalThis);
