@@ -84,6 +84,57 @@
     return res;
   };
 
+  // Parse hele dokumentet → { cells, warnings }.
+  // Celle: { type, attrs, headerRaw, headerLine, startLine, endLine, source, hasBody }
+  //  - headerRaw === null: implisitt preambel (tekst før første markør)
+  //  - source: linjene ETTER headeren t.o.m. linjen før neste markør
+  //  - hasBody: om cellen hadde minst én kildelinje (skiller '#%% r' fra '#%% r\n')
+  C.parseCells = function (text) {
+    var lines = String(text == null ? '' : text).split('\n');
+    var cells = [], warnings = [], ids = {};
+    var cur = null;
+    function close(endLine) {
+      if (!cur) return;
+      cur.endLine = endLine;
+      var bodyStart = cur.headerRaw === null ? cur.startLine : cur.startLine + 1;
+      cur.hasBody = endLine >= bodyStart;
+      cur.source = cur.hasBody ? lines.slice(bodyStart, endLine + 1).join('\n') : '';
+      cells.push(cur);
+      cur = null;
+    }
+    for (var i = 0; i < lines.length; i++) {
+      if (MARKER_RE.test(lines[i])) {
+        close(i - 1);
+        var h = C.parseHeader(lines[i]);
+        for (var w = 0; w < h.warnings.length; w++) warnings.push('linje ' + (i + 1) + ': ' + h.warnings[w]);
+        cur = { type: h.type, attrs: h.attrs, headerRaw: lines[i], headerLine: i,
+                startLine: i, endLine: -1, source: '', hasBody: false };
+        if (h.attrs.id) {
+          if (ids[h.attrs.id] !== undefined) warnings.push('linje ' + (i + 1) + ': duplisert id: ' + h.attrs.id);
+          ids[h.attrs.id] = cells.length; // sist vinner
+        }
+      } else if (!cur) {
+        cur = { type: null, attrs: {}, headerRaw: null, headerLine: -1,
+                startLine: i, endLine: -1, source: '', hasBody: false };
+      }
+    }
+    close(lines.length - 1);
+    return { cells: cells, warnings: warnings };
+  };
+
+  // Én celles tekstblokk (header + body). Round-trip-garanti for uendrede celler.
+  C.cellBlock = function (c) {
+    if (c.headerRaw === null) return c.source;
+    if (!c.hasBody && c.source === '') return c.headerRaw;
+    return c.headerRaw + '\n' + c.source;
+  };
+
+  C.serializeCells = function (cells) {
+    var out = [];
+    for (var i = 0; i < cells.length; i++) out.push(C.cellBlock(cells[i]));
+    return out.join('\n');
+  };
+
   global.Cells = C;
   if (typeof module !== 'undefined' && module.exports) module.exports = C;
 })(typeof window !== 'undefined' ? window : globalThis);

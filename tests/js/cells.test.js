@@ -67,3 +67,59 @@ test('supportedMode / isCodeType / resolveType', () => {
   assert.strictEqual(C.resolveType({ type: null }, 'r'), 'r');
   assert.strictEqual(C.resolveType({ type: 'md' }, 'r'), 'md');
 });
+
+test('parseCells: uten markører → én implisitt preambelcelle', () => {
+  const p = C.parseCells('print(1)\nprint(2)');
+  assert.strictEqual(p.cells.length, 1);
+  assert.strictEqual(p.cells[0].headerRaw, null);
+  assert.strictEqual(p.cells[0].source, 'print(1)\nprint(2)');
+});
+
+test('parseCells: preambel + to celler, spans og kilder', () => {
+  const doc = '# load x\n\n#%% md\n# Tittel\n\n#%% python id=a\n1 + 1';
+  const p = C.parseCells(doc);
+  assert.strictEqual(p.cells.length, 3);
+  assert.strictEqual(p.cells[0].headerRaw, null);
+  assert.strictEqual(p.cells[0].source, '# load x\n');
+  assert.strictEqual(p.cells[1].type, 'md');
+  assert.strictEqual(p.cells[1].headerLine, 2);
+  assert.strictEqual(p.cells[1].source, '# Tittel\n');
+  assert.strictEqual(p.cells[2].attrs.id, 'a');
+  assert.strictEqual(p.cells[2].source, '1 + 1');
+  assert.strictEqual(p.cells[2].startLine, 5);
+  assert.strictEqual(p.cells[2].endLine, 6);
+});
+
+test('parseCells: dokument som starter med markør har ingen preambel', () => {
+  const p = C.parseCells('#%% python\nx = 1');
+  assert.strictEqual(p.cells.length, 1);
+  assert.strictEqual(p.cells[0].headerRaw, '#%% python');
+});
+
+test('parseCells: duplisert id gir advarsel', () => {
+  const p = C.parseCells('#%% python id=a\n1\n#%% r id=a\n2');
+  assert.ok(p.warnings.some(w => /duplisert id/.test(w)));
+});
+
+test('round-trip: serialize(parse(t)) === t — eksakt', () => {
+  const docs = [
+    'print(1)',
+    'print(1)\n',
+    '# pre\n#%% md\ntekst\n\n#%% python id=x hide-code\n1+1\n',
+    '#%% r',                    // header-only, ingen body
+    '#%% r\n',                  // header + én tom linje
+    '#%%\n#%% python\n',        // to markører rett etter hverandre
+    '\n\n#%% md\n',             // blank preambel bevares
+    '',
+  ];
+  for (const d of docs) {
+    assert.strictEqual(C.serializeCells(C.parseCells(d).cells), d, JSON.stringify(d));
+  }
+});
+
+test('cellBlock: redigert celle serialiseres med header', () => {
+  const p = C.parseCells('#%% python\nx = 1');
+  p.cells[0].source = 'x = 2';
+  p.cells[0].hasBody = true;
+  assert.strictEqual(C.serializeCells(p.cells), '#%% python\nx = 2');
+});
