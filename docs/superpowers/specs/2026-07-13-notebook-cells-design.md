@@ -271,10 +271,13 @@ run's output rendered into **that cell's slot**. Design:
   single-shot); an example notebook; and (added 2026-07-14) the notebook
   display policy — last-expression-only output + `>>>`-echo off in
   notebook runs. Independently shippable.
-- **Phase B — per-cell run.** Sessions, hoisted loads, full render-target
-  threading (§5, incl. dashboards/enhancers), per-cell run buttons +
-  keyboard shortcuts, Run above/Restart, stale tint, cell toolbar editing
-  operations, skrittvis cell playback.
+- **Phase B1 — DONE 2026-07-14: sessions, per-cell run (python/duckdb
+  incremental, microdata replay-through, R captureR), run buttons +
+  Shift/Ctrl+Enter, stale tint, session chip, Restart & kjør alle.**
+- **Phase B2 — remaining:** cell toolbar editing operations, skrittvis cell
+  playback, dashboard render-target completion (R dashboard cells per-cell,
+  dash per-slot cleanup), `#options.display=last` for unmarked scripts, R
+  `# use` cross-runtime per-cell.
 
 If phase B stalls, phase A remains a shippable feature.
 

@@ -18,3 +18,8 @@ iris.describe()
 
 #%% md style=note
 Cellen over har `hide-code` — bare resultatet vises.
+
+#%% md
+▶-knappen på hver kodecelle kjører kun den cellen; Shift+Enter kjører og
+hopper videre, Ctrl/Cmd+Enter kjører på stedet. «Restart & kjør alle»
+nullstiller sesjonen og kjører alt på nytt fra toppen.
