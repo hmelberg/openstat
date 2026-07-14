@@ -236,7 +236,7 @@
                rawOverride: false, activeFlag: false, lastSerialized: null,
                plan: [], runSinks: null, trailing: null, chip: null,
                editTimer: null, tickHandle: null, lastUserInput: 0,
-               lastTickValue: null, lastTickTime: 0 };
+               lastTickValue: null, lastTickTime: 0, htmlTrusted: true };
 
     function $(id) { return document.getElementById(id); }
     function el(tag, cls, text) {
@@ -264,7 +264,13 @@
     // Eksplisitt signal fra innlastingsstedene (eksempler, share/GitHub):
     // nytt dokument er lastet → auto-åpne notatboken hvis dokumentet er en,
     // uavhengig av tick-heuristikken. Nytt dokument nullstiller Rå tekst-valget.
-    C.contentLoaded = function () {
+    // opts.untrusted === true (share-lenker, GitHub-filer, dyplenker — alt
+    // eksternt): html-celler rendres eskapert til brukeren godtar dem (Vis HTML
+    // / Kjør), så attributt-baserte hendelseshandlere ikke kjører ved lasting.
+    // Uten flagget (lokalt/eksempler i repoen) er dokumentet brukerens eget og
+    // fullt betrodd. Nytt dokument erstatter forrige tillitstilstand.
+    C.contentLoaded = function (opts) {
+      NB.htmlTrusted = !(opts && opts.untrusted === true);
       NB.rawOverride = false;
       var ta = $('scriptInput');
       if (!ta) return;
@@ -417,12 +423,31 @@
         var div = el('div', 'output-markdown');
         if (md) div.innerHTML = md.render(src); else div.textContent = src;
         out.appendChild(div);
+      } else if (!NB.htmlTrusted) {
+        // Utrygt opphav (delt lenke / GitHub / dyplenke): vis kilden eskapert
+        // (textContent — ingen live-DOM, ingen onerror/onload kjører) + en
+        // knapp som gir tillit til HELE dokumentet på ett klikk.
+        out.appendChild(el('pre', 'nb-html-escaped', src));
+        var btn = el('button', 'nb-html-trust-btn', t('Vis HTML'));
+        btn.type = 'button';
+        btn.title = t('Dokumentet kom fra en delt lenke — HTML vises først når du godtar det');
+        btn.addEventListener('click', function () { C.grantHtmlTrust(); });
+        out.appendChild(btn);
       } else {
         var host = el('div', 'nb-html');
-        host.innerHTML = src;   // html-celle: brukerens eget dokument, samme tillit som kode
+        host.innerHTML = src;   // html-celle: betrodd dokument (lokalt/eksempel/godtatt)
         out.appendChild(host);
       }
     }
+
+    // Idempotent tillitsinnvilgelse: setter flagget true og re-rendrer HELE
+    // notatboken (alle html-celler blir live) kun hvis det var false. Kalles
+    // fra Vis HTML-knappen og fra Kjør-stien (kjøring dominerer HTML-rendring).
+    C.grantHtmlTrust = function () {
+      if (NB.htmlTrusted) return;
+      NB.htmlTrusted = true;
+      if (NB.activeFlag && NB.root) render();
+    };
 
     function autoSize(ta) {
       ta.style.height = 'auto';

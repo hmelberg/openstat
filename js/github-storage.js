@@ -38,7 +38,9 @@
         // eksplisitt signal så notatbok-dokumenter auto-åpnes (tick-
         // heuristikken ser ikke kryssmodus-lasting — switchEditorMode
         // resynker basislinjen).
-        if (window.Cells) window.Cells.contentLoaded();
+        // Utrygt opphav (share-lenke/GitHub/dyplenke): html-celler rendres
+        // eskapert til brukeren godtar dem (Vis HTML / Kjør).
+        if (window.Cells) window.Cells.contentLoaded({ untrusted: true });
       }
       function langFromPath(p) {
         const s = (p || '').toLowerCase().split('?')[0];

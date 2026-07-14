@@ -8472,6 +8472,11 @@ options(width = 200)
       // (linjetall bevares, så breakpoint-linjenumre under forblir gyldige).
       // Gates på active(), IKKE hasMarkers(): med Rå tekst-valget på ser
       // brukeren ren tekst og får dagens atferd (#%%-linjer er kommentarer).
+      // Bruker-initiert Kjør gir også HTML-tillit: klikk på Kjør kjører uansett
+      // dokumentets kode, som strengt dominerer HTML-rendring (idempotent).
+      if (window.Cells && window.Cells.active()) {
+        if (window.Cells.grantHtmlTrust) window.Cells.grantHtmlTrust();
+      }
       const rawScript = (window.Cells && window.Cells.active())
         ? window.Cells.executableSource(scriptInput.value, activeEditorMode)
         : scriptInput.value;

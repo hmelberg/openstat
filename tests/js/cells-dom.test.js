@@ -283,6 +283,98 @@ test('beginRun(0) (tall, bakoverkompatibelt) → fortsatt null-sinks (runHybridR
   assert.strictEqual(sinks, null);
 });
 
+// ---- Fix 1: HTML-tillit for utrygt opphav (delte lenker / GitHub / dyplenker) ----
+
+// Rekursiv innsamling av alle noder i notatbok-treet (stubben eksponerer
+// children + _html/_text, så vi kan observere innerHTML- vs textContent-bruk).
+function collectNodes(node, acc) {
+  if (!node) return acc;
+  acc.push(node);
+  (node.children || []).forEach((c) => collectNodes(c, acc));
+  return acc;
+}
+function nbRoot(containerEl) {
+  const body = containerEl.parentNode;
+  return body.children.find((c) => c.classList.contains('nb-root'));
+}
+
+test('contentLoaded({untrusted:true}) med html-celle → kilden eskapert (textContent), ingen live innerHTML', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  C.init('python'); // tom editor → inaktiv
+  const payload = '<img src=x onerror="window.__pwned=1">';
+  scriptInputEl.value = '#%% md\nhei\n#%% html\n' + payload + '\n#%% python\nprint(1)\n';
+  C.contentLoaded({ untrusted: true });
+  assert.strictEqual(C.active(), true, 'notatbok-dokument auto-åpnes');
+
+  const nodes = collectNodes(nbRoot(containerEl), []);
+  const htmls = nodes.map((n) => n.innerHTML).filter(Boolean);
+  assert.ok(!htmls.some((h) => h.includes('onerror')),
+    'ingen node fikk payloaden satt som live innerHTML');
+  const texts = nodes.map((n) => n.textContent).filter(Boolean);
+  assert.ok(texts.some((tx) => tx.includes('onerror')),
+    'kilden vises eskapert via textContent');
+  const btn = nodes.find((n) => n.tag === 'button' && n.textContent === 'Vis HTML');
+  assert.ok(btn, 'Vis HTML-knapp vises (tillit er false)');
+  // md-cellen rendres uansett (trygg — markdown-it html:false som standard).
+  assert.ok(texts.some((tx) => tx === 'hei'), 'md-celle rendres');
+});
+
+test('grantHtmlTrust() gjør html-celler live og re-rendrer hele notatboken', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  C.init('python');
+  const payload = '<img src=x onerror="window.__pwned=1">';
+  scriptInputEl.value = '#%% html\n' + payload + '\n#%% python\nprint(1)\n';
+  C.contentLoaded({ untrusted: true });
+  // Før: eskapert, ingen live payload.
+  let nodes = collectNodes(nbRoot(containerEl), []);
+  assert.ok(!nodes.map((n) => n.innerHTML).filter(Boolean).some((h) => h.includes('onerror')));
+
+  C.grantHtmlTrust();
+
+  nodes = collectNodes(nbRoot(containerEl), []);
+  const htmls = nodes.map((n) => n.innerHTML).filter(Boolean);
+  assert.ok(htmls.some((h) => h.includes('onerror')),
+    'html rendres live etter innvilget tillit');
+  assert.ok(!nodes.some((n) => n.tag === 'button' && n.textContent === 'Vis HTML'),
+    'Vis HTML-knappen er borte etter re-rendring');
+});
+
+test('contentLoaded() uten flagg gir betrodd dokument: html rendres live umiddelbart', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  C.init('python');
+  const payload = '<b id="hb">ok</b>';
+  scriptInputEl.value = '#%% html\n' + payload + '\n#%% python\nprint(1)\n';
+  C.contentLoaded(); // ingen untrusted-flagg → tillit nullstilles til true
+  assert.strictEqual(C.active(), true);
+
+  const nodes = collectNodes(nbRoot(containerEl), []);
+  const htmls = nodes.map((n) => n.innerHTML).filter(Boolean);
+  assert.ok(htmls.some((h) => h.includes('id="hb"')),
+    'betrodd html rendres live');
+  assert.ok(!nodes.some((n) => n.tag === 'button' && n.textContent === 'Vis HTML'),
+    'ingen Vis HTML-knapp for betrodd dokument');
+});
+
+test('untrusted → contentLoaded() uten flagg gjenoppretter tillit (nytt dokument erstatter tilstand)', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  C.init('python');
+  const payload = '<img src=x onerror="window.__pwned=1">';
+  // Først et utrygt dokument.
+  scriptInputEl.value = '#%% html\n' + payload + '\n';
+  C.contentLoaded({ untrusted: true });
+  let nodes = collectNodes(nbRoot(containerEl), []);
+  assert.ok(nodes.some((n) => n.tag === 'button' && n.textContent === 'Vis HTML'),
+    'utrygt: knapp vises');
+  // Så et betrodd dokument (eksempel/lokalt) → tillit nullstilles til true.
+  scriptInputEl.value = '#%% html\n<b id="hb">ok</b>\n';
+  C.contentLoaded();
+  nodes = collectNodes(nbRoot(containerEl), []);
+  assert.ok(nodes.map((n) => n.innerHTML).filter(Boolean).some((h) => h.includes('id="hb"')),
+    'nytt betrodd dokument rendres live');
+  assert.ok(!nodes.some((n) => n.tag === 'button' && n.textContent === 'Vis HTML'),
+    'ingen knapp igjen etter betrodd lasting');
+});
+
 test('C.init slår opp #scriptInput kun én gang (finding 3: gjenbruk referanse)', () => {
   const { C, scriptInputEl } = freshEnv();
   const original = global.document.getElementById;

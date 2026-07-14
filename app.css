@@ -1082,3 +1082,9 @@
 .nb-chip { position: absolute; right: 12px; top: 8px; z-index: 6; font-size: 12px;
   padding: 3px 10px; border: 1px solid var(--border); border-radius: 12px;
   background: var(--bg-code); color: inherit; cursor: pointer; }
+.nb-html-escaped { margin: 0 0 6px; padding: 8px 10px; border: 1px solid var(--border);
+  border-radius: 4px; background: var(--bg-code);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+  line-height: 1.45; white-space: pre-wrap; word-break: break-word; overflow-x: auto; }
+.nb-html-trust-btn { font-size: 12px; padding: 3px 10px; border: 1px solid var(--border);
+  border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
