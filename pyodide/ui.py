@@ -1,16 +1,143 @@
-"""ui - pyodide-fasade for notebook-widgets (spec 2, W1).
+"""ui - pyodide-fasade for notebook-widgets (spec 2026-07-15-notebook-widgets-design.md, W1).
 
-Plassholder (Task 2 i planen docs/superpowers/plans/2026-07-15-notebook-widgets-w1.md):
-den fulle fasaden (ui.slider/dropdown/checkbox/switch/number/text/button)
-bygges i Task 4. Denne fila finnes kun slik at __ensureUi-ledningen i
-index.html (lazy-lasting av `import ui` mot window.Ui, samme mønster som
-pyodide/dash.py) er ende-til-ende-testbar før DOM-halvdelen er ferdig.
+Pull-modell: hvert `ui.*`-kall bygger en kontrollspec og sender den over
+grensen som JSON til `window.Ui.registerControl(...)` (js/ui.js). Det er
+JS-siden som EIER verdien - `ui.*` returnerer den gjeldende LAGREDE verdien
+for kontrollen, ikke nødvendigvis det scriptet nettopp sendte inn som
+`value=`. Når brukeren endrer kontrollen i nettleseren, oppdaterer js/ui.js
+verdilageret og kjører cellen (eller et annet mål-id via `rerun=`) på nytt
+gjennom den vanlige per-celle-kjøremaskinen - scriptet leser da UT den nye
+verdien neste gang det kaller `ui.*`. Ingen tilstand lever i Python: en
+celle er en ren funksjon av (kode, lagret verdi et sted i js/ui.js).
 
-`import ui` i en celle vil altså kjøre helt frem til `ui.<noe>`-kallet, som
-da feiler med en tydelig ImportError - ALDRI en rå AttributeError/krasj i
-selve importen.
+I et vanlig script - ingen notatbok, ingen aktiv celle-kjørekontekst -
+finnes det ingen `window.mdUiRunCtx()` å registrere kontrollen mot:
+`registerControl` returnerer da None (eller `window`/`window.Ui` finnes
+ikke i det hele tatt), og hver `ui.*`-funksjon faller tilbake til en
+deterministisk default (dokumentert per funksjon under) - ALDRI en feil,
+og ingen widget tegnes.
+
+Widgets krever altså en aktiv notatbok + kjørende pyodide (med js/ui.js
+lastet og en aktiv celle-kjørekontekst). Denne fila lastes lasy av
+__ensureUi (index.html) - speiler pyodide/dash.py sitt mønster: en
+`import ui`/`from ui import ...` i en celle trigger henting av denne fila
+FØR micropip forsøker å installere den fra PyPI.
 """
+import json
+
+try:
+    from js import window
+except ImportError:      # CPython (pytest uten js-stub, eller ingen browser)
+    window = None
 
 
-def __getattr__(name):
-    raise ImportError("ui er ikke ferdig - Task 4")
+def _ui():
+    """window.Ui hvis den finnes og er lastet ennå, ellers None."""
+    try:
+        return window.Ui
+    except AttributeError:
+        return None
+
+
+def _register(spec):
+    """Send spec til window.Ui.registerControl, JSON begge veier.
+    None kommer tilbake ved: ingen window, Ui ikke lastet ennå,
+    registerControl selv returnerer null (ingen kjørekontekst - plain
+    script), eller enhver annen uventet feil på veien."""
+    ui = _ui()
+    if ui is None:
+        return None
+    try:
+        raw = ui.registerControl(json.dumps(spec))
+    except Exception:
+        return None
+    if raw is None:
+        return None
+    return json.loads(raw)
+
+
+def _spec(type_, **kwargs):
+    """type + gitte kwargs, None-verdier droppes (matcher js/ui.js sin
+    normalizeSpec, som selv fyller inn defaults for det som mangler)."""
+    spec = {"type": type_}
+    for k, v in kwargs.items():
+        if v is not None:
+            spec[k] = v
+    return spec
+
+
+def _num(value):
+    """JSON-tall -> int hvis heltallig, ellers float (dokumentert
+    returtype for slider/number er int|float)."""
+    if value is None or isinstance(value, bool):
+        return value
+    f = float(value)
+    return int(f) if f.is_integer() else f
+
+
+def slider(min=0, max=100, *, value=None, step=1, label=None, name=None, rerun='self'):
+    """Glidebryter. Fallback (ingen notatbok): value hvis gitt, ellers min."""
+    spec = _spec("slider", min=min, max=max, value=value, step=step,
+                 label=label, name=name, rerun=rerun)
+    result = _register(spec)
+    if result is None:
+        return value if value is not None else min
+    return _num(result)
+
+
+def dropdown(options, *, value=None, label=None, name=None, rerun='self'):
+    """Nedtrekksmeny. Fallback: value hvis gitt, ellers første valg."""
+    options = list(options)
+    if not options:
+        raise ValueError("ui.dropdown: options kan ikke være en tom liste.")
+    spec = _spec("dropdown", options=[str(o) for o in options], value=value,
+                 label=label, name=name, rerun=rerun)
+    result = _register(spec)
+    if result is None:
+        return str(value) if value is not None else str(options[0])
+    return str(result)
+
+
+def checkbox(label=None, *, value=False, name=None, rerun='self'):
+    """Avkrysningsboks. Fallback: value."""
+    spec = _spec("checkbox", value=bool(value), label=label, name=name, rerun=rerun)
+    result = _register(spec)
+    if result is None:
+        return bool(value)
+    return bool(result)
+
+
+def switch(label=None, *, value=False, name=None, rerun='self'):
+    """Bryter (samme semantikk som checkbox, annen visning). Fallback: value."""
+    spec = _spec("switch", value=bool(value), label=label, name=name, rerun=rerun)
+    result = _register(spec)
+    if result is None:
+        return bool(value)
+    return bool(result)
+
+
+def number(value=0, *, min=None, max=None, step=None, label=None, name=None, rerun='self'):
+    """Tallfelt. Fallback: value."""
+    spec = _spec("number", value=value, min=min, max=max, step=step,
+                 label=label, name=name, rerun=rerun)
+    result = _register(spec)
+    if result is None:
+        return value
+    return _num(result)
+
+
+def text(value='', *, label=None, name=None, rerun='self'):
+    """Tekstfelt. Fallback: value."""
+    spec = _spec("text", value=value, label=label, name=name, rerun=rerun)
+    result = _register(spec)
+    if result is None:
+        return value
+    return str(result)
+
+
+def button(label, *, rerun='self', name=None):
+    """Trykknapp. Returnerer alltid None - selve klikket trigger en rerun
+    av målcellen (js/ui.js), ikke en verdi å lese ut."""
+    spec = _spec("button", label=label, name=name, rerun=rerun)
+    _register(spec)
+    return None
