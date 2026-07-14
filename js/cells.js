@@ -234,7 +234,7 @@
     var t = typeof global.t === 'function' ? global.t : function (s) { return s; };
     var NB = { root: null, cells: [], docMode: 'python', layout: 'columns',
                rawOverride: false, activeFlag: false, lastSerialized: null,
-               plan: [], runSinks: null, trailing: null, chip: null,
+               plan: [], runSinks: null, runPlan: null, trailing: null, chip: null,
                editTimer: null, tickHandle: null, lastUserInput: 0,
                lastTickValue: null, lastTickTime: 0, htmlTrusted: true };
 
@@ -372,7 +372,7 @@
       NB.cells = parsed.cells;
       NB.lastSerialized = ta.value;
       NB.plan = C.segmentPlan(ta.value, NB.docMode);
-      NB.runSinks = null; NB.trailing = null;
+      NB.runSinks = null; NB.runPlan = null; NB.trailing = null;
       purge(NB.root);
       NB.root.innerHTML = '';
       NB.root.className = 'nb-root nb-layout-' + NB.layout;
@@ -550,11 +550,12 @@
       var plan = NB.plan;
       if (Array.isArray(segmentsOrCount)) {
         var aligned = C.alignPlan(NB.plan, NB.cells, NB.docMode, segmentsOrCount);
-        if (aligned === null) { NB.runSinks = null; return null; }
+        if (aligned === null) { NB.runSinks = null; NB.runPlan = null; return null; }
         plan = aligned;
       } else if (segmentsOrCount !== NB.plan.length) {
-        NB.runSinks = null; return null;
+        NB.runSinks = null; NB.runPlan = null; return null;
       }
+      NB.runPlan = plan;
       NB.runSinks = [];
       for (var s = 0; s < plan.length; s++) {
         var node = NB.root.querySelector('.nb-cell[data-idx="' + plan[s] + '"] .nb-output');
@@ -566,6 +567,21 @@
     C.sinkForSegment = function (i) {
       if (NB.runSinks && NB.runSinks[i]) return NB.runSinks[i];
       return C.errorHost();
+    };
+
+    // Visningspolicy per segment (§4 "Display policy" i spec): brukes av
+    // JS-segmentløkken i index.html til å avgjøre om et pyodide-segment skal
+    // kjøre med echo av + kun siste uttrykk vist (eksplisitt celle) eller
+    // beholde dagens vis-alt-oppførsel (implisitt preambel, eller ingen
+    // justert plan — f.eks. håndskrevne '##'-markører inni en celle).
+    // Returnerer { explicit: bool } for segment-indeks i, eller null når
+    // notatbok er inaktiv eller planen ikke kunne justeres mot kjøretiden.
+    C.segmentDisplay = function (i) {
+      if (!NB.activeFlag || !NB.runPlan) return null;
+      var idx = NB.runPlan[i];
+      var c = idx === undefined ? null : NB.cells[idx];
+      if (!c) return null;
+      return { explicit: c.headerRaw !== null };
     };
 
     // Samle-slot nederst: fallback ved planavvik og vert for feilmeldinger.

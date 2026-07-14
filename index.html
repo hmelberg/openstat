@@ -6812,10 +6812,14 @@ def _apply_labels_to_globals(_g, _cat):
                         _mapped.where(_mapped.notna(), _v[_col].astype(str)),
                         categories=_cats
                     )
-def _exec_pyodide_block(code, g, show_commands=False):
+def _exec_pyodide_block(code, g, show_commands=False, only_last=False):
     """REPL-style: alle Expr-setninger vises (tabell, Plotly, matplotlib PNG).
     Hvis show_commands=True echoes hver top-level statement med '>>> ' /
-    '... ' foran, sa bruker ser kommandoen rett over outputen den lager."""
+    '... ' foran, sa bruker ser kommandoen rett over outputen den lager.
+    only_last=True (notatbok-celler, spec §4 "Display policy"): kun SISTE
+    topp-nivå Expr-setnings verdi vises (Jupyter-konvensjon) — print()/plot
+    vises som før, uendret. Hver setning evalueres/kjøres i dokumentrekkefølge
+    som i dag; kun visningen endres."""
     code = (code or "").strip()
     if not code:
         return
@@ -6841,7 +6845,12 @@ def _exec_pyodide_block(code, g, show_commands=False):
             return
         if not tree.body:
             return
-        for stmt in tree.body:
+        _last_expr_i = -1
+        if only_last:
+            for _i, _s in enumerate(tree.body):
+                if isinstance(_s, ast.Expr):
+                    _last_expr_i = _i
+        for _i, stmt in enumerate(tree.body):
             try:
                 _src = ast.get_source_segment(code, stmt) or ""
             except Exception:
@@ -6849,7 +6858,7 @@ def _exec_pyodide_block(code, g, show_commands=False):
             _echo(_src)
             if isinstance(stmt, ast.Expr):
                 _v = eval(compile(ast.Expression(stmt.value), "<pyodide>", "eval"), g)
-                if _v is not None:
+                if _v is not None and (not only_last or _i == _last_expr_i):
                     _show_one(_v)
             else:
                 exec(compile(ast.Module(body=[stmt], type_ignores=[]), "<pyodide>", "exec"), g)
@@ -8547,6 +8556,9 @@ options(width = 200)
         var _showCmds = (typeof _scriptOpts.show_commands === 'boolean')
           ? _scriptOpts.show_commands
           : getShowCommandsDefault();
+        // Eskapeluke (spec §4): '#options.display = all' slår av notatbok-
+        // visningspolicyen igjen (vis alt, echo følger _showCmds som vanlig).
+        var _displayAll = String(_scriptOpts.display || '').toLowerCase() === 'all';
         var _mr = currentMode();
         var _ctx = { py: py, rightStatus: rightStatus, showCommands: _showCmds, profile: _scriptOpts.profile };
         if (_mr.runSelf) { await _mr.runSelf(effectiveScript, _ctx); return; }
@@ -8691,7 +8703,12 @@ async def _m2py_run_segment(_seg_json):
         _apply_labels_to_globals(_g, catalog)
         _g["show"] = show
         _g["to_microdata"] = to_microdata
-        _exec_pyodide_block(_st, _g, ${_showCmds ? 'True' : 'False'})
+        # _nb (satt av JS-segmentløkken, kun for notatbok-celler): overstyrer
+        # echo/only_last per segment — spec §4 "Display policy". Fraværende
+        # _nb (preambel, ikke-notatbok, #options.display=all) → dagens atferd.
+        _nb = _seg.get("_nb") or {}
+        _sc = bool(_nb.get("echo")) if "echo" in _nb else ${_showCmds ? 'True' : 'False'}
+        _exec_pyodide_block(_st, _g, _sc, bool(_nb.get("last")))
         e.sync_datasets_to_globals(_g)
         _apply_labels_to_globals(_g, catalog)
         _g["show"] = show
@@ -8747,6 +8764,13 @@ async def _m2py_run_segment(_seg_json):
           for (var _um = 0; _um < (segments[i].uses || []).length; _um++) {
             var _u4 = segments[i].uses[_um];
             await _bindUseIntoPy(py, _u4.name, await _useBytesFromRuntime(_u4));
+          }
+          // Notatbok-visningspolicy (spec §4): eksplisitt celle + pyodide-
+          // segment → echo av, kun siste uttrykk vises — med mindre
+          // '#options.display = all' ber om dagens vis-alt-oppførsel.
+          if (segments[i].kind === 'pyodide' && _nbActive && !_displayAll) {
+            var _sd = window.Cells.segmentDisplay(i);
+            if (_sd && _sd.explicit) segments[i]._nb = { echo: false, last: true };
           }
           py.globals.set('_m2py_seg_json', JSON.stringify(segments[i]));
           const rc = await py.runPythonAsync('await _m2py_run_segment(_m2py_seg_json)');

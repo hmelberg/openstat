@@ -283,6 +283,55 @@ test('beginRun(0) (tall, bakoverkompatibelt) → fortsatt null-sinks (runHybridR
   assert.strictEqual(sinks, null);
 });
 
+// ---- segmentDisplay (Task 10: notatbok-visningspolicy, spec §4 "Display policy") ----
+
+test('segmentDisplay: preambel-segment er ikke eksplisitt, celle-segmenter er', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = 'print(1)\n#%% python\n2 + 1\n#%% python\n3 + 4\n';
+  C.init('python');
+  assert.strictEqual(C.active(), true);
+
+  const sinks = C.beginRun(['pyodide', 'pyodide', 'pyodide']); // preambel + 2 celler
+  assert.notStrictEqual(sinks, null);
+  assert.deepStrictEqual(C.segmentDisplay(0), { explicit: false }, 'preambelen skal beholde vis-alt');
+  assert.deepStrictEqual(C.segmentDisplay(1), { explicit: true });
+  assert.deepStrictEqual(C.segmentDisplay(2), { explicit: true });
+});
+
+test('segmentDisplay: strippet preambel justeres bort — segment 0 er da den første cellen (eksplisitt)', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#options.mode = python\n#%% python\n1\n#%% python\n2\n';
+  C.init('python');
+  assert.strictEqual(C.active(), true);
+
+  // Kjøretiden strippet #options.*-preambelen bort før segmentering — kun
+  // 2 faktiske segmenter (samme bug-mønster som beginRun-testene over).
+  const sinks = C.beginRun(['pyodide', 'pyodide']);
+  assert.notStrictEqual(sinks, null);
+  assert.deepStrictEqual(C.segmentDisplay(0), { explicit: true });
+  assert.deepStrictEqual(C.segmentDisplay(1), { explicit: true });
+});
+
+test('segmentDisplay: reelt planavvik (beginRun → null) gir segmentDisplay → null for alle indekser', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python\n1\n#%% r\n2\n';
+  C.init('python');
+  assert.strictEqual(C.active(), true);
+
+  const sinks = C.beginRun(['pyodide', 'r', 'r']); // ingen 1:1-justering finnes
+  assert.strictEqual(sinks, null);
+  assert.strictEqual(C.segmentDisplay(0), null);
+  assert.strictEqual(C.segmentDisplay(1), null);
+});
+
+test('segmentDisplay: notatbok inaktiv → null', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = 'print(1)\n';
+  C.init('python');
+  assert.strictEqual(C.active(), false);
+  assert.strictEqual(C.segmentDisplay(0), null);
+});
+
 // ---- Fix 1: HTML-tillit for utrygt opphav (delte lenker / GitHub / dyplenker) ----
 
 // Rekursiv innsamling av alle noder i notatbok-treet (stubben eksponerer
