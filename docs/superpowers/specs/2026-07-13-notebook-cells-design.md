@@ -219,6 +219,12 @@ in that cell's output slot.
 
 ### Display policy ("last line only")
 
+**Moved from Phase B into Phase A** (user decision 2026-07-14, first
+hands-on test): notebook cell output follows notebook conventions — a cell
+shows only its last expression's value, and the `>>>` command echo is OFF
+in notebook runs (reusing the existing `show_commands` mechanism). The
+implicit preamble cell keeps show-all.
+
 Applies to **explicit cells** (those created by a `#%%` header):
 
 - **python / brython / micropython:** the AST walker (index.html ~6815)
@@ -261,11 +267,13 @@ run's output rendered into **that cell's slot**. Design:
   and detection hint; "run" is today's whole-document run, with per-cell
   output attribution via the existing JS segment loops (python/duckdb/
   microdata; R falls back to a combined trailing slot if its runner proves
-  single-shot); an example notebook. Independently shippable.
+  single-shot); an example notebook; and (added 2026-07-14) the notebook
+  display policy — last-expression-only output + `>>>`-echo off in
+  notebook runs. Independently shippable.
 - **Phase B — per-cell run.** Sessions, hoisted loads, full render-target
   threading (§5, incl. dashboards/enhancers), per-cell run buttons +
-  keyboard shortcuts, last-expression display flag, Run above/Restart,
-  stale tint, cell toolbar editing operations, skrittvis cell playback.
+  keyboard shortcuts, Run above/Restart, stale tint, cell toolbar editing
+  operations, skrittvis cell playback.
 
 If phase B stalls, phase A remains a shippable feature.
 
