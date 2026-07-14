@@ -8713,12 +8713,19 @@ async def _m2py_run_segment(_seg_json):
         purgePlots(outputArea);
         outputArea.innerHTML = '';
         incrementalStarted = true;
-        // Notatbok aktiv (Task 6): per-celle output-slots for segmentløkken.
-        // beginRun returnerer null ved plan-avvik (f.eks. en '## python'
-        // skrevet manuelt inni en celle) — sinkForSegment faller da tilbake
-        // til den samlede trailing-sloten, aldri en krasj.
+        // Notatbok aktiv (Task 6/9): per-celle output-slots for segmentløkken.
+        // beginRun får segment-KINDENE (ikke bare antallet, Task 9 bug (a)):
+        // en strippet preambel (f.eks. en '#options.*'-linje som er hele
+        // preambelen i microdata-celler) gir da ikke lenger et falskt
+        // plan/antall-avvik — alignPlan justerer planen mot de faktiske
+        // kindene i stedet. beginRun returnerer fortsatt null ved et ekte
+        // avvik (f.eks. en '## python' skrevet manuelt inni en celle) —
+        // sinkForSegment faller da tilbake til den samlede trailing-sloten,
+        // aldri en krasj.
         const _nbActive = !!(window.Cells && window.Cells.active());
-        const _nbSinks = _nbActive ? window.Cells.beginRun(segments.length) : null;
+        const _nbSinks = _nbActive
+          ? window.Cells.beginRun(segments.map(function (s) { return s.kind; }))
+          : null;
         let renderedLen = 0;
         for (let i = 0; i < segments.length; i++) {
           if (segments.length > 1) setStatus(rightStatus, t('Kjører del {i} av {n}…', { i: i + 1, n: segments.length }));

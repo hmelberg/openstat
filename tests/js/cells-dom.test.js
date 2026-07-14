@@ -235,6 +235,54 @@ test('contentLoaded() uten markører mens aktiv → forlater notatboken (rent do
   assert.strictEqual(C.active(), false, 'rent dokument skal ikke bli stående i cellevisning');
 });
 
+// ---- beginRun (Task 9 bug (a)-fiks: kind-array justerer planen) ----
+
+test('beginRun med kind-array: strippet preambel (kun #options.*) justeres, gir sinks — ikke trailing-fallback', () => {
+  const { C, scriptInputEl } = freshEnv();
+  // Speiler bug (a)-repro: preambelen er KUN et #options.*-direktiv, som
+  // strippes bort før segmentering i index.html — segmentPlan (som jobber
+  // på rå kildetekst) teller den likevel som et lederssegment (3 planslots),
+  // mens kjøretiden faktisk bare produserer 2 segmenter (microdata-cellene).
+  scriptInputEl.value = '#options.mode = microdata\n#%% microdata\nfoo\n#%% microdata\nbar\n';
+  C.init('python');
+  assert.strictEqual(C.active(), true);
+
+  const sinks = C.beginRun(['microdata', 'microdata']); // faktiske kjøretids-kinds, uten preambelen
+  assert.notStrictEqual(sinks, null, 'aligned plan skal gi sinks, ikke null → trailing-fallback');
+  assert.strictEqual(sinks.length, 2);
+});
+
+test('beginRun med kind-array: eksakt match (ingen strippet preambel) → uendret plan, sinks', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python\n1\n#%% r\n2\n';
+  C.init('python');
+  assert.strictEqual(C.active(), true);
+
+  const sinks = C.beginRun(['pyodide', 'r']);
+  assert.notStrictEqual(sinks, null);
+  assert.strictEqual(sinks.length, 2);
+});
+
+test('beginRun med kind-array: reelt avvik (ingen 1:1-mapping) → null (trailing-fallback)', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python\n1\n#%% r\n2\n';
+  C.init('python');
+  assert.strictEqual(C.active(), true);
+
+  const sinks = C.beginRun(['pyodide', 'r', 'r']); // ingen justering gir dette
+  assert.strictEqual(sinks, null);
+});
+
+test('beginRun(0) (tall, bakoverkompatibelt) → fortsatt null-sinks (runHybridR sin bevisste avvik-semantikk)', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python\n1\n#%% r\n2\n';
+  C.init('python');
+  assert.strictEqual(C.active(), true);
+
+  const sinks = C.beginRun(0);
+  assert.strictEqual(sinks, null);
+});
+
 test('C.init slår opp #scriptInput kun én gang (finding 3: gjenbruk referanse)', () => {
   const { C, scriptInputEl } = freshEnv();
   const original = global.document.getElementById;

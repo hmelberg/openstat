@@ -173,3 +173,46 @@ test('segmentPlan: dokument som starter rett på kodecelle', () => {
   const doc = '#%% python\n1\n#%% python\n2';
   assert.deepStrictEqual(C.segmentPlan(doc, 'python'), [0, 1]);
 });
+
+// ---- alignPlan (Task 9 bug (a)-fiks) ----
+
+test('alignPlan: eksakt kind-match → planen returneres uendret', () => {
+  const doc = '# pre\n#%% python\n1\n#%% r\n2';
+  const p = C.parseCells(doc);
+  const plan = C.segmentPlan(doc, 'python'); // [0, 1, 2]
+  const aligned = C.alignPlan(plan, p.cells, 'python', ['pyodide', 'pyodide', 'r']);
+  assert.deepStrictEqual(aligned, plan);
+});
+
+test('alignPlan: preambel strippet bort (kun #options.*-linjer) → planen justeres uten leder', () => {
+  // Speiler bug (a): en preambel som KUN inneholder direktivlinjer blir blank
+  // etter effectiveScript-strippingen i index.html (~8541) og gir dermed
+  // ALDRI et faktisk kjøretidssegment, selv om segmentPlan (som jobber på rå
+  // kildetekst) fortsatt teller den som et lederssegment.
+  const doc = '#options.mode = microdata\n#%% microdata\nrequire no.ssb.fdb:51 as db\n#%% microdata\nsummarize inntekt';
+  const p = C.parseCells(doc);
+  const plan = C.segmentPlan(doc, 'python'); // [0, 1, 2] — preambel + to celler
+  assert.deepStrictEqual(plan, [0, 1, 2]);
+  // Faktiske kjøretidssegmenter: preambelen forsvant, kun de to cellene kjørte.
+  const aligned = C.alignPlan(plan, p.cells, 'python', ['microdata', 'microdata']);
+  assert.deepStrictEqual(aligned, [1, 2]);
+});
+
+test('alignPlan: reelt avvik (ingen 1:1-mapping mulig) → null', () => {
+  const doc = '#%% python\n1\n#%% r\n2';
+  const p = C.parseCells(doc);
+  const plan = C.segmentPlan(doc, 'python'); // [0, 1]
+  // Verken uendret plan eller preambel-fjernet variant matcher denne kind-
+  // sekvensen (feil rekkefølge/antall) — f.eks. en manuelt skrevet '## r'
+  // midt inni en celle som splitter kjøretiden i tre reelle segmenter.
+  const aligned = C.alignPlan(plan, p.cells, 'python', ['pyodide', 'r', 'r']);
+  assert.strictEqual(aligned, null);
+});
+
+test('alignPlan: preambel finnes ikke (planen starter ikke med en ekte preambel) → null ved avvik', () => {
+  const doc = '#%% python\n1\n#%% r\n2';
+  const p = C.parseCells(doc);
+  const plan = C.segmentPlan(doc, 'python'); // [0, 1] — begge ekte celler, ingen preambel
+  const aligned = C.alignPlan(plan, p.cells, 'python', ['r']); // feil lengde/kind, og plan[0] er ikke preambel
+  assert.strictEqual(aligned, null);
+});

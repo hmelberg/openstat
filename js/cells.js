@@ -196,6 +196,39 @@
     return plan;
   };
 
+  // Celletype → runtime segment-kind slik matchHybridMarker/parseHybridScript
+  // (index.html ~6039-6072) navngir dem: python→'pyodide', r→'r',
+  // duckdb→'duckdb', microdata→'microdata'. Samme mapping som SEG_MARKER,
+  // bare med kjøretidens kind-navn i stedet for legacy-markørteksten.
+  var KIND_FOR_TYPE = { python: 'pyodide', r: 'r', duckdb: 'duckdb', microdata: 'microdata' };
+  C.KIND_FOR_TYPE = KIND_FOR_TYPE;
+
+  // Juster planen mot de faktiske segment-kindene fra kjøretiden: hvis
+  // leder-oppføringen (preambel) ble strippet bort før segmentering
+  // (f.eks. #-direktivlinjer i microdata-modus), fjern den fra planen.
+  // Returnerer justert plan, eller null når ingen 1:1-mapping finnes.
+  C.alignPlan = function (plan, cells, docMode, segmentKinds) {
+    function expectedKind(idx) {
+      var c = cells[idx];
+      if (!c) return null;
+      var type = c.headerRaw === null ? docMode : C.resolveType(c, docMode);
+      return KIND_FOR_TYPE[type] || null;
+    }
+    function kindsMatch(idxs) {
+      if (idxs.length !== segmentKinds.length) return false;
+      for (var i = 0; i < idxs.length; i++) {
+        if (expectedKind(idxs[i]) !== segmentKinds[i]) return false;
+      }
+      return true;
+    }
+    if (kindsMatch(plan)) return plan;
+    if (plan.length && cells[plan[0]] && cells[plan[0]].headerRaw === null &&
+        kindsMatch(plan.slice(1))) {
+      return plan.slice(1);
+    }
+    return null;
+  };
+
   // ---------- DOM-halvdel (kun browser) ----------
   if (typeof document !== 'undefined') (function () {
     var t = typeof global.t === 'function' ? global.t : function (s) { return s; };
@@ -458,11 +491,16 @@
       NB.chip.hidden = !(!NB.activeFlag && ta && C.hasMarkers(ta.value) && C.supportedMode(NB.docMode));
     }
 
-    // ---- kjøring (Task 6): per-celle output-slots ----
-    // beginRun kalles fra segmentløkken i index.html med antall segmenter.
+    // ---- kjøring (Task 6/9): per-celle output-slots ----
+    // beginRun kalles fra segmentløkken i index.html. Aksepterer enten:
+    //  - et array av segment-KINDS (f.eks. ['pyodide','microdata']) → justerer
+    //    planen mot de faktiske kindene via alignPlan (Task 9 bug (a)-fiks:
+    //    en strippet preambel gir ikke lenger trailing-fallback), eller
+    //  - et tall (bakoverkompatibelt antall-sjekk — runHybridR sender bevisst
+    //    0 for å alltid falle til trailing-sloten, se runHybridR).
     // Returnerer sink-listen, eller null (→ samlet fallback-slot nederst)
     // når planen ikke matcher — f.eks. ##-markører skrevet manuelt i en celle.
-    C.beginRun = function (segmentCount) {
+    C.beginRun = function (segmentsOrCount) {
       if (!NB.activeFlag) return null;
       var outs = NB.root.querySelectorAll('.nb-cell .nb-output');
       for (var i = 0; i < outs.length; i++) {
@@ -472,10 +510,17 @@
         outs[i].innerHTML = '';
       }
       if (NB.trailing) { NB.trailing.remove(); NB.trailing = null; }
-      if (segmentCount !== NB.plan.length) { NB.runSinks = null; return null; }
+      var plan = NB.plan;
+      if (Array.isArray(segmentsOrCount)) {
+        var aligned = C.alignPlan(NB.plan, NB.cells, NB.docMode, segmentsOrCount);
+        if (aligned === null) { NB.runSinks = null; return null; }
+        plan = aligned;
+      } else if (segmentsOrCount !== NB.plan.length) {
+        NB.runSinks = null; return null;
+      }
       NB.runSinks = [];
-      for (var s = 0; s < NB.plan.length; s++) {
-        var node = NB.root.querySelector('.nb-cell[data-idx="' + NB.plan[s] + '"] .nb-output');
+      for (var s = 0; s < plan.length; s++) {
+        var node = NB.root.querySelector('.nb-cell[data-idx="' + plan[s] + '"] .nb-output');
         NB.runSinks.push(node || null);
       }
       return NB.runSinks;
