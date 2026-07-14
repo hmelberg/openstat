@@ -41,14 +41,18 @@ def _ui():
 
 def _register(spec):
     """Send spec til window.Ui.registerControl, JSON begge veier.
-    None kommer tilbake ved: ingen window, Ui ikke lastet ennå,
+    None kommer tilbake ved: ingen window, Ui ikke lastet ennå, eller
     registerControl selv returnerer null (ingen kjørekontekst - plain
-    script), eller enhver annen uventet feil på veien."""
+    script). json.dumps ligger UTENFOR try-en med vilje: en userialiserbar
+    verdi (f.eks. et vilkårlig objekt som value=) er en programmeringsfeil
+    og skal feile HØYT med TypeError, ikke stille falle tilbake til
+    default så widgeten bare uteblir."""
     ui = _ui()
     if ui is None:
         return None
+    payload = json.dumps(spec)
     try:
-        raw = ui.registerControl(json.dumps(spec))
+        raw = ui.registerControl(payload)
     except Exception:
         return None
     if raw is None:
@@ -56,11 +60,27 @@ def _register(spec):
     return json.loads(raw)
 
 
+def _scalar(value):
+    """numpy-skalar -> python int/float/bool (json.dumps tåler ikke numpy).
+    Samme oppskrift som pyodide/dash.py sin _scalar."""
+    if type(value).__module__ == "numpy" and hasattr(value, "item") \
+            and not hasattr(value, "__len__"):
+        try:
+            return value.item()
+        except Exception:
+            return value
+    return value
+
+
 def _spec(type_, **kwargs):
     """type + gitte kwargs, None-verdier droppes (matcher js/ui.js sin
-    normalizeSpec, som selv fyller inn defaults for det som mangler)."""
+    normalizeSpec, som selv fyller inn defaults for det som mangler).
+    Numeriske kwargs (min/max/value/step) koerseres via _scalar, slik at
+    f.eks. `max=df['x'].max()` (numpy-skalar) overlever json.dumps."""
     spec = {"type": type_}
     for k, v in kwargs.items():
+        if k in ("min", "max", "value", "step"):
+            v = _scalar(v)
         if v is not None:
             spec[k] = v
     return spec
@@ -81,7 +101,7 @@ def slider(min=0, max=100, *, value=None, step=1, label=None, name=None, rerun='
                  label=label, name=name, rerun=rerun)
     result = _register(spec)
     if result is None:
-        return value if value is not None else min
+        return _scalar(value) if value is not None else _scalar(min)
     return _num(result)
 
 
@@ -122,16 +142,17 @@ def number(value=0, *, min=None, max=None, step=None, label=None, name=None, rer
                  label=label, name=name, rerun=rerun)
     result = _register(spec)
     if result is None:
-        return value
+        return _scalar(value)
     return _num(result)
 
 
 def text(value='', *, label=None, name=None, rerun='self'):
-    """Tekstfelt. Fallback: value."""
-    spec = _spec("text", value=value, label=label, name=name, rerun=rerun)
+    """Tekstfelt. Fallback: str(value) - returtypen er alltid str
+    (speiler dash.py sin textfield(default=str(default)))."""
+    spec = _spec("text", value=str(value), label=label, name=name, rerun=rerun)
     result = _register(spec)
     if result is None:
-        return value
+        return str(value)
     return str(result)
 
 

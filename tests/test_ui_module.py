@@ -132,6 +132,60 @@ def test_button_live_returnerer_none_uansett(monkeypatch):
     assert mod.button("Kjør") is None
 
 
+# ---- skalar-koersjon + serialiseringsfeil (review-runde 2) ----
+
+class FakeNumpyScalar:
+    """Stub som treffer _scalar-vaktene eksakt (type.__module__ == 'numpy',
+    har .item(), ikke __len__) uten aa avhenge av numpy i testmiljoet."""
+    def __init__(self, v):
+        self._v = v
+
+    def item(self):
+        return self._v
+
+
+FakeNumpyScalar.__module__ = "numpy"
+
+
+def test_slider_numpy_skalar_koerseres_i_spec(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=None)
+    result = mod.slider(FakeNumpyScalar(0), FakeNumpyScalar(200),
+                        value=FakeNumpyScalar(50), step=FakeNumpyScalar(5))
+    spec = fake.calls[-1]   # json.dumps overlevde -> spec ble sendt
+    assert spec["min"] == 0
+    assert spec["max"] == 200
+    assert spec["value"] == 50
+    assert spec["step"] == 5
+    assert result == 50     # fallback: value ble gitt
+
+
+def test_number_ekte_numpy_skalar_koerseres(monkeypatch):
+    np = pytest.importorskip("numpy")
+    mod, fake = _load_ui(monkeypatch, next_result=None)
+    mod.number(np.int64(7), min=np.float64(0.5), max=np.int64(10))
+    spec = fake.calls[-1]
+    assert spec["value"] == 7
+    assert spec["min"] == 0.5
+    assert spec["max"] == 10
+
+
+def test_userialiserbar_value_gir_typeerror_hoyt(monkeypatch):
+    """En value= som json.dumps ikke taaler skal feile HOYT paa live-stien,
+    ikke stille falle tilbake til plain-script-defaulten."""
+    mod, fake = _load_ui(monkeypatch, next_result="42")
+    with pytest.raises(TypeError):
+        mod.slider(0, 100, value=object())
+    assert fake.calls == []   # registerControl ble aldri naadd
+
+
+def test_text_fallback_koerserer_til_str(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=None)
+    result = mod.text(value=123)
+    assert result == "123"
+    assert isinstance(result, str)
+    assert fake.calls[-1]["value"] == "123"   # str ogsaa i selve specen
+
+
 # ---- (d) dropdown med tomt options skal feile tydelig ----
 
 def test_dropdown_tomt_options_gir_valueerror(monkeypatch):
