@@ -48,16 +48,12 @@
       return { spec: null, warnings: warnings };
     }
 
-    // Sjekk for ukjente nøkler
+    // Ukjente nøkler: advar og ignorer (speiler cells.js parseHeader) —
+    // spec bygges videre uten dem, aldri feil.
     for (var key in raw) {
       if (raw.hasOwnProperty(key) && !VALID_KEYS[key]) {
         warnings.push('ukjent nøkkel: ' + key);
       }
-    }
-
-    // Hvis det finnes ukjente nøkler, returner null
-    if (warnings.length > 0) {
-      return { spec: null, warnings: warnings };
     }
 
     var type = raw.type;
@@ -82,10 +78,19 @@
 
     // Type-spesifikk normalisering
     if (type === 'slider') {
-      var min = raw.min !== undefined ? +raw.min : 0;
-      var max = raw.max !== undefined ? +raw.max : 100;
-      var step = raw.step !== undefined ? +raw.step : 1;
-      var value = raw.value !== undefined ? +raw.value : min;
+      var min = raw.min !== undefined ? Number(raw.min) : 0;
+      var max = raw.max !== undefined ? Number(raw.max) : 100;
+      var step = raw.step !== undefined ? Number(raw.step) : 1;
+      // NaN-vakter: ugyldige tall faller tilbake til default + advarsel
+      if (isNaN(min)) { warnings.push('ugyldig min for slider: ' + raw.min); min = 0; }
+      if (isNaN(max)) { warnings.push('ugyldig max for slider: ' + raw.max); max = 100; }
+      if (isNaN(step)) { warnings.push('ugyldig step for slider: ' + raw.step); step = 1; }
+      if (min > max) {
+        warnings.push('slider: min > max — byttet om');
+        var tmp = min; min = max; max = tmp;
+      }
+      var value = raw.value !== undefined ? Number(raw.value) : min;
+      if (isNaN(value)) { warnings.push('ugyldig value for slider: ' + raw.value); value = min; }
 
       // Klamp verdi til intervall
       if (value < min) value = min;
@@ -116,7 +121,8 @@
       // Konverter til boolean
       spec.value = Boolean(raw.value);
     } else if (type === 'number') {
-      var numVal = raw.value !== undefined ? +raw.value : 0;
+      var numVal = raw.value !== undefined ? Number(raw.value) : 0;
+      if (isNaN(numVal)) { warnings.push('ugyldig value for number: ' + raw.value); numVal = 0; }
       spec.value = numVal;
     } else if (type === 'text') {
       var strVal = raw.value !== undefined ? String(raw.value) : '';
@@ -144,8 +150,5 @@
     module.exports = Ui;
   }
 
-  // ---------- DOM-halvdel (kun browser) ----------
-  if (typeof document !== 'undefined') {
-    // Placeholder for DOM-halvdel, implementert i Task 3
-  }
+  // ---------- DOM-halvdel (kun browser) ---------- (fylles i Task 3)
 })(typeof window !== 'undefined' ? window : global);

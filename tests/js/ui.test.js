@@ -32,6 +32,41 @@ test('normalizeSpec: slider with custom min/max/step/value', () => {
   assert.strictEqual(res.spec.value, 30);
 });
 
+test('normalizeSpec: slider NaN min → defaults + warning', () => {
+  const res = Ui.normalizeSpec({ type: 'slider', min: 'abc' });
+  assert.ok(res.spec);
+  assert.strictEqual(res.spec.min, 0);
+  assert.strictEqual(res.spec.max, 100);
+  assert.strictEqual(res.spec.value, 0);
+  assert.ok(res.warnings.some(w => /ugyldig min/.test(w)));
+});
+
+test('normalizeSpec: slider NaN max → default + warning', () => {
+  const res = Ui.normalizeSpec({ type: 'slider', max: 'xyz' });
+  assert.strictEqual(res.spec.max, 100);
+  assert.ok(res.warnings.some(w => /ugyldig max/.test(w)));
+});
+
+test('normalizeSpec: slider NaN value → min + warning', () => {
+  const res = Ui.normalizeSpec({ type: 'slider', min: 10, max: 50, value: 'nope' });
+  assert.strictEqual(res.spec.value, 10);
+  assert.ok(res.warnings.some(w => /ugyldig value/.test(w)));
+});
+
+test('normalizeSpec: slider min > max → swapped + warning', () => {
+  const res = Ui.normalizeSpec({ type: 'slider', min: 100, max: 0 });
+  assert.ok(res.spec);
+  assert.strictEqual(res.spec.min, 0);
+  assert.strictEqual(res.spec.max, 100);
+  assert.ok(res.warnings.some(w => /min > max/.test(w)));
+});
+
+test('normalizeSpec: number NaN value → 0 + warning', () => {
+  const res = Ui.normalizeSpec({ type: 'number', value: 'notanumber' });
+  assert.strictEqual(res.spec.value, 0);
+  assert.ok(res.warnings.some(w => /ugyldig value/.test(w)));
+});
+
 test('normalizeSpec: dropdown requires options array', () => {
   const res = Ui.normalizeSpec({ type: 'dropdown' });
   assert.strictEqual(res.spec, null);
@@ -124,15 +159,29 @@ test('normalizeSpec: unknown type name in warning', () => {
   assert.ok(res.warnings.some(w => /radio/.test(w)));
 });
 
-test('normalizeSpec: unknown key warns', () => {
+test('normalizeSpec: unknown key warns but spec still built (uten nøkkelen)', () => {
   const res = Ui.normalizeSpec({ type: 'text', unknownKey: 'value' });
-  assert.strictEqual(res.spec, null);
-  assert.ok(res.warnings.some(w => /unknownKey/.test(w) || /ukjent/.test(w)));
+  assert.ok(res.spec, 'spec skal ikke nulles av ukjent nøkkel');
+  assert.strictEqual(res.spec.type, 'text');
+  assert.strictEqual(res.spec.value, '');
+  assert.strictEqual(res.spec.unknownKey, undefined);
+  assert.ok(res.warnings.some(w => /unknownKey/.test(w)));
 });
 
-test('normalizeSpec: multiple unknown keys warn', () => {
+test('normalizeSpec: multiple unknown keys warn, spec beholdes', () => {
   const res = Ui.normalizeSpec({ type: 'text', foo: 1, bar: 2 });
+  assert.ok(res.spec);
+  assert.strictEqual(res.spec.foo, undefined);
+  assert.strictEqual(res.spec.bar, undefined);
   assert.ok(res.warnings.length >= 2);
+});
+
+test('normalizeSpec: unknown key on slider keeps normalized slider spec', () => {
+  const res = Ui.normalizeSpec({ type: 'slider', value: 500, max: 200, bogus: true });
+  assert.ok(res.spec);
+  assert.strictEqual(res.spec.value, 200);
+  assert.strictEqual(res.spec.bogus, undefined);
+  assert.ok(res.warnings.some(w => /bogus/.test(w)));
 });
 
 test('normalizeSpec: rerun defaults to "self"', () => {
