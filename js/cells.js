@@ -311,7 +311,7 @@
       NB.activeFlag = true;
       NB.rawOverride = false;
       if (layout) NB.layout = layout;
-      if (container) container.classList.add('nb-hidden');
+      container.classList.add('nb-hidden');
       if (!NB.root) {
         NB.root = el('div', 'nb-root');
         NB.root.id = 'notebookRoot';
@@ -335,9 +335,21 @@
     C.exit = function (opts) {
       if (opts && opts.raw) NB.rawOverride = true;
       NB.activeFlag = false;
+      // Kansellér en ventende celle-redigerings-debounce: ellers kan den fyre
+      // etter et contentLoaded()→exit og re-serialisere gamle celler over et
+      // ferskt dokument i #scriptInput.
+      if (NB.editTimer) { clearTimeout(NB.editTimer); NB.editTimer = null; }
       if (NB.root) { purge(NB.root); NB.root.hidden = true; }
       var container = document.querySelector('.container');
       if (container) container.classList.remove('nb-hidden');
+      // Speil notatbokens layoutvalg tilbake til den underliggende skript-
+      // visningen, så «Rå tekst» og senere re-inngang stemmer med siste valg.
+      if (NB.layout === 'output') {
+        if (global.mdSetInputHidden) global.mdSetInputHidden(true);
+      } else {
+        if (global.mdSetInputHidden) global.mdSetInputHidden(false);
+        if (global.mdSetLayoutMode) global.mdSetLayoutMode(NB.layout);
+      }
       if (global.updateLineNumbers) global.updateLineNumbers();
       if (global.refreshPlotlyAfterLayout) global.refreshPlotlyAfterLayout();
       updateChip();

@@ -32,6 +32,16 @@ test('parseHeader: attrs — flagg, key=value, sitert verdi', () => {
   assert.strictEqual(s.attrs.speak, 'hei verden');
 });
 
+test('parseHeader: ulukket sitat → advarsel + degradert til mellomrom-splitt, ingen throw', () => {
+  let h;
+  assert.doesNotThrow(() => { h = C.parseHeader('#%% python speak="hei'); });
+  assert.ok(h.warnings.some((w) => /ulukket "/.test(w)), 'advarsel om ulukket sitat mangler');
+  // Degradert parsing: tokeniseringen faller til mellomrom-splitt, så typen
+  // fanges fortsatt og attributtet får den rå (sitatledede) verdien.
+  assert.strictEqual(h.type, 'python');
+  assert.strictEqual(h.attrs.speak, '"hei');
+});
+
 test('parseHeader: advarsler — ukjent nøkkel/flagg/style, ugyldig id', () => {
   assert.match(C.parseHeader('#%% python foo=bar').warnings[0], /ukjent attributt/);
   assert.match(C.parseHeader('#%% python blah').warnings[0], /ukjent flagg/);
