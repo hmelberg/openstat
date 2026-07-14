@@ -47,6 +47,7 @@ class FakeEl {
   remove() { if (this.parentNode) this.parentNode.removeChild(this); }
   addEventListener(ev, fn) { (this._listeners[ev] = this._listeners[ev] || []).push(fn); }
   dispatchEvent(ev) { (this._listeners[ev.type] || []).forEach((fn) => fn(ev)); }
+  focus() { if (global.document) global.document.activeElement = this; }
   set innerHTML(v) { this._html = v; this.children = []; }
   get innerHTML() { return this._html; }
   set textContent(v) { this._text = v; }
@@ -69,9 +70,19 @@ function freshEnv() {
   bodyEl.appendChild(containerEl);
   const wrapEl = new FakeEl('div');
   wrapEl.className = 'code-input-wrap';
+  // Stub for "Restart & kjør alle" (Task 5): klikk-mål index.html eier i det
+  // ekte dokumentet (btnRun) — her bare en klikkbar knapp vi kan observere.
+  const btnRunEl = new FakeEl('button');
+  btnRunEl.id = 'btnRun';
+  let btnRunClicks = 0;
+  btnRunEl.click = () => { btnRunClicks++; };
 
   global.document = {
-    getElementById: (id) => (id === 'scriptInput' ? scriptInputEl : null),
+    getElementById: (id) => {
+      if (id === 'scriptInput') return scriptInputEl;
+      if (id === 'btnRun') return btnRunEl;
+      return null;
+    },
     querySelector: (sel) => {
       if (sel === '.container') return containerEl;
       if (sel === '.code-input-wrap') return wrapEl;
@@ -79,6 +90,7 @@ function freshEnv() {
     },
     querySelectorAll: () => [],
     createElement: (tag) => new FakeEl(tag),
+    activeElement: null,
   };
 
   let intervalCallback = null;
@@ -101,6 +113,8 @@ function freshEnv() {
     scriptInputEl,
     containerEl,
     wrapEl,
+    btnRunEl,
+    getBtnRunClicks: () => btnRunClicks,
     tick() { fakeNow += 1000; if (intervalCallback) intervalCallback(); },
     typeInput(newValue) {
       scriptInputEl.value = newValue;
@@ -445,7 +459,23 @@ function cellParts(containerEl, idx) {
   const nodes = collectNodes(wrap, []);
   const ta = nodes.find((n) => n.tag === 'textarea');
   const out = nodes.find((n) => n.classList && n.classList.contains('nb-output'));
-  return { wrap, ta, out };
+  const input = nodes.find((n) => n.classList && n.classList.contains('nb-input'));
+  const runBtn = nodes.find((n) => n.tag === 'button' && n.classList && n.classList.contains('nb-runbtn'));
+  return { wrap, ta, out, input, runBtn };
+}
+
+// .nb-bar (Task 5): sesjonschip + Restart-knapp lever der, ikke inni en celle.
+function nbBar(containerEl) {
+  const root = nbRoot(containerEl);
+  return root.children.find((n) => n.classList && n.classList.contains('nb-bar'));
+}
+function sessionChipEl(containerEl) {
+  const bar = nbBar(containerEl);
+  return bar && bar.children.find((n) => n.classList && n.classList.contains('nb-session-chip'));
+}
+function restartBtnEl(containerEl) {
+  const bar = nbBar(containerEl);
+  return bar && bar.children.find((n) => n.tag === 'button' && n.classList && n.classList.contains('nb-restart-btn'));
 }
 
 test('runCell: eksplisitt python-celle → riktig payload (kind/cellIdx/nb), rendrer kun i egen slot', async () => {
@@ -594,4 +624,329 @@ test('runCell: {notice} → pre.nb-notice (ikke pre.error) i cellens egen slot (
   assert.ok(noticeNode, 'begrensningsmeldingen skal vises som pre.nb-notice');
   assert.strictEqual(noticeNode.textContent, 'Dashboard-celler krever Kjør alle (fase B2)');
   assert.strictEqual(errNode, undefined, 'skal IKKE rendres som pre.error (den er rød/alarmerende, dette er ikke en feil)');
+});
+
+// ---- Task 5 (fase B1): kjøreknapper, Shift/Ctrl+Enter, stale-markering,
+// sesjonschip + Restart ----------------------------------------------------
+
+function fakeKeydown(overrides) {
+  return Object.assign({
+    type: 'keydown', key: 'Enter', shiftKey: false, ctrlKey: false, metaKey: false,
+    _prevented: false,
+    preventDefault() { this._prevented = true; },
+  }, overrides);
+}
+
+test('kjøreknapp finnes kun på kode-celler, ikke på md/html/skip', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\n1\n#%% md\nhei\n#%% html\n<b>x</b>\n#%% skip\nx\n';
+  C.init('python');
+  assert.strictEqual(C.active(), true);
+
+  assert.ok(cellParts(containerEl, 0).runBtn, 'python-celle har kjøreknapp');
+  assert.strictEqual(cellParts(containerEl, 1).runBtn, undefined, 'md-celle har INGEN kjøreknapp');
+  assert.strictEqual(cellParts(containerEl, 2).runBtn, undefined, 'html-celle har INGEN kjøreknapp');
+  assert.strictEqual(cellParts(containerEl, 3).runBtn, undefined, 'skip-celle har INGEN kjøreknapp');
+});
+
+test('kjøreknapp-klikk kaller C.runCell(idx)', async () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 1\n#%% python\na + 1\n';
+  C.init('python');
+
+  let calledIdx = null;
+  global.mdIsScriptRunning = () => false;
+  global.mdRunNotebookCell = (payload) => { calledIdx = payload.cellIdx; return Promise.resolve({ text: '2' }); };
+
+  const cell1 = cellParts(containerEl, 1);
+  cell1.runBtn.dispatchEvent({ type: 'click' });
+  assert.strictEqual(calledIdx, 1);
+});
+
+test('Shift+Enter i cellens tekstfelt: preventDefault, kjører cellen og flytter fokus til NESTE kode-celle', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 1\n#%% md\nhei\n#%% python\na + 1\n';
+  C.init('python');
+
+  let calledIdx = null;
+  global.mdIsScriptRunning = () => false;
+  global.mdRunNotebookCell = (payload) => { calledIdx = payload.cellIdx; return Promise.resolve({ text: '2' }); };
+
+  const cell0 = cellParts(containerEl, 0);
+  const cell2 = cellParts(containerEl, 2); // md-cellen (idx 1) hoppes over
+
+  const ev = fakeKeydown({ shiftKey: true });
+  cell0.ta.dispatchEvent(ev);
+
+  assert.strictEqual(ev._prevented, true, 'Shift+Enter skal prevente default (linjeskift)');
+  assert.strictEqual(calledIdx, 0, 'runCell(0) skal ha kjørt');
+  assert.strictEqual(global.document.activeElement, cell2.ta,
+    'fokus hopper over md-cellen til NESTE kode-celle (idx 2)');
+});
+
+test('Shift+Enter i SISTE celle: kjører, men beholder fokus (ingen auto-opprettet halecelle i fase B1)', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 1\n';
+  C.init('python');
+  global.mdIsScriptRunning = () => false;
+  global.mdRunNotebookCell = () => Promise.resolve({ text: '1' });
+
+  const cell0 = cellParts(containerEl, 0);
+  global.document.activeElement = cell0.ta; // simuler at brukeren allerede står der
+
+  cell0.ta.dispatchEvent(fakeKeydown({ shiftKey: true }));
+  assert.strictEqual(global.document.activeElement, cell0.ta, 'ingen neste kode-celle → fokus urørt');
+});
+
+test('Ctrl+Enter kjører PÅ STEDET (ingen fokus-flytting)', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 1\n#%% python\na + 1\n';
+  C.init('python');
+
+  let calledIdx = null;
+  global.mdIsScriptRunning = () => false;
+  global.mdRunNotebookCell = (payload) => { calledIdx = payload.cellIdx; return Promise.resolve({ text: '2' }); };
+
+  const cell0 = cellParts(containerEl, 0);
+  const cell1 = cellParts(containerEl, 1);
+
+  const ev = fakeKeydown({ ctrlKey: true });
+  cell0.ta.dispatchEvent(ev);
+
+  assert.strictEqual(ev._prevented, true, 'Ctrl+Enter skal prevente default');
+  assert.strictEqual(calledIdx, 0, 'runCell(0) — kjøres på stedet');
+  assert.notStrictEqual(global.document.activeElement, cell1.ta, 'fokus skal IKKE flyttes til neste celle');
+});
+
+test('vanlig Enter (uten shift/ctrl/cmd) er upåvirket: ingen preventDefault, ingen kjøring', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 1\n';
+  C.init('python');
+
+  let called = false;
+  global.mdIsScriptRunning = () => false;
+  global.mdRunNotebookCell = () => { called = true; return Promise.resolve({ text: '1' }); };
+
+  const cell0 = cellParts(containerEl, 0);
+  const ev = fakeKeydown({});
+  cell0.ta.dispatchEvent(ev);
+
+  assert.strictEqual(ev._prevented, false, 'vanlig Enter skal ALDRI prevente default (linjeskift i cellen)');
+  assert.strictEqual(called, false, 'vanlig Enter skal ikke trigge en kjøring');
+});
+
+test('stale-markering: ingen tint før første kjøring; redigering etter vellykket kjøring markerer .nb-stale; ny vellykket kjøring fjerner den', async () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 1\n';
+  C.init('python');
+  global.mdIsScriptRunning = () => false;
+  global.mdRunNotebookCell = () => Promise.resolve({ text: '1' });
+
+  const cell0 = cellParts(containerEl, 0);
+
+  // Redigering FØR noen kjøring har skjedd: ingen stale-tint (ingenting å
+  // mistro ennå — cellen har aldri produsert et resultat).
+  cell0.ta.value = 'a = 2\n';
+  cell0.ta.dispatchEvent({ type: 'input' });
+  assert.strictEqual(cell0.input.classList.contains('nb-stale'), false,
+    'redigering før første kjøring skal ikke markere stale');
+
+  await C.runCell(0);
+  assert.strictEqual(cell0.input.classList.contains('nb-stale'), false, 'rett etter vellykket kjøring: ikke stale');
+
+  cell0.ta.value = 'a = 3\n';
+  cell0.ta.dispatchEvent({ type: 'input' });
+  assert.strictEqual(cell0.input.classList.contains('nb-stale'), true,
+    'redigering etter en vellykket kjøring markerer stale UMIDDELBART (ikke ventet på debounce)');
+
+  await C.runCell(0);
+  assert.strictEqual(cell0.input.classList.contains('nb-stale'), false,
+    'en ny vellykket kjøring fjerner stale-tinten igjen');
+});
+
+test('stale-markering: en FEILET kjøring rører IKKE en eksisterende stale-tint (kun suksess tømmer den)', async () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 1\n';
+  C.init('python');
+  global.mdIsScriptRunning = () => false;
+  global.mdRunNotebookCell = () => Promise.resolve({ text: '1' });
+
+  const cell0 = cellParts(containerEl, 0);
+  await C.runCell(0); // markerer ranOk
+
+  cell0.ta.value = '1/0\n';
+  cell0.ta.dispatchEvent({ type: 'input' });
+  assert.strictEqual(cell0.input.classList.contains('nb-stale'), true);
+
+  global.mdRunNotebookCell = () => Promise.resolve({ error: 'ZeroDivisionError' });
+  await C.runCell(0);
+  assert.strictEqual(cell0.input.classList.contains('nb-stale'), true,
+    'feilet kjøring skal IKKE tømme en eksisterende stale-tint (spec: kun suksess tømmer)');
+});
+
+test('beginRun (Kjør alle-hook) tømmer ALLE stale-tinter — Kjør alle er reset-mekanismen', async () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 1\n#%% python\na + 1\n';
+  C.init('python');
+  global.mdIsScriptRunning = () => false;
+  global.mdRunNotebookCell = () => Promise.resolve({ text: 'ok' });
+
+  const cell0 = cellParts(containerEl, 0);
+  const cell1 = cellParts(containerEl, 1);
+  await C.runCell(0);
+  await C.runCell(1);
+  cell0.ta.value = 'a = 9\n';
+  cell0.ta.dispatchEvent({ type: 'input' });
+  cell1.ta.value = 'a + 9\n';
+  cell1.ta.dispatchEvent({ type: 'input' });
+  assert.strictEqual(cell0.input.classList.contains('nb-stale'), true);
+  assert.strictEqual(cell1.input.classList.contains('nb-stale'), true);
+  // Flush den ekte 250ms-redigeringsdebouncen (uten å trigge en faktisk
+  // kjøring/_afterCellRun som ville rørt stale-tilstanden) — celle 99
+  // finnes ikke, så runCell returnerer tidlig RETT ETTER flushPendingEdit().
+  await C.runCell(99);
+
+  C.beginRun(['pyodide', 'pyodide']);
+
+  assert.strictEqual(cell0.input.classList.contains('nb-stale'), false, 'beginRun tømmer stale for celle 0');
+  assert.strictEqual(cell1.input.classList.contains('nb-stale'), false, 'beginRun tømmer stale for celle 1');
+});
+
+test('full render() (f.eks. contentLoaded-gjeninnlasting) nullstiller stale/ranOk-stempler', async () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 1\n#%% python\na + 1\n';
+  C.init('python');
+  global.mdIsScriptRunning = () => false;
+  global.mdRunNotebookCell = () => Promise.resolve({ text: 'ok' });
+
+  const cell0 = cellParts(containerEl, 0);
+  await C.runCell(0);
+  cell0.ta.value = 'a = 9\n';
+  cell0.ta.dispatchEvent({ type: 'input' });
+  assert.strictEqual(cell0.input.classList.contains('nb-stale'), true, 'stale satt før re-rendring');
+  // Flush den ekte 250ms-redigeringsdebouncen først (unngår en hengende
+  // ekte timer som ellers ville overleve testen) — celle 99 finnes ikke.
+  await C.runCell(99);
+
+  // contentLoaded() på et notatbok-dokument mens notatboken er aktiv kjører
+  // render() på nytt (samme sti nye dokumenter/eksempler/share-lenker
+  // bruker) — en strukturendring er en ærlig reset (se render() i cells.js).
+  C.contentLoaded();
+
+  const freshCell0 = cellParts(containerEl, 0);
+  assert.strictEqual(freshCell0.input.classList.contains('nb-stale'), false,
+    'etter en full re-rendring skal ingen celle vises som stale');
+});
+
+test('kjøreknapper + Restart deaktiveres mens en celle-kjøring pågår, gjenopprettes etter fullført kjøring', async () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 1\n#%% python\na + 1\n';
+  C.init('python');
+
+  let resolveRun;
+  global.mdIsScriptRunning = () => false;
+  global.mdRunNotebookCell = () => new Promise((res) => { resolveRun = res; });
+
+  const cell0 = cellParts(containerEl, 0);
+  const cell1 = cellParts(containerEl, 1);
+  const restartBtn = restartBtnEl(containerEl);
+
+  const p = C.runCell(0);
+  assert.strictEqual(cell0.runBtn.disabled, true, 'den kjørende cellens knapp deaktiveres');
+  assert.strictEqual(cell1.runBtn.disabled, true, 'ALLE kjøreknapper deaktiveres, ikke bare den kjørende cellen sin');
+  assert.strictEqual(restartBtn.disabled, true, 'Restart-knappen deaktiveres også');
+  assert.strictEqual(cell0.input.classList.contains('nb-running'), true, 'kjørende celle får .nb-running');
+  assert.strictEqual(cell1.input.classList.contains('nb-running'), false, 'kun den kjørende cellen får .nb-running');
+
+  resolveRun({ text: '2' });
+  await p;
+
+  assert.strictEqual(cell0.runBtn.disabled, false);
+  assert.strictEqual(cell1.runBtn.disabled, false);
+  assert.strictEqual(restartBtn.disabled, false);
+  assert.strictEqual(cell0.input.classList.contains('nb-running'), false, '.nb-running fjernes i finally');
+});
+
+test('render() setter kjøreknapper som disabled fra start hvis mdIsScriptRunning() allerede er true', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  global.mdIsScriptRunning = () => true;
+  scriptInputEl.value = '#%% python\n1\n';
+  C.init('python');
+
+  const cell0 = cellParts(containerEl, 0);
+  const restartBtn = restartBtnEl(containerEl);
+  assert.strictEqual(cell0.runBtn.disabled, true, 'render()-tidens sjekk av mdIsScriptRunning() deaktiverer knappen');
+  assert.strictEqual(restartBtn.disabled, true);
+});
+
+test('sesjonschip: viser kjøretid + kald/aktiv fra mdNotebookSession, oppdateres via onStateChange', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  let live = false;
+  let stateCb = null;
+  global.mdNotebookSession = {
+    runtime: () => 'python',
+    isLive: () => live,
+    onStateChange: (cb) => { stateCb = cb; },
+    restart: () => Promise.resolve(),
+  };
+  scriptInputEl.value = '#%% python\n1\n';
+  C.init('python');
+
+  const chip = sessionChipEl(containerEl);
+  assert.ok(chip.textContent.indexOf('python') !== -1, 'chip viser kjøretidsnavn');
+  assert.ok(chip.textContent.indexOf('kald') !== -1, 'kald ved isLive()===false');
+  assert.strictEqual(chip.classList.contains('nb-session-live'), false);
+
+  live = true;
+  assert.ok(typeof stateCb === 'function', 'onStateChange skal ha registrert en callback');
+  stateCb(true);
+
+  assert.ok(chip.textContent.indexOf('aktiv') !== -1, 'chip oppdateres til aktiv via onStateChange-kallet');
+  assert.strictEqual(chip.classList.contains('nb-session-live'), true);
+
+  delete global.mdNotebookSession;
+});
+
+test('sesjonschip: window.mdNotebookSession fraværende (stub-DOM) → viser dokumentmodus, ingen krasj', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  delete global.mdNotebookSession;
+  scriptInputEl.value = '#%% python\n1\n';
+  C.init('python');
+
+  const chip = sessionChipEl(containerEl);
+  assert.ok(chip, 'chip-elementet finnes selv uten mdNotebookSession');
+  assert.ok(chip.textContent.indexOf('python') !== -1, 'faller tilbake til dokumentmodus som kjøretidsnavn');
+});
+
+test('Restart & kjør alle: kaller mdNotebookSession.restart() og deretter btnRun.click()', async () => {
+  const { C, scriptInputEl, containerEl, getBtnRunClicks } = freshEnv();
+  let restarted = false;
+  global.mdNotebookSession = {
+    runtime: () => 'python',
+    isLive: () => true,
+    onStateChange: () => {},
+    restart: () => { restarted = true; return Promise.resolve(); },
+  };
+  scriptInputEl.value = '#%% python\n1\n';
+  C.init('python');
+
+  const restartBtn = restartBtnEl(containerEl);
+  restartBtn.dispatchEvent({ type: 'click' });
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+
+  assert.strictEqual(restarted, true, 'mdNotebookSession.restart() skal ha blitt kalt');
+  assert.strictEqual(getBtnRunClicks(), 1, 'btnRun.click() skal kalles ETTER restart()');
+
+  delete global.mdNotebookSession;
+});
+
+test('Restart & kjør alle: window.mdNotebookSession fraværende → klikk gjør ingenting, ingen krasj (stub-DOM-guard)', () => {
+  const { C, scriptInputEl, containerEl, getBtnRunClicks } = freshEnv();
+  delete global.mdNotebookSession;
+  scriptInputEl.value = '#%% python\n1\n';
+  C.init('python');
+
+  const restartBtn = restartBtnEl(containerEl);
+  assert.doesNotThrow(() => restartBtn.dispatchEvent({ type: 'click' }));
+  assert.strictEqual(getBtnRunClicks(), 0, 'uten sesjon skal btnRun aldri klikkes');
 });

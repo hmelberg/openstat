@@ -236,7 +236,13 @@
                rawOverride: false, activeFlag: false, lastSerialized: null,
                plan: [], runSinks: null, runPlan: null, trailing: null, chip: null,
                editTimer: null, pendingFlush: null, tickHandle: null, lastUserInput: 0,
-               lastTickValue: null, lastTickTime: 0, htmlTrusted: true };
+               lastTickValue: null, lastTickTime: 0, htmlTrusted: true,
+               // Fase B1 Task 5: per-celle kjøring — "endret siden sist kjørt"
+               // (stale) og "har kjørt OK minst én gang" (ranOk), keyet på
+               // celleindeks; sesjonschip/Restart-knapp-referanser og en
+               // engangs-vakt for onStateChange-abonnementet.
+               stale: {}, ranOk: {}, sessionChip: null, restartBtn: null,
+               sessionListenerAttached: false };
 
     function $(id) { return document.getElementById(id); }
     function el(tag, cls, text) {
@@ -373,6 +379,10 @@
       NB.lastSerialized = ta.value;
       NB.plan = C.segmentPlan(ta.value, NB.docMode);
       NB.runSinks = null; NB.runPlan = null; NB.trailing = null;
+      // Fase B1 Task 5: struktur-endring er en ærlig reset av stale/ranOk —
+      // cellene under er FRISKE objekter (nettopp parset), gamle stempler
+      // (keyet kun på indeks) ville ellers feste seg til feil innhold.
+      NB.stale = {}; NB.ranOk = {};
       purge(NB.root);
       NB.root.innerHTML = '';
       NB.root.className = 'nb-root nb-layout-' + NB.layout;
@@ -383,8 +393,25 @@
       rawBtn.addEventListener('click', function () { C.exit({ raw: true }); });
       bar.appendChild(rawBtn);
       if (parsed.warnings.length) bar.appendChild(el('span', 'nb-warnings', parsed.warnings.join(' · ')));
+      var sessionChip = el('span', 'nb-session-chip');
+      NB.sessionChip = sessionChip;
+      bar.appendChild(sessionChip);
+      var restartBtn = el('button', 'nb-restart-btn', t('Restart & kjør alle'));
+      restartBtn.type = 'button';
+      restartBtn.title = t('Restart & kjør alle');
+      restartBtn.addEventListener('click', onRestartClick);
+      NB.restartBtn = restartBtn;
+      bar.appendChild(restartBtn);
       NB.root.appendChild(bar);
+      attachSessionListener();
+      updateSessionChip();
       for (var i = 0; i < NB.cells.length; i++) NB.root.appendChild(cellNode(NB.cells[i], i));
+      // Render-tidens engangs-sjekk (poll-fri per Task 5-kontrakten): fanger
+      // et Kjør alle/Forklar-løp som allerede er i gang idet notatboken
+      // (re-)rendres (f.eks. en strukturendring midt i en kjøring) — den
+      // løpende synkroniseringen ellers skjer via setRunningUi (runCell) og
+      // clearAllStale (beginRun), ikke via en ny poll-løkke.
+      setNbButtonsDisabled(!!(global.mdIsScriptRunning && global.mdIsScriptRunning()));
     }
 
     function cellNode(c, idx) {
@@ -399,14 +426,27 @@
       if (c.attrs['hide-output']) wrap.classList.add('nb-hide-output');
 
       var input = el('div', 'nb-input');
+      c._input = input;
       var head = el('div', 'nb-head');
       head.appendChild(el('span', 'nb-type', type + (c.attrs.id ? ' · ' + c.attrs.id : '')));
+      // Kjøreknapp per kode-celle (Task 5): fraværende for md/html/skip
+      // (samme "nonCode"-flagg som resten av cellen bruker).
+      if (!nonCode) {
+        var runBtn = el('button', 'nb-runbtn', '▶');
+        runBtn.type = 'button';
+        runBtn.title = t('Kjør denne cellen');
+        runBtn.addEventListener('click', function () { C.runCell(idx); });
+        head.appendChild(runBtn);
+        c._runBtn = runBtn;
+      }
       input.appendChild(head);
       var ta = el('textarea', 'nb-src');
       ta.value = c.source;
       ta.spellcheck = false;
       ta.addEventListener('input', function () { autoSize(ta); onEdit(idx, ta.value); });
+      ta.addEventListener('keydown', function (ev) { onSrcKeydown(ev, idx); });
       input.appendChild(ta);
+      c._ta = ta;
 
       var out = el('div', 'nb-output');
       if (nonCode && type !== 'skip') {
@@ -479,10 +519,40 @@
       ta.style.height = (ta.scrollHeight + 2) + 'px';
     }
 
+    // Fase B1 Task 5: Shift+Enter = kjør + hopp til NESTE kode-celle (ingen
+    // auto-opprettelse av en hale-celle ennå); Ctrl/Cmd+Enter = kjør på
+    // stedet (fokus urørt). preventDefault KUN for disse to kombinasjonene —
+    // vanlig Enter (linjeskift i cellen) er helt upåvirket.
+    function onSrcKeydown(ev, idx) {
+      if (ev.key !== 'Enter') return;
+      var mod = ev.ctrlKey || ev.metaKey;
+      if (mod) {
+        ev.preventDefault();
+        C.runCell(idx);
+      } else if (ev.shiftKey) {
+        ev.preventDefault();
+        C.runCell(idx);
+        focusNextCodeCell(idx);
+      }
+    }
+
+    // Neste KODE-celle (md/html/skip hoppes over — de har ingen kjørbar
+    // tekstflate å lande fokus i som gir mening her). Siste celle / ingen
+    // flere kode-celler → behold fokus i inneværende (spec: ingen auto-
+    // opprettet hale-celle i fase B1).
+    function focusNextCodeCell(idx) {
+      for (var i = idx + 1; i < NB.cells.length; i++) {
+        var c = NB.cells[i];
+        var type = C.resolveType(c, NB.docMode);
+        if (C.isCodeType(type) && c._ta) { c._ta.focus(); return; }
+      }
+    }
+
     function onEdit(idx, value) {
       var c = NB.cells[idx];
       c.source = value;
       c.hasBody = true;
+      markStaleIfRan(idx);
       if (NB.editTimer) { clearTimeout(NB.editTimer); NB.editTimer = null; }
       // Selve flush-kroppen holdes i en navngitt lukning (NB.pendingFlush) i
       // tillegg til å være setTimeout-callbacken, slik at runCell() kan
@@ -573,6 +643,11 @@
     // når planen ikke matcher — f.eks. ##-markører skrevet manuelt i en celle.
     C.beginRun = function (segmentsOrCount) {
       if (!NB.activeFlag) return null;
+      // Kjør alle/Forklar kjører ALT på nytt (Global Constraints: Restart &
+      // Kjør alle ER reset-mekanismen for stale-tilstand) — enhver beginRun
+      // regnes derfor som en fullstendig frisk kjøring av hver celle, uansett
+      // om et enkelt segment feiler underveis (bevisst forenkling, spec §7).
+      clearAllStale();
       var outs = NB.root.querySelectorAll('.nb-cell .nb-output');
       for (var i = 0; i < outs.length; i++) {
         var cellEl = outs[i].parentNode;
@@ -665,18 +740,122 @@
         nb: { echo: false, last: true },
         cellIdx: idx
       };
+      // Task 5: kjøre-livssyklusen driver BÅDE den kjørende cellens
+      // .nb-running-puls OG deaktivering av ALLE kjøreknapper + Restart —
+      // poll-fritt, symmetrisk start/slutt-par (ingen finally() avhengighet:
+      // begge then-grenene under fullfører alltid uten å kaste videre).
+      setRunningUi(idx, true);
       return global.mdRunNotebookCell(payload).then(function (res) {
         renderCellResult(out, res);
         C._afterCellRun(idx, !(res && res.error));
       }, function (err) {
         renderCellResult(out, { error: (err && err.message) || String(err) });
         C._afterCellRun(idx, false);
+      }).then(function () {
+        setRunningUi(idx, false);
+        updateSessionChip();
       });
     };
 
-    // Task 5 (samme plan) konsumerer dette til å tømme "endret siden sist
-    // kjørt"-tint (.nb-stale) ved suksess — ingen-op inntil videre.
-    C._afterCellRun = function (idx, ok) {};
+    // Tømmer "endret siden sist kjørt"-tint (.nb-stale) ved suksess og
+    // markerer cellen som "har kjørt OK" (senere redigering skal da vise
+    // stale igjen, se markStaleIfRan). Feilet kjøring rører IKKE stale-
+    // tilstanden — spec sier eksplisitt "cleared when that cell later runs
+    // OK", ikke ved feil.
+    C._afterCellRun = function (idx, ok) {
+      if (!ok) return;
+      NB.ranOk[idx] = true;
+      if (NB.stale[idx]) {
+        NB.stale[idx] = false;
+        var c = NB.cells[idx];
+        if (c && c._input) c._input.classList.remove('nb-stale');
+      }
+    };
+
+    function markStaleIfRan(idx) {
+      if (!NB.ranOk[idx] || NB.stale[idx]) return;
+      NB.stale[idx] = true;
+      var c = NB.cells[idx];
+      if (c && c._input) c._input.classList.add('nb-stale');
+    }
+
+    function clearAllStale() {
+      var ranOk = {};
+      for (var i = 0; i < NB.cells.length; i++) {
+        ranOk[i] = true;
+        var c = NB.cells[i];
+        if (c && c._input) c._input.classList.remove('nb-stale');
+      }
+      NB.stale = {};
+      NB.ranOk = ranOk;
+    }
+
+    // Poll-fri knappe-deaktivering (Task 5): flippes fra selve kjøre-
+    // livssyklusen (setRunningUi, kalt av runCell) i tillegg til render()-
+    // tidens engangs-sjekk av mdIsScriptRunning() — Kjør alle/Forklar sin
+    // egen kjøreløkke har ingen tilbakekalls-hake inn i cells.js sin DOM-
+    // halvdel underveis, så et allerede-rendret notatbok-visning som IKKE
+    // re-rendres midt i et Kjør alle-løp forblir uendret (akseptert scope,
+    // se brief).
+    function setNbButtonsDisabled(disabled) {
+      for (var i = 0; i < NB.cells.length; i++) {
+        var c = NB.cells[i];
+        if (c && c._runBtn) c._runBtn.disabled = disabled;
+      }
+      if (NB.restartBtn) NB.restartBtn.disabled = disabled;
+    }
+
+    function setRunningUi(idx, running) {
+      var c = NB.cells[idx];
+      if (c && c._input) c._input.classList.toggle('nb-running', running);
+      setNbButtonsDisabled(running);
+    }
+
+    // Sesjonschip (Task 5): kjøretid + levende/kald fra mdNotebookSession.
+    // Globalen mangler i stub-DOM-testene og kan i prinsippet mangle i
+    // browseren også (defensivt) — vis dokumentmodus og "kald" i stedet for
+    // å kaste.
+    function updateSessionChip() {
+      if (!NB.sessionChip) return;
+      var sess = global.mdNotebookSession;
+      var rt = (sess && typeof sess.runtime === 'function') ? sess.runtime() : null;
+      var live = !!(sess && typeof sess.isLive === 'function' && sess.isLive());
+      var label = rt || NB.docMode;
+      NB.sessionChip.textContent = label + ' ' + (live ? ('● ' + t('aktiv')) : ('○ ' + t('kald')));
+      NB.sessionChip.classList.toggle('nb-session-live', live);
+      NB.sessionChip.classList.toggle('nb-session-cold', !live);
+    }
+
+    // Abonner PRESIS ÉN gang på hele modulets levetid (NB.sessionListenerAttached
+    // er et closure-singleton, som resten av NB) — render() kan kalles mange
+    // ganger (strukturendringer), men mdNotebookSession.onStateChange skal
+    // ikke få flere callbacks stablet opp for hver re-rendring.
+    function attachSessionListener() {
+      if (NB.sessionListenerAttached) return;
+      var sess = global.mdNotebookSession;
+      if (!sess || typeof sess.onStateChange !== 'function') return;
+      NB.sessionListenerAttached = true;
+      sess.onStateChange(function () { updateSessionChip(); });
+    }
+
+    // "Restart & kjør alle": tving en frisk sesjon, deretter samme "Kjør
+    // alle"-knapp som index.html allerede driver (btnRun) — ingen ny
+    // kjørelogikk duplisert her. Guard for window.mdNotebookSession sitt
+    // fravær (stub-DOM-tester, og defensivt i browseren).
+    function onRestartClick() {
+      var sess = global.mdNotebookSession;
+      if (!sess || typeof sess.restart !== 'function') return;
+      setNbButtonsDisabled(true);
+      sess.restart().then(function () {
+        updateSessionChip();
+        setNbButtonsDisabled(!!(global.mdIsScriptRunning && global.mdIsScriptRunning()));
+        var btn = $('btnRun');
+        if (btn) btn.click();
+      }, function () {
+        updateSessionChip();
+        setNbButtonsDisabled(!!(global.mdIsScriptRunning && global.mdIsScriptRunning()));
+      });
+    }
 
     // Rendrer mdRunNotebookCell sitt resultat inn i ÉN celles output-node:
     // purge+innerHTML='' (replace-semantikk) før nytt innhold, akkurat som
