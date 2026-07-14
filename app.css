@@ -1057,7 +1057,12 @@
   border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
 .nb-warnings { font-size: 12px; opacity: .75; }
 .nb-cell { display: grid; gap: 10px; margin-bottom: 12px; border: 1px solid var(--border);
-  border-radius: 6px; padding: 10px; }
+  border-radius: 8px; padding: 10px; position: relative; background: var(--bg-panel);
+  transition: box-shadow .15s ease, border-color .15s ease, background-color .15s ease; }
+.nb-cell:hover { border-color: color-mix(in srgb, var(--accent) 25%, var(--border));
+  box-shadow: 0 2px 6px rgba(0,0,0,.12); }
+.nb-cell:focus-within { border-color: var(--accent);
+  box-shadow: inset 2px 0 0 var(--accent), 0 2px 6px rgba(0,0,0,.12); }
 .nb-layout-columns .nb-cell { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 .nb-layout-columns .nb-cell.nb-noncode,
 .nb-layout-columns .nb-cell.nb-hide-code,
@@ -1065,11 +1070,39 @@
 .nb-layout-stacked .nb-cell { grid-template-columns: 1fr; }
 .nb-layout-output .nb-cell { grid-template-columns: 1fr; border: none; padding: 4px 0; }
 .nb-layout-output .nb-input { display: none; }
+/* Input/output som to soner i ett kort: tynn skillelinje — loddrett i
+   kolonne-layout (side ved side), vannrett i stablet layout (over/under).
+   Utelatt der input er skjult (hide-code/rendered-only) — da er det bare én sone. */
+.nb-layout-columns .nb-cell:not(.nb-noncode):not(.nb-hide-code):not(.nb-rendered-only) > .nb-output {
+  border-left: 1px solid var(--border); padding-left: 10px; }
+.nb-layout-stacked .nb-cell:not(.nb-hide-code):not(.nb-rendered-only) > .nb-output {
+  border-top: 1px solid var(--border); padding-top: 8px; }
 .nb-rendered-only .nb-input { display: none; }
 .nb-hide-code .nb-input { display: none; }
 .nb-hide-output .nb-output { display: none; }
 .nb-skip { opacity: .55; }
 .nb-head { font-size: 11px; opacity: .65; margin-bottom: 4px; }
+/* md/html-celler: roligere type-chip (kun synlig mens kilden redigeres —
+   rendert tilstand skjuler hele .nb-input, se .nb-rendered-only .nb-input over). */
+.nb-noncode .nb-head { opacity: .45; }
+/* Rendrede md/html-celler: nesten rammeløst (Jupyter/Colab-konvensjon) —
+   kun et hint på hover/fokus om at det er en celle. */
+.nb-cell.nb-rendered-only { border-color: transparent; background: transparent; box-shadow: none; }
+.nb-cell.nb-rendered-only:hover {
+  border-color: color-mix(in srgb, var(--border) 70%, transparent); background: var(--bg-panel); }
+.nb-cell.nb-rendered-only:focus-within { border-color: var(--accent); background: var(--bg-panel);
+  box-shadow: inset 2px 0 0 var(--accent); }
+/* Blyant-affordanse: samme handling som dobbeltklikk (se cellNode i cells.js),
+   diskret til man hovrer/fokuserer cellen. */
+.nb-edit-btn { display: none; }
+.nb-rendered-only .nb-edit-btn { display: inline-flex; align-items: center; justify-content: center;
+  position: absolute; top: 6px; right: 8px; width: 22px; height: 22px; padding: 0; z-index: 1;
+  border: 1px solid var(--border); border-radius: 4px; background: var(--bg-panel);
+  color: var(--text-muted); font-size: 13px; line-height: 1; cursor: pointer;
+  opacity: 0; transition: opacity .15s ease; }
+.nb-cell.nb-rendered-only:hover .nb-edit-btn,
+.nb-cell.nb-rendered-only:focus-within .nb-edit-btn { opacity: .6; }
+.nb-edit-btn:hover { opacity: 1 !important; border-color: var(--accent); color: var(--accent); }
 .nb-src { width: 100%; min-height: 1.6em; resize: none; border: 1px solid var(--border);
   border-radius: 4px; background: var(--bg-code); color: inherit;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px;

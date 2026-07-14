@@ -412,10 +412,17 @@
       if (nonCode && type !== 'skip') {
         wrap.classList.add('nb-rendered-only');
         renderNonCode(out, type, c.source);
-        out.addEventListener('dblclick', function () {
+        out.title = t('Dobbeltklikk for å redigere');
+        var enterEdit = function () {
           wrap.classList.remove('nb-rendered-only');
           autoSize(ta); ta.focus();
-        });
+        };
+        out.addEventListener('dblclick', enterEdit);
+        var editBtn = el('button', 'nb-edit-btn', '✎');
+        editBtn.type = 'button';
+        editBtn.title = t('Dobbeltklikk for å redigere');
+        editBtn.addEventListener('click', enterEdit);
+        wrap.appendChild(editBtn);
         ta.addEventListener('blur', function () {
           renderNonCode(out, type, ta.value);
           wrap.classList.add('nb-rendered-only');
