@@ -235,7 +235,7 @@
     var NB = { root: null, cells: [], docMode: 'python', layout: 'columns',
                rawOverride: false, activeFlag: false, lastSerialized: null,
                plan: [], runSinks: null, runPlan: null, trailing: null, chip: null,
-               editTimer: null, tickHandle: null, lastUserInput: 0,
+               editTimer: null, pendingFlush: null, tickHandle: null, lastUserInput: 0,
                lastTickValue: null, lastTickTime: 0, htmlTrusted: true };
 
     function $(id) { return document.getElementById(id); }
@@ -431,6 +431,12 @@
       wrap.appendChild(input);
       wrap.appendChild(out);
       requestAnimationFrame(function () { autoSize(ta); });
+      // Direkte DOM-referanser for enkelt-celle-kjøring (Task 2): runCell(idx)
+      // vet allerede nøyaktig hvilken celle den kjører, så et querySelector-
+      // oppslag mot NB.root (som beginRun/sinkForSegment bruker for segment-
+      // JUSTERT plan-indeksering) er unødvendig her — cellens egen node holdes.
+      c._out = out;
+      c._wrap = wrap;
       return wrap;
     }
 
@@ -477,8 +483,14 @@
       var c = NB.cells[idx];
       c.source = value;
       c.hasBody = true;
-      if (NB.editTimer) clearTimeout(NB.editTimer);
-      NB.editTimer = setTimeout(function () {
+      if (NB.editTimer) { clearTimeout(NB.editTimer); NB.editTimer = null; }
+      // Selve flush-kroppen holdes i en navngitt lukning (NB.pendingFlush) i
+      // tillegg til å være setTimeout-callbacken, slik at runCell() kan
+      // trigge AKKURAT samme logikk synkront (flushPendingEdit) uten å vente
+      // på debouncen — "skriv → kjør" skal alltid kjøre det du nettopp skrev.
+      var doFlush = function () {
+        NB.editTimer = null;
+        NB.pendingFlush = null;
         var ta = $('scriptInput');
         var text = C.serializeCells(NB.cells);
         NB.lastSerialized = text;
@@ -491,7 +503,22 @@
         for (var i = 0; i < lines.length; i++) {
           if (C.isMarkerLine(lines[i])) { render(); return; }
         }
-      }, 250);
+      };
+      NB.pendingFlush = doFlush;
+      NB.editTimer = setTimeout(doFlush, 250);
+    }
+
+    // Kjør cellens ventende redigering (250ms debounce) SYNKRONT — kalt fra
+    // runCell() FØR kjøringen leser #scriptInput, slik at index.html sin
+    // segmentoppløsning (full-dokument, cellIdx → segment) alltid ser den
+    // ferskeste kildeteksten, ikke en som henger igjen til debouncen fyrer.
+    function flushPendingEdit() {
+      if (!NB.editTimer) return;
+      clearTimeout(NB.editTimer);
+      NB.editTimer = null;
+      var fn = NB.pendingFlush;
+      NB.pendingFlush = null;
+      if (fn) fn();
     }
 
     // Én tikker: aktiv → fang programmatiske endringer i #scriptInput
@@ -600,6 +627,85 @@
       }
       return NB.trailing;
     };
+
+    // ---- kjøring: enkelt-celle mot levende sesjon (Task 2, fase B1) ----
+    // Kjør ÉN celle via window.mdRunNotebookCell (sesjon + eksekvering lever
+    // i index.html — cells.js sin DOM-halvdel forblir Pyodide/DuckDB-agnostisk).
+    // Rendrer KUN inn i denne cellens EGEN .nb-output (lagret direkte på
+    // celleobjektet i cellNode) — ingen segment-plan-oppslag trengs her, i
+    // motsetning til beginRun/sinkForSegment (som betjener HELE kjøreløkken
+    // under Kjør alle): vi vet allerede nøyaktig hvilken DOM-node dette er.
+    // "# use"-oppløsning mot full dokumentkontekst skjer i index.html
+    // (forskningsfaktum: use-inferens skanner hele dokumentet) — payload.uses
+    // sendes derfor tom herfra; index.html sin egen segmentoppløsning
+    // (buildDocumentSegments + Cells.segmentPlan/alignPlan på cellIdx) er
+    // autoritativ.
+    C.runCell = function (idx) {
+      flushPendingEdit();
+      if (!NB.activeFlag) return Promise.resolve();
+      var c = NB.cells[idx];
+      if (!c) return Promise.resolve();
+      if (global.mdIsScriptRunning && global.mdIsScriptRunning()) return Promise.resolve();
+      var type = C.resolveType(c, NB.docMode);
+      var kind = C.isCodeType(type) ? KIND_FOR_TYPE[type] : null;
+      if (!kind) {
+        flashHint(c._wrap);
+        return Promise.resolve();
+      }
+      if (typeof global.mdRunNotebookCell !== 'function') return Promise.resolve();
+      var out = c._out;
+      var payload = {
+        kind: kind,
+        text: c.source || '',
+        uses: [],
+        // Eksplisitt celle (spec §4 "Display policy"): echo av, kun siste
+        // uttrykk vises — index.html overstyrer/dropper dette selv når
+        // dokumentet har '#options.display = all' (leses fra HELE dokumentet,
+        // aldri fra cellen).
+        nb: { echo: false, last: true },
+        cellIdx: idx
+      };
+      return global.mdRunNotebookCell(payload).then(function (res) {
+        renderCellResult(out, res);
+        C._afterCellRun(idx, !(res && res.error));
+      }, function (err) {
+        renderCellResult(out, { error: (err && err.message) || String(err) });
+        C._afterCellRun(idx, false);
+      });
+    };
+
+    // Task 5 (samme plan) konsumerer dette til å tømme "endret siden sist
+    // kjørt"-tint (.nb-stale) ved suksess — ingen-op inntil videre.
+    C._afterCellRun = function (idx, ok) {};
+
+    // Rendrer mdRunNotebookCell sitt resultat inn i ÉN celles output-node:
+    // purge+innerHTML='' (replace-semantikk) før nytt innhold, akkurat som
+    // renderOutput() gjør i index.html — kjørt gjennom window.mdRenderOutput
+    // (samme buildOutputNodes) når den finnes, ellers en ren tekst-fallback
+    // (brukt av node-testene, som ikke stubber mdRenderOutput).
+    function renderCellResult(out, res) {
+      if (!out) return;
+      if (res && res.error) {
+        purge(out);
+        out.innerHTML = '';
+        out.appendChild(el('pre', 'error', res.error));
+      } else if (typeof global.mdRenderOutput === 'function') {
+        global.mdRenderOutput((res && res.text) || '', out);
+      } else {
+        purge(out);
+        out.innerHTML = '';
+        out.textContent = (res && res.text) || '';
+      }
+    }
+
+    // Kort visuelt hint uten kjøring (md/html/skip-celler, ukjente
+    // celletyper): flash-klasse fjernes selv igjen — ingen tilstand å rydde.
+    function flashHint(wrapEl) {
+      if (!wrapEl) return;
+      wrapEl.classList.add('nb-cell-hint');
+      var h = global.setTimeout(function () { wrapEl.classList.remove('nb-cell-hint'); }, 400);
+      if (h && typeof h.unref === 'function') h.unref();
+    }
   })();
 
   global.Cells = C;

@@ -433,3 +433,101 @@ test('C.init slår opp #scriptInput kun én gang (finding 3: gjenbruk referanse)
   C.init('python');
   assert.strictEqual(calls, 1, 'init skal hente #scriptInput én gang, ikke to');
 });
+
+// ---- C.runCell (Task 2: per-celle-kjøring mot levende sesjon, fase B1) ----
+// window.mdRunNotebookCell stubbes her (den ekte implementasjonen lever i
+// index.html — sesjon/Pyodide/DuckDB er utenfor rekkevidde for et node-test).
+
+function cellParts(containerEl, idx) {
+  const root = nbRoot(containerEl);
+  const wrap = root.children.find((n) => n.classList && n.classList.contains('nb-cell') &&
+    n.dataset.idx === String(idx));
+  const nodes = collectNodes(wrap, []);
+  const ta = nodes.find((n) => n.tag === 'textarea');
+  const out = nodes.find((n) => n.classList && n.classList.contains('nb-output'));
+  return { wrap, ta, out };
+}
+
+test('runCell: eksplisitt python-celle → riktig payload (kind/cellIdx/nb), rendrer kun i egen slot', async () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 2\n#%% python\na + 3\n';
+  C.init('python');
+  assert.strictEqual(C.active(), true);
+
+  let capturedPayload = null;
+  global.mdIsScriptRunning = () => false;
+  global.mdRunNotebookCell = (payload) => {
+    capturedPayload = payload;
+    return Promise.resolve({ text: '5' });
+  };
+
+  await C.runCell(1);
+
+  assert.ok(capturedPayload, 'mdRunNotebookCell skal kalles for en kjørbar celle');
+  assert.strictEqual(capturedPayload.kind, 'pyodide');
+  assert.strictEqual(capturedPayload.cellIdx, 1);
+  assert.deepStrictEqual(capturedPayload.nb, { echo: false, last: true });
+
+  const cell0 = cellParts(containerEl, 0);
+  const cell1 = cellParts(containerEl, 1);
+  assert.strictEqual(cell1.out.textContent, '5', 'resultatet rendres i cellens egen slot');
+  assert.strictEqual(cell0.out.textContent, '', 'cell 0 sin slot er urørt av cell 1 sin kjøring');
+});
+
+test('runCell: {error} → pre.error i cellens egen slot', async () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\n1/0\n';
+  C.init('python');
+  global.mdIsScriptRunning = () => false;
+  global.mdRunNotebookCell = () => Promise.resolve({ error: 'ZeroDivisionError' });
+
+  await C.runCell(0);
+
+  const { out } = cellParts(containerEl, 0);
+  const errNode = out.children.find((n) => n.tag === 'pre' && n.classList.contains('error'));
+  assert.ok(errNode, 'feilen skal vises som pre.error');
+  assert.strictEqual(errNode.textContent, 'ZeroDivisionError');
+});
+
+test('runCell: md-celle → ingen-op (mdRunNotebookCell kalles ikke)', async () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% md\nhei\n#%% python\n1\n';
+  C.init('python');
+  let called = false;
+  global.mdIsScriptRunning = () => false;
+  global.mdRunNotebookCell = () => { called = true; return Promise.resolve({ text: '' }); };
+
+  await C.runCell(0);
+  assert.strictEqual(called, false, 'en md-celle skal aldri trigge en kjøring');
+});
+
+test('runCell: nekter mens mdIsScriptRunning() er true (kaller ikke mdRunNotebookCell)', async () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python\n1\n';
+  C.init('python');
+  let called = false;
+  global.mdIsScriptRunning = () => true;
+  global.mdRunNotebookCell = () => { called = true; return Promise.resolve({ text: 'x' }); };
+
+  await C.runCell(0);
+  assert.strictEqual(called, false, 'skal nekte å kjøre mens en annen kjøring pågår');
+});
+
+test('runCell: flusher ventende redigering synkront FØR kjøring (kanonisk #scriptInput oppdatert)', async () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 2\n';
+  C.init('python');
+  const { ta } = cellParts(containerEl, 0);
+  ta.value = 'a = 10\n';
+  ta.dispatchEvent({ type: 'input' }); // starter 250ms-debouncen (ekte timer)
+  assert.strictEqual(scriptInputEl.value, '#%% python\na = 2\n',
+    'debouncen har ikke rukket å fyre ennå — #scriptInput er fortsatt den gamle teksten');
+
+  global.mdIsScriptRunning = () => false;
+  global.mdRunNotebookCell = () => Promise.resolve({ text: '10' });
+
+  await C.runCell(0);
+
+  assert.strictEqual(scriptInputEl.value, '#%% python\na = 10\n',
+    'runCell skal flushe debouncen synkront FØR kjøringen starter');
+});

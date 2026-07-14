@@ -1063,6 +1063,12 @@
   box-shadow: 0 2px 6px rgba(0,0,0,.12); }
 .nb-cell:focus-within { border-color: var(--accent);
   box-shadow: inset 2px 0 0 var(--accent), 0 2px 6px rgba(0,0,0,.12); }
+/* Kort flash (Task 2): md/html/skip-celler og andre celler uten kjørbar
+   kind gir et hint i stedet for å kjøre — ingen egen keyframe, den
+   allerede-eksisterende box-shadow/border-color-transitionen over tar seg
+   av inn/ut når klassen legges til og fjernes igjen etter ~400ms (js/cells.js). */
+.nb-cell.nb-cell-hint { border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent); }
 .nb-layout-columns .nb-cell { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 .nb-layout-columns .nb-cell.nb-noncode,
 .nb-layout-columns .nb-cell.nb-hide-code,

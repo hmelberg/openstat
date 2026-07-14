@@ -2786,9 +2786,16 @@
 
     window.__duck = {
       conn: null,
-      async begin() {
+      // opts.fresh (fase B1, plan 2026-07-14): default true (uendret atferd
+      // for alle eksisterende kallere — Kjør alle, native duckdb-veien).
+      // begin({fresh:false}) hopper over drop-alt-blokken: brukt av per-celle-
+      // kjøring (mdRunNotebookCell) slik at duck-tabeller nå lever på tvers av
+      // CELLE-kjøringer helt til Kjør alle/Restart bygger en fersk økt.
+      async begin(opts) {
         const db = await __ensureDuckDB();
         this.conn = await db.connect();
+        const fresh = !(opts && opts.fresh === false);
+        if (!fresh) return;
         // The DuckDB-WASM database is a persistent singleton, so tables/views
         // created in earlier runs linger in the catalog. Drop them so each run
         // starts clean and the pandas datasets (re-registered below) remain the
@@ -6679,8 +6686,7 @@ for _wl in json.loads(${JSON.stringify(JSON.stringify(loads))}):
         _m2py_mod.M2PY_DEFAULTS['dc_min_affected'] = ${getDcThreshold('dc_min_affected')}
         _m2py_mod.M2PY_DEFAULTS['dc_min_summarize'] = ${getDcThreshold('dc_min_summarize')}
 except Exception:
-    pass
-`;
+    pass`;
     }
 
     function getInterpreterCorePython(catalogArg, pageBase, segmentsStrForInit) {
@@ -6910,7 +6916,10 @@ def _duck_concise(_msg):
             _best = _best[len(_p):].strip()
     return _best
 
-async def _run_duck_sql(_sql):
+async def _run_duck_sql(_sql, _fresh=True):
+    # _fresh=False (fase B1, plan 2026-07-14): per-celle-kjøring — duck-
+    # tabeller lever nå på tvers av CELLE-kjøringer til Kjør alle/Restart
+    # bygger en fersk økt (window.__duck.begin({fresh:false})).
     # DuckDB-only imports are lazy: duckdb_bridge + pyarrow are loaded on demand
     # (only when a #duckdb segment runs), so they must NOT be imported at core
     # top level — that would break every non-DuckDB run with ModuleNotFoundError.
@@ -6951,9 +6960,28 @@ async def _run_duck_sql(_sql):
     _refs = [r for r in _refs if r.lower() not in _created_lower]
     _out = []
     try:
-        await _duck_js.__duck.begin()
+        _duck_opts = _duck_to_js({"fresh": _fresh}, dict_converter=_duck_js.Object.fromEntries)
+        await _duck_js.__duck.begin(_duck_opts)
         try:
+            # fresh=False (per-celle-kjøring): en tidligere celles CREATE TABLE
+            # lever fortsatt i katalogen (begin() droppet ikke) — re-registrer
+            # den IKKE som view fra en pandas-øyeblikksbilde-kopi (CREATE OR
+            # REPLACE VIEW ville da kollidert med den eksisterende TABLEN,
+            # «Existing object … is of type Table»). Bruk den levende tabellen
+            # direkte i stedet; skjevheten mot en evt. FERSKERE pandas-kopi er
+            # akseptert stale-by-design (spec §7 — ingen avhengighetssporing).
+            _existing_lower = set()
+            if not _fresh:
+                try:
+                    _chk = (await _duck_js.__duck.query(
+                        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
+                    )).to_py()
+                    _existing_lower = {str(_n).lower() for _n in (_chk.get("table_name") or [])}
+                except Exception:
+                    _existing_lower = set()
             for _name in _refs:
+                if _name.lower() in _existing_lower:
+                    continue
                 _buf = _duck_db.df_to_parquet_bytes(_datasets[_name])
                 await _duck_js.__duck.registerTable(_name, _duck_to_js(_buf))
             if _sql.strip():
@@ -8506,6 +8534,44 @@ options(width = 200)
     // run has settled before inspecting #outputArea for a `pre.error` node.
     window.mdIsScriptRunning = function () { return scriptRunInProgress; };
 
+    // Dokumentets fulle segment-array (kind + tekst + uses), bygget fra en
+    // allerede direktiv-strippet effectiveScript. Delt av bootNotebookSession
+    // ("Kjør alle") og window.mdRunNotebookCell (per-celle-kjøring, fase B1
+    // Task 2) — begge veiene MÅ bruke akkurat samme normalisering +
+    // parseHybridScript + segment-use-utledning, siden "# use" skannes over
+    // HELE dokumentets segmenter (forskningsfaktum, plan 2026-07-14) og en
+    // per-celle-kjøring uten full-dokument-kontekst ville løst use'ene feil.
+    async function buildDocumentSegments(py, mode, effectiveScript) {
+      const runDefault = currentMode().runDefault || getRunnerDefaultMode();
+      let segments = parseHybridScript(effectiveScript, runDefault);
+      if (segments.length === 0 && effectiveScript.trim()) {
+        segments = [{ kind: runDefault, text: effectiveScript }];
+      }
+      // Notebook prose: top-level bare strings (python) and #' blocks (R)
+      // become markdown embeds, interleaved with output in source order.
+      for (var _si = 0; _si < segments.length; _si++) {
+        var _seg = segments[_si];
+        if (_seg.kind === 'pyodide' && _seg.text) {
+          try {
+            py.globals.set('_np_src', _seg.text);
+            _seg.text = String(await py.runPythonAsync(
+              'import notebook_prose as _np; _np.prep_python_prose(_np_src)'));
+          } catch (e) { console.warn('prep_python_prose:', e); }
+        } else if (_seg.kind === 'r' && _seg.text && window.NotebookLinks) {
+          try { _seg.text = window.NotebookLinks.rProsePrep(_seg.text); }
+          catch (e) { console.warn('rProsePrep:', e); }
+        }
+      }
+      // Segmentnivå-use: trekk use-linjene ut av hver blokk og utled kilder
+      // (kortform henter fra nærmeste foregående blokk med annet språk).
+      if (window.DataDirectives && window.DataDirectives.parseSegmentUses) {
+        var _segUse = window.DataDirectives.parseSegmentUses(segments);
+        if (_segUse.errors.length) throw new Error(_segUse.errors.join('; '));
+        segments = _segUse.segments;
+      }
+      return segments;
+    }
+
     // ── Notatbok-sesjon: boot (fase B1, plan 2026-07-14) ────────────────────
     // Ekstrahert fra btnRun sin python-sti (loads-henting/binding + setupCode-
     // bygging/kjøring, som skaper en FRISK e/_g) slik at "Kjør alle" og
@@ -8545,34 +8611,12 @@ options(width = 200)
           : null;
         const catalogArg = catalogJson !== null ? JSON.stringify(catalogJson) : 'None';
         const pageBase = window.location.href.replace(/[^/]+$/, '');
-        // In Python mode, unmarked code is pyodide; otherwise use the stored runner default
-        const runDefault = currentMode().runDefault || getRunnerDefaultMode();
-        let segments = parseHybridScript(effectiveScript, runDefault);
-        if (segments.length === 0 && effectiveScript.trim()) {
-          segments = [{ kind: runDefault, text: effectiveScript }];
-        }
-        // Notebook prose: top-level bare strings (python) and #' blocks (R)
-        // become markdown embeds, interleaved with output in source order.
-        for (var _si = 0; _si < segments.length; _si++) {
-          var _seg = segments[_si];
-          if (_seg.kind === 'pyodide' && _seg.text) {
-            try {
-              py.globals.set('_np_src', _seg.text);
-              _seg.text = String(await py.runPythonAsync(
-                'import notebook_prose as _np; _np.prep_python_prose(_np_src)'));
-            } catch (e) { console.warn('prep_python_prose:', e); }
-          } else if (_seg.kind === 'r' && _seg.text && window.NotebookLinks) {
-            try { _seg.text = window.NotebookLinks.rProsePrep(_seg.text); }
-            catch (e) { console.warn('rProsePrep:', e); }
-          }
-        }
-        // Segmentnivå-use: trekk use-linjene ut av hver blokk og utled kilder
-        // (kortform henter fra nærmeste foregående blokk med annet språk).
-        if (window.DataDirectives && window.DataDirectives.parseSegmentUses) {
-          var _segUse = window.DataDirectives.parseSegmentUses(segments);
-          if (_segUse.errors.length) throw new Error(_segUse.errors.join('; '));
-          segments = _segUse.segments;
-        }
+        // In Python mode, unmarked code is pyodide; otherwise use the stored runner default.
+        // Segmentbygging (parseHybridScript + notatbok-prose + segment-use) er
+        // ekstrahert til buildDocumentSegments() (fase B1, plan 2026-07-14) slik
+        // at mdRunNotebookCell (per-celle-kjøring) bruker AKKURAT samme vei —
+        // "# use" utledes alltid over HELE dokumentets segmenter (forskningsfaktum).
+        let segments = await buildDocumentSegments(py, activeEditorMode, effectiveScript);
         // If any segment is DuckDB SQL, make sure the bridge module + pyarrow are
         // ready before the Pyodide run loop reaches a #duckdb segment.
         if (segments.some(function (s) { return s.kind === 'duckdb'; })) {
@@ -8656,7 +8700,10 @@ async def _m2py_run_segment(_seg_json):
     elif _k == "duckdb":
         e.sync_datasets_to_globals(_g)
         try:
-            print(await _run_duck_sql(_st))
+            # _cell (satt av JS for per-celle-kjøring, fase B1 Task 2): duck-
+            # tabeller lever da på tvers av celle-kjøringer (fresh=False) —
+            # fraværende _cell (Kjør alle/preambel) → dagens fresh-hver-gang.
+            print(await _run_duck_sql(_st, not bool(_seg.get("_cell"))))
         except Exception as _de:
             print("DuckDB-feil: " + str(_de))
             return "stop"
@@ -8720,11 +8767,151 @@ async def _m2py_run_segment(_seg_json):
         return nbEnsureSession(true);
       },
       isLive: function () { return nbSessionLive; },
-      runtime: function () { return activeEditorMode; },
+      // Klemmer til de fire kjøretidene notatbok-sesjonen faktisk kjenner
+      // (status-chips, Task 5) — en ukjent/fremtidig modusverdi gir null
+      // fremfor å lekke en vilkårlig streng videre til UI-en.
+      runtime: function () {
+        var m = activeEditorMode;
+        return (m === 'python' || m === 'r' || m === 'duckdb' || m === 'microdata') ? m : null;
+      },
       onStateChange: function (cb) {
         if (typeof cb === 'function') nbStateChangeCbs.push(cb);
       },
       reapplySettings: function () { return nbReapplySettings(); }
+    };
+
+    // Eksponert for cells.js sin DOM-halvdel (per-celle-rendring, fase B1
+    // Task 2): samme output-bygging (buildOutputNodes) som appendOutput/
+    // renderOutput bruker internt her, men tilgjengelig utenfor DENNE
+    // closuren — notatbok-cellenes sluk (.nb-output) lever i cells.js.
+    window.mdRenderOutput = function (raw, target) {
+      var asHtml = document.querySelector('input[name="outputMode"]:checked').value === 'html';
+      var suppress = suppressEmbedded.checked;
+      renderOutput(raw, asHtml, suppress, target);
+    };
+
+    // ── Notatbok: per-celle-kjøring mot levende sesjon (fase B1 Task 2,
+    // plan 2026-07-14) ──────────────────────────────────────────────────────
+    // window.mdRunNotebookCell(payload) kjører ÉTT segment (python/duckdb)
+    // fra js/cells.js sin C.runCell(idx). payload = {kind, text, uses, nb,
+    // cellIdx} — cellIdx er den AVGJØRENDE nøkkelen: "# use"-direktiver
+    // skannes over HELE dokumentet (forskningsfaktum), så segmentets `uses`
+    // løses her mot den FULLE segment-arrayen (buildDocumentSegments), ALDRI
+    // mot payload.text/uses alene (cellens isolerte tekst mangler den
+    // konteksten). cellIdx → segment-indeks via Cells.segmentPlan/alignPlan,
+    // samme justeringslogikk btnRun bruker via Cells.beginRun()/sinkForSegment.
+    //
+    // microdata-celler (Task 3) og r-celler i ikke-R-modus-dokumenter
+    // (Task 4 gir full R-per-celle-støtte, inkl. bilder — å prøve å presse
+    // captureR-bilder gjennom denne {text}-kontrakten her ville enten miste
+    // bilder eller kreve en DOM-referanse i payload som ville la
+    // mdRunNotebookCell skrive rett inn i cellens slot og dermed kollidere
+    // med cells.js sin egen purge+skriv-rekkefølge — venter derfor bevisst
+    // til Task 4) gir en tydelig begrensningsmelding i stedet.
+    window.mdRunNotebookCell = async function (payload) {
+      if (scriptRunInProgress) {
+        return { error: t('En kjøring pågår allerede.') };
+      }
+      var kind = payload && payload.kind;
+      if (kind === 'microdata') {
+        return { error: t('Microdata-celler kjøres fra toppen — kommer i neste oppgave') };
+      }
+      if (kind === 'r') {
+        return { error: t('R-celler kjøres per celle i en senere oppgave (fase B1 Task 4) — bruk Kjør alle inntil videre') };
+      }
+      if (kind !== 'pyodide' && kind !== 'duckdb') {
+        return { error: t('Ukjent celletype: {kind}', { kind: String(kind) }) };
+      }
+      scriptRunInProgress = true;
+      setRunButtonsUi('running');
+      var py = null;
+      var nbCellStdout = '';
+      var nbCellStderr = '';
+      try {
+        var _sess = await window.mdNotebookSession.ensure();
+        py = _sess.py;
+        await window.mdNotebookSession.reapplySettings();
+        var _mode = activeEditorMode;
+        var rawScript = (window.Cells && window.Cells.active())
+          ? window.Cells.executableSource(scriptInput.value, _mode)
+          : scriptInput.value;
+        var _scriptOpts = extractScriptOptions(rawScript);
+        var effectiveScript = rawScript.replace(/^[ \t]*(?:#|\/\/)[ \t]*options\.[A-Za-z_]\w*[ \t]*=.*$\n?/gm, '');
+        var _displayAll = String(_scriptOpts.display || '').toLowerCase() === 'all';
+        // Segmentoppløsning: samme vei som "Kjør alle" (bootNotebookSession),
+        // så cellens "# use" og #options.* leses fra HELE dokumentet, aldri
+        // fra cellens egen (potensielt ufullstendige) tekst.
+        var segments = await buildDocumentSegments(py, _mode, effectiveScript);
+        if (kind === 'duckdb') {
+          await __ensureDuckBridge(py);
+          try {
+            var _needPa = await py.runPythonAsync('import importlib.util as _iu\n_iu.find_spec("pyarrow") is None');
+            if (_needPa) await py.runPythonAsync('import micropip as _mp\nawait _mp.install("pyarrow")');
+          } catch (e) { console.warn('pyarrow ensure (celle):', e); }
+        }
+        var _cells = (window.Cells.parseCells(scriptInput.value)).cells;
+        var _plan = window.Cells.segmentPlan(scriptInput.value, _mode);
+        var _segmentKinds = segments.map(function (s) { return s.kind; });
+        var _aligned = window.Cells.alignPlan(_plan, _cells, _mode, _segmentKinds);
+        var _segIdx = _aligned ? _aligned.indexOf(payload.cellIdx) : -1;
+        if (_segIdx === -1) {
+          return { error: t('Fant ikke cellens segment i dokumentet (planavvik) — prøv Kjør alle.') };
+        }
+        var targetSeg = segments[_segIdx];
+        // Materialiser blokkens use-kopier inn i python-familien (samme
+        // kilde-logikk som "Kjør alle" sin segmentløkke).
+        for (var _um = 0; _um < (targetSeg.uses || []).length; _um++) {
+          var _u = targetSeg.uses[_um];
+          await _bindUseIntoPy(py, _u.name, await _useBytesFromRuntime(_u));
+        }
+        if (targetSeg.kind === 'pyodide' && !_displayAll) {
+          targetSeg._nb = payload.nb || { echo: false, last: true };
+        }
+        if (targetSeg.kind === 'duckdb') {
+          // duck-tabeller lever nå på tvers av CELLE-kjøringer til Kjør
+          // alle/Restart (window.__duck.begin({fresh:false})).
+          targetSeg._cell = true;
+        }
+        // Gated stdout-akkumulator (forklar-mønster: forklarChunkCapture/
+        // forklarChunkStdout) — her uten gate: wiringen er kall-scoped (satt
+        // rett før kjøringen, gjenopprettet i finally), ingen samtidig lengre
+        // kjøring deler denne callbacken, så et boolsk gate-flagg trengs ikke.
+        if (py && typeof py.setStdout === 'function') {
+          py.setStdout({ batched: function (s) {
+            // Filtrer bort Pyodide/micropip pakke-lastemeldinger (samme filter
+            // som btnRun/Forklar bruker).
+            var f = String(s).split('\n').filter(function (l) {
+              var tt = l.replace(/\s+$/, '');
+              return !(/ already loaded from default channel$/.test(tt)
+                || /^Load(ing|ed) [\w.\-]+(, [\w.\-]+)+$/.test(tt)
+                || /^Load(ing|ed) (statsmodels|matplotlib|patsy|lifelines|linearmodels|autograd|numpy|scipy|pandas)$/.test(tt));
+            }).join('\n');
+            if (f === '' && String(s).trim() !== '') return;
+            nbCellStdout += f + '\n';
+          } });
+        }
+        if (py && typeof py.setStderr === 'function') {
+          py.setStderr({ batched: function (s) { nbCellStderr += s + '\n'; } });
+        }
+        py.globals.set('_m2py_seg_json', JSON.stringify(targetSeg));
+        var rc = await py.runPythonAsync('await _m2py_run_segment(_m2py_seg_json)');
+        if (py && typeof py.setStdout === 'function') py.setStdout();
+        if (py && typeof py.setStderr === 'function') py.setStderr();
+        if (nbCellStderr) console.warn('[stderr]', nbCellStderr.trim());
+        if (rc === 'stop') {
+          return { error: (nbCellStdout || '').trim() || t('Kjøring stoppet.') };
+        }
+        await refreshDatasetSidebarFromPy(py);
+        return { text: (nbCellStdout || '').trim() };
+      } catch (e) {
+        return { error: (e && e.message) ? e.message : String(e) };
+      } finally {
+        if (py && typeof py.setStdout === 'function') py.setStdout();
+        if (py && typeof py.setStderr === 'function') py.setStderr();
+        scriptRunInProgress = false;
+        setRunButtonsUi('idle');
+        if (activeEditorMode === 'duckdb') { refreshDatasetSidebarFromDuck(); }
+      }
     };
 
     btnRun.addEventListener('click', async () => {
