@@ -1,0 +1,25 @@
+# label: Notatbok — celler med #%% (python + markdown)
+#options.mode = python
+#options.title = "Notatbok-celler"
+#options.description = "Celler skilles med #%% — markdown, kode og attrs som hide-code"
+# load https://raw.githubusercontent.com/hmelberg/openstat/main/data/iris.csv as iris
+
+#%% md
+# Iris-notatbok
+Dette dokumentet er en **notatbok**: celler skilles med `#%%`.
+Kolonner-visning legger output ved siden av hver celle; Stablet under;
+Kun output viser bare resultatene. Knappen «Rå tekst» gir vanlig editor.
+
+#%% python
+iris.groupby("species")["sepal_length"].mean()
+
+#%% python hide-code
+iris.describe()
+
+#%% md style=note
+Cellen over har `hide-code` — bare resultatet vises.
+
+#%% md
+▶-knappen på hver kodecelle kjører kun den cellen; Shift+Enter kjører og
+hopper videre, Ctrl/Cmd+Enter kjører på stedet. «Restart & kjør alle»
+nullstiller sesjonen og kjører alt på nytt fra toppen.

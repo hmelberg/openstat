@@ -219,6 +219,12 @@ in that cell's output slot.
 
 ### Display policy ("last line only")
 
+**Moved from Phase B into Phase A** (user decision 2026-07-14, first
+hands-on test): notebook cell output follows notebook conventions — a cell
+shows only its last expression's value, and the `>>>` command echo is OFF
+in notebook runs (reusing the existing `show_commands` mechanism). The
+implicit preamble cell keeps show-all.
+
 Applies to **explicit cells** (those created by a `#%%` header):
 
 - **python / brython / micropython:** the AST walker (index.html ~6815)
@@ -234,7 +240,8 @@ Applies to **explicit cells** (those created by a `#%%` header):
 
 Documents **without markers keep today's show-all REPL behavior.**
 `#options.display = all` opts a marked document back into show-all;
-`#options.display = last` forces last-only for an unmarked script.
+`#options.display = last` (forcing last-only for an unmarked script) is
+**Phase B** — not implemented in Phase A.
 
 ## 5. Output routing (the designated hard part)
 
@@ -261,11 +268,17 @@ run's output rendered into **that cell's slot**. Design:
   and detection hint; "run" is today's whole-document run, with per-cell
   output attribution via the existing JS segment loops (python/duckdb/
   microdata; R falls back to a combined trailing slot if its runner proves
-  single-shot); an example notebook. Independently shippable.
-- **Phase B — per-cell run.** Sessions, hoisted loads, full render-target
-  threading (§5, incl. dashboards/enhancers), per-cell run buttons +
-  keyboard shortcuts, last-expression display flag, Run above/Restart,
-  stale tint, cell toolbar editing operations, skrittvis cell playback.
+  single-shot); an example notebook; and (added 2026-07-14) the notebook
+  display policy — last-expression-only output + `>>>`-echo off in
+  notebook runs. Independently shippable.
+- **Phase B1 — DONE 2026-07-14: sessions, per-cell run (python/duckdb
+  incremental, microdata replay-through, R captureR), run buttons +
+  Shift/Ctrl+Enter, stale tint, session chip, Restart & kjør alle.**
+- **Phase B2 — remaining:** cell toolbar editing operations, skrittvis cell
+  playback, dashboard render-target completion (R dashboard cells per-cell,
+  dash per-slot cleanup), `#options.display=last` for unmarked scripts, R
+  `# use` cross-runtime per-cell; ekte R-sesjonsreset (rm(list=ls()) +
+  DashWebR.reset) ved Restart.
 
 If phase B stalls, phase A remains a shippable feature.
 

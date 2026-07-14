@@ -35,6 +35,7 @@ statement.
 |------|------|
 | `index.html` | The front-end app shell (editor, runners, mode system, settings) + remaining inline modules. |
 | `app.css`, `js/` | Extracted front-end: `app.css` (styles); `js/ai-chat.js`, `js/github-storage.js`, `js/data-directives.js`, `js/data-loader.js`, `js/enc-crypto.js` (classic `<script src>` modules loaded after the inline block, sharing the `window.*` surface). |
+| `js/cells.js` | Notebook cells: `#%%` parsing/serialisering (ren halvdel, node-testet) + celle-rendrer for visningene (spec `docs/superpowers/specs/2026-07-13-notebook-cells-design.md`). |
 | `m2py.py` | The interpreter: `MicroParser` + `MicroInterpreter` (engine, mock-data, stats, disclosure control). |
 | `functions.py` | microdata functions used in generate/replace/if expressions. |
 | `protect.py` | `scrub-*` data-protection verbs (noise, swap, k-anon, risk, …) — a local disclosure-control toolkit you can call on your own scripts; no server involved. |

@@ -574,6 +574,7 @@
   <script src="js/brython-engine.js"></script>
   <script src="js/micropython-engine.js"></script>
   <script src="js/dash.js"></script>
+  <script src="js/cells.js"></script>
   <script src="js/dash-webr.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tabulator-tables@6.3.1/dist/js/tabulator.min.js" defer></script>
@@ -1509,6 +1510,10 @@
           if (window.mdClearOutput) window.mdClearOutput();
           if (window.mdGithubClearCurrent) window.mdGithubClearCurrent();
           if (window.updateLineNumbers) window.updateLineNumbers();
+          // Nytt dokument levert (samme- og kryssmodus): eksplisitt signal så
+          // notatbok-dokumenter auto-åpnes (tick-heuristikken alene ser ikke
+          // kryssmodus-lasting — switchEditorMode resynker basislinjen).
+          if (window.Cells) window.Cells.contentLoaded();
           dropdown.classList.remove('open');
           scriptInput.focus();
           scriptInput.selectionStart = scriptInput.selectionEnd = 0;
@@ -1774,6 +1779,9 @@
           scriptName.value = f.name.replace(/\.txt$/i, '');
           if (window.mdGithubClearCurrent) window.mdGithubClearCurrent();
           if (window.updateLineNumbers) window.updateLineNumbers();
+          // Nytt dokument via Last-menyen: samme innlastingssignal som
+          // eksempler/GitHub — auto-åpner notatbok og invaliderer sesjonen.
+          if (window.Cells) window.Cells.contentLoaded();
         };
         r.readAsText(f);
         fileInput.value = '';
@@ -2781,9 +2789,16 @@
 
     window.__duck = {
       conn: null,
-      async begin() {
+      // opts.fresh (fase B1, plan 2026-07-14): default true (uendret atferd
+      // for alle eksisterende kallere — Kjør alle, native duckdb-veien).
+      // begin({fresh:false}) hopper over drop-alt-blokken: brukt av per-celle-
+      // kjøring (mdRunNotebookCell) slik at duck-tabeller nå lever på tvers av
+      // CELLE-kjøringer helt til Kjør alle/Restart bygger en fersk økt.
+      async begin(opts) {
         const db = await __ensureDuckDB();
         this.conn = await db.connect();
+        const fresh = !(opts && opts.fresh === false);
+        if (!fresh) return;
         // The DuckDB-WASM database is a persistent singleton, so tables/views
         // created in earlier runs linger in the catalog. Drop them so each run
         // starts clean and the pandas datasets (re-registered below) remain the
@@ -3249,6 +3264,10 @@
     function runtimeForMode(id) { return RUNTIME_FOR_MODE[id] || 'pyodide'; }  // ukjent → trygt valg
 
     function switchEditorMode(newMode) {
+      // Notatbok-sesjonen (fase B1) er knyttet til EN modus/dokument-visning;
+      // et modusbytte gjør den levende Python-sesjonen (e/_g) ugyldig — neste
+      // kjøring (Kjør alle eller en fremtidig per-celle-kjøring) booter på nytt.
+      nbSetSessionLive(false);
       // Save departing mode's content and breakpoints
       const si = document.getElementById('scriptInput');
       if (si) editorContent[activeEditorMode] = si.value;
@@ -3259,6 +3278,12 @@
       try { localStorage.setItem('md_editor_mode', newMode); } catch(e) {}
       // Restore new mode
       if (si) si.value = editorContent[newMode];
+      // setDocMode must see the NEW mode, and the tick baseline must be taken
+      // from the RESTORED value — both after the restore above, else the next
+      // tick sees a value change with no input event and misreads this
+      // programmatic restore as a share-link-style injection, auto-entering
+      // the notebook (finding 1). The hint chip decides instead.
+      if (window.Cells) { window.Cells.setDocMode(activeEditorMode); window.Cells.syncTickBaseline(); }
       if (window.setBreakpoints) window.setBreakpoints(editorBP[newMode]);
       if (window.updateLineNumbers) window.updateLineNumbers();
       // Hide autocomplete
@@ -3446,6 +3471,11 @@
         b.addEventListener('click', function () {
           menu.classList.remove('open');
           var v = b.dataset.view;
+          if (window.Cells && window.Cells.active() && v !== 'forklar') {
+            window.Cells.setLayout(v === 'output' ? 'output' : v);
+            setActive(v);
+            return;
+          }
           if (v === 'forklar') {
             // Skrittvis er en KJØRING, ikke en tilstand — ikke endre label.
             var fk = document.getElementById('btnForklar');
@@ -3601,6 +3631,20 @@
     let pyodide = null;
     let pyInterruptBuf = null;
     let scriptRunInProgress = false;
+    // ── Notatbok-sesjon (fase B1, plan 2026-07-14) ──────────────────────
+    // Holder e/_g i live mellom per-celle-kjøringer (senere oppgaver).
+    // "Kjør alle" (btnRun) re-booter alltid ubetinget og markerer deretter
+    // levende; modusbytte og restart() markerer død FØR ny boot.
+    let nbSessionLive = false;
+    let nbStateChangeCbs = [];
+    function nbSetSessionLive(v) {
+      v = !!v;
+      if (v === nbSessionLive) return;
+      nbSessionLive = v;
+      for (var _nsi = 0; _nsi < nbStateChangeCbs.length; _nsi++) {
+        try { nbStateChangeCbs[_nsi](nbSessionLive); } catch (_e) {}
+      }
+    }
     // ── Editor mode (always-on, controlled by bottom-bar dropdown) ──────
     let activeEditorMode  = 'microdata'; // 'microdata' | 'python' | 'r'
     const editorContent   = { microdata: '', python: '', r: '', statx: '', jamovi: '', duckdb: '', brython: '', micropython: '' };
@@ -3661,6 +3705,7 @@
     scriptInput.scrollTop = 0;
     scriptInput.selectionStart = scriptInput.selectionEnd = 0;
     scriptInput.focus();
+    if (window.Cells) window.Cells.init(activeEditorMode);
 
     let pdexplorerReady = false, pdexplorerLoading = false;
     let explainAbortRef = null;
@@ -5750,18 +5795,21 @@ json.dumps(out)
       return frag;
     }
 
-    function renderOutput(raw, asHtml, suppress) {
+    function renderOutput(raw, asHtml, suppress, target) {
+      var host = target || outputArea;
       const frag = buildOutputNodes(raw, asHtml, suppress);
-      purgePlots(outputArea);
-      outputArea.innerHTML = '';
-      outputArea.appendChild(frag);
+      purgePlots(host);
+      host.innerHTML = '';
+      host.appendChild(frag);
     }
 
     // Inkrementell variant: legg nye output-deler til uten å røre det som
-    // allerede er rendret (brukes av den segmentvise kjøringen).
-    function appendOutput(raw, asHtml, suppress) {
+    // allerede er rendret (brukes av den segmentvise kjøringen). Valgfri
+    // `target` (Task 6): notatbok-kjøring rendrer til cellens .nb-output
+    // i stedet for #outputArea; default uendret for alle eksisterende kall.
+    function appendOutput(raw, asHtml, suppress, target) {
       if (!raw || !raw.trim()) return;
-      outputArea.appendChild(buildOutputNodes(raw, asHtml, suppress));
+      (target || outputArea).appendChild(buildOutputNodes(raw, asHtml, suppress));
     }
 
     // Frigjør Plotly-interne ressurser (handlers/WebGL) før innholdet
@@ -5772,6 +5820,7 @@ json.dumps(out)
         try { Plotly.purge(el); } catch (e) {}
       });
     }
+    window.purgePlots = purgePlots;
 
     // ── B1: kopier/last ned enkeltresultater + "kopier alt" ────────────────
     // Generisk post-render-forsterkning: finner resultatblokker inni #outputArea
@@ -5952,17 +6001,25 @@ json.dumps(out)
     // Debounced MutationObserver: fanger opp alle stedene i koden som setter
     // outputArea.innerHTML/appendChild uten at vi må endre hvert enkelt sted.
     // Idempotent via data-copybtn-done, så gjentatte kall er billige no-ops.
+    // Eksponert som window.mdScheduleResultEnhance (Task 6): notatbokens
+    // egen MutationObserver på #notebookRoot (js/cells.js, C.enter) kaller
+    // denne — samme debounce, generalisert til å dekke celle-outputene også.
+    var _resultEnhancePending = null;
+    function scheduleResultEnhance() {
+      if (_resultEnhancePending) clearTimeout(_resultEnhancePending);
+      _resultEnhancePending = setTimeout(function() {
+        _resultEnhancePending = null;
+        attachResultCopyButtons(outputArea);
+        var nbRoot = document.getElementById('notebookRoot');
+        if (nbRoot) attachResultCopyButtons(nbRoot);
+        updateCopyAllResultsVisibility();
+      }, 150);
+    }
+    window.mdScheduleResultEnhance = scheduleResultEnhance;
+
     (function observeOutputAreaForCopyButtons() {
       if (!outputArea || typeof MutationObserver === 'undefined') return;
-      var pending = null;
-      var observer = new MutationObserver(function() {
-        if (pending) clearTimeout(pending);
-        pending = setTimeout(function() {
-          pending = null;
-          attachResultCopyButtons(outputArea);
-          updateCopyAllResultsVisibility();
-        }, 150);
-      });
+      var observer = new MutationObserver(scheduleResultEnhance);
       observer.observe(outputArea, { childList: true, subtree: true });
       attachResultCopyButtons(outputArea);
       updateCopyAllResultsVisibility();
@@ -6619,6 +6676,22 @@ for _wl in json.loads(${JSON.stringify(JSON.stringify(loads))}):
 `;
     }
 
+    // DC-innstillinger (label_format + dc_*-terskler) presset inn i
+    // _m2py_mod.M2PY_DEFAULTS. Ekstrahert (fase B1, plan 2026-07-14) fra
+    // getInterpreterCorePython() sin boot-mal slik at reapplySettings() kan
+    // kjøre AKKURAT samme snutt mot en allerede levende sesjon uten reboot.
+    function buildM2pyDefaultsSnippet() {
+      return `try:
+    if isinstance(getattr(_m2py_mod, 'M2PY_DEFAULTS', None), dict):
+        _m2py_mod.M2PY_DEFAULTS['label_format'] = ${JSON.stringify(getLabelFormat())}
+        _m2py_mod.M2PY_DEFAULTS['dc_min_population'] = ${getDcThreshold('dc_min_population')}
+        _m2py_mod.M2PY_DEFAULTS['dc_tabulate_low_cell'] = ${getDcThreshold('dc_tabulate_low_cell')}
+        _m2py_mod.M2PY_DEFAULTS['dc_min_affected'] = ${getDcThreshold('dc_min_affected')}
+        _m2py_mod.M2PY_DEFAULTS['dc_min_summarize'] = ${getDcThreshold('dc_min_summarize')}
+except Exception:
+    pass`;
+    }
+
     function getInterpreterCorePython(catalogArg, pageBase, segmentsStrForInit) {
       const segAssign = segmentsStrForInit != null
         ? `_segments = json.loads(${JSON.stringify(segmentsStrForInit)})\n`
@@ -6648,15 +6721,7 @@ try:
         _m2py_mod.M2PY_DATA_SOURCE = 'dynamic'
 except Exception:
     _m2py_mod.M2PY_DATA_SOURCE = 'dynamic'
-try:
-    if isinstance(getattr(_m2py_mod, 'M2PY_DEFAULTS', None), dict):
-        _m2py_mod.M2PY_DEFAULTS['label_format'] = ${JSON.stringify(getLabelFormat())}
-        _m2py_mod.M2PY_DEFAULTS['dc_min_population'] = ${getDcThreshold('dc_min_population')}
-        _m2py_mod.M2PY_DEFAULTS['dc_tabulate_low_cell'] = ${getDcThreshold('dc_tabulate_low_cell')}
-        _m2py_mod.M2PY_DEFAULTS['dc_min_affected'] = ${getDcThreshold('dc_min_affected')}
-        _m2py_mod.M2PY_DEFAULTS['dc_min_summarize'] = ${getDcThreshold('dc_min_summarize')}
-except Exception:
-    pass
+${buildM2pyDefaultsSnippet()}
 import __main__
 __main__.micro_interpreter = e
 ${segAssign}_EMBED_S = "__micro_transform_start_"
@@ -6783,10 +6848,14 @@ def _apply_labels_to_globals(_g, _cat):
                         _mapped.where(_mapped.notna(), _v[_col].astype(str)),
                         categories=_cats
                     )
-def _exec_pyodide_block(code, g, show_commands=False):
+def _exec_pyodide_block(code, g, show_commands=False, only_last=False):
     """REPL-style: alle Expr-setninger vises (tabell, Plotly, matplotlib PNG).
     Hvis show_commands=True echoes hver top-level statement med '>>> ' /
-    '... ' foran, sa bruker ser kommandoen rett over outputen den lager."""
+    '... ' foran, sa bruker ser kommandoen rett over outputen den lager.
+    only_last=True (notatbok-celler, spec §4 "Display policy"): kun SISTE
+    topp-nivå Expr-setnings verdi vises (Jupyter-konvensjon) — print()/plot
+    vises som før, uendret. Hver setning evalueres/kjøres i dokumentrekkefølge
+    som i dag; kun visningen endres."""
     code = (code or "").strip()
     if not code:
         return
@@ -6812,7 +6881,12 @@ def _exec_pyodide_block(code, g, show_commands=False):
             return
         if not tree.body:
             return
-        for stmt in tree.body:
+        _last_expr_i = -1
+        if only_last:
+            for _i, _s in enumerate(tree.body):
+                if isinstance(_s, ast.Expr):
+                    _last_expr_i = _i
+        for _i, stmt in enumerate(tree.body):
             try:
                 _src = ast.get_source_segment(code, stmt) or ""
             except Exception:
@@ -6820,7 +6894,7 @@ def _exec_pyodide_block(code, g, show_commands=False):
             _echo(_src)
             if isinstance(stmt, ast.Expr):
                 _v = eval(compile(ast.Expression(stmt.value), "<pyodide>", "eval"), g)
-                if _v is not None:
+                if _v is not None and (not only_last or _i == _last_expr_i):
                     _show_one(_v)
             else:
                 exec(compile(ast.Module(body=[stmt], type_ignores=[]), "<pyodide>", "exec"), g)
@@ -6845,7 +6919,10 @@ def _duck_concise(_msg):
             _best = _best[len(_p):].strip()
     return _best
 
-async def _run_duck_sql(_sql):
+async def _run_duck_sql(_sql, _fresh=True):
+    # _fresh=False (fase B1, plan 2026-07-14): per-celle-kjøring — duck-
+    # tabeller lever nå på tvers av CELLE-kjøringer til Kjør alle/Restart
+    # bygger en fersk økt (window.__duck.begin({fresh:false})).
     # DuckDB-only imports are lazy: duckdb_bridge + pyarrow are loaded on demand
     # (only when a #duckdb segment runs), so they must NOT be imported at core
     # top level — that would break every non-DuckDB run with ModuleNotFoundError.
@@ -6886,9 +6963,28 @@ async def _run_duck_sql(_sql):
     _refs = [r for r in _refs if r.lower() not in _created_lower]
     _out = []
     try:
-        await _duck_js.__duck.begin()
+        _duck_opts = _duck_to_js({"fresh": _fresh}, dict_converter=_duck_js.Object.fromEntries)
+        await _duck_js.__duck.begin(_duck_opts)
         try:
+            # fresh=False (per-celle-kjøring): en tidligere celles CREATE TABLE
+            # lever fortsatt i katalogen (begin() droppet ikke) — re-registrer
+            # den IKKE som view fra en pandas-øyeblikksbilde-kopi (CREATE OR
+            # REPLACE VIEW ville da kollidert med den eksisterende TABLEN,
+            # «Existing object … is of type Table»). Bruk den levende tabellen
+            # direkte i stedet; skjevheten mot en evt. FERSKERE pandas-kopi er
+            # akseptert stale-by-design (spec §7 — ingen avhengighetssporing).
+            _existing_lower = set()
+            if not _fresh:
+                try:
+                    _chk = (await _duck_js.__duck.query(
+                        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
+                    )).to_py()
+                    _existing_lower = {str(_n).lower() for _n in (_chk.get("table_name") or [])}
+                except Exception:
+                    _existing_lower = set()
             for _name in _refs:
+                if _name.lower() in _existing_lower:
+                    continue
                 _buf = _duck_db.df_to_parquet_bytes(_datasets[_name])
                 await _duck_js.__duck.registerTable(_name, _duck_to_js(_buf))
             if _sql.strip():
@@ -6990,6 +7086,9 @@ async def _run_duck_sql(_sql):
         return (l.format === 'parquet' || l.format === 'csv') && l.bytes;
       });
       if (!_supported) return { handled: false, res: _res };
+      // Hybride/notatbok-skript har ##-segmentmarkører som ikke er gyldig SQL —
+      // overlat dem til pyodide-segmentløkken.
+      if (/^\s*(\/\/|##?)\s*(duckdb|duck|sql|python|py|pyodide|r|microdata|micro)\s*$/im.test(script)) return { handled: false, res: null };
       setStatus(ctx.rightStatus, t('Kjører…'));
       // Direktivlinjene er metadata (og «# load» er ikke gyldig SQL) — fjern dem før exec.
       var _sql = script.replace(/^[ \t]*(?:#|--|\/\/)[ \t]*(?:connect|load|require|import|join|create-dataset)\b[^\n]*\n?/gim, '');
@@ -7121,7 +7220,7 @@ async def _run_duck_sql(_sql):
     }
     // Kjører en #r-blokk inne i et python-familie-script: materialiser
     // blokkens uses, kjør via captureR, og legg output/plot rett i outputArea.
-    async function runInlineRSegment(seg) {
+    async function runInlineRSegment(seg, target) {
       if (!webRReady) await loadWebR();
       for (var _iu = 0; _iu < (seg.uses || []).length; _iu++) {
         var _u3 = seg.uses[_iu];
@@ -7135,7 +7234,7 @@ async def _run_duck_sql(_sql):
         .map(function (o) { return String(o.data); }).join('\n');
       if (_lines.trim()) _parts.push({ type: 'text', text: _lines, className: 'm2py-stmt-output' });
       (_cap.images || []).forEach(function (bm) { _parts.push({ type: 'image', bitmap: bm }); });
-      outputArea.appendChild(buildROutputNodes(_parts));
+      (target || outputArea).appendChild(buildROutputNodes(_parts));
     }
 
     // R-motstykket til refreshDatasetSidebarFromPy: sidepanelet var før et
@@ -7504,17 +7603,56 @@ json.dumps(out)
       return frag;
     }
 
-    function renderROutputParts(outputParts) {
-      purgePlots(outputArea);
-      outputArea.innerHTML = '';
-      outputArea.appendChild(buildROutputNodes(outputParts));
+    // Valgfri `target` (Task 7, speiler renderOutput i index.html ~5770):
+    // runHybridR er en samlet single-shot-rendring (alle segmenter bygger én
+    // outputParts-liste, rendret ÉN gang til slutt — se løkka over) — derfor
+    // 2b-grenen (trailing-slot fallback), ikke per-celle-attribusjon.
+    function renderROutputParts(outputParts, target) {
+      var host = target || outputArea;
+      purgePlots(host);
+      host.innerHTML = '';
+      host.appendChild(buildROutputNodes(outputParts));
+    }
+
+    // Konverterer et webRShelter.captureR()-resultat til en outputParts-liste
+    // (samme form som buildROutputNodes/renderROutputParts forventer) —
+    // ekstrahert fra forklarRunOneRBlock (fase B1 Task 4, plan 2026-07-14) slik
+    // at både Forklar og notatbokens R-per-celle-kjøring (runNotebookRCell)
+    // deler NØYAKTIG samme konvertering i stedet for å duplisere den (Task 3-
+    // review flagget duplisering som en fare). Kun stdout tas med her (samme
+    // som forklar-forbildet) — stderr håndteres ikke, i motsetning til
+    // runHybridR/runInlineRSegment sine egne (bevisst separate) varianter.
+    function captureRToOutputParts(captured) {
+      var outputParts = [];
+      // WebR strips trailing \n fra hver linje-entry; join med '\n' ellers
+      // kollapser flerlinje-output (print.data.frame etc.) til en linje.
+      var lines = (captured.output || [])
+        .filter(function (o) { return o.type === 'stdout'; })
+        .map(function (o) { return String(o.data); }).join('\n');
+      if (lines.trim()) outputParts.push({ type: 'text', text: lines, className: 'm2py-stmt-output' });
+      (captured.images || []).forEach(function (bm) { outputParts.push({ type: 'image', bitmap: bm }); });
+      return outputParts;
     }
 
     async function runHybridR(src, py, runOpts) {
       runOpts = runOpts || {};
       var showCommands = runOpts.showCommands !== false; // default true
       if (!webRReady) {
-        outputArea.innerHTML = '<pre class="error">WebR er ikke klar. Vent til R er lastet og pr\u00f8v igjen.</pre>';
+        // Notatbok aktiv (Task 7-oppfølging): #outputArea ligger skjult bak
+        // .nb-hidden — meldingen må til trailing-sloten, ellers ser brukeren
+        // ingenting. En fersk pre APPENDES der (ikke innerHTML-wipe: sloten
+        // kan holde forrige kjørings samlede output); utenfor notatbok
+        // beholdes dagens erstatt-alt-adferd i #outputArea uendret.
+        var _nbEarlyHost = window.Cells && window.Cells.active() && window.Cells.errorHost();
+        var _wrMsg = 'WebR er ikke klar. Vent til R er lastet og pr\u00f8v igjen.';
+        if (_nbEarlyHost) {
+          var _wrPre = document.createElement('pre');
+          _wrPre.className = 'error';
+          _wrPre.textContent = _wrMsg;
+          _nbEarlyHost.appendChild(_wrPre);
+        } else {
+          outputArea.innerHTML = '<pre class="error">' + _wrMsg + '</pre>';
+        }
         setRunButtonsUi('idle');
         scriptRunInProgress = false;
         return;
@@ -7583,6 +7721,14 @@ json.dumps(out)
       var microdataSegs = _rSegsAll.filter(function(s) { return s.kind === 'microdata' && (s.text || '').trim(); });
       var rSegs        = _rSegsAll.filter(function(s) { return s.kind !== 'microdata' && (s.text || '').trim(); });
       var outputParts  = [];
+
+      // Notatbok aktiv (Task 7): tøm forrige kjørings per-celle-output FØR
+      // denne kjøringen begynner å skrive. R-modus bygger ÉN samlet
+      // outputParts-liste og rendrer den ÉN gang til slutt (se
+      // renderROutputParts-kallet nederst) — per-celle-attribusjon er Fase B.
+      // Count 0 er bevisst: matcher aldri NB.plan.length, så sinks forblir
+      // av og alt R-output havner i trailing-sloten (errorHost) i stedet.
+      if (window.Cells && window.Cells.active()) window.Cells.beginRun(0);
 
       // ── Phase 1: run all microdata segments with a shared interpreter ────
       // Runs silently (setup). Datasets exported to WebR as typed tibbles via
@@ -7751,7 +7897,11 @@ json.dumps(out)
         }
       }
 
-      renderROutputParts(outputParts);
+      // Trailing-slot fallback (Task 7, 2b): samlet R-output havner i
+      // notatbokens errorHost-slot nederst når notatbok er aktiv, ellers
+      // uendret i #outputArea.
+      renderROutputParts(outputParts,
+        (window.Cells && window.Cells.active() && window.Cells.errorHost()) || null);
       // dash v2: bygg dashboardet (om noe) etter at tekst-output er rendret.
       // mount() venter på førsterenders i egen Shelter, så purgen under er trygg.
       if (window.DashWebR) {
@@ -8310,14 +8460,21 @@ options(width = 200)
       schedulePrefetchLazyPackages._done = true;
       var pkgs = ['statsmodels', 'matplotlib', 'lifelines', 'linearmodels'];
       var go = function () {
+        // Feilmeldingen går via js.console.warn (ikke print()): print() ville
+        // skrevet til Pyodides delte stdout-strøm, som en samtidig kjøring kan
+        // ha wiret til SIN output-buffer akkurat da denne bakgrunnsoppgaven
+        // (fire-and-forget async, kan vekselkjøre ved en hvilken som helst
+        // await-linje) fyrer — meldingen lekket da inn i en celles/kjørings
+        // output. Dette er ren varmlasting og aldri brukerrettet output
+        // (eksisterende auto-install i run-handleren dekker utelatte pakker).
         py.runPythonAsync(
-          'import micropip, asyncio\n' +
+          'import micropip, asyncio, js\n' +
           'async def _prefetch():\n' +
           '    for p in ' + JSON.stringify(pkgs) + ':\n' +
           '        try:\n' +
           '            await micropip.install(p)\n' +
           '        except Exception as e:\n' +
-          '            print("prefetch", p, "failed:", e)\n' +
+          '            js.console.warn("prefetch", p, "failed:", str(e))\n' +
           'asyncio.ensure_future(_prefetch())\n'
         ).catch(function (e) { console.warn('prefetch failed:', e); });
       };
@@ -8400,12 +8557,610 @@ options(width = 200)
     // run has settled before inspecting #outputArea for a `pre.error` node.
     window.mdIsScriptRunning = function () { return scriptRunInProgress; };
 
+    // Dokumentets fulle segment-array (kind + tekst + uses), bygget fra en
+    // allerede direktiv-strippet effectiveScript. Delt av bootNotebookSession
+    // ("Kjør alle") og window.mdRunNotebookCell (per-celle-kjøring, fase B1
+    // Task 2) — begge veiene MÅ bruke akkurat samme normalisering +
+    // parseHybridScript + segment-use-utledning, siden "# use" skannes over
+    // HELE dokumentets segmenter (forskningsfaktum, plan 2026-07-14) og en
+    // per-celle-kjøring uten full-dokument-kontekst ville løst use'ene feil.
+    // (final-review F7: droppet den tidligere `mode`-parameteren — funksjonen
+    // leste alltid currentMode() internt uansett, og begge kallsteder ga
+    // nettopp den samme aktive modusen, så parameteren var død.)
+    async function buildDocumentSegments(py, effectiveScript) {
+      const runDefault = currentMode().runDefault || getRunnerDefaultMode();
+      let segments = parseHybridScript(effectiveScript, runDefault);
+      if (segments.length === 0 && effectiveScript.trim()) {
+        segments = [{ kind: runDefault, text: effectiveScript }];
+      }
+      // Notebook prose: top-level bare strings (python) and #' blocks (R)
+      // become markdown embeds, interleaved with output in source order.
+      for (var _si = 0; _si < segments.length; _si++) {
+        var _seg = segments[_si];
+        if (_seg.kind === 'pyodide' && _seg.text) {
+          try {
+            py.globals.set('_np_src', _seg.text);
+            _seg.text = String(await py.runPythonAsync(
+              'import notebook_prose as _np; _np.prep_python_prose(_np_src)'));
+          } catch (e) { console.warn('prep_python_prose:', e); }
+        } else if (_seg.kind === 'r' && _seg.text && window.NotebookLinks) {
+          try { _seg.text = window.NotebookLinks.rProsePrep(_seg.text); }
+          catch (e) { console.warn('rProsePrep:', e); }
+        }
+      }
+      // Segmentnivå-use: trekk use-linjene ut av hver blokk og utled kilder
+      // (kortform henter fra nærmeste foregående blokk med annet språk).
+      if (window.DataDirectives && window.DataDirectives.parseSegmentUses) {
+        var _segUse = window.DataDirectives.parseSegmentUses(segments);
+        if (_segUse.errors.length) throw new Error(_segUse.errors.join('; '));
+        segments = _segUse.segments;
+      }
+      return segments;
+    }
+
+    // ── Notatbok-sesjon: boot (fase B1, plan 2026-07-14) ────────────────────
+    // Ekstrahert fra btnRun sin python-sti (loads-henting/binding + setupCode-
+    // bygging/kjøring, som skaper en FRISK e/_g) slik at "Kjør alle" og
+    // window.mdNotebookSession (ensure/restart, brukt av senere per-celle-
+    // kjøring) deler NØYAKTIG samme boot-kode. Kalleren har allerede avgjort
+    // modusforgreningen (duckdb-native fast path, #options.*-parsing,
+    // Pyodide-lasting) FØR dette kalles -- funksjonen booter alltid
+    // ubetinget når den kalles (kalleren styrer om/når). ctx = { py,
+    // activeEditorMode, effectiveScript, duckPreResolved, showCommands }.
+    async function bootNotebookSession(ctx) {
+      var py = ctx.py;
+      var activeEditorMode = ctx.activeEditorMode;
+      var effectiveScript = ctx.effectiveScript;
+      var _duckPreResolved = ctx.duckPreResolved;
+      var _showCmds = ctx.showCommands;
+        var _pyLoads = [];
+        if (activeEditorMode === 'python' || activeEditorMode === 'duckdb') {
+          var _dlDeps = { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey };
+          var _dl = _duckPreResolved || await window.DataLoader.resolveAndFetchLoads(effectiveScript, _dlDeps);
+          var _rawLoads = _dl.loads;
+          if (activeEditorMode === 'duckdb') {
+            var _htmlLoad = _rawLoads.find(function (l) { return l.format === 'html'; });
+            if (_htmlLoad) throw new Error(t('html-kilder støttes ikke i duckdb-modus ({alias}) — bruk python/r', { alias: _htmlLoad.alias }));
+          }
+          // "# use …" håndteres nå på SEGMENTNIVÅ (plan 2026-07-11 i
+          // safestat): use-linjene parses/strippes per blokk og
+          // materialiseres ved blokkgrensen i kjøringsløkka lenger ned.
+          if (_rawLoads.some(function (l) { return l.bytes; })) py.FS.mkdirTree('/home/pyodide/_webdata');
+          _pyLoads = _rawLoads.map(function (l) {
+            var _path = '/home/pyodide/_webdata/' + l.alias + '.' + l.format;
+            py.FS.writeFile(_path, l.bytes);
+            return { alias: l.alias, format: l.format, path: _path };
+          });
+        }
+        const catalogJson = microdataCatalog && microdataCatalog.variables
+          ? JSON.stringify(microdataCatalog.variables)
+          : null;
+        const catalogArg = catalogJson !== null ? JSON.stringify(catalogJson) : 'None';
+        const pageBase = window.location.href.replace(/[^/]+$/, '');
+        // In Python mode, unmarked code is pyodide; otherwise use the stored runner default.
+        // Segmentbygging (parseHybridScript + notatbok-prose + segment-use) er
+        // ekstrahert til buildDocumentSegments() (fase B1, plan 2026-07-14) slik
+        // at mdRunNotebookCell (per-celle-kjøring) bruker AKKURAT samme vei —
+        // "# use" utledes alltid over HELE dokumentets segmenter (forskningsfaktum).
+        let segments = await buildDocumentSegments(py, effectiveScript);
+        // If any segment is DuckDB SQL, make sure the bridge module + pyarrow are
+        // ready before the Pyodide run loop reaches a #duckdb segment.
+        if (segments.some(function (s) { return s.kind === 'duckdb'; })) {
+          setStatus(rightStatus, t('Laster DuckDB-bro…'));
+          await __ensureDuckBridge(py);
+          try {
+            var _needPa = await py.runPythonAsync('import importlib.util as _iu\n_iu.find_spec("pyarrow") is None');
+            if (_needPa) {
+              setStatus(rightStatus, t('Installerer pyarrow…'));
+              await py.runPythonAsync('import micropip as _mp\nawait _mp.install("pyarrow")');
+            }
+          } catch (e) { console.warn('pyarrow ensure:', e); }
+        }
+        const segmentsStr = JSON.stringify(segments);
+        const _dataPreamble = buildWebDataLoaderPreamble(_pyLoads);
+        const setupCode = getInterpreterCorePython(catalogArg, pageBase, segmentsStr) + _dataPreamble + `
+import asyncio as _asyncio
+# ── Statisk datakilde: pre-fetch alle importer via DuckDB-WASM (JS) før kjøring ──
+if getattr(_m2py_mod, 'M2PY_DATA_SOURCE', 'dynamic') == 'static' and getattr(e, 'static_source', None) is not None:
+    import js as _js
+    try:
+        _schemas = (await _js.runStaticSchemas(${JSON.stringify(pageBase)})).to_py()
+        e.static_source.table_columns = {k: set(v) for k, v in _schemas.items()}
+        # Manifest gir limit-planen levende/døde-fordelingen (unit_id-splitten);
+        # uten den faller planen tilbake til kun-levende-grensen.
+        try:
+            _mresp = await _js.fetch(${JSON.stringify(pageBase)} + 'static_data/manifest.json?v=' + ${JSON.stringify(String(window.M2PY_VERSION || '1'))})
+            if _mresp.ok:
+                e.static_source.manifest = json.loads(await _mresp.text())
+        except Exception:
+            pass
+        _plan = e.static_source.plan_sql(${JSON.stringify(effectiveScript)}, ${JSON.stringify(pageBase)}, ${getImportLimit()}, version=${JSON.stringify(String(window.M2PY_VERSION || '1'))})
+        _cache = {}
+        for _q in _plan:
+            try:
+                _cache[_q['key']] = (await _js.runStaticQuery(_q['sql'])).to_py()
+            except Exception:
+                pass
+        e.static_source.set_cache(_cache)
+    except Exception as _pe:
+        print('(static pre-fetch feilet, faller tilbake til generering:', _pe, ')')
+        _m2py_mod.M2PY_DATA_SOURCE = 'dynamic'
+result = None
+async def _m2py_run_segment(_seg_json):
+    # Ett hybrid-segment; "stop" avbryter kjøringen (DuckDB-feil, som før).
+    global result
+    _seg = json.loads(_seg_json)
+    _st = (_seg.get("text") or "").strip()
+    if not _st:
+        return "ok"
+    _k = _seg.get("kind") or "microdata"
+    if _k == "microdata":
+        # run_script(_async) returnerer hele output_log; uten clear her
+        # akkumuleres alle tidligere segmenters output i senere celler
+        # (per-segment attribusjon krever et rent log per segment-kjøring).
+        e.output_log.clear()
+        if hasattr(e, 'run_script_async'):
+            result = await e.run_script_async(_st)
+        else:
+            result = e.run_script(_st)
+        print(result)
+        e.sync_datasets_to_globals(_g)
+        _apply_labels_to_globals(_g, catalog)
+        _g["show"] = show
+        _g["to_microdata"] = to_microdata
+    elif _k == "pyodide":
+        e.sync_datasets_to_globals(_g)
+        _apply_labels_to_globals(_g, catalog)
+        _g["show"] = show
+        _g["to_microdata"] = to_microdata
+        # _nb (satt av JS-segmentløkken, kun for notatbok-celler): overstyrer
+        # echo/only_last per segment — spec §4 "Display policy". Fraværende
+        # _nb (preambel, ikke-notatbok, #options.display=all) → dagens atferd.
+        _nb = _seg.get("_nb") or {}
+        _sc = bool(_nb.get("echo")) if "echo" in _nb else ${_showCmds ? 'True' : 'False'}
+        _exec_pyodide_block(_st, _g, _sc, bool(_nb.get("last")))
+        e.sync_datasets_to_globals(_g)
+        _apply_labels_to_globals(_g, catalog)
+        _g["show"] = show
+        _g["to_microdata"] = to_microdata
+    elif _k == "duckdb":
+        e.sync_datasets_to_globals(_g)
+        try:
+            # _cell (satt av JS for per-celle-kjøring, fase B1 Task 2): duck-
+            # tabeller lever da på tvers av celle-kjøringer (fresh=False) —
+            # fraværende _cell (Kjør alle/preambel) → dagens fresh-hver-gang.
+            print(await _run_duck_sql(_st, not bool(_seg.get("_cell"))))
+        except Exception as _de:
+            print("DuckDB-feil: " + str(_de))
+            return "stop"
+        e.sync_datasets_to_globals(_g)
+        _apply_labels_to_globals(_g, catalog)
+        _g["show"] = show
+        _g["to_microdata"] = to_microdata
+    return "ok"
+`;
+        setStatus(rightStatus, 'Running...');
+        await py.runPythonAsync(setupCode);
+      nbSetSessionLive(true);
+      return { py: py, segments: segments };
+    }
+
+    // Python-sti: kall bootNotebookSession() på nytt hvis sesjonen ikke er
+    // levende (force=true tvinger reboot uansett -- samme som restart()).
+    // Ensure()/restart() beregner sin egen ctx fra DOKUMENTETS nåværende
+    // tilstand (uavhengig av en pågående btnRun-kjøring): ingen duckdb-native
+    // fast path (alltid via Pyodide-DataLoader-veien) og ingen breakpoint-
+    // trunkering (det er et "Kjør alle"-spesifikt konsept).
+    async function nbEnsureSession(force) {
+      // R-modus (final-review F4, minimal variant): denne sesjonen er en
+      // Pyodide-sesjon (e/_g) — R-kjøringer bruker webR direkte og skal ALDRI
+      // få "Restart & kjør alle" til å boote Pyodide. Ekte R-sesjonsreset
+      // (rm(list=ls()) + DashWebR.reset) ved Restart er fase B2 (se spec §6).
+      // MERK: sjekker activeEditorMode === 'r' direkte, IKKE
+      // runtimeForMode(...) !== 'pyodide' — duckdb-modusens notatbok-sesjon
+      // (bootNotebookSession) kaller py.runPythonAsync(setupCode) ubetinget
+      // for duckdb også (loads/#duckdb-bro), så den TRENGER Pyodide selv om
+      // runtimeForMode('duckdb') === 'duckdb' (den betegnelsen gjelder kun
+      // "duckdb-native"-hurtigveien i btnRun, ikke denne delte sesjonen).
+      if (activeEditorMode === 'r') {
+        nbSetSessionLive(false);
+        return { py: null };
+      }
+      if (nbSessionLive && !force) {
+        return { py: await loadPyodideAndM2py() };
+      }
+      var _mode = activeEditorMode;
+      var py = await loadPyodideAndM2py();
+      var rawScript = (window.Cells && window.Cells.active())
+        ? window.Cells.executableSource(scriptInput.value, _mode)
+        : scriptInput.value;
+      var _scriptOpts = extractScriptOptions(rawScript);
+      var effectiveScript = rawScript.replace(/^[ \t]*(?:#|\/\/)[ \t]*options\.[A-Za-z_]\w*[ \t]*=.*$\n?/gm, '');
+      var _showCmds = (typeof _scriptOpts.show_commands === 'boolean')
+        ? _scriptOpts.show_commands
+        : getShowCommandsDefault();
+      var _result = await bootNotebookSession({
+        py: py,
+        activeEditorMode: _mode,
+        effectiveScript: effectiveScript,
+        duckPreResolved: null,
+        showCommands: _showCmds
+      });
+      return { py: _result.py };
+    }
+
+    async function nbReapplySettings() {
+      if (!nbSessionLive) return;
+      var py = await loadPyodideAndM2py();
+      try { await py.runPythonAsync(buildM2pyDefaultsSnippet()); }
+      catch (_e) { console.warn('mdNotebookSession.reapplySettings:', _e); }
+    }
+
+    // Eksponert for senere oppgaver (per-celle-kjøring, sesjonschips, Restart
+    // & kjør alle -- plan 2026-07-14 fase B1, Task 2/5). "Kjør alle" (btnRun)
+    // bruker bootNotebookSession() direkte (uendret atferd); dette objektet
+    // er det NYE, generiske grensesnittet mot samme sesjon.
+    window.mdNotebookSession = {
+      ensure: function (force) { return nbEnsureSession(!!force); },
+      restart: function () {
+        nbSetSessionLive(false);
+        return nbEnsureSession(true);
+      },
+      // Nytt dokument (eksempler, share/GitHub, dyplenker) → gammel sesjon er
+      // ugyldig (fase B1 final-review F1): kalt fra Cells.contentLoaded() FØR
+      // rendring, slik at en celle kjørt i dokument B aldri kan gjenbruke
+      // e/_g/loads booted for dokument A.
+      invalidate: function () { nbSetSessionLive(false); },
+      isLive: function () { return nbSessionLive; },
+      // Klemmer til de fire kjøretidene notatbok-sesjonen faktisk kjenner
+      // (status-chips, Task 5) — en ukjent/fremtidig modusverdi gir null
+      // fremfor å lekke en vilkårlig streng videre til UI-en.
+      runtime: function () {
+        var m = activeEditorMode;
+        return (m === 'python' || m === 'r' || m === 'duckdb' || m === 'microdata') ? m : null;
+      },
+      onStateChange: function (cb) {
+        if (typeof cb === 'function') nbStateChangeCbs.push(cb);
+      },
+      reapplySettings: function () { return nbReapplySettings(); }
+    };
+
+    // Eksponert for cells.js sin DOM-halvdel (per-celle-rendring, fase B1
+    // Task 2): samme output-bygging (buildOutputNodes) som appendOutput/
+    // renderOutput bruker internt her, men tilgjengelig utenfor DENNE
+    // closuren — notatbok-cellenes sluk (.nb-output) lever i cells.js.
+    window.mdRenderOutput = function (raw, target) {
+      var asHtml = document.querySelector('input[name="outputMode"]:checked').value === 'html';
+      var suppress = suppressEmbedded.checked;
+      renderOutput(raw, asHtml, suppress, target);
+    };
+
+    // ── Notatbok: per-celle-kjøring mot levende sesjon (fase B1 Task 2/3,
+    // plan 2026-07-14) ──────────────────────────────────────────────────────
+    // window.mdRunNotebookCell(payload) kjører ÉTT segment (python/duckdb/
+    // microdata) fra js/cells.js sin C.runCell(idx). payload = {kind, text,
+    // uses, nb, cellIdx} — cellIdx er den AVGJØRENDE nøkkelen: "# use"-
+    // direktiver skannes over HELE dokumentet (forskningsfaktum), så
+    // segmentets `uses` løses her mot den FULLE segment-arrayen
+    // (buildDocumentSegments), ALDRI mot payload.text/uses alene (cellens
+    // isolerte tekst mangler den konteksten). cellIdx → segment-indeks via
+    // Cells.segmentPlan/alignPlan, samme justeringslogikk btnRun bruker via
+    // Cells.beginRun()/sinkForSegment.
+    //
+    // microdata-celler (Task 3, spec §4-unntaket "kjør fra toppen gjennom
+    // cellen"): tolkeren (`e`) har INGEN isolert per-celle-eksekvering — den
+    // er en stateful DSL-motor som bygger datasett gradvis (require/create-
+    // dataset/import/generate/…). Sesjonen restartes derfor (fersk e/_g,
+    // speiler forklarReplayChunksBeforeIndex ~9178), og segmentene 0..target
+    // kjøres i dokumentrekkefølge gjennom _m2py_run_segment (samme vei som
+    // "Kjør alle" sin segmentløkke) — kun målsegmentets output fanges og
+    // rendres, tidligere segmenters stdout fanges og forkastes (deres EGNE
+    // sluk i DOM-en er urørt, cells.js skriver kun til målcellens slot).
+    //
+    // r-celler i R-MODUS-dokumenter kjøres nå her under (Task 4) via
+    // runNotebookRCell — EGEN sti, ikke denne python/duckdb/microdata-
+    // grenen: R-modus har ingen Pyodide-sesjon å boote (webRShelter.captureR
+    // kjører direkte mot det levende .GlobalEnv, speiler forklarRunOneRBlock
+    // ~9465-9509), så å kalle mdNotebookSession.ensure()/restart() her ville
+    // unødig boote/restarte en Pyodide-økt R-kjøringen ikke trenger.
+    // r-celler i ikke-R-modus-dokumenter (blandede dokumenter, «## r» inni et
+    // python-modus-dokument) og microdata-celler INNI et R-modus-dokument er
+    // fortsatt utenfor rekkevidde her (spec-notatet i Task 6 avgjør den
+    // blandede stien) — begge gir en tydelig begrensningsmelding
+    // (`{notice}`, IKKE `{error}` — carry-over-poleringen i Task 4: disse skal
+    // vises som en rolig info-boks, ikke som en rød feilmelding).
+    async function runNotebookRCell(payload) {
+      var cellText = (payload && payload.text) || '';
+      // Dashboard-guard (Task 4-kontrakten): dashboard()-celler kan IKKE
+      // kjøres isolert — DashWebR.reset() nullstiller HELE dashboard-
+      // registeret og skal ALDRI kalles fra denne per-celle-stien (i
+      // motsetning til runHybridR sin fulle kjøring, se kommentar der).
+      // Sjekkes FØR webR-beredskap/kjøretilstand — ingen kjøring skjer, så
+      // ingen scriptRunInProgress/knappe-tilstand trengs her.
+      if (/\bdashboard\s*\(/.test(cellText)) {
+        return { notice: t('Dashboard-celler krever Kjør alle (fase B2)') };
+      }
+      // Fase-A-mønsteret (btnRun sin R-modus-vakt, ~9255): sjekk beredskap i
+      // stedet for å blokkere på en 30-60s lasting her — «r»-modusens
+      // onActivate trigger allerede loadWebR() (~3157). Kall den likevel
+      // idempotent (no-op om alt lastes/er lastet) i tilfelle den av en
+      // eller annen grunn ikke er i gang ennå.
+      if (!webRReady && !webRLoading) loadWebR();
+      if (!webRReady) {
+        return { error: t('WebR er ikke klar ennå. Vent og prøv igjen.') };
+      }
+      scriptRunInProgress = true;
+      setRunButtonsUi('running');
+      try {
+        // Pakke-auto-installasjon fra CELLENS EGEN tekst (ikke hele
+        // dokumentet — hver celle installerer det den selv trenger, samme
+        // extractRPackages-funksjon som runHybridR/Forklar bruker).
+        var rPkgs = extractRPackages(cellText);
+        if (rPkgs.length) {
+          setStatus(leftStatus, t('Installerer: {pkgs}…', { pkgs: rPkgs.join(', ') }));
+          try { await webR.installPackages(rPkgs, { quiet: true }); } catch (e) {
+            console.warn('R package install error (celle):', e);
+          }
+          setStatus(leftStatus, t('Klar (R).'));
+        }
+        if (!webRShelter) webRShelter = await new webR.Shelter();
+        var captured = await webRShelter.captureR(cellText, { withAutoprint: true });
+        var outputParts = captureRToOutputParts(captured);
+        await refreshDatasetSidebarFromR();
+        return { rparts: outputParts };
+      } catch (e) {
+        return { error: 'R-feil: ' + ((e && e.message) || String(e)) };
+      } finally {
+        // Frigjør captureR-allokeringene for denne cellen (speiler
+        // forklarRunOneRBlock/runHybridR — uten purge vokser WebR-minnet
+        // monotont for hver celle-kjøring i økten).
+        if (webRShelter) { try { await webRShelter.purge(); } catch (e) {} }
+        scriptRunInProgress = false;
+        setRunButtonsUi('idle');
+      }
+    }
+    window.mdRunNotebookCell = async function (payload) {
+      if (scriptRunInProgress) {
+        return { error: t('En kjøring pågår allerede.') };
+      }
+      var kind = payload && payload.kind;
+      if (kind === 'r') {
+        if (activeEditorMode !== 'r') {
+          return { notice: t('R-celler i ikke-R-modus-dokumenter kjøres foreløpig kun via Kjør alle') };
+        }
+        return runNotebookRCell(payload);
+      }
+      // R-modus: pyodide-sesjonen bootes ikke lenger der (F4-fiksen), så ALLE
+      // ikke-R-kinds får limitation-notis — ellers ville ensure() gitt {py:null}
+      // og en rå TypeError i stedet for den kontraktsfestede meldingen.
+      if (activeEditorMode === 'r') {
+        return { notice: t('Denne celletypen i R-modus kjøres foreløpig kun via Kjør alle (fase B2)') };
+      }
+      if (kind !== 'pyodide' && kind !== 'duckdb' && kind !== 'microdata') {
+        return { error: t('Ukjent celletype: {kind}', { kind: String(kind) }) };
+      }
+      scriptRunInProgress = true;
+      setRunButtonsUi('running');
+      var py = null;
+      var nbCellStdout = '';
+      var nbCellStderr = '';
+      try {
+        // microdata-celler (Task 3, spec §4-unntaket): sesjonen MÅ restartes
+        // (fersk e/_g) — "kjør fra toppen gjennom cellen" er per definisjon
+        // en gjenoppbygging, speiler forklarReplayChunksBeforeIndex (~9178).
+        // pyodide/duckdb-celler beholder den levende sesjonen (ensure uten
+        // force), som før (Task 2).
+        var isMicrodataReplay = (kind === 'microdata');
+        if (isMicrodataReplay) setStatus(rightStatus, t('Kjører fra toppen…'));
+        var _sess = isMicrodataReplay
+          ? await window.mdNotebookSession.restart()
+          : await window.mdNotebookSession.ensure();
+        py = _sess.py;
+        await window.mdNotebookSession.reapplySettings();
+        var _mode = activeEditorMode;
+        var rawScript = (window.Cells && window.Cells.active())
+          ? window.Cells.executableSource(scriptInput.value, _mode)
+          : scriptInput.value;
+        var _scriptOpts = extractScriptOptions(rawScript);
+        var effectiveScript = rawScript.replace(/^[ \t]*(?:#|\/\/)[ \t]*options\.[A-Za-z_]\w*[ \t]*=.*$\n?/gm, '');
+        var _displayAll = String(_scriptOpts.display || '').toLowerCase() === 'all';
+        // Segmentoppløsning: samme vei som "Kjør alle" (bootNotebookSession),
+        // så cellens "# use" og #options.* leses fra HELE dokumentet, aldri
+        // fra cellens egen (potensielt ufullstendige) tekst.
+        var segments = await buildDocumentSegments(py, effectiveScript);
+        if (kind === 'duckdb') {
+          await __ensureDuckBridge(py);
+          try {
+            var _needPa = await py.runPythonAsync('import importlib.util as _iu\n_iu.find_spec("pyarrow") is None');
+            if (_needPa) await py.runPythonAsync('import micropip as _mp\nawait _mp.install("pyarrow")');
+          } catch (e) { console.warn('pyarrow ensure (celle):', e); }
+        }
+        var _cells = (window.Cells.parseCells(scriptInput.value)).cells;
+        var _plan = window.Cells.segmentPlan(scriptInput.value, _mode);
+        var _segmentKinds = segments.map(function (s) { return s.kind; });
+        var _aligned = window.Cells.alignPlan(_plan, _cells, _mode, _segmentKinds);
+        var _segIdx = _aligned ? _aligned.indexOf(payload.cellIdx) : -1;
+        if (_segIdx === -1) {
+          return { error: t('Fant ikke cellens segment i dokumentet (planavvik) — prøv Kjør alle.') };
+        }
+        var targetSeg = segments[_segIdx];
+        if (isMicrodataReplay) {
+          // ── Kjør fra toppen GJENNOM målcellen (spec §4-unntaket) ──────────
+          // Alle segmenter 0..target kjøres i dokumentrekkefølge mot den
+          // nystartede sesjonen (restart over) — samme _m2py_run_segment-vei
+          // som "Kjør alle" sin segmentløkke (~9051). Kun målsegmentets
+          // output fanges og rendres; tidligere segmenters stdout fanges og
+          // FORKASTES (deres egne .nb-output-sluk i DOM-en røres ikke — kun
+          // cells.js sin runCell(idx) skriver til målcellens EGEN slot).
+          if (segments.some(function (s) { return s.kind === 'duckdb'; })) {
+            await __ensureDuckBridge(py);
+            try {
+              var _needPaReplay = await py.runPythonAsync('import importlib.util as _iu\n_iu.find_spec("pyarrow") is None');
+              if (_needPaReplay) await py.runPythonAsync('import micropip as _mp\nawait _mp.install("pyarrow")');
+            } catch (e) { console.warn('pyarrow ensure (kjør fra toppen):', e); }
+          }
+          for (var _ri = 0; _ri <= _segIdx; _ri++) {
+            var _rseg = segments[_ri];
+            var _isTargetSeg = (_ri === _segIdx);
+            // Materialiser blokkens use-kopier inn i python-familien (samme
+            // kilde-logikk som "Kjør alle" sin segmentløkke) — for HVERT
+            // segment i replayen, ikke bare målet (tidligere celler kan ha
+            // sine egne "# use"-direktiver).
+            for (var _rum = 0; _rum < (_rseg.uses || []).length; _rum++) {
+              var _ru = _rseg.uses[_rum];
+              await _bindUseIntoPy(py, _ru.name, await _useBytesFromRuntime(_ru));
+            }
+            if (_isTargetSeg) {
+              if (_rseg.kind === 'pyodide' && !_displayAll) {
+                // Carry-over (Task 2-review): kun EKSPLISITTE celler (ikke en
+                // preambel kjørt alene) får notatbok-visningspolicyen — en
+                // preambel-celle (headerRaw null) skal vise ALT sitt output,
+                // akkurat som "Kjør alle" gjør.
+                var _targetCellForNb = _cells[payload.cellIdx];
+                if (_targetCellForNb && _targetCellForNb.headerRaw !== null) {
+                  _rseg._nb = payload.nb || { echo: false, last: true };
+                }
+              }
+              if (_rseg.kind === 'duckdb') {
+                // duck-tabeller lever nå på tvers av CELLE-kjøringer til Kjør
+                // alle/Restart (window.__duck.begin({fresh:false})).
+                _rseg._cell = true;
+              }
+            }
+            // Gated stdout-akkumulator per replay-segment (samme filter som
+            // btnRun/Forklar bruker) — kall-scoped, gjenopprettet rett under.
+            var _capOut = '';
+            var _capErr = '';
+            if (py && typeof py.setStdout === 'function') {
+              py.setStdout({ batched: function (s) {
+                var f = String(s).split('\n').filter(function (l) {
+                  var tt = l.replace(/\s+$/, '');
+                  return !(/ already loaded from default channel$/.test(tt)
+                    || /^Load(ing|ed) [\w.\-]+(, [\w.\-]+)+$/.test(tt)
+                    || /^Load(ing|ed) (statsmodels|matplotlib|patsy|lifelines|linearmodels|autograd|numpy|scipy|pandas)$/.test(tt));
+                }).join('\n');
+                if (f === '' && String(s).trim() !== '') return;
+                _capOut += f + '\n';
+              } });
+            }
+            if (py && typeof py.setStderr === 'function') {
+              py.setStderr({ batched: function (s) { _capErr += s + '\n'; } });
+            }
+            var _rrc = null;
+            var _rerr = null;
+            try {
+              py.globals.set('_m2py_seg_json', JSON.stringify(_rseg));
+              _rrc = await py.runPythonAsync('await _m2py_run_segment(_m2py_seg_json)');
+            } catch (segE) {
+              _rerr = segE;
+            }
+            if (py && typeof py.setStdout === 'function') py.setStdout();
+            if (py && typeof py.setStderr === 'function') py.setStderr();
+            if (_capErr) console.warn('[stderr]', _capErr.trim());
+            // microdata-DSL-feil ("FEIL:"/oversatt "ERROR:") stopper IKKE
+            // _m2py_run_segment (ikke-fatalt per design, se m2py.py _log) —
+            // egen tekst-skanning her oppdager at en TIDLIGERE celle feilet
+            // under kjøring fra toppen. rc === 'stop' dekker DuckDB-grenen;
+            // ekte unntak (f.eks. en '## python'-celle i dokumentet) dekkes
+            // av try/catch over.
+            var _segFailed = !!_rerr || _rrc === 'stop' ||
+              (_rseg.kind === 'microdata' && /^[ \t]*(FEIL|ERROR):/m.test(_capOut));
+            var _failMsg = _rerr
+              ? ((_rerr && _rerr.message) ? _rerr.message : String(_rerr))
+              : ((_capOut || '').trim() || t('Kjøring stoppet.'));
+            if (_isTargetSeg) {
+              if (_segFailed) return { error: _failMsg };
+              await refreshDatasetSidebarFromPy(py);
+              return { text: (_capOut || '').trim() };
+            }
+            if (_segFailed) {
+              var _failCellIdx = (_aligned && _aligned[_ri] !== undefined) ? _aligned[_ri] : null;
+              var _failCellNum = (_failCellIdx !== null) ? (_failCellIdx + 1) : (_ri + 1);
+              return { error: t('Feil i celle {n} under kjøring fra toppen: {msg}', { n: _failCellNum, msg: _failMsg }) };
+            }
+          }
+          // Uventet: løkken over returnerer alltid via _isTargetSeg-grenen.
+          return { error: t('Intern feil under kjøring fra toppen.') };
+        }
+        // Materialiser blokkens use-kopier inn i python-familien (samme
+        // kilde-logikk som "Kjør alle" sin segmentløkke).
+        for (var _um = 0; _um < (targetSeg.uses || []).length; _um++) {
+          var _u = targetSeg.uses[_um];
+          await _bindUseIntoPy(py, _u.name, await _useBytesFromRuntime(_u));
+        }
+        if (targetSeg.kind === 'pyodide' && !_displayAll) {
+          // Carry-over (Task 2-review): se kommentar i replay-grenen over —
+          // samme EKSPLISITT-sjekk gjelder for enkelt-segment-kjøring også.
+          var _targetCell = _cells[payload.cellIdx];
+          if (_targetCell && _targetCell.headerRaw !== null) {
+            targetSeg._nb = payload.nb || { echo: false, last: true };
+          }
+        }
+        if (targetSeg.kind === 'duckdb') {
+          // duck-tabeller lever nå på tvers av CELLE-kjøringer til Kjør
+          // alle/Restart (window.__duck.begin({fresh:false})).
+          targetSeg._cell = true;
+        }
+        // Gated stdout-akkumulator (forklar-mønster: forklarChunkCapture/
+        // forklarChunkStdout) — her uten gate: wiringen er kall-scoped (satt
+        // rett før kjøringen, gjenopprettet i finally), ingen samtidig lengre
+        // kjøring deler denne callbacken, så et boolsk gate-flagg trengs ikke.
+        if (py && typeof py.setStdout === 'function') {
+          py.setStdout({ batched: function (s) {
+            // Filtrer bort Pyodide/micropip pakke-lastemeldinger (samme filter
+            // som btnRun/Forklar bruker).
+            var f = String(s).split('\n').filter(function (l) {
+              var tt = l.replace(/\s+$/, '');
+              return !(/ already loaded from default channel$/.test(tt)
+                || /^Load(ing|ed) [\w.\-]+(, [\w.\-]+)+$/.test(tt)
+                || /^Load(ing|ed) (statsmodels|matplotlib|patsy|lifelines|linearmodels|autograd|numpy|scipy|pandas)$/.test(tt));
+            }).join('\n');
+            if (f === '' && String(s).trim() !== '') return;
+            nbCellStdout += f + '\n';
+          } });
+        }
+        if (py && typeof py.setStderr === 'function') {
+          py.setStderr({ batched: function (s) { nbCellStderr += s + '\n'; } });
+        }
+        py.globals.set('_m2py_seg_json', JSON.stringify(targetSeg));
+        var rc = await py.runPythonAsync('await _m2py_run_segment(_m2py_seg_json)');
+        if (py && typeof py.setStdout === 'function') py.setStdout();
+        if (py && typeof py.setStderr === 'function') py.setStderr();
+        if (nbCellStderr) console.warn('[stderr]', nbCellStderr.trim());
+        if (rc === 'stop') {
+          return { error: (nbCellStdout || '').trim() || t('Kjøring stoppet.') };
+        }
+        await refreshDatasetSidebarFromPy(py);
+        return { text: (nbCellStdout || '').trim() };
+      } catch (e) {
+        return { error: (e && e.message) ? e.message : String(e) };
+      } finally {
+        if (py && typeof py.setStdout === 'function') py.setStdout();
+        if (py && typeof py.setStderr === 'function') py.setStderr();
+        if (isMicrodataReplay) setStatus(rightStatus, '');
+        scriptRunInProgress = false;
+        setRunButtonsUi('idle');
+        if (activeEditorMode === 'duckdb') { refreshDatasetSidebarFromDuck(); }
+      }
+    };
+
     btnRun.addEventListener('click', async () => {
       if (scriptRunInProgress) {
         performRunInterrupt();
         return;
       }
-      const rawScript = scriptInput.value;
+      // Notatbok aktiv (Task 6): #%%-celler → legacy '## lang'-segmentmarkører
+      // (linjetall bevares, så breakpoint-linjenumre under forblir gyldige).
+      // Gates på active(), IKKE hasMarkers(): med Rå tekst-valget på ser
+      // brukeren ren tekst og får dagens atferd (#%%-linjer er kommentarer).
+      // Bruker-initiert Kjør gir også HTML-tillit: klikk på Kjør kjører uansett
+      // dokumentets kode, som strengt dominerer HTML-rendring (idempotent).
+      if (window.Cells && window.Cells.active()) {
+        if (window.Cells.grantHtmlTrust) window.Cells.grantHtmlTrust();
+      }
+      const rawScript = (window.Cells && window.Cells.active())
+        ? window.Cells.executableSource(scriptInput.value, activeEditorMode)
+        : scriptInput.value;
       // Respekter breakpoint: trunkér script til og med første breakpoint-linje
       let effectiveScript = rawScript;
       if (window.getBreakpoints) {
@@ -8473,6 +9228,9 @@ options(width = 200)
         var _showCmds = (typeof _scriptOpts.show_commands === 'boolean')
           ? _scriptOpts.show_commands
           : getShowCommandsDefault();
+        // Eskapeluke (spec §4): '#options.display = all' slår av notatbok-
+        // visningspolicyen igjen (vis alt, echo følger _showCmds som vanlig).
+        var _displayAll = String(_scriptOpts.display || '').toLowerCase() === 'all';
         var _mr = currentMode();
         var _ctx = { py: py, rightStatus: rightStatus, showCommands: _showCmds, profile: _scriptOpts.profile };
         if (_mr.runSelf) { await _mr.runSelf(effectiveScript, _ctx); return; }
@@ -8495,144 +9253,10 @@ options(width = 200)
         // Pyodide-FS her; selve bindingen inn i e.datasets/_g skjer i
         // buildWebDataLoaderPreamble() (kjøres som del av runCode under).
         // Ingen-op når scriptet ikke har load-direktiver (tom liste).
-        var _pyLoads = [];
-        if (activeEditorMode === 'python' || activeEditorMode === 'duckdb') {
-          var _dlDeps = { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey };
-          var _dl = _duckPreResolved || await window.DataLoader.resolveAndFetchLoads(effectiveScript, _dlDeps);
-          var _rawLoads = _dl.loads;
-          if (activeEditorMode === 'duckdb') {
-            var _htmlLoad = _rawLoads.find(function (l) { return l.format === 'html'; });
-            if (_htmlLoad) throw new Error(t('html-kilder støttes ikke i duckdb-modus ({alias}) — bruk python/r', { alias: _htmlLoad.alias }));
-          }
-          // "# use …" håndteres nå på SEGMENTNIVÅ (plan 2026-07-11 i
-          // safestat): use-linjene parses/strippes per blokk og
-          // materialiseres ved blokkgrensen i kjøringsløkka lenger ned.
-          if (_rawLoads.some(function (l) { return l.bytes; })) py.FS.mkdirTree('/home/pyodide/_webdata');
-          _pyLoads = _rawLoads.map(function (l) {
-            var _path = '/home/pyodide/_webdata/' + l.alias + '.' + l.format;
-            py.FS.writeFile(_path, l.bytes);
-            return { alias: l.alias, format: l.format, path: _path };
-          });
-        }
-        const catalogJson = microdataCatalog && microdataCatalog.variables
-          ? JSON.stringify(microdataCatalog.variables)
-          : null;
-        const catalogArg = catalogJson !== null ? JSON.stringify(catalogJson) : 'None';
-        const pageBase = window.location.href.replace(/[^/]+$/, '');
-        // In Python mode, unmarked code is pyodide; otherwise use the stored runner default
-        const runDefault = currentMode().runDefault || getRunnerDefaultMode();
-        let segments = parseHybridScript(effectiveScript, runDefault);
-        if (segments.length === 0 && effectiveScript.trim()) {
-          segments = [{ kind: runDefault, text: effectiveScript }];
-        }
-        // Notebook prose: top-level bare strings (python) and #' blocks (R)
-        // become markdown embeds, interleaved with output in source order.
-        for (var _si = 0; _si < segments.length; _si++) {
-          var _seg = segments[_si];
-          if (_seg.kind === 'pyodide' && _seg.text) {
-            try {
-              py.globals.set('_np_src', _seg.text);
-              _seg.text = String(await py.runPythonAsync(
-                'import notebook_prose as _np; _np.prep_python_prose(_np_src)'));
-            } catch (e) { console.warn('prep_python_prose:', e); }
-          } else if (_seg.kind === 'r' && _seg.text && window.NotebookLinks) {
-            try { _seg.text = window.NotebookLinks.rProsePrep(_seg.text); }
-            catch (e) { console.warn('rProsePrep:', e); }
-          }
-        }
-        // Segmentnivå-use: trekk use-linjene ut av hver blokk og utled kilder
-        // (kortform henter fra nærmeste foregående blokk med annet språk).
-        if (window.DataDirectives && window.DataDirectives.parseSegmentUses) {
-          var _segUse = window.DataDirectives.parseSegmentUses(segments);
-          if (_segUse.errors.length) throw new Error(_segUse.errors.join('; '));
-          segments = _segUse.segments;
-        }
-        // If any segment is DuckDB SQL, make sure the bridge module + pyarrow are
-        // ready before the Pyodide run loop reaches a #duckdb segment.
-        if (segments.some(function (s) { return s.kind === 'duckdb'; })) {
-          setStatus(rightStatus, t('Laster DuckDB-bro…'));
-          await __ensureDuckBridge(py);
-          try {
-            var _needPa = await py.runPythonAsync('import importlib.util as _iu\n_iu.find_spec("pyarrow") is None');
-            if (_needPa) {
-              setStatus(rightStatus, t('Installerer pyarrow…'));
-              await py.runPythonAsync('import micropip as _mp\nawait _mp.install("pyarrow")');
-            }
-          } catch (e) { console.warn('pyarrow ensure:', e); }
-        }
-        const segmentsStr = JSON.stringify(segments);
-        const _dataPreamble = buildWebDataLoaderPreamble(_pyLoads);
-        const setupCode = getInterpreterCorePython(catalogArg, pageBase, segmentsStr) + _dataPreamble + `
-import asyncio as _asyncio
-# ── Statisk datakilde: pre-fetch alle importer via DuckDB-WASM (JS) før kjøring ──
-if getattr(_m2py_mod, 'M2PY_DATA_SOURCE', 'dynamic') == 'static' and getattr(e, 'static_source', None) is not None:
-    import js as _js
-    try:
-        _schemas = (await _js.runStaticSchemas(${JSON.stringify(pageBase)})).to_py()
-        e.static_source.table_columns = {k: set(v) for k, v in _schemas.items()}
-        # Manifest gir limit-planen levende/døde-fordelingen (unit_id-splitten);
-        # uten den faller planen tilbake til kun-levende-grensen.
-        try:
-            _mresp = await _js.fetch(${JSON.stringify(pageBase)} + 'static_data/manifest.json?v=' + ${JSON.stringify(String(window.M2PY_VERSION || '1'))})
-            if _mresp.ok:
-                e.static_source.manifest = json.loads(await _mresp.text())
-        except Exception:
-            pass
-        _plan = e.static_source.plan_sql(${JSON.stringify(effectiveScript)}, ${JSON.stringify(pageBase)}, ${getImportLimit()}, version=${JSON.stringify(String(window.M2PY_VERSION || '1'))})
-        _cache = {}
-        for _q in _plan:
-            try:
-                _cache[_q['key']] = (await _js.runStaticQuery(_q['sql'])).to_py()
-            except Exception:
-                pass
-        e.static_source.set_cache(_cache)
-    except Exception as _pe:
-        print('(static pre-fetch feilet, faller tilbake til generering:', _pe, ')')
-        _m2py_mod.M2PY_DATA_SOURCE = 'dynamic'
-result = None
-async def _m2py_run_segment(_seg_json):
-    # Ett hybrid-segment; "stop" avbryter kjøringen (DuckDB-feil, som før).
-    global result
-    _seg = json.loads(_seg_json)
-    _st = (_seg.get("text") or "").strip()
-    if not _st:
-        return "ok"
-    _k = _seg.get("kind") or "microdata"
-    if _k == "microdata":
-        if hasattr(e, 'run_script_async'):
-            result = await e.run_script_async(_st)
-        else:
-            result = e.run_script(_st)
-        print(result)
-        e.sync_datasets_to_globals(_g)
-        _apply_labels_to_globals(_g, catalog)
-        _g["show"] = show
-        _g["to_microdata"] = to_microdata
-    elif _k == "pyodide":
-        e.sync_datasets_to_globals(_g)
-        _apply_labels_to_globals(_g, catalog)
-        _g["show"] = show
-        _g["to_microdata"] = to_microdata
-        _exec_pyodide_block(_st, _g, ${_showCmds ? 'True' : 'False'})
-        e.sync_datasets_to_globals(_g)
-        _apply_labels_to_globals(_g, catalog)
-        _g["show"] = show
-        _g["to_microdata"] = to_microdata
-    elif _k == "duckdb":
-        e.sync_datasets_to_globals(_g)
-        try:
-            print(await _run_duck_sql(_st))
-        except Exception as _de:
-            print("DuckDB-feil: " + str(_de))
-            return "stop"
-        e.sync_datasets_to_globals(_g)
-        _apply_labels_to_globals(_g, catalog)
-        _g["show"] = show
-        _g["to_microdata"] = to_microdata
-    return "ok"
-`;
-        setStatus(rightStatus, 'Running...');
-        await py.runPythonAsync(setupCode);
+        var _bootCtx = { py: py, activeEditorMode: activeEditorMode, effectiveScript: effectiveScript, duckPreResolved: _duckPreResolved, showCommands: _showCmds };
+        var _bootResult = await bootNotebookSession(_bootCtx);
+        py = _bootResult.py;
+        var segments = _bootResult.segments;
         // Segmentvis kjøring drevet fra JS: output rendres etter hvert segment,
         // og nettleseren får tegnet mellom segmentene (progressiv visning).
         const asHtml = document.querySelector('input[name="outputMode"]:checked').value === 'html';
@@ -8640,15 +9264,29 @@ async def _m2py_run_segment(_seg_json):
         purgePlots(outputArea);
         outputArea.innerHTML = '';
         incrementalStarted = true;
+        // Notatbok aktiv (Task 6/9): per-celle output-slots for segmentløkken.
+        // beginRun får segment-KINDENE (ikke bare antallet, Task 9 bug (a)):
+        // en strippet preambel (f.eks. en '#options.*'-linje som er hele
+        // preambelen i microdata-celler) gir da ikke lenger et falskt
+        // plan/antall-avvik — alignPlan justerer planen mot de faktiske
+        // kindene i stedet. beginRun returnerer fortsatt null ved et ekte
+        // avvik (f.eks. en '## python' skrevet manuelt inni en celle) —
+        // sinkForSegment faller da tilbake til den samlede trailing-sloten,
+        // aldri en krasj.
+        const _nbActive = !!(window.Cells && window.Cells.active());
+        const _nbSinks = _nbActive
+          ? window.Cells.beginRun(segments.map(function (s) { return s.kind; }))
+          : null;
         let renderedLen = 0;
         for (let i = 0; i < segments.length; i++) {
           if (segments.length > 1) setStatus(rightStatus, t('Kjører del {i} av {n}…', { i: i + 1, n: segments.length }));
+          var _sink = _nbActive ? window.Cells.sinkForSegment(i) : null;
           // #r-blokker kjøres JS-side mot webR (før 2026-07-11 ble de STILLE
           // ignorert her — python-runneren har ingen r-gren).
           if (segments[i].kind === 'r') {
-            appendOutput(stdout.slice(renderedLen), asHtml, suppress);
+            appendOutput(stdout.slice(renderedLen), asHtml, suppress, _sink);
             renderedLen = stdout.length;
-            await runInlineRSegment(segments[i]);
+            await runInlineRSegment(segments[i], _sink);
             continue;
           }
           // Materialiser blokkens use-kopier inn i python-familien først.
@@ -8656,9 +9294,16 @@ async def _m2py_run_segment(_seg_json):
             var _u4 = segments[i].uses[_um];
             await _bindUseIntoPy(py, _u4.name, await _useBytesFromRuntime(_u4));
           }
+          // Notatbok-visningspolicy (spec §4): eksplisitt celle + pyodide-
+          // segment → echo av, kun siste uttrykk vises — med mindre
+          // '#options.display = all' ber om dagens vis-alt-oppførsel.
+          if (segments[i].kind === 'pyodide' && _nbActive && !_displayAll) {
+            var _sd = window.Cells.segmentDisplay(i);
+            if (_sd && _sd.explicit) segments[i]._nb = { echo: false, last: true };
+          }
           py.globals.set('_m2py_seg_json', JSON.stringify(segments[i]));
           const rc = await py.runPythonAsync('await _m2py_run_segment(_m2py_seg_json)');
-          appendOutput(stdout.slice(renderedLen), asHtml, suppress);
+          appendOutput(stdout.slice(renderedLen), asHtml, suppress, _sink);
           renderedLen = stdout.length;
           if (rc === 'stop') break;
         }
@@ -8678,7 +9323,10 @@ async def _m2py_run_segment(_seg_json):
         const pre = document.createElement('pre');
         pre.className = 'error';
         pre.textContent = lastOutput;
-        outputArea.appendChild(pre);
+        // Notatbok aktiv (Task 6): feilen havner i samle-sloten nederst,
+        // ikke i den skjulte #outputArea — tidligere cellers output beholdes.
+        const _errHost = (window.Cells && window.Cells.active() && window.Cells.errorHost()) || outputArea;
+        _errHost.appendChild(pre);
         setStatus(rightStatus, 'Run failed.', true);
         window.lastDatasetInfo = {};
         updateSidebarDatasets({});
@@ -8955,13 +9603,7 @@ async def _m2py_run_segment(_seg_json):
           try {
             if (!webRShelter) webRShelter = await new webR.Shelter();
             const captured = await webRShelter.captureR(block.codeTrim, { withAutoprint: true });
-            const outputParts = [];
-            // WebR strips trailing \n fra hver linje-entry; join med '\n'
-            // ellers kollapser flerlinje-output (print.data.frame etc.) til en linje.
-            const lines = (captured.output || [])
-              .filter(o => o.type === 'stdout').map(o => String(o.data)).join('\n');
-            if (lines.trim()) outputParts.push({ type: 'text', text: lines, className: 'm2py-stmt-output' });
-            (captured.images || []).forEach(bm => outputParts.push({ type: 'image', bitmap: bm }));
+            const outputParts = captureRToOutputParts(captured);
             renderROutputParts(outputParts);
             if (outputParts.length) await forklarRevealOutputAnim();
           } catch (err) {
@@ -9027,6 +9669,10 @@ def _run_microdata_chunk(_code):
     _g["to_microdata"] = to_microdata
 `;
           await py.runPythonAsync(explainInit);
+          // Forklar bygger sitt EGET e/_g her (uten loads) — notatbok-sesjonen
+          // (fase B1) er død etterpå, ellers ville en per-celle-kjøring etter
+          // en Forklar-økt gjenbrukt Forklars e/_g uten de innlastede datasettene.
+          nbSetSessionLive(false);
         }
         const forklarBlocks = parseExplainBlocks(extractBlockWidgets(snapshotScript), activeEditorMode);
         forklarSessionFlatWork = forklarBlocks;
