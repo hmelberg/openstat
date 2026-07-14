@@ -8382,14 +8382,21 @@ options(width = 200)
       schedulePrefetchLazyPackages._done = true;
       var pkgs = ['statsmodels', 'matplotlib', 'lifelines', 'linearmodels'];
       var go = function () {
+        // Feilmeldingen går via js.console.warn (ikke print()): print() ville
+        // skrevet til Pyodides delte stdout-strøm, som en samtidig kjøring kan
+        // ha wiret til SIN output-buffer akkurat da denne bakgrunnsoppgaven
+        // (fire-and-forget async, kan vekselkjøre ved en hvilken som helst
+        // await-linje) fyrer — meldingen lekket da inn i en celles/kjørings
+        // output. Dette er ren varmlasting og aldri brukerrettet output
+        // (eksisterende auto-install i run-handleren dekker utelatte pakker).
         py.runPythonAsync(
-          'import micropip, asyncio\n' +
+          'import micropip, asyncio, js\n' +
           'async def _prefetch():\n' +
           '    for p in ' + JSON.stringify(pkgs) + ':\n' +
           '        try:\n' +
           '            await micropip.install(p)\n' +
           '        except Exception as e:\n' +
-          '            print("prefetch", p, "failed:", e)\n' +
+          '            js.console.warn("prefetch", p, "failed:", str(e))\n' +
           'asyncio.ensure_future(_prefetch())\n'
         ).catch(function (e) { console.warn('prefetch failed:', e); });
       };
