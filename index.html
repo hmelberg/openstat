@@ -8668,6 +8668,10 @@ async def _m2py_run_segment(_seg_json):
         return "ok"
     _k = _seg.get("kind") or "microdata"
     if _k == "microdata":
+        # run_script(_async) returnerer hele output_log; uten clear her
+        # akkumuleres alle tidligere segmenters output i senere celler
+        # (per-segment attribusjon krever et rent log per segment-kjøring).
+        e.output_log.clear()
         if hasattr(e, 'run_script_async'):
             result = await e.run_script_async(_st)
         else:
