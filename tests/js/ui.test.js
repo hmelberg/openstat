@@ -125,6 +125,36 @@ test('normalizeSpec: number coerces value to numeric', () => {
   assert.strictEqual(Ui.normalizeSpec({ type: 'number', value: '3.14' }).spec.value, 3.14);
 });
 
+// number sitt min/max/step er VALGFRITT (i motsetning til slider, som alltid
+// får defaults) — speiler pyodide-fasadens ui.number(value=0, *, min=None,
+// max=None, step=None, ...) signatur (Task 4). Fraværende min/max skal ikke
+// dukke opp i spec i det hele tatt (ingen påtvunget default-grense).
+test('normalizeSpec: number uten min/max/step → ingen av dem i spec', () => {
+  const res = Ui.normalizeSpec({ type: 'number', value: 5 });
+  assert.strictEqual(res.spec.min, undefined);
+  assert.strictEqual(res.spec.max, undefined);
+  assert.strictEqual(res.spec.step, undefined);
+});
+
+test('normalizeSpec: number med eksplisitt min/max/step → tatt med i spec', () => {
+  const res = Ui.normalizeSpec({ type: 'number', value: 5, min: 0, max: 10, step: 2 });
+  assert.strictEqual(res.spec.min, 0);
+  assert.strictEqual(res.spec.max, 10);
+  assert.strictEqual(res.spec.step, 2);
+  assert.strictEqual(res.spec.value, 5);
+});
+
+test('normalizeSpec: number verdi klampes til [min,max] når begge er gitt', () => {
+  const res = Ui.normalizeSpec({ type: 'number', value: 99, min: 0, max: 10 });
+  assert.strictEqual(res.spec.value, 10);
+});
+
+test('normalizeSpec: number ugyldig min → varsel, min utelates fra spec', () => {
+  const res = Ui.normalizeSpec({ type: 'number', value: 5, min: 'abc' });
+  assert.strictEqual(res.spec.min, undefined);
+  assert.ok(res.warnings.some((w) => /ugyldig min for number/.test(w)));
+});
+
 test('normalizeSpec: text defaults to empty string', () => {
   const res = Ui.normalizeSpec({ type: 'text' });
   assert.strictEqual(res.spec.value, '');

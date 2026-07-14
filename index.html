@@ -575,6 +575,7 @@
   <script src="js/micropython-engine.js"></script>
   <script src="js/dash.js"></script>
   <script src="js/cells.js"></script>
+  <script src="js/ui.js"></script>
   <script src="js/dash-webr.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tabulator-tables@6.3.1/dist/js/tabulator.min.js" defer></script>
@@ -9119,6 +9120,11 @@ async def _m2py_run_segment(_seg_json):
               _rerr = segE;
             }
             nbUiRunCtx = null;
+            // ui-widgets (Task 3): stale-sopp for målcellens kontrollstripe
+            // — kun målsegmentet var en adressert celle her (se kommentaren
+            // over), tidligere segmenter fikk aldri en ctx og skal derfor
+            // heller ikke sopes.
+            if (_isTargetSeg && window.Ui && window.Ui.endCellRun) window.Ui.endCellRun(payload.cellIdx);
             if (py && typeof py.setStdout === 'function') py.setStdout();
             if (py && typeof py.setStderr === 'function') py.setStderr();
             if (_capErr) console.warn('[stderr]', _capErr.trim());
@@ -9210,6 +9216,11 @@ async def _m2py_run_segment(_seg_json):
         if (py && typeof py.setStderr === 'function') py.setStderr();
         if (isMicrodataReplay) setStatus(rightStatus, '');
         nbUiRunCtx = null;
+        // ui-widgets (Task 3): stale-sopp for cellens kontrollstripe. Denne
+        // delte finally'en dekker BEGGE grener (replay og direkte enkelt-
+        // celle) — endCellRun er idempotent (se js/ui.js), så et duplikat-
+        // kall her etter replay-grenens EGET kall over er trygt.
+        if (window.Ui && window.Ui.endCellRun) window.Ui.endCellRun(payload.cellIdx);
         scriptRunInProgress = false;
         setRunButtonsUi('idle');
         if (activeEditorMode === 'duckdb') { refreshDatasetSidebarFromDuck(); }
@@ -9384,6 +9395,11 @@ async def _m2py_run_segment(_seg_json):
           py.globals.set('_m2py_seg_json', JSON.stringify(segments[i]));
           const rc = await py.runPythonAsync('await _m2py_run_segment(_m2py_seg_json)');
           nbUiRunCtx = null;
+          // ui-widgets (Task 3): stale-sopp for denne cellens kontrollstripe
+          // — kun når planen faktisk ga en celleindeks for segmentet (se
+          // _uiIdx over; null når notatboken er inaktiv/planen ikke er
+          // justert, samme betingelse som satte nbUiRunCtx i utgangspunktet).
+          if (_uiIdx !== null && _uiIdx !== undefined && window.Ui && window.Ui.endCellRun) window.Ui.endCellRun(_uiIdx);
           appendOutput(stdout.slice(renderedLen), asHtml, suppress, _sink);
           renderedLen = stdout.length;
           if (rc === 'stop') break;
@@ -9423,6 +9439,14 @@ async def _m2py_run_segment(_seg_json):
         // kastet FØR løkka når til å nullstille selv (f.eks. under segment-
         // bygging), idempotent med løkkas egen nullstilling.
         nbUiRunCtx = null;
+        // ui-widgets (Task 3): samme sikkerhetsnett-logikk for stale-sopp —
+        // dekker et unntak kastet MIDT i et segments py.runPythonAsync (FØR
+        // løkkas egen endCellRun-linje rekker å kjøre). _uiIdx er var-
+        // deklarert inni løkka, altså funksjonsscopet: den beholder verdien
+        // fra siste forsøkte iterasjon selv om unntaket hoppet ut av
+        // løkka-blokken. endCellRun er idempotent, så dette er trygt også
+        // i det vanlige tilfellet der løkka allerede sopte ferdig selv.
+        if (typeof _uiIdx !== 'undefined' && _uiIdx !== null && window.Ui && window.Ui.endCellRun) window.Ui.endCellRun(_uiIdx);
         setRunButtonsUi('idle');
         // duckdb-modus: sidepanelet mates fra wasm-katalogen — fire-and-forget.
         if (activeEditorMode === 'duckdb') { refreshDatasetSidebarFromDuck(); }
