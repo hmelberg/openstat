@@ -550,7 +550,9 @@
       for (var i = idx + 1; i < NB.cells.length; i++) {
         var c = NB.cells[i];
         var type = C.resolveType(c, NB.docMode);
-        if (C.isCodeType(type) && c._ta) { c._ta.focus(); return; }
+        // Hopp over celler med skjult editor (hide-code) — focus() på et
+        // usynlig felt gjør ingenting, og markøren ville "forsvinne".
+        if (C.isCodeType(type) && c._ta && !c.attrs['hide-code']) { c._ta.focus(); return; }
       }
     }
 
