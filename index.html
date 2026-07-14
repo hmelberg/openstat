@@ -1779,6 +1779,9 @@
           scriptName.value = f.name.replace(/\.txt$/i, '');
           if (window.mdGithubClearCurrent) window.mdGithubClearCurrent();
           if (window.updateLineNumbers) window.updateLineNumbers();
+          // Nytt dokument via Last-menyen: samme innlastingssignal som
+          // eksempler/GitHub — auto-åpner notatbok og invaliderer sesjonen.
+          if (window.Cells) window.Cells.contentLoaded();
         };
         r.readAsText(f);
         fileInput.value = '';
@@ -8927,8 +8930,11 @@ async def _m2py_run_segment(_seg_json):
         }
         return runNotebookRCell(payload);
       }
-      if (kind === 'microdata' && activeEditorMode === 'r') {
-        return { notice: t('Microdata-celler i R-modus kjøres foreløpig kun via Kjør alle (fase B2)') };
+      // R-modus: pyodide-sesjonen bootes ikke lenger der (F4-fiksen), så ALLE
+      // ikke-R-kinds får limitation-notis — ellers ville ensure() gitt {py:null}
+      // og en rå TypeError i stedet for den kontraktsfestede meldingen.
+      if (activeEditorMode === 'r') {
+        return { notice: t('Denne celletypen i R-modus kjøres foreløpig kun via Kjør alle (fase B2)') };
       }
       if (kind !== 'pyodide' && kind !== 'duckdb' && kind !== 'microdata') {
         return { error: t('Ukjent celletype: {kind}', { kind: String(kind) }) };
