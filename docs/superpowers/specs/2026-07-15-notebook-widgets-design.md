@@ -168,7 +168,10 @@ runtime because it never touches the runtime: it edits text and reruns.
 ## Phasing
 
 - **W1 — `ui` core (pyodide):** protocol + renderer + python facade +
-  rerun semantics + tests; ship.
+  rerun semantics + tests; ship. **Done 2026-07-15** — browser-verified
+  end-to-end (slider/dropdown/button, per-cell + Run All, DOM-identity
+  preserved across reruns, zero-ui sweep, plain-script fallback, example
+  notebook); see `.superpowers/sdd/task-w1-5-report.md`.
 - **W2 — `ui` everywhere:** brython + micropython facades (same module),
   R facade; notice for microdata.
 - **W3 — ipywidgets bridge v1** (per track 2 scope).

@@ -1,0 +1,34 @@
+# label: Widgets — ui.slider/dropdown (notatbok)
+#options.mode = python
+#options.title = "Widgets — ui.slider/dropdown"
+#options.description = "ui-modulen: glidebryter og nedtrekksmeny som styrer output i en notatbokcelle"
+# load https://raw.githubusercontent.com/hmelberg/openstat/main/data/iris.csv as iris
+
+#%% md
+# Widgets med `ui`
+
+`ui`-modulen gir kontroller (glidebryter, nedtrekksmeny, knapp m.fl.) som
+lever i en stripe over cellens output. Dette er en **pull-modell**: verdien
+kontrollen har akkurat nå ligger lagret i nettleseren (ikke i Python), og
+hvert `ui.*`-kall i cellen leser den ut igjen. Endrer du en kontroll, kjøres
+cellen (eller en annen navngitt celle via `rerun=`) på nytt automatisk —
+scriptet leser da ut den nye verdien neste gang det kaller `ui.*`.
+
+#%% python
+import ui
+
+n = ui.slider(1, 20, value=5, label="Antall rader")
+art = ui.dropdown(sorted(iris["species"].unique()), label="Art")
+
+iris[iris["species"] == art].head(n)
+
+#%% python id=plot
+import plotly.express as px
+
+px.scatter(iris, x="sepal_length", y="petal_length", color="species",
+           title="Iris — kronblad mot begerblad")
+
+#%% python
+import ui
+
+ui.button("Oppdater", rerun="plot")
