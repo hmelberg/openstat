@@ -240,7 +240,8 @@ Applies to **explicit cells** (those created by a `#%%` header):
 
 Documents **without markers keep today's show-all REPL behavior.**
 `#options.display = all` opts a marked document back into show-all;
-`#options.display = last` forces last-only for an unmarked script.
+`#options.display = last` (forcing last-only for an unmarked script) is
+**Phase B** — not implemented in Phase A.
 
 ## 5. Output routing (the designated hard part)
 
