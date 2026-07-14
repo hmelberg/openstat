@@ -683,9 +683,29 @@
     // renderOutput() gjør i index.html — kjørt gjennom window.mdRenderOutput
     // (samme buildOutputNodes) når den finnes, ellers en ren tekst-fallback
     // (brukt av node-testene, som ikke stubber mdRenderOutput).
+    // {rparts} (fase B1 Task 4): R-kjøringer via captureR returnerer bilde-
+    // bærende deler som ikke kan rundtures gjennom {text} uten å miste
+    // plottene — rendres i stedet via window.renderROutputParts (samme
+    // bygger som R-modusens fulle kjøring/Forklar bruker) rett inn i denne
+    // cellens EGEN slot (target-parameteren, fase A Task 7).
+    // {notice} (Task 4 carry-over-polering): dokumenterte begrensnings-
+    // meldinger (R-celle i ikke-R-modus, microdata-celle i R-modus,
+    // dashboard-celler) er IKKE feil — en rolig info-boks (.nb-notice),
+    // ikke rød pre.error.
     function renderCellResult(out, res) {
       if (!out) return;
-      if (res && res.error) {
+      if (res && res.rparts) {
+        if (typeof global.renderROutputParts === 'function') {
+          global.renderROutputParts(res.rparts, out);
+        } else {
+          purge(out);
+          out.innerHTML = '';
+        }
+      } else if (res && res.notice) {
+        purge(out);
+        out.innerHTML = '';
+        out.appendChild(el('pre', 'nb-notice', res.notice));
+      } else if (res && res.error) {
         purge(out);
         out.innerHTML = '';
         out.appendChild(el('pre', 'error', res.error));

@@ -7611,6 +7611,26 @@ json.dumps(out)
       host.appendChild(buildROutputNodes(outputParts));
     }
 
+    // Konverterer et webRShelter.captureR()-resultat til en outputParts-liste
+    // (samme form som buildROutputNodes/renderROutputParts forventer) —
+    // ekstrahert fra forklarRunOneRBlock (fase B1 Task 4, plan 2026-07-14) slik
+    // at både Forklar og notatbokens R-per-celle-kjøring (runNotebookRCell)
+    // deler NØYAKTIG samme konvertering i stedet for å duplisere den (Task 3-
+    // review flagget duplisering som en fare). Kun stdout tas med her (samme
+    // som forklar-forbildet) — stderr håndteres ikke, i motsetning til
+    // runHybridR/runInlineRSegment sine egne (bevisst separate) varianter.
+    function captureRToOutputParts(captured) {
+      var outputParts = [];
+      // WebR strips trailing \n fra hver linje-entry; join med '\n' ellers
+      // kollapser flerlinje-output (print.data.frame etc.) til en linje.
+      var lines = (captured.output || [])
+        .filter(function (o) { return o.type === 'stdout'; })
+        .map(function (o) { return String(o.data); }).join('\n');
+      if (lines.trim()) outputParts.push({ type: 'text', text: lines, className: 'm2py-stmt-output' });
+      (captured.images || []).forEach(function (bm) { outputParts.push({ type: 'image', bitmap: bm }); });
+      return outputParts;
+    }
+
     async function runHybridR(src, py, runOpts) {
       runOpts = runOpts || {};
       var showCommands = runOpts.showCommands !== false; // default true
@@ -8812,20 +8832,81 @@ async def _m2py_run_segment(_seg_json):
     // rendres, tidligere segmenters stdout fanges og forkastes (deres EGNE
     // sluk i DOM-en er urørt, cells.js skriver kun til målcellens slot).
     //
-    // r-celler i ikke-R-modus-dokumenter (Task 4 gir full R-per-celle-støtte,
-    // inkl. bilder — å prøve å presse captureR-bilder gjennom denne {text}-
-    // kontrakten her ville enten miste bilder eller kreve en DOM-referanse i
-    // payload som ville la mdRunNotebookCell skrive rett inn i cellens slot
-    // og dermed kollidere med cells.js sin egen purge+skriv-rekkefølge —
-    // venter derfor bevisst til Task 4) gir en tydelig begrensningsmelding
-    // i stedet.
+    // r-celler i R-MODUS-dokumenter kjøres nå her under (Task 4) via
+    // runNotebookRCell — EGEN sti, ikke denne python/duckdb/microdata-
+    // grenen: R-modus har ingen Pyodide-sesjon å boote (webRShelter.captureR
+    // kjører direkte mot det levende .GlobalEnv, speiler forklarRunOneRBlock
+    // ~9465-9509), så å kalle mdNotebookSession.ensure()/restart() her ville
+    // unødig boote/restarte en Pyodide-økt R-kjøringen ikke trenger.
+    // r-celler i ikke-R-modus-dokumenter (blandede dokumenter, «## r» inni et
+    // python-modus-dokument) og microdata-celler INNI et R-modus-dokument er
+    // fortsatt utenfor rekkevidde her (spec-notatet i Task 6 avgjør den
+    // blandede stien) — begge gir en tydelig begrensningsmelding
+    // (`{notice}`, IKKE `{error}` — carry-over-poleringen i Task 4: disse skal
+    // vises som en rolig info-boks, ikke som en rød feilmelding).
+    async function runNotebookRCell(payload) {
+      var cellText = (payload && payload.text) || '';
+      // Dashboard-guard (Task 4-kontrakten): dashboard()-celler kan IKKE
+      // kjøres isolert — DashWebR.reset() nullstiller HELE dashboard-
+      // registeret og skal ALDRI kalles fra denne per-celle-stien (i
+      // motsetning til runHybridR sin fulle kjøring, se kommentar der).
+      // Sjekkes FØR webR-beredskap/kjøretilstand — ingen kjøring skjer, så
+      // ingen scriptRunInProgress/knappe-tilstand trengs her.
+      if (/dashboard\s*\(/.test(cellText)) {
+        return { notice: t('Dashboard-celler krever Kjør alle (fase B2)') };
+      }
+      // Fase-A-mønsteret (btnRun sin R-modus-vakt, ~9255): sjekk beredskap i
+      // stedet for å blokkere på en 30-60s lasting her — «r»-modusens
+      // onActivate trigger allerede loadWebR() (~3157). Kall den likevel
+      // idempotent (no-op om alt lastes/er lastet) i tilfelle den av en
+      // eller annen grunn ikke er i gang ennå.
+      if (!webRReady && !webRLoading) loadWebR();
+      if (!webRReady) {
+        return { error: t('WebR er ikke klar ennå. Vent og prøv igjen.') };
+      }
+      scriptRunInProgress = true;
+      setRunButtonsUi('running');
+      try {
+        // Pakke-auto-installasjon fra CELLENS EGEN tekst (ikke hele
+        // dokumentet — hver celle installerer det den selv trenger, samme
+        // extractRPackages-funksjon som runHybridR/Forklar bruker).
+        var rPkgs = extractRPackages(cellText);
+        if (rPkgs.length) {
+          setStatus(leftStatus, t('Installerer: {pkgs}…', { pkgs: rPkgs.join(', ') }));
+          try { await webR.installPackages(rPkgs, { quiet: true }); } catch (e) {
+            console.warn('R package install error (celle):', e);
+          }
+          setStatus(leftStatus, t('Klar (R).'));
+        }
+        if (!webRShelter) webRShelter = await new webR.Shelter();
+        var captured = await webRShelter.captureR(cellText, { withAutoprint: true });
+        var outputParts = captureRToOutputParts(captured);
+        await refreshDatasetSidebarFromR();
+        return { rparts: outputParts };
+      } catch (e) {
+        return { error: 'R-feil: ' + ((e && e.message) || String(e)) };
+      } finally {
+        // Frigjør captureR-allokeringene for denne cellen (speiler
+        // forklarRunOneRBlock/runHybridR — uten purge vokser WebR-minnet
+        // monotont for hver celle-kjøring i økten).
+        if (webRShelter) { try { await webRShelter.purge(); } catch (e) {} }
+        scriptRunInProgress = false;
+        setRunButtonsUi('idle');
+      }
+    }
     window.mdRunNotebookCell = async function (payload) {
       if (scriptRunInProgress) {
         return { error: t('En kjøring pågår allerede.') };
       }
       var kind = payload && payload.kind;
       if (kind === 'r') {
-        return { error: t('R-celler kjøres per celle i en senere oppgave (fase B1 Task 4) — bruk Kjør alle inntil videre') };
+        if (activeEditorMode !== 'r') {
+          return { notice: t('R-celler i ikke-R-modus-dokumenter kjøres foreløpig kun via Kjør alle') };
+        }
+        return runNotebookRCell(payload);
+      }
+      if (kind === 'microdata' && activeEditorMode === 'r') {
+        return { notice: t('Microdata-celler i R-modus kjøres foreløpig kun via Kjør alle (fase B2)') };
       }
       if (kind !== 'pyodide' && kind !== 'duckdb' && kind !== 'microdata') {
         return { error: t('Ukjent celletype: {kind}', { kind: String(kind) }) };
@@ -9494,13 +9575,7 @@ async def _m2py_run_segment(_seg_json):
           try {
             if (!webRShelter) webRShelter = await new webR.Shelter();
             const captured = await webRShelter.captureR(block.codeTrim, { withAutoprint: true });
-            const outputParts = [];
-            // WebR strips trailing \n fra hver linje-entry; join med '\n'
-            // ellers kollapser flerlinje-output (print.data.frame etc.) til en linje.
-            const lines = (captured.output || [])
-              .filter(o => o.type === 'stdout').map(o => String(o.data)).join('\n');
-            if (lines.trim()) outputParts.push({ type: 'text', text: lines, className: 'm2py-stmt-output' });
-            (captured.images || []).forEach(bm => outputParts.push({ type: 'image', bitmap: bm }));
+            const outputParts = captureRToOutputParts(captured);
             renderROutputParts(outputParts);
             if (outputParts.length) await forklarRevealOutputAnim();
           } catch (err) {

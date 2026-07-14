@@ -1115,6 +1115,12 @@
   line-height: 1.45; padding: 6px 8px; box-sizing: border-box; }
 .nb-output { min-width: 0; overflow-x: auto; }
 .nb-output.nb-trailing { border-top: 1px dashed var(--border); padding-top: 8px; }
+/* Dokumenterte begrensningsmeldinger (R-celle utenfor R-modus, microdata i
+   R-modus, dashboard krever Kjør alle — fase B1 Task 4): rolig info-boks,
+   ikke en rød feilmelding (pre.error) — brukeren har ikke gjort noe galt. */
+.nb-notice { margin: 0; padding: 6px 10px; border: 1px solid var(--border);
+  border-radius: 4px; background: var(--bg-panel); color: var(--text-muted);
+  font-size: 12.5px; white-space: pre-wrap; }
 .nb-style-note { border-left: 4px solid #4a90d9; }
 .nb-style-warn { border-left: 4px solid #d9a54a; }
 .nb-style-card { box-shadow: 0 1px 4px rgba(0,0,0,.15); }

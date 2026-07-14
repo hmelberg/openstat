@@ -531,3 +531,67 @@ test('runCell: flusher ventende redigering synkront FØR kjøring (kanonisk #scr
   assert.strictEqual(scriptInputEl.value, '#%% python\na = 10\n',
     'runCell skal flushe debouncen synkront FØR kjøringen starter');
 });
+
+// ---- C.runCell: R-modus per-celle-kjøring (Task 4, fase B1) ----
+// index.html sin mdRunNotebookCell/webRShelter.captureR er utenfor rekkevidde
+// for et node-test (ingen ekte webR her) — disse testene dekker KUN
+// cells.js sin DOM-halvdel: riktig kind i payload for en r-celle, og at
+// {rparts}/{notice} kontraktene (Task 4 sin utvidelse av returverdien)
+// rendres riktig inn i cellens EGEN slot.
+
+test('runCell: r-celle i r-modus → payload.kind er "r"', async () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% r\nx <- 1:10\n';
+  C.init('r');
+  assert.strictEqual(C.active(), true);
+
+  let capturedPayload = null;
+  global.mdIsScriptRunning = () => false;
+  global.mdRunNotebookCell = (payload) => {
+    capturedPayload = payload;
+    return Promise.resolve({ rparts: [] });
+  };
+
+  await C.runCell(0);
+
+  assert.ok(capturedPayload, 'mdRunNotebookCell skal kalles for en r-celle');
+  assert.strictEqual(capturedPayload.kind, 'r');
+  assert.strictEqual(capturedPayload.cellIdx, 0);
+});
+
+test('runCell: {rparts} → rendres via window.renderROutputParts inn i cellens egen slot (bilde-bærende R-output)', async () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% r\nx <- 1:10\n#%% r\nsummary(x)\n';
+  C.init('r');
+
+  let calledWith = null;
+  global.renderROutputParts = (parts, target) => { calledWith = { parts, target }; };
+  global.mdIsScriptRunning = () => false;
+  global.mdRunNotebookCell = () => Promise.resolve({ rparts: [{ type: 'text', text: 'Min. 1st Qu. ...' }] });
+
+  await C.runCell(1);
+
+  const cell1 = cellParts(containerEl, 1);
+  assert.ok(calledWith, 'renderROutputParts skal kalles for {rparts}');
+  assert.deepStrictEqual(calledWith.parts, [{ type: 'text', text: 'Min. 1st Qu. ...' }]);
+  assert.strictEqual(calledWith.target, cell1.out, 'rendres inn i DENNE cellens egen .nb-output, ikke en delt/global target');
+
+  delete global.renderROutputParts;
+});
+
+test('runCell: {notice} → pre.nb-notice (ikke pre.error) i cellens egen slot (dashboard/mixed-mode begrensningsmeldinger)', async () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% r\ndashboard(title = "x")\n';
+  C.init('r');
+  global.mdIsScriptRunning = () => false;
+  global.mdRunNotebookCell = () => Promise.resolve({ notice: 'Dashboard-celler krever Kjør alle (fase B2)' });
+
+  await C.runCell(0);
+
+  const { out } = cellParts(containerEl, 0);
+  const noticeNode = out.children.find((n) => n.tag === 'pre' && n.classList.contains('nb-notice'));
+  const errNode = out.children.find((n) => n.tag === 'pre' && n.classList.contains('error'));
+  assert.ok(noticeNode, 'begrensningsmeldingen skal vises som pre.nb-notice');
+  assert.strictEqual(noticeNode.textContent, 'Dashboard-celler krever Kjør alle (fase B2)');
+  assert.strictEqual(errNode, undefined, 'skal IKKE rendres som pre.error (den er rød/alarmerende, dette er ikke en feil)');
+});
