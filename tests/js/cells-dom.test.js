@@ -12,6 +12,48 @@ const path = require('path');
 
 const CELLS_PATH = path.join(__dirname, '..', '..', 'js', 'cells.js');
 
+// Minimal querySelector-motor for FakeEl (final-review F6): produksjonskoden
+// bruker NØYAKTIG ett mønster mot elementer (ikke document) —
+// '.klasse[data-attr="verdi"] .klasse' (etterkommer-kombinator av to
+// sammensatte selektorer) — cells.js:683/900. Generisk nok til vilkårlig
+// antall ledd, men støtter kun klasse- og attributt-deler (ingen tag/id),
+// som er alt produksjonsselektorene faktisk bruker.
+function parseCompoundSelector(compound) {
+  var classes = [];
+  var attrs = [];
+  var re = /\.([\w-]+)|\[([\w-]+)(?:=("[^"]*"|'[^']*'|[^\]]*))?\]/g;
+  var m;
+  while ((m = re.exec(compound))) {
+    if (m[1]) classes.push(m[1]);
+    else attrs.push({ key: m[2], val: m[3] !== undefined ? m[3].replace(/^["']|["']$/g, '') : undefined });
+  }
+  return { classes: classes, attrs: attrs };
+}
+function matchesCompoundSelector(node, parsed) {
+  for (var i = 0; i < parsed.classes.length; i++) {
+    if (!(node.classList && node.classList.contains(parsed.classes[i]))) return false;
+  }
+  for (var j = 0; j < parsed.attrs.length; j++) {
+    var a = parsed.attrs[j];
+    var actual;
+    if (a.key.indexOf('data-') === 0) {
+      var camelKey = a.key.slice(5).replace(/-([a-z])/g, function (_, c) { return c.toUpperCase(); });
+      actual = node.dataset ? node.dataset[camelKey] : undefined;
+    } else {
+      actual = node[a.key];
+    }
+    if (a.val !== undefined) { if (String(actual) !== a.val) return false; }
+    else if (actual === undefined) return false;
+  }
+  return true;
+}
+function findAllMatchingDescendants(node, parsed, out) {
+  (node.children || []).forEach(function (c) {
+    if (matchesCompoundSelector(c, parsed)) out.push(c);
+    findAllMatchingDescendants(c, parsed, out);
+  });
+}
+
 class FakeEl {
   constructor(tag) {
     this.tag = tag;
@@ -43,16 +85,49 @@ class FakeEl {
   get className() { return Array.from(this._classes).join(' '); }
   appendChild(c) { this.children.push(c); c.parentNode = this; return c; }
   insertBefore(node) { this.children.push(node); node.parentNode = this; return node; }
-  removeChild(c) { this.children = this.children.filter((x) => x !== c); return c; }
+  removeChild(c) { this.children = this.children.filter((x) => x !== c); c.parentNode = null; return c; }
   remove() { if (this.parentNode) this.parentNode.removeChild(this); }
   addEventListener(ev, fn) { (this._listeners[ev] = this._listeners[ev] || []).push(fn); }
   dispatchEvent(ev) { (this._listeners[ev.type] || []).forEach((fn) => fn(ev)); }
   focus() { if (global.document) global.document.activeElement = this; }
-  set innerHTML(v) { this._html = v; this.children = []; }
+  // Speiler ekte DOM: å sette innerHTML='' (brukt av render()'s rebygging)
+  // frakobler de gamle barna — final-review F6 sin "detached node midt i
+  // kjøring"-scenario er utestbart kun hvis stubben faktisk frakobler dem.
+  set innerHTML(v) {
+    this._html = v;
+    this.children.forEach((c) => { c.parentNode = null; });
+    this.children = [];
+  }
   get innerHTML() { return this._html; }
+  // final-review F6: ekte tilkoblet-sjekk (walker parentNode-kjeden opp til
+  // rot-sentinelen satt av freshEnv, IKKE bare "har en parentNode" — en node
+  // som ble frakoblet via innerHTML='' beholder ingen parentNode, mens en
+  // aldri-tilknyttet, fersk node (samme starttilstand) korrekt også regnes
+  // som ikke tilkoblet).
+  get isConnected() {
+    let n = this;
+    while (n) {
+      if (n._attachedRoot) return true;
+      n = n.parentNode;
+    }
+    return false;
+  }
   set textContent(v) { this._text = v; }
   get textContent() { return this._text; }
-  querySelector() { return null; }
+  querySelector(sel) {
+    if (!sel) return null;
+    var parts = String(sel).trim().split(/\s+/).filter(Boolean).map(parseCompoundSelector);
+    var candidates = [this];
+    for (var i = 0; i < parts.length; i++) {
+      var next = [];
+      candidates.forEach(function (cand) {
+        findAllMatchingDescendants(cand, parts[i], next);
+      });
+      candidates = next;
+      if (!candidates.length) return null;
+    }
+    return candidates[0] || null;
+  }
   querySelectorAll() { return []; }
   get nextSibling() { return null; }
   get parentNode() { return this._parentNode; }
@@ -67,6 +142,7 @@ function freshEnv() {
   const containerEl = new FakeEl('div');
   containerEl.className = 'container';
   const bodyEl = new FakeEl('body');
+  bodyEl._attachedRoot = true; // final-review F6: rot-sentinel for isConnected-kjeden
   bodyEl.appendChild(containerEl);
   const wrapEl = new FakeEl('div');
   wrapEl.className = 'code-input-wrap';
@@ -538,6 +614,67 @@ test('runCell: {error} → pre.error i cellens egen slot', async () => {
   const errNode = out.children.find((n) => n.tag === 'pre' && n.classList.contains('error'));
   assert.ok(errNode, 'feilen skal vises som pre.error');
   assert.strictEqual(errNode.textContent, 'ZeroDivisionError');
+});
+
+// final-review F6: en strukturell re-rendring (render(), f.eks. utløst av en
+// samtidig redigering et annet sted) kan skje MENS en celle-kjøring pågår.
+// out-noden fanget ved kjørestart (c._out) er da frakoblet av render()'ens
+// NB.root.innerHTML=''-rebygging — uten en requery ville resultatet forsvinne
+// stille inn i en node ingen lenger ser.
+test('runCell: struktur-re-render midt i kjøring → resultatet rendres i cellens GJELDENDE slot, ikke den frakoblede', async () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 1\n#%% python\na + 1\n';
+  C.init('python');
+  global.mdIsScriptRunning = () => false;
+
+  var resolveRun;
+  global.mdRunNotebookCell = () => new Promise((res) => { resolveRun = res; });
+
+  const runPromise = C.runCell(1);
+  const staleOut = cellParts(containerEl, 1).out;
+  assert.strictEqual(staleOut.isConnected, true, 'sanity: slot er tilkoblet før re-rendring');
+
+  // Strukturendring midt i kjøringen (samme celletekst → cellen finnes
+  // fortsatt på idx 1, men i en HELT NY DOM-node etter render()'ens rebygging).
+  C.refreshFromScript();
+  assert.strictEqual(staleOut.isConnected, false, 'den gamle noden er frakoblet etter re-rendring');
+
+  resolveRun({ text: '2' });
+  await runPromise;
+
+  const freshOut = cellParts(containerEl, 1).out;
+  assert.notStrictEqual(freshOut, staleOut, 'cellens slot er en annen node-instans etter rebygging');
+  assert.strictEqual(freshOut.textContent, '2', 'resultatet endte i cellens GJELDENDE slot');
+  assert.strictEqual(staleOut.textContent, '', 'den frakoblede, gamle noden fikk ALDRI resultatet');
+});
+
+test('runCell: struktur-re-render fjerner cellen midt i kjøring → resultatet droppes med console.warn, ingen krasj', async () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 1\n#%% python\na + 1\n';
+  C.init('python');
+  global.mdIsScriptRunning = () => false;
+
+  var resolveRun;
+  global.mdRunNotebookCell = () => new Promise((res) => { resolveRun = res; });
+
+  const runPromise = C.runCell(1);
+
+  // Cellen som kjører (idx 1) fjernes helt fra dokumentet før resultatet kommer.
+  scriptInputEl.value = '#%% python\na = 1\n';
+  C.refreshFromScript();
+
+  const origWarn = console.warn;
+  let warned = 0;
+  console.warn = () => { warned++; };
+  try {
+    resolveRun({ text: '2' });
+    await assert.doesNotReject(runPromise);
+  } finally {
+    console.warn = origWarn;
+  }
+  assert.strictEqual(warned, 1, 'console.warn skal kalles når cellens slot ikke lenger finnes');
+  // Gjenværende celle 0 sin slot skal være urørt av det droppede resultatet.
+  assert.strictEqual(cellParts(containerEl, 0).out.textContent, '');
 });
 
 test('runCell: md-celle → ingen-op (mdRunNotebookCell kalles ikke)', async () => {

@@ -8561,7 +8561,10 @@ options(width = 200)
     // parseHybridScript + segment-use-utledning, siden "# use" skannes over
     // HELE dokumentets segmenter (forskningsfaktum, plan 2026-07-14) og en
     // per-celle-kjøring uten full-dokument-kontekst ville løst use'ene feil.
-    async function buildDocumentSegments(py, mode, effectiveScript) {
+    // (final-review F7: droppet den tidligere `mode`-parameteren — funksjonen
+    // leste alltid currentMode() internt uansett, og begge kallsteder ga
+    // nettopp den samme aktive modusen, så parameteren var død.)
+    async function buildDocumentSegments(py, effectiveScript) {
       const runDefault = currentMode().runDefault || getRunnerDefaultMode();
       let segments = parseHybridScript(effectiveScript, runDefault);
       if (segments.length === 0 && effectiveScript.trim()) {
@@ -8636,7 +8639,7 @@ options(width = 200)
         // ekstrahert til buildDocumentSegments() (fase B1, plan 2026-07-14) slik
         // at mdRunNotebookCell (per-celle-kjøring) bruker AKKURAT samme vei —
         // "# use" utledes alltid over HELE dokumentets segmenter (forskningsfaktum).
-        let segments = await buildDocumentSegments(py, activeEditorMode, effectiveScript);
+        let segments = await buildDocumentSegments(py, effectiveScript);
         // If any segment is DuckDB SQL, make sure the bridge module + pyarrow are
         // ready before the Pyodide run loop reaches a #duckdb segment.
         if (segments.some(function (s) { return s.kind === 'duckdb'; })) {
@@ -8958,7 +8961,7 @@ async def _m2py_run_segment(_seg_json):
         // Segmentoppløsning: samme vei som "Kjør alle" (bootNotebookSession),
         // så cellens "# use" og #options.* leses fra HELE dokumentet, aldri
         // fra cellens egen (potensielt ufullstendige) tekst.
-        var segments = await buildDocumentSegments(py, _mode, effectiveScript);
+        var segments = await buildDocumentSegments(py, effectiveScript);
         if (kind === 'duckdb') {
           await __ensureDuckBridge(py);
           try {

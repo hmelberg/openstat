@@ -759,10 +759,10 @@
       // begge then-grenene under fullfører alltid uten å kaste videre).
       setRunningUi(idx, true);
       return global.mdRunNotebookCell(payload).then(function (res) {
-        renderCellResult(out, res);
+        renderCellResult(idx, out, res);
         C._afterCellRun(idx, !(res && res.error));
       }, function (err) {
-        renderCellResult(out, { error: (err && err.message) || String(err) });
+        renderCellResult(idx, out, { error: (err && err.message) || String(err) });
         C._afterCellRun(idx, false);
       }).then(function () {
         setRunningUi(idx, false);
@@ -888,7 +888,21 @@
     // meldinger (R-celle i ikke-R-modus, microdata-celle i R-modus,
     // dashboard-celler) er IKKE feil — en rolig info-boks (.nb-notice),
     // ikke rød pre.error.
-    function renderCellResult(out, res) {
+    // {idx} (final-review F6): en strukturell re-rendring (render(), utløst
+    // av f.eks. en samtidig contentLoaded/exit) kan skje MENS denne cellens
+    // kjøring pågår — c._out fanget ved kjørestart er da en detached node
+    // (fjernet fra DOM av render()'ens purge/gjenoppbygging), og et resultat
+    // som skrives dit ville forsvinne stille. Requery cellens NÅVÆRENDE slot
+    // via data-idx før rendring; finnes cellen ikke lenger, drop med warn
+    // fremfor å kaste (kjøringen fullførte tross alt).
+    function renderCellResult(idx, out, res) {
+      if (out && !out.isConnected && NB.root) {
+        out = NB.root.querySelector('.nb-cell[data-idx="' + idx + '"] .nb-output');
+        if (!out) {
+          console.warn('renderCellResult: celle', idx, 'finnes ikke lenger (strukturendring midt i kjøring) — resultat droppet');
+          return;
+        }
+      }
       if (!out) return;
       if (res && res.rparts) {
         if (typeof global.renderROutputParts === 'function') {
