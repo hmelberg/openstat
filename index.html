@@ -8852,7 +8852,7 @@ async def _m2py_run_segment(_seg_json):
       // motsetning til runHybridR sin fulle kjøring, se kommentar der).
       // Sjekkes FØR webR-beredskap/kjøretilstand — ingen kjøring skjer, så
       // ingen scriptRunInProgress/knappe-tilstand trengs her.
-      if (/dashboard\s*\(/.test(cellText)) {
+      if (/\bdashboard\s*\(/.test(cellText)) {
         return { notice: t('Dashboard-celler krever Kjør alle (fase B2)') };
       }
       // Fase-A-mønsteret (btnRun sin R-modus-vakt, ~9255): sjekk beredskap i
