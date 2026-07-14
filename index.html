@@ -3254,6 +3254,10 @@
     function runtimeForMode(id) { return RUNTIME_FOR_MODE[id] || 'pyodide'; }  // ukjent → trygt valg
 
     function switchEditorMode(newMode) {
+      // Notatbok-sesjonen (fase B1) er knyttet til EN modus/dokument-visning;
+      // et modusbytte gjør den levende Python-sesjonen (e/_g) ugyldig — neste
+      // kjøring (Kjør alle eller en fremtidig per-celle-kjøring) booter på nytt.
+      nbSetSessionLive(false);
       // Save departing mode's content and breakpoints
       const si = document.getElementById('scriptInput');
       if (si) editorContent[activeEditorMode] = si.value;
@@ -3617,6 +3621,20 @@
     let pyodide = null;
     let pyInterruptBuf = null;
     let scriptRunInProgress = false;
+    // ── Notatbok-sesjon (fase B1, plan 2026-07-14) ──────────────────────
+    // Holder e/_g i live mellom per-celle-kjøringer (senere oppgaver).
+    // "Kjør alle" (btnRun) re-booter alltid ubetinget og markerer deretter
+    // levende; modusbytte og restart() markerer død FØR ny boot.
+    let nbSessionLive = false;
+    let nbStateChangeCbs = [];
+    function nbSetSessionLive(v) {
+      v = !!v;
+      if (v === nbSessionLive) return;
+      nbSessionLive = v;
+      for (var _nsi = 0; _nsi < nbStateChangeCbs.length; _nsi++) {
+        try { nbStateChangeCbs[_nsi](nbSessionLive); } catch (_e) {}
+      }
+    }
     // ── Editor mode (always-on, controlled by bottom-bar dropdown) ──────
     let activeEditorMode  = 'microdata'; // 'microdata' | 'python' | 'r'
     const editorContent   = { microdata: '', python: '', r: '', statx: '', jamovi: '', duckdb: '', brython: '', micropython: '' };
@@ -6648,6 +6666,23 @@ for _wl in json.loads(${JSON.stringify(JSON.stringify(loads))}):
 `;
     }
 
+    // DC-innstillinger (label_format + dc_*-terskler) presset inn i
+    // _m2py_mod.M2PY_DEFAULTS. Ekstrahert (fase B1, plan 2026-07-14) fra
+    // getInterpreterCorePython() sin boot-mal slik at reapplySettings() kan
+    // kjøre AKKURAT samme snutt mot en allerede levende sesjon uten reboot.
+    function buildM2pyDefaultsSnippet() {
+      return `try:
+    if isinstance(getattr(_m2py_mod, 'M2PY_DEFAULTS', None), dict):
+        _m2py_mod.M2PY_DEFAULTS['label_format'] = ${JSON.stringify(getLabelFormat())}
+        _m2py_mod.M2PY_DEFAULTS['dc_min_population'] = ${getDcThreshold('dc_min_population')}
+        _m2py_mod.M2PY_DEFAULTS['dc_tabulate_low_cell'] = ${getDcThreshold('dc_tabulate_low_cell')}
+        _m2py_mod.M2PY_DEFAULTS['dc_min_affected'] = ${getDcThreshold('dc_min_affected')}
+        _m2py_mod.M2PY_DEFAULTS['dc_min_summarize'] = ${getDcThreshold('dc_min_summarize')}
+except Exception:
+    pass
+`;
+    }
+
     function getInterpreterCorePython(catalogArg, pageBase, segmentsStrForInit) {
       const segAssign = segmentsStrForInit != null
         ? `_segments = json.loads(${JSON.stringify(segmentsStrForInit)})\n`
@@ -6677,15 +6712,7 @@ try:
         _m2py_mod.M2PY_DATA_SOURCE = 'dynamic'
 except Exception:
     _m2py_mod.M2PY_DATA_SOURCE = 'dynamic'
-try:
-    if isinstance(getattr(_m2py_mod, 'M2PY_DEFAULTS', None), dict):
-        _m2py_mod.M2PY_DEFAULTS['label_format'] = ${JSON.stringify(getLabelFormat())}
-        _m2py_mod.M2PY_DEFAULTS['dc_min_population'] = ${getDcThreshold('dc_min_population')}
-        _m2py_mod.M2PY_DEFAULTS['dc_tabulate_low_cell'] = ${getDcThreshold('dc_tabulate_low_cell')}
-        _m2py_mod.M2PY_DEFAULTS['dc_min_affected'] = ${getDcThreshold('dc_min_affected')}
-        _m2py_mod.M2PY_DEFAULTS['dc_min_summarize'] = ${getDcThreshold('dc_min_summarize')}
-except Exception:
-    pass
+${buildM2pyDefaultsSnippet()}
 import __main__
 __main__.micro_interpreter = e
 ${segAssign}_EMBED_S = "__micro_transform_start_"
@@ -8479,115 +8506,21 @@ options(width = 200)
     // run has settled before inspecting #outputArea for a `pre.error` node.
     window.mdIsScriptRunning = function () { return scriptRunInProgress; };
 
-    btnRun.addEventListener('click', async () => {
-      if (scriptRunInProgress) {
-        performRunInterrupt();
-        return;
-      }
-      // Notatbok aktiv (Task 6): #%%-celler → legacy '## lang'-segmentmarkører
-      // (linjetall bevares, så breakpoint-linjenumre under forblir gyldige).
-      // Gates på active(), IKKE hasMarkers(): med Rå tekst-valget på ser
-      // brukeren ren tekst og får dagens atferd (#%%-linjer er kommentarer).
-      // Bruker-initiert Kjør gir også HTML-tillit: klikk på Kjør kjører uansett
-      // dokumentets kode, som strengt dominerer HTML-rendring (idempotent).
-      if (window.Cells && window.Cells.active()) {
-        if (window.Cells.grantHtmlTrust) window.Cells.grantHtmlTrust();
-      }
-      const rawScript = (window.Cells && window.Cells.active())
-        ? window.Cells.executableSource(scriptInput.value, activeEditorMode)
-        : scriptInput.value;
-      // Respekter breakpoint: trunkér script til og med første breakpoint-linje
-      let effectiveScript = rawScript;
-      if (window.getBreakpoints) {
-        const _bps = window.getBreakpoints();
-        if (_bps && _bps.size > 0) {
-          const _stopLine = Math.min(..._bps);
-          effectiveScript = rawScript.split('\n').slice(0, _stopLine).join('\n');
-        }
-      }
-      const scriptTrim = effectiveScript.trim();
-      if (!scriptTrim) {
-        setStatus(rightStatus, 'No script to run.', true);
-        return;
-      }
-      scriptRunInProgress = true;
-      explainRunActive = false;
-      setRunButtonsUi('running');
-      setStatus(rightStatus, 'Starting...');
-      let py = null;
-      let incrementalStarted = false;
-      try {
-        // Moduser med lett runtime (webr, senere brython) skal ikke betale
-        // Pyodide-lastingen (10-30 s kaldt) — de py-avhengige blokkene i
-        // runHybridR henter sin egen ved behov (plan 2026-07-09 fase 1).
-        py = (runtimeForMode(activeEditorMode) !== 'pyodide') ? null : await loadPyodideAndM2py();
-        let stdout = '';
-        let stderr = '';
-        // Egen funksjon: kalles både ved normal boot her og ved SEN Pyodide-
-        // boot i duckdb-fallbackveien lenger ned (fase 1, plan 2026-07-11).
-        const _wirePyIO = function (p) {
-          if (p && typeof p.setStdout === 'function') {
-            p.setStdout({ batched: s => {
-              // Filtrer bort Pyodide/micropip pakke-lastemeldinger (bakgrunns-prefetch)
-              // som ellers lekker inn i output ved første kjøring.
-              var f = String(s).split('\n').filter(function (l) {
-                var t = l.replace(/\s+$/, '');
-                return !(/ already loaded from default channel$/.test(t)
-                  || /^Load(ing|ed) [\w.\-]+(, [\w.\-]+)+$/.test(t)
-                  || /^Load(ing|ed) (statsmodels|matplotlib|patsy|lifelines|linearmodels|autograd|numpy|scipy|pandas)$/.test(t));
-              }).join('\n');
-              if (f === '' && String(s).trim() !== '') return;  // ren pakke-støy → hopp over
-              stdout += f + '\n';
-            } });
-          }
-          if (p && typeof p.setStderr === 'function') {
-            p.setStderr({ batched: s => { stderr += s + '\n'; } });
-          }
-        };
-        _wirePyIO(py);
-        // ── Parse inline-direktiver fra scriptet (f.eks.
-        //    `#options.show_commands=False`). Brukes til a styre om
-        //    kode-echo skal vises i output for R og Python.
-        // Presedens: script-direktiv > Innstillinger > true.
-        var _scriptOpts = extractScriptOptions(effectiveScript);
-        // #options.view = output-only | split  → toggle the input-panel visibility from a script
-        if (_scriptOpts.view !== undefined && window.mdSetInputHidden) {
-          var _vw = String(_scriptOpts.view).toLowerCase().replace(/[\s_]+/g, '-');
-          var _hide = (_vw === 'output-only' || _vw === 'output' || _vw === 'results-only');
-          window.mdSetInputHidden(_hide);
-          if (window.mdOnInputToggle) window.mdOnInputToggle(_hide);
-        }
-        // Directive lines are metadata — strip them so the engine never runs them
-        // (#options.* is not a comment in microdata, so it would otherwise error).
-        effectiveScript = effectiveScript.replace(/^[ \t]*(?:#|\/\/)[ \t]*options\.[A-Za-z_]\w*[ \t]*=.*$\n?/gm, '');
-        var _showCmds = (typeof _scriptOpts.show_commands === 'boolean')
-          ? _scriptOpts.show_commands
-          : getShowCommandsDefault();
-        // Eskapeluke (spec §4): '#options.display = all' slår av notatbok-
-        // visningspolicyen igjen (vis alt, echo følger _showCmds som vanlig).
-        var _displayAll = String(_scriptOpts.display || '').toLowerCase() === 'all';
-        var _mr = currentMode();
-        var _ctx = { py: py, rightStatus: rightStatus, showCommands: _showCmds, profile: _scriptOpts.profile };
-        if (_mr.runSelf) { await _mr.runSelf(effectiveScript, _ctx); return; }
-        if (_mr.preRun)  await _mr.preRun(effectiveScript, _ctx);
-        // Fase 1 (plan 2026-07-11-phase1-duckdb-native.md i safestat): ren SQL
-        // i duckdb-modus kjører native mot duckdb-wasm, uten Pyodide. Hybride
-        // segmenter, use-direktiver og pandas-formater faller igjennom hit —
-        // da bootes Pyodide sent, og resten av veien under er uendret.
-        var _duckPreResolved = null;
-        if (activeEditorMode === 'duckdb' && !py) {
-          var _dn = await maybeRunDuckNative(effectiveScript, _ctx);
-          if (_dn.handled) return;
-          // Gjenbruk native-veiens resolve i fallback (unngå dobbel henting).
-          _duckPreResolved = _dn.res;
-          py = await loadPyodideAndM2py();
-          _ctx.py = py;
-          _wirePyIO(py);
-        }
-        // Web-modus: connect/load-direktiver — hent kildene og skriv dem til
-        // Pyodide-FS her; selve bindingen inn i e.datasets/_g skjer i
-        // buildWebDataLoaderPreamble() (kjøres som del av runCode under).
-        // Ingen-op når scriptet ikke har load-direktiver (tom liste).
+    // ── Notatbok-sesjon: boot (fase B1, plan 2026-07-14) ────────────────────
+    // Ekstrahert fra btnRun sin python-sti (loads-henting/binding + setupCode-
+    // bygging/kjøring, som skaper en FRISK e/_g) slik at "Kjør alle" og
+    // window.mdNotebookSession (ensure/restart, brukt av senere per-celle-
+    // kjøring) deler NØYAKTIG samme boot-kode. Kalleren har allerede avgjort
+    // modusforgreningen (duckdb-native fast path, #options.*-parsing,
+    // Pyodide-lasting) FØR dette kalles -- funksjonen booter alltid
+    // ubetinget når den kalles (kalleren styrer om/når). ctx = { py,
+    // activeEditorMode, effectiveScript, duckPreResolved, showCommands }.
+    async function bootNotebookSession(ctx) {
+      var py = ctx.py;
+      var activeEditorMode = ctx.activeEditorMode;
+      var effectiveScript = ctx.effectiveScript;
+      var _duckPreResolved = ctx.duckPreResolved;
+      var _showCmds = ctx.showCommands;
         var _pyLoads = [];
         if (activeEditorMode === 'python' || activeEditorMode === 'duckdb') {
           var _dlDeps = { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey };
@@ -8735,6 +8668,178 @@ async def _m2py_run_segment(_seg_json):
 `;
         setStatus(rightStatus, 'Running...');
         await py.runPythonAsync(setupCode);
+      nbSetSessionLive(true);
+      return { py: py, segments: segments };
+    }
+
+    // Python-sti: kall bootNotebookSession() på nytt hvis sesjonen ikke er
+    // levende (force=true tvinger reboot uansett -- samme som restart()).
+    // Ensure()/restart() beregner sin egen ctx fra DOKUMENTETS nåværende
+    // tilstand (uavhengig av en pågående btnRun-kjøring): ingen duckdb-native
+    // fast path (alltid via Pyodide-DataLoader-veien) og ingen breakpoint-
+    // trunkering (det er et "Kjør alle"-spesifikt konsept).
+    async function nbEnsureSession(force) {
+      if (nbSessionLive && !force) {
+        return { py: await loadPyodideAndM2py() };
+      }
+      var _mode = activeEditorMode;
+      var py = await loadPyodideAndM2py();
+      var rawScript = (window.Cells && window.Cells.active())
+        ? window.Cells.executableSource(scriptInput.value, _mode)
+        : scriptInput.value;
+      var _scriptOpts = extractScriptOptions(rawScript);
+      var effectiveScript = rawScript.replace(/^[ \t]*(?:#|\/\/)[ \t]*options\.[A-Za-z_]\w*[ \t]*=.*$\n?/gm, '');
+      var _showCmds = (typeof _scriptOpts.show_commands === 'boolean')
+        ? _scriptOpts.show_commands
+        : getShowCommandsDefault();
+      var _result = await bootNotebookSession({
+        py: py,
+        activeEditorMode: _mode,
+        effectiveScript: effectiveScript,
+        duckPreResolved: null,
+        showCommands: _showCmds
+      });
+      return { py: _result.py };
+    }
+
+    async function nbReapplySettings() {
+      if (!nbSessionLive) return;
+      var py = await loadPyodideAndM2py();
+      try { await py.runPythonAsync(buildM2pyDefaultsSnippet()); }
+      catch (_e) { console.warn('mdNotebookSession.reapplySettings:', _e); }
+    }
+
+    // Eksponert for senere oppgaver (per-celle-kjøring, sesjonschips, Restart
+    // & kjør alle -- plan 2026-07-14 fase B1, Task 2/5). "Kjør alle" (btnRun)
+    // bruker bootNotebookSession() direkte (uendret atferd); dette objektet
+    // er det NYE, generiske grensesnittet mot samme sesjon.
+    window.mdNotebookSession = {
+      ensure: function (force) { return nbEnsureSession(!!force); },
+      restart: function () {
+        nbSetSessionLive(false);
+        return nbEnsureSession(true);
+      },
+      isLive: function () { return nbSessionLive; },
+      runtime: function () { return activeEditorMode; },
+      onStateChange: function (cb) {
+        if (typeof cb === 'function') nbStateChangeCbs.push(cb);
+      },
+      reapplySettings: function () { return nbReapplySettings(); }
+    };
+
+    btnRun.addEventListener('click', async () => {
+      if (scriptRunInProgress) {
+        performRunInterrupt();
+        return;
+      }
+      // Notatbok aktiv (Task 6): #%%-celler → legacy '## lang'-segmentmarkører
+      // (linjetall bevares, så breakpoint-linjenumre under forblir gyldige).
+      // Gates på active(), IKKE hasMarkers(): med Rå tekst-valget på ser
+      // brukeren ren tekst og får dagens atferd (#%%-linjer er kommentarer).
+      // Bruker-initiert Kjør gir også HTML-tillit: klikk på Kjør kjører uansett
+      // dokumentets kode, som strengt dominerer HTML-rendring (idempotent).
+      if (window.Cells && window.Cells.active()) {
+        if (window.Cells.grantHtmlTrust) window.Cells.grantHtmlTrust();
+      }
+      const rawScript = (window.Cells && window.Cells.active())
+        ? window.Cells.executableSource(scriptInput.value, activeEditorMode)
+        : scriptInput.value;
+      // Respekter breakpoint: trunkér script til og med første breakpoint-linje
+      let effectiveScript = rawScript;
+      if (window.getBreakpoints) {
+        const _bps = window.getBreakpoints();
+        if (_bps && _bps.size > 0) {
+          const _stopLine = Math.min(..._bps);
+          effectiveScript = rawScript.split('\n').slice(0, _stopLine).join('\n');
+        }
+      }
+      const scriptTrim = effectiveScript.trim();
+      if (!scriptTrim) {
+        setStatus(rightStatus, 'No script to run.', true);
+        return;
+      }
+      scriptRunInProgress = true;
+      explainRunActive = false;
+      setRunButtonsUi('running');
+      setStatus(rightStatus, 'Starting...');
+      let py = null;
+      let incrementalStarted = false;
+      try {
+        // Moduser med lett runtime (webr, senere brython) skal ikke betale
+        // Pyodide-lastingen (10-30 s kaldt) — de py-avhengige blokkene i
+        // runHybridR henter sin egen ved behov (plan 2026-07-09 fase 1).
+        py = (runtimeForMode(activeEditorMode) !== 'pyodide') ? null : await loadPyodideAndM2py();
+        let stdout = '';
+        let stderr = '';
+        // Egen funksjon: kalles både ved normal boot her og ved SEN Pyodide-
+        // boot i duckdb-fallbackveien lenger ned (fase 1, plan 2026-07-11).
+        const _wirePyIO = function (p) {
+          if (p && typeof p.setStdout === 'function') {
+            p.setStdout({ batched: s => {
+              // Filtrer bort Pyodide/micropip pakke-lastemeldinger (bakgrunns-prefetch)
+              // som ellers lekker inn i output ved første kjøring.
+              var f = String(s).split('\n').filter(function (l) {
+                var t = l.replace(/\s+$/, '');
+                return !(/ already loaded from default channel$/.test(t)
+                  || /^Load(ing|ed) [\w.\-]+(, [\w.\-]+)+$/.test(t)
+                  || /^Load(ing|ed) (statsmodels|matplotlib|patsy|lifelines|linearmodels|autograd|numpy|scipy|pandas)$/.test(t));
+              }).join('\n');
+              if (f === '' && String(s).trim() !== '') return;  // ren pakke-støy → hopp over
+              stdout += f + '\n';
+            } });
+          }
+          if (p && typeof p.setStderr === 'function') {
+            p.setStderr({ batched: s => { stderr += s + '\n'; } });
+          }
+        };
+        _wirePyIO(py);
+        // ── Parse inline-direktiver fra scriptet (f.eks.
+        //    `#options.show_commands=False`). Brukes til a styre om
+        //    kode-echo skal vises i output for R og Python.
+        // Presedens: script-direktiv > Innstillinger > true.
+        var _scriptOpts = extractScriptOptions(effectiveScript);
+        // #options.view = output-only | split  → toggle the input-panel visibility from a script
+        if (_scriptOpts.view !== undefined && window.mdSetInputHidden) {
+          var _vw = String(_scriptOpts.view).toLowerCase().replace(/[\s_]+/g, '-');
+          var _hide = (_vw === 'output-only' || _vw === 'output' || _vw === 'results-only');
+          window.mdSetInputHidden(_hide);
+          if (window.mdOnInputToggle) window.mdOnInputToggle(_hide);
+        }
+        // Directive lines are metadata — strip them so the engine never runs them
+        // (#options.* is not a comment in microdata, so it would otherwise error).
+        effectiveScript = effectiveScript.replace(/^[ \t]*(?:#|\/\/)[ \t]*options\.[A-Za-z_]\w*[ \t]*=.*$\n?/gm, '');
+        var _showCmds = (typeof _scriptOpts.show_commands === 'boolean')
+          ? _scriptOpts.show_commands
+          : getShowCommandsDefault();
+        // Eskapeluke (spec §4): '#options.display = all' slår av notatbok-
+        // visningspolicyen igjen (vis alt, echo følger _showCmds som vanlig).
+        var _displayAll = String(_scriptOpts.display || '').toLowerCase() === 'all';
+        var _mr = currentMode();
+        var _ctx = { py: py, rightStatus: rightStatus, showCommands: _showCmds, profile: _scriptOpts.profile };
+        if (_mr.runSelf) { await _mr.runSelf(effectiveScript, _ctx); return; }
+        if (_mr.preRun)  await _mr.preRun(effectiveScript, _ctx);
+        // Fase 1 (plan 2026-07-11-phase1-duckdb-native.md i safestat): ren SQL
+        // i duckdb-modus kjører native mot duckdb-wasm, uten Pyodide. Hybride
+        // segmenter, use-direktiver og pandas-formater faller igjennom hit —
+        // da bootes Pyodide sent, og resten av veien under er uendret.
+        var _duckPreResolved = null;
+        if (activeEditorMode === 'duckdb' && !py) {
+          var _dn = await maybeRunDuckNative(effectiveScript, _ctx);
+          if (_dn.handled) return;
+          // Gjenbruk native-veiens resolve i fallback (unngå dobbel henting).
+          _duckPreResolved = _dn.res;
+          py = await loadPyodideAndM2py();
+          _ctx.py = py;
+          _wirePyIO(py);
+        }
+        // Web-modus: connect/load-direktiver — hent kildene og skriv dem til
+        // Pyodide-FS her; selve bindingen inn i e.datasets/_g skjer i
+        // buildWebDataLoaderPreamble() (kjøres som del av runCode under).
+        // Ingen-op når scriptet ikke har load-direktiver (tom liste).
+        var _bootCtx = { py: py, activeEditorMode: activeEditorMode, effectiveScript: effectiveScript, duckPreResolved: _duckPreResolved, showCommands: _showCmds };
+        var _bootResult = await bootNotebookSession(_bootCtx);
+        py = _bootResult.py;
+        var segments = _bootResult.segments;
         // Segmentvis kjøring drevet fra JS: output rendres etter hvert segment,
         // og nettleseren får tegnet mellom segmentene (progressiv visning).
         const asHtml = document.querySelector('input[name="outputMode"]:checked').value === 'html';
