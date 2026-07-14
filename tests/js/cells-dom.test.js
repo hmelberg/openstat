@@ -222,6 +222,27 @@ test('contentLoaded() etter kryssmodus eksempel-lasting → auto-åpner (speiler
   assert.strictEqual(C.active(), true, 'contentLoaded auto-åpner notatbok-dokument uavhengig av tick-heuristikken');
 });
 
+// final-review F1: et nytt dokument (eksempler, share/GitHub, dyplenker) skal
+// alltid ugyldiggjøre en eventuell levende notatbok-sesjon FØR rendring,
+// ellers kunne en celle kjørt i det nye dokumentet gjenbruke forrige
+// dokuments e/_g/loads (kryss-dokument-kontaminering).
+test('contentLoaded() kaller mdNotebookSession.invalidate() (sesjon fra forrige dokument ugyldiggjøres)', () => {
+  const { C, scriptInputEl } = freshEnv();
+  let invalidated = 0;
+  global.mdNotebookSession = { invalidate: () => { invalidated++; } };
+  scriptInputEl.value = '#%% python\nprint(1)\n';
+  C.contentLoaded();
+  assert.strictEqual(invalidated, 1, 'invalidate() skal kalles ved contentLoaded()');
+  delete global.mdNotebookSession;
+});
+
+test('contentLoaded() uten mdNotebookSession (stub-DOM) → ingen krasj', () => {
+  const { C, scriptInputEl } = freshEnv();
+  delete global.mdNotebookSession;
+  scriptInputEl.value = '#%% python\nprint(1)\n';
+  assert.doesNotThrow(() => C.contentLoaded());
+});
+
 test('contentLoaded() nullstiller rawOverride: nytt dokument re-åpner etter Rå tekst-exit', () => {
   const { C, scriptInputEl } = freshEnv();
   scriptInputEl.value = '#%% python\nprint(1)\n';
@@ -957,6 +978,10 @@ test('Restart & kjør alle: kaller mdNotebookSession.restart() og deretter btnRu
     onStateChange: () => {},
     restart: () => { restarted = true; return Promise.resolve(); },
   };
+  // final-review F3: onRestartClick guarder nå mot mdIsScriptRunning() —
+  // eksplisitt false her (i stedet for å stole på forrige tests globale
+  // stub) siden en foregående test bevisst lot den stå på true.
+  global.mdIsScriptRunning = () => false;
   scriptInputEl.value = '#%% python\n1\n';
   C.init('python');
 
@@ -979,4 +1004,30 @@ test('Restart & kjør alle: window.mdNotebookSession fraværende → klikk gjør
   const restartBtn = restartBtnEl(containerEl);
   assert.doesNotThrow(() => restartBtn.dispatchEvent({ type: 'click' }));
   assert.strictEqual(getBtnRunClicks(), 0, 'uten sesjon skal btnRun aldri klikkes');
+});
+
+// final-review F3: Restart & kjør alle skal IKKE virke mens en Kjør alle/
+// Forklar-kjøring allerede pågår — uten denne guarden kunne Restart rive
+// vekk e/_g under føttene på den pågående kjøringen.
+test('Restart & kjør alle: nekter mens mdIsScriptRunning() er true (kaller ikke mdNotebookSession.restart())', async () => {
+  const { C, scriptInputEl, containerEl, getBtnRunClicks } = freshEnv();
+  let restarted = false;
+  global.mdNotebookSession = {
+    runtime: () => 'python',
+    isLive: () => true,
+    onStateChange: () => {},
+    restart: () => { restarted = true; return Promise.resolve(); },
+  };
+  global.mdIsScriptRunning = () => true;
+  scriptInputEl.value = '#%% python\n1\n';
+  C.init('python');
+
+  const restartBtn = restartBtnEl(containerEl);
+  restartBtn.dispatchEvent({ type: 'click' });
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+
+  assert.strictEqual(restarted, false, 'mdNotebookSession.restart() skal IKKE kalles mens en kjøring pågår');
+  assert.strictEqual(getBtnRunClicks(), 0, 'btnRun skal heller ikke klikkes');
+
+  delete global.mdNotebookSession;
 });

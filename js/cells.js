@@ -276,6 +276,11 @@
     // Uten flagget (lokalt/eksempler i repoen) er dokumentet brukerens eget og
     // fullt betrodd. Nytt dokument erstatter forrige tillitstilstand.
     C.contentLoaded = function (opts) {
+      // Nytt dokument → gammel sesjon er ugyldig (final-review F1): en celle
+      // kjørt i dokument B skal aldri kunne gjenbruke e/_g/loads fra
+      // dokument A. Må kalles FØR render()/exit() under, ellers rekker en
+      // per-celle-kjøring å starte mot den gamle sesjonen først.
+      if (global.mdNotebookSession) global.mdNotebookSession.invalidate();
       NB.htmlTrusted = !(opts && opts.untrusted === true);
       NB.rawOverride = false;
       var ta = $('scriptInput');
@@ -851,6 +856,10 @@
     // kjørelogikk duplisert her. Guard for window.mdNotebookSession sitt
     // fravær (stub-DOM-tester, og defensivt i browseren).
     function onRestartClick() {
+      // Guard mot en pågående Kjør alle/Forklar (final-review F3, speiler
+      // C.runCell sin egen sjekk): uten denne kunne Restart rive vekk
+      // e/_g under føttene på en kjøring som allerede er i gang.
+      if (global.mdIsScriptRunning && global.mdIsScriptRunning()) return;
       var sess = global.mdNotebookSession;
       if (!sess || typeof sess.restart !== 'function') return;
       setNbButtonsDisabled(true);

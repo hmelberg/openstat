@@ -277,7 +277,8 @@ run's output rendered into **that cell's slot**. Design:
 - **Phase B2 — remaining:** cell toolbar editing operations, skrittvis cell
   playback, dashboard render-target completion (R dashboard cells per-cell,
   dash per-slot cleanup), `#options.display=last` for unmarked scripts, R
-  `# use` cross-runtime per-cell.
+  `# use` cross-runtime per-cell; ekte R-sesjonsreset (rm(list=ls()) +
+  DashWebR.reset) ved Restart.
 
 If phase B stalls, phase A remains a shippable feature.
 

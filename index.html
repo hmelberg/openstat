@@ -8746,6 +8746,20 @@ async def _m2py_run_segment(_seg_json):
     // fast path (alltid via Pyodide-DataLoader-veien) og ingen breakpoint-
     // trunkering (det er et "Kjør alle"-spesifikt konsept).
     async function nbEnsureSession(force) {
+      // R-modus (final-review F4, minimal variant): denne sesjonen er en
+      // Pyodide-sesjon (e/_g) — R-kjøringer bruker webR direkte og skal ALDRI
+      // få "Restart & kjør alle" til å boote Pyodide. Ekte R-sesjonsreset
+      // (rm(list=ls()) + DashWebR.reset) ved Restart er fase B2 (se spec §6).
+      // MERK: sjekker activeEditorMode === 'r' direkte, IKKE
+      // runtimeForMode(...) !== 'pyodide' — duckdb-modusens notatbok-sesjon
+      // (bootNotebookSession) kaller py.runPythonAsync(setupCode) ubetinget
+      // for duckdb også (loads/#duckdb-bro), så den TRENGER Pyodide selv om
+      // runtimeForMode('duckdb') === 'duckdb' (den betegnelsen gjelder kun
+      // "duckdb-native"-hurtigveien i btnRun, ikke denne delte sesjonen).
+      if (activeEditorMode === 'r') {
+        nbSetSessionLive(false);
+        return { py: null };
+      }
       if (nbSessionLive && !force) {
         return { py: await loadPyodideAndM2py() };
       }
@@ -8786,6 +8800,11 @@ async def _m2py_run_segment(_seg_json):
         nbSetSessionLive(false);
         return nbEnsureSession(true);
       },
+      // Nytt dokument (eksempler, share/GitHub, dyplenker) → gammel sesjon er
+      // ugyldig (fase B1 final-review F1): kalt fra Cells.contentLoaded() FØR
+      // rendring, slik at en celle kjørt i dokument B aldri kan gjenbruke
+      // e/_g/loads booted for dokument A.
+      invalidate: function () { nbSetSessionLive(false); },
       isLive: function () { return nbSessionLive; },
       // Klemmer til de fire kjøretidene notatbok-sesjonen faktisk kjenner
       // (status-chips, Task 5) — en ukjent/fremtidig modusverdi gir null
@@ -9641,6 +9660,10 @@ def _run_microdata_chunk(_code):
     _g["to_microdata"] = to_microdata
 `;
           await py.runPythonAsync(explainInit);
+          // Forklar bygger sitt EGET e/_g her (uten loads) — notatbok-sesjonen
+          // (fase B1) er død etterpå, ellers ville en per-celle-kjøring etter
+          // en Forklar-økt gjenbrukt Forklars e/_g uten de innlastede datasettene.
+          nbSetSessionLive(false);
         }
         const forklarBlocks = parseExplainBlocks(extractBlockWidgets(snapshotScript), activeEditorMode);
         forklarSessionFlatWork = forklarBlocks;
