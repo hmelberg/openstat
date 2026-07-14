@@ -207,13 +207,16 @@
     // cellIdx → cellens .ui-controls-node (for lazy gjenbruk mellom kall).
     var _strips = {};
     // cellIdx → { ordinal, registered: {controlKey: true}, closed }.
-    // "closed" markeres av endCellRun ved slutten av en kjøring — neste
-    // registerControl for samme celle ser closed===true og starter en
-    // FRISK ordinal-teller + registered-sett (dette ER "reset når en ny
-    // kjøring starter", uttrykt via endCellRun i stedet for en global
-    // null→ikke-null-overgangsvakt: enklere, og gjør endCellRun selv
-    // idempotent — et duplikatkall (flere kjørebraketter kan begge kalle
-    // den for samme celle) sopper ingenting nytt andre gang).
+    // Nullstilles EKSPLISITT av Ui.beginCellRun (kalt fra de samme
+    // kjørebrakettene i index.html som SETTER nbUiRunCtx) — det gjør
+    // stale-soppen i endCellRun korrekt også når en rerun har NULL
+    // ui.*-kall (kilden fjernet alle kontrollene): uten beginCellRun
+    // ville "ny kjøring startet" bare vært observerbar via første
+    // registerControl, som aldri kommer. "closed" (satt av endCellRun)
+    // beholdes som lat fallback for registerControl-kall som skulle nå
+    // hit uten en foregående beginCellRun, og gjør endCellRun idempotent
+    // — et duplikatkall (flere kjørebraketter kan begge kalle den for
+    // samme celle) sopper ingenting nytt andre gang.
     var _cellRuns = {};
 
     function _el(tag, cls, text) {
@@ -254,7 +257,9 @@
           ? global.Cells.cellIndexById(id) : -1;
         if (idx === -1) {
           console.warn('Ui: ukjent rerun-mål id: ' + id);
-        } else {
+        } else if (idxs.indexOf(idx) === -1) {
+          // Dedup: rerun:['a','a'] (eller to id-er som løses til samme
+          // celle) skal gi ÉN kjøring, ikke to.
           idxs.push(idx);
         }
       });
@@ -323,7 +328,10 @@
     }
 
     function _buildCheckbox(key, cellIdx, spec, value, isSwitch) {
-      var wrap = _el('label', isSwitch ? 'ui-widget ui-widget--check' : 'ui-widget ui-widget--check');
+      // Egen modifikator-klasse for switch (CSS-en selv nøkler på
+      // input[role="switch"], men wrap-klassen gjør varianten adresserbar
+      // for tester/fremtidige regler uten attributt-selektor).
+      var wrap = _el('label', isSwitch ? 'ui-widget ui-widget--check ui-widget--switch' : 'ui-widget ui-widget--check');
       var labelEl = _el('span', 'ui-widget-label', _labelText(spec));
       wrap.appendChild(labelEl);
       var input = document.createElement('input');
@@ -507,6 +515,21 @@
       }
       _values[key] = value;
       return JSON.stringify(value);
+    };
+
+    /**
+     * Ui.beginCellRun(cellIdx) — eksplisitt start på en celles kjøring:
+     * nullstiller ordinal-teller og registrert-sett. Kalles fra de samme
+     * kjørebrakettene i index.html som SETTER nbUiRunCtx (Kjør alle per
+     * segment, enkelt-celle-stien, microdata-replayens målsegment) —
+     * guardet `window.Ui && window.Ui.beginCellRun`, så plain scripts
+     * uten notatbok berøres aldri. Uten dette kallet ville en rerun med
+     * NULL ui.*-kall (kilden fjernet alle kontrollene) aldri nullstilt
+     * registrert-settet, og endCellRun-soppen under hadde latt de gamle
+     * kontrollene stå igjen.
+     */
+    Ui.beginCellRun = function (cellIdx) {
+      _cellRuns[cellIdx] = { ordinal: 0, registered: {} };
     };
 
     /**

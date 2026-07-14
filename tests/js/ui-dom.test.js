@@ -233,6 +233,19 @@ test('rerun: array av id-er reruner HVER av dem', async () => {
   assert.deepStrictEqual(runCellCalls.slice().sort(), [3, 4]);
 });
 
+test('rerun: duplikat-id-er i array dedupes — én kjøring per unik målcelle', async () => {
+  const { Ui, cellEl, runCellCalls } = freshEnv({ idMap: { a: 3, b: 4 } });
+  Ui.registerControl(JSON.stringify({ type: 'text', name: 'x', value: 'v', rerun: ['a', 'a', 'b'] }));
+  const strip = cellEl.children[0];
+  const textInput = strip.children[0].children[1];
+
+  textInput.value = 'w';
+  textInput.dispatchEvent({ type: 'change' });
+  await wait(200);
+
+  assert.deepStrictEqual(runCellCalls.slice().sort(), [3, 4], "['a','a','b'] → nøyaktig én kjøring for 'a'");
+});
+
 test('refuse-drop: mens mdIsScriptRunning() er true, forkastes den debouncede reruen (kjøres ikke i ettertid)', async () => {
   const { Ui, cellEl, runCellCalls, setScriptRunning } = freshEnv({ cellIdx: 1, scriptRunning: true });
   Ui.registerControl(JSON.stringify({ type: 'text', name: 'x', value: 'a' }));
@@ -281,6 +294,35 @@ test('endCellRun: fjerner kontroller registrert i FORRIGE kjøring men ikke gjen
   Ui.endCellRun(0);
 
   assert.strictEqual(strip.children.length, 1, "'b' ble sopt bort — ikke gjenregistrert i kjøring 2");
+});
+
+test('beginCellRun + endCellRun uten NOEN registreringer (reviewer-repro): alle gamle kontroller OG verdiene deres sopes', async () => {
+  const { Ui, cellEl } = freshEnv({ cellIdx: 0 });
+  // Kjøring 1: registrer en slider, bruker-endre verdien, avslutt.
+  Ui.beginCellRun(0);
+  Ui.registerControl(JSON.stringify({ type: 'slider', name: 'x', min: 0, max: 100, value: 5 }));
+  const strip = cellEl.children[0];
+  const rangeInput = strip.children[0].children[1];
+  rangeInput.value = '42';
+  rangeInput.dispatchEvent({ type: 'input' });
+  Ui.endCellRun(0);
+  assert.strictEqual(strip.children.length, 1, 'slider finnes etter kjøring 1');
+
+  // Kjøring 2: kilden har fjernet ALLE ui.*-kall — kun brakettene fyrer.
+  Ui.beginCellRun(0);
+  Ui.endCellRun(0);
+
+  assert.strictEqual(strip.children.length, 0,
+    'rerun med null registreringer skal sope ALLE gamle kontroller');
+
+  // _values-oppføringen er også borte: en senere gjenregistrering med samme
+  // nøkkel skal få spec-defaulten, ikke den gamle lagrede 42.
+  Ui.beginCellRun(0);
+  const res = Ui.registerControl(JSON.stringify({ type: 'slider', name: 'x', min: 0, max: 100, value: 5 }));
+  assert.strictEqual(JSON.parse(res), 5, 'verdilager-oppføringen ble slettet av soppen');
+  // Flush den løse 150ms-debouncen fra dispatchEvent over (se tilsvarende
+  // kommentar i "samme nøkkel re-registrert"-testen).
+  await wait(200);
 });
 
 test('endCellRun: kalt to ganger på rad for samme celle er idempotent (andre kallet fjerner ingenting nytt)', () => {
@@ -342,13 +384,16 @@ test('checkbox: verdi + endring lagres som boolean', async () => {
   assert.deepStrictEqual(runCellCalls, [7]);
 });
 
-test('switch: samme som checkbox men med role="switch"', () => {
+test('switch: samme som checkbox men med role="switch" og ui-widget--switch-klasse på wrap', () => {
   const { Ui, cellEl } = freshEnv();
   Ui.registerControl(JSON.stringify({ type: 'switch', name: 's', value: true }));
   const strip = cellEl.children[0];
-  const switchInput = strip.children[0].children[0];
+  const wrap = strip.children[0];
+  const switchInput = wrap.children[0];
   assert.strictEqual(switchInput.getAttribute('role'), 'switch');
   assert.strictEqual(switchInput.checked, true);
+  assert.ok(wrap.classList.contains('ui-widget--switch'), 'wrap skiller switch fra vanlig checkbox');
+  assert.ok(wrap.classList.contains('ui-widget--check'));
 });
 
 test('number: verdi og min/max/step overføres til input-elementet', () => {

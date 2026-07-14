@@ -9113,6 +9113,11 @@ async def _m2py_run_segment(_seg_json):
             // der ville aldri kunne rerunnes meningsfullt. Nullstilles rett
             // etter kjøringen uansett utfall (try/catch over dekker begge).
             nbUiRunCtx = _isTargetSeg ? _nbUiCtxFor(payload.cellIdx) : null;
+            // ui-widgets (Task 3-review): eksplisitt kjøringsstart for
+            // stale-soppen — nullstiller ordinal/registrert-sett slik at
+            // endCellRun under sopper korrekt selv når rerunen har NULL
+            // ui.*-kall igjen.
+            if (_isTargetSeg && window.Ui && window.Ui.beginCellRun) window.Ui.beginCellRun(payload.cellIdx);
             try {
               py.globals.set('_m2py_seg_json', JSON.stringify(_rseg));
               _rrc = await py.runPythonAsync('await _m2py_run_segment(_m2py_seg_json)');
@@ -9199,6 +9204,9 @@ async def _m2py_run_segment(_seg_json):
         // allerede har nullstilt sin egen per-segment, så dette er et
         // idempotent sikkerhetsnett, ikke en dobbel-mening).
         nbUiRunCtx = _nbUiCtxFor(payload.cellIdx);
+        // ui-widgets (Task 3-review): eksplisitt kjøringsstart — se
+        // replay-grenens tilsvarende kommentar over.
+        if (window.Ui && window.Ui.beginCellRun) window.Ui.beginCellRun(payload.cellIdx);
         py.globals.set('_m2py_seg_json', JSON.stringify(targetSeg));
         var rc = await py.runPythonAsync('await _m2py_run_segment(_m2py_seg_json)');
         if (py && typeof py.setStdout === 'function') py.setStdout();
@@ -9392,6 +9400,9 @@ async def _m2py_run_segment(_seg_json):
           // rc === 'stop' (break under er dermed også dekket).
           var _uiIdx = _nbActive ? window.Cells.cellIdxForSegment(i) : null;
           nbUiRunCtx = (_uiIdx !== null && _uiIdx !== undefined) ? _nbUiCtxFor(_uiIdx) : null;
+          // ui-widgets (Task 3-review): eksplisitt kjøringsstart for
+          // stale-soppen — samme betingelse som satte konteksten over.
+          if (_uiIdx !== null && _uiIdx !== undefined && window.Ui && window.Ui.beginCellRun) window.Ui.beginCellRun(_uiIdx);
           py.globals.set('_m2py_seg_json', JSON.stringify(segments[i]));
           const rc = await py.runPythonAsync('await _m2py_run_segment(_m2py_seg_json)');
           nbUiRunCtx = null;
