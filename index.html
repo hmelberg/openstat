@@ -8790,36 +8790,44 @@ async def _m2py_run_segment(_seg_json):
       renderOutput(raw, asHtml, suppress, target);
     };
 
-    // ── Notatbok: per-celle-kjøring mot levende sesjon (fase B1 Task 2,
+    // ── Notatbok: per-celle-kjøring mot levende sesjon (fase B1 Task 2/3,
     // plan 2026-07-14) ──────────────────────────────────────────────────────
-    // window.mdRunNotebookCell(payload) kjører ÉTT segment (python/duckdb)
-    // fra js/cells.js sin C.runCell(idx). payload = {kind, text, uses, nb,
-    // cellIdx} — cellIdx er den AVGJØRENDE nøkkelen: "# use"-direktiver
-    // skannes over HELE dokumentet (forskningsfaktum), så segmentets `uses`
-    // løses her mot den FULLE segment-arrayen (buildDocumentSegments), ALDRI
-    // mot payload.text/uses alene (cellens isolerte tekst mangler den
-    // konteksten). cellIdx → segment-indeks via Cells.segmentPlan/alignPlan,
-    // samme justeringslogikk btnRun bruker via Cells.beginRun()/sinkForSegment.
+    // window.mdRunNotebookCell(payload) kjører ÉTT segment (python/duckdb/
+    // microdata) fra js/cells.js sin C.runCell(idx). payload = {kind, text,
+    // uses, nb, cellIdx} — cellIdx er den AVGJØRENDE nøkkelen: "# use"-
+    // direktiver skannes over HELE dokumentet (forskningsfaktum), så
+    // segmentets `uses` løses her mot den FULLE segment-arrayen
+    // (buildDocumentSegments), ALDRI mot payload.text/uses alene (cellens
+    // isolerte tekst mangler den konteksten). cellIdx → segment-indeks via
+    // Cells.segmentPlan/alignPlan, samme justeringslogikk btnRun bruker via
+    // Cells.beginRun()/sinkForSegment.
     //
-    // microdata-celler (Task 3) og r-celler i ikke-R-modus-dokumenter
-    // (Task 4 gir full R-per-celle-støtte, inkl. bilder — å prøve å presse
-    // captureR-bilder gjennom denne {text}-kontrakten her ville enten miste
-    // bilder eller kreve en DOM-referanse i payload som ville la
-    // mdRunNotebookCell skrive rett inn i cellens slot og dermed kollidere
-    // med cells.js sin egen purge+skriv-rekkefølge — venter derfor bevisst
-    // til Task 4) gir en tydelig begrensningsmelding i stedet.
+    // microdata-celler (Task 3, spec §4-unntaket "kjør fra toppen gjennom
+    // cellen"): tolkeren (`e`) har INGEN isolert per-celle-eksekvering — den
+    // er en stateful DSL-motor som bygger datasett gradvis (require/create-
+    // dataset/import/generate/…). Sesjonen restartes derfor (fersk e/_g,
+    // speiler forklarReplayChunksBeforeIndex ~9178), og segmentene 0..target
+    // kjøres i dokumentrekkefølge gjennom _m2py_run_segment (samme vei som
+    // "Kjør alle" sin segmentløkke) — kun målsegmentets output fanges og
+    // rendres, tidligere segmenters stdout fanges og forkastes (deres EGNE
+    // sluk i DOM-en er urørt, cells.js skriver kun til målcellens slot).
+    //
+    // r-celler i ikke-R-modus-dokumenter (Task 4 gir full R-per-celle-støtte,
+    // inkl. bilder — å prøve å presse captureR-bilder gjennom denne {text}-
+    // kontrakten her ville enten miste bilder eller kreve en DOM-referanse i
+    // payload som ville la mdRunNotebookCell skrive rett inn i cellens slot
+    // og dermed kollidere med cells.js sin egen purge+skriv-rekkefølge —
+    // venter derfor bevisst til Task 4) gir en tydelig begrensningsmelding
+    // i stedet.
     window.mdRunNotebookCell = async function (payload) {
       if (scriptRunInProgress) {
         return { error: t('En kjøring pågår allerede.') };
       }
       var kind = payload && payload.kind;
-      if (kind === 'microdata') {
-        return { error: t('Microdata-celler kjøres fra toppen — kommer i neste oppgave') };
-      }
       if (kind === 'r') {
         return { error: t('R-celler kjøres per celle i en senere oppgave (fase B1 Task 4) — bruk Kjør alle inntil videre') };
       }
-      if (kind !== 'pyodide' && kind !== 'duckdb') {
+      if (kind !== 'pyodide' && kind !== 'duckdb' && kind !== 'microdata') {
         return { error: t('Ukjent celletype: {kind}', { kind: String(kind) }) };
       }
       scriptRunInProgress = true;
@@ -8828,7 +8836,16 @@ async def _m2py_run_segment(_seg_json):
       var nbCellStdout = '';
       var nbCellStderr = '';
       try {
-        var _sess = await window.mdNotebookSession.ensure();
+        // microdata-celler (Task 3, spec §4-unntaket): sesjonen MÅ restartes
+        // (fersk e/_g) — "kjør fra toppen gjennom cellen" er per definisjon
+        // en gjenoppbygging, speiler forklarReplayChunksBeforeIndex (~9178).
+        // pyodide/duckdb-celler beholder den levende sesjonen (ensure uten
+        // force), som før (Task 2).
+        var isMicrodataReplay = (kind === 'microdata');
+        if (isMicrodataReplay) setStatus(rightStatus, t('Kjører fra toppen…'));
+        var _sess = isMicrodataReplay
+          ? await window.mdNotebookSession.restart()
+          : await window.mdNotebookSession.ensure();
         py = _sess.py;
         await window.mdNotebookSession.reapplySettings();
         var _mode = activeEditorMode;
@@ -8858,6 +8875,104 @@ async def _m2py_run_segment(_seg_json):
           return { error: t('Fant ikke cellens segment i dokumentet (planavvik) — prøv Kjør alle.') };
         }
         var targetSeg = segments[_segIdx];
+        if (isMicrodataReplay) {
+          // ── Kjør fra toppen GJENNOM målcellen (spec §4-unntaket) ──────────
+          // Alle segmenter 0..target kjøres i dokumentrekkefølge mot den
+          // nystartede sesjonen (restart over) — samme _m2py_run_segment-vei
+          // som "Kjør alle" sin segmentløkke (~9051). Kun målsegmentets
+          // output fanges og rendres; tidligere segmenters stdout fanges og
+          // FORKASTES (deres egne .nb-output-sluk i DOM-en røres ikke — kun
+          // cells.js sin runCell(idx) skriver til målcellens EGEN slot).
+          if (segments.some(function (s) { return s.kind === 'duckdb'; })) {
+            await __ensureDuckBridge(py);
+            try {
+              var _needPaReplay = await py.runPythonAsync('import importlib.util as _iu\n_iu.find_spec("pyarrow") is None');
+              if (_needPaReplay) await py.runPythonAsync('import micropip as _mp\nawait _mp.install("pyarrow")');
+            } catch (e) { console.warn('pyarrow ensure (kjør fra toppen):', e); }
+          }
+          for (var _ri = 0; _ri <= _segIdx; _ri++) {
+            var _rseg = segments[_ri];
+            var _isTargetSeg = (_ri === _segIdx);
+            // Materialiser blokkens use-kopier inn i python-familien (samme
+            // kilde-logikk som "Kjør alle" sin segmentløkke) — for HVERT
+            // segment i replayen, ikke bare målet (tidligere celler kan ha
+            // sine egne "# use"-direktiver).
+            for (var _rum = 0; _rum < (_rseg.uses || []).length; _rum++) {
+              var _ru = _rseg.uses[_rum];
+              await _bindUseIntoPy(py, _ru.name, await _useBytesFromRuntime(_ru));
+            }
+            if (_isTargetSeg) {
+              if (_rseg.kind === 'pyodide' && !_displayAll) {
+                // Carry-over (Task 2-review): kun EKSPLISITTE celler (ikke en
+                // preambel kjørt alene) får notatbok-visningspolicyen — en
+                // preambel-celle (headerRaw null) skal vise ALT sitt output,
+                // akkurat som "Kjør alle" gjør.
+                var _targetCellForNb = _cells[payload.cellIdx];
+                if (_targetCellForNb && _targetCellForNb.headerRaw !== null) {
+                  _rseg._nb = payload.nb || { echo: false, last: true };
+                }
+              }
+              if (_rseg.kind === 'duckdb') {
+                // duck-tabeller lever nå på tvers av CELLE-kjøringer til Kjør
+                // alle/Restart (window.__duck.begin({fresh:false})).
+                _rseg._cell = true;
+              }
+            }
+            // Gated stdout-akkumulator per replay-segment (samme filter som
+            // btnRun/Forklar bruker) — kall-scoped, gjenopprettet rett under.
+            var _capOut = '';
+            var _capErr = '';
+            if (py && typeof py.setStdout === 'function') {
+              py.setStdout({ batched: function (s) {
+                var f = String(s).split('\n').filter(function (l) {
+                  var tt = l.replace(/\s+$/, '');
+                  return !(/ already loaded from default channel$/.test(tt)
+                    || /^Load(ing|ed) [\w.\-]+(, [\w.\-]+)+$/.test(tt)
+                    || /^Load(ing|ed) (statsmodels|matplotlib|patsy|lifelines|linearmodels|autograd|numpy|scipy|pandas)$/.test(tt));
+                }).join('\n');
+                if (f === '' && String(s).trim() !== '') return;
+                _capOut += f + '\n';
+              } });
+            }
+            if (py && typeof py.setStderr === 'function') {
+              py.setStderr({ batched: function (s) { _capErr += s + '\n'; } });
+            }
+            var _rrc = null;
+            var _rerr = null;
+            try {
+              py.globals.set('_m2py_seg_json', JSON.stringify(_rseg));
+              _rrc = await py.runPythonAsync('await _m2py_run_segment(_m2py_seg_json)');
+            } catch (segE) {
+              _rerr = segE;
+            }
+            if (py && typeof py.setStdout === 'function') py.setStdout();
+            if (py && typeof py.setStderr === 'function') py.setStderr();
+            if (_capErr) console.warn('[stderr]', _capErr.trim());
+            // microdata-DSL-feil ("FEIL:"/oversatt "ERROR:") stopper IKKE
+            // _m2py_run_segment (ikke-fatalt per design, se m2py.py _log) —
+            // egen tekst-skanning her oppdager at en TIDLIGERE celle feilet
+            // under kjøring fra toppen. rc === 'stop' dekker DuckDB-grenen;
+            // ekte unntak (f.eks. en '## python'-celle i dokumentet) dekkes
+            // av try/catch over.
+            var _segFailed = !!_rerr || _rrc === 'stop' ||
+              (_rseg.kind === 'microdata' && /^[ \t]*(FEIL|ERROR):/m.test(_capOut));
+            var _failMsg = _rerr
+              ? ((_rerr && _rerr.message) ? _rerr.message : String(_rerr))
+              : ((_capOut || '').trim() || t('Kjøring stoppet.'));
+            if (_isTargetSeg) {
+              if (_segFailed) return { error: _failMsg };
+              await refreshDatasetSidebarFromPy(py);
+              return { text: (_capOut || '').trim() };
+            }
+            if (_segFailed) {
+              var _failCellIdx = (_aligned && _aligned[_ri] !== undefined) ? _aligned[_ri] : null;
+              var _failCellNum = (_failCellIdx !== null) ? (_failCellIdx + 1) : (_ri + 1);
+              return { error: t('Feil i celle {n} under kjøring fra toppen: {msg}', { n: _failCellNum, msg: _failMsg }) };
+            }
+          }
+          // Uventet: løkken over returnerer alltid via _isTargetSeg-grenen.
+          return { error: t('Intern feil under kjøring fra toppen.') };
+        }
         // Materialiser blokkens use-kopier inn i python-familien (samme
         // kilde-logikk som "Kjør alle" sin segmentløkke).
         for (var _um = 0; _um < (targetSeg.uses || []).length; _um++) {
@@ -8865,7 +8980,12 @@ async def _m2py_run_segment(_seg_json):
           await _bindUseIntoPy(py, _u.name, await _useBytesFromRuntime(_u));
         }
         if (targetSeg.kind === 'pyodide' && !_displayAll) {
-          targetSeg._nb = payload.nb || { echo: false, last: true };
+          // Carry-over (Task 2-review): se kommentar i replay-grenen over —
+          // samme EKSPLISITT-sjekk gjelder for enkelt-segment-kjøring også.
+          var _targetCell = _cells[payload.cellIdx];
+          if (_targetCell && _targetCell.headerRaw !== null) {
+            targetSeg._nb = payload.nb || { echo: false, last: true };
+          }
         }
         if (targetSeg.kind === 'duckdb') {
           // duck-tabeller lever nå på tvers av CELLE-kjøringer til Kjør
@@ -8908,6 +9028,7 @@ async def _m2py_run_segment(_seg_json):
       } finally {
         if (py && typeof py.setStdout === 'function') py.setStdout();
         if (py && typeof py.setStderr === 'function') py.setStderr();
+        if (isMicrodataReplay) setStatus(rightStatus, '');
         scriptRunInProgress = false;
         setRunButtonsUi('idle');
         if (activeEditorMode === 'duckdb') { refreshDatasetSidebarFromDuck(); }
