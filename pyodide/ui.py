@@ -46,7 +46,15 @@ def _register(spec):
     script). json.dumps ligger UTENFOR try-en med vilje: en userialiserbar
     verdi (f.eks. et vilkårlig objekt som value=) er en programmeringsfeil
     og skal feile HØYT med TypeError, ikke stille falle tilbake til
-    default så widgeten bare uteblir."""
+    default så widgeten bare uteblir.
+
+    `not raw` (ikke `raw is None`) med vilje: et ekte JS `null` som kommer
+    tilbake over pyodide-grensen konverteres IKKE til Python `None`, men til
+    en egen falsy sentinel (`pyodide.ffi.JsNull`) - `is None` bommer da helt
+    (oppdaget i browserverifisering: plain script + `import ui` kastet
+    TypeError i json.loads i stedet for aa falle tilbake til default). Alle
+    ekte (ikke-fallback) svar er ikke-tomme JSON-strenger ("3", "false",
+    "null" for knapp), sa `not raw` treffer aldri en gyldig verdi."""
     ui = _ui()
     if ui is None:
         return None
@@ -55,7 +63,7 @@ def _register(spec):
         raw = ui.registerControl(payload)
     except Exception:
         return None
-    if raw is None:
+    if not raw:
         return None
     return json.loads(raw)
 

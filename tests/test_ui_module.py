@@ -194,6 +194,27 @@ def test_dropdown_tomt_options_gir_valueerror(monkeypatch):
         mod.dropdown([])
 
 
+# ---- ekte JS null (ikke Python None) fra registerControl (browser-bug) ----
+
+class FakeJsNull:
+    """Etterligner pyodide.ffi.JsNull: falsy, men IKKE `is None` - ekte JS
+    `null` konverteres til denne sentinelen over pyodide-grensen, ikke til
+    Python None. _register maa bruke `not raw`, ikke `raw is None`, ellers
+    kastes TypeError i json.loads (funnet i browserverifisering, Task 5)."""
+    def __bool__(self):
+        return False
+
+
+def test_slider_ekte_js_null_gir_fallback_ikke_typeerror(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=FakeJsNull())
+    assert mod.slider(0, 100, value=42) == 42
+
+
+def test_dropdown_ekte_js_null_gir_fallback_ikke_typeerror(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=FakeJsNull())
+    assert mod.dropdown(["a", "b"]) == "a"
+
+
 # ---- window/Ui mangler helt (enda tidligere pyodide-tilstand) ----
 
 def test_ingen_window_gir_samme_fallback(monkeypatch):
