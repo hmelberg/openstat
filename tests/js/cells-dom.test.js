@@ -718,6 +718,36 @@ test('Ctrl+Enter kjører PÅ STEDET (ingen fokus-flytting)', () => {
   assert.notStrictEqual(global.document.activeElement, cell1.ta, 'fokus skal IKKE flyttes til neste celle');
 });
 
+test('Shift+Enter i en md-celles editor: IKKE preventDefault, ingen kjøring, fokus urørt (linjeskift skal fungere normalt)', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% md\nhei\n#%% python\n1 + 1\n';
+  C.init('python');
+
+  let called = false;
+  global.mdIsScriptRunning = () => false;
+  global.mdRunNotebookCell = () => { called = true; return Promise.resolve({ text: '2' }); };
+
+  const mdCell = cellParts(containerEl, 0);
+  const codeCell = cellParts(containerEl, 1);
+  global.document.activeElement = mdCell.ta; // brukeren redigerer md-cellen (post-dblclikk)
+
+  const ev = fakeKeydown({ shiftKey: true });
+  mdCell.ta.dispatchEvent(ev);
+
+  assert.strictEqual(ev._prevented, false,
+    'Shift+Enter i en ikke-kode-celle skal ALDRI prevente default — det er et vanlig linjeskift');
+  assert.strictEqual(called, false, 'ingen kjøring skal trigges fra en md-celle');
+  assert.strictEqual(global.document.activeElement, mdCell.ta,
+    'fokus skal IKKE rykkes til neste kodecelle midt i skrivingen');
+  assert.notStrictEqual(global.document.activeElement, codeCell.ta);
+
+  // Ctrl+Enter likeså: helt upåvirket i en ikke-kode-celle.
+  const ev2 = fakeKeydown({ ctrlKey: true });
+  mdCell.ta.dispatchEvent(ev2);
+  assert.strictEqual(ev2._prevented, false, 'Ctrl+Enter i en md-celle skal heller ikke prevente default');
+  assert.strictEqual(called, false);
+});
+
 test('vanlig Enter (uten shift/ctrl/cmd) er upåvirket: ingen preventDefault, ingen kjøring', () => {
   const { C, scriptInputEl, containerEl } = freshEnv();
   scriptInputEl.value = '#%% python\na = 1\n';

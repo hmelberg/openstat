@@ -522,9 +522,15 @@
     // Fase B1 Task 5: Shift+Enter = kjør + hopp til NESTE kode-celle (ingen
     // auto-opprettelse av en hale-celle ennå); Ctrl/Cmd+Enter = kjør på
     // stedet (fokus urørt). preventDefault KUN for disse to kombinasjonene —
-    // vanlig Enter (linjeskift i cellen) er helt upåvirket.
+    // vanlig Enter (linjeskift i cellen) er helt upåvirket. Gjelder KUN
+    // kodeceller (samme port som kjøreknappen): i en md/html/skip-celles
+    // editor (etter dblclikk) er Shift+Enter et vanlig linjeskift — uten
+    // denne vakten ville preventDefault sluke linjeskiftet og Shift+Enter
+    // rykke fokus til neste kodecelle midt i skrivingen.
     function onSrcKeydown(ev, idx) {
       if (ev.key !== 'Enter') return;
+      var c = NB.cells[idx];
+      if (!c || !C.isCodeType(C.resolveType(c, NB.docMode))) return;
       var mod = ev.ctrlKey || ev.metaKey;
       if (mod) {
         ev.preventDefault();

@@ -1153,6 +1153,9 @@
 .nb-session-chip { font-size: 12px; opacity: .8; padding: 3px 10px; border: 1px solid var(--border);
   border-radius: 12px; background: var(--bg-code); color: inherit; white-space: nowrap; }
 .nb-session-chip.nb-session-live { border-color: var(--accent); color: var(--accent); opacity: 1; }
+/* Kald sesjon: ekstra dempet — motstykket til live-regelen over, så begge
+   tilstandsklassene cells.js toggler faktisk har en synlig effekt. */
+.nb-session-chip.nb-session-cold { opacity: .6; }
 .nb-restart-btn { font-size: 12px; padding: 3px 10px; border: 1px solid var(--border);
   border-radius: 4px; background: transparent; color: inherit; cursor: pointer; margin-left: auto; }
 .nb-restart-btn:hover { border-color: var(--accent); color: var(--accent); }
