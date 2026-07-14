@@ -717,6 +717,11 @@
       "file": "python/py06_dashboard.txt",
       "label": "Dashboard — fordelingsutforsker",
       "group": null
+    },
+    {
+      "file": "python/py_notatbok_celler.txt",
+      "label": "Notatbok — celler med #%% (python + markdown)",
+      "group": null
     }
   ],
   "r": [
