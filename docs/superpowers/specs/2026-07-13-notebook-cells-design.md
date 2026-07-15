@@ -300,7 +300,12 @@ run's output rendered into **that cell's slot**. Design:
     **consciously not done** — `webr/dash.R`'s registry is positional/
     append-only with no per-cell-safe remount path; a real fix needs a
     `dash-webr.js`/`webr/dash.R` restructure, out of this phase's cheap-fix
-    scope (documented, not silently dropped).
+    scope (documented, not silently dropped). **R `# use` cross-runtime
+    binding for per-cell runs is likewise consciously not done** — a lone
+    R cell run executes only its own text via `captureR` and never
+    materializes `# use`-copies from python/duckdb (Run All binds them as
+    before); deferred with the same reasoning (needs the segment-uses
+    machinery threaded into `runNotebookRCell`).
   - **Task 4 + 4b — display=last, small-fix queue, dash-to-slot:**
     `#options.display = last` gives unmarked scripts the notebook's
     last-expression-only display without requiring `#%%`; numeric
