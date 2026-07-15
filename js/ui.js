@@ -111,9 +111,23 @@
         return String(opt);
       });
 
-      // Sett verdi — hvis eksplisitt gitt, konverter til string; ellers bruk første option
+      // Sett verdi — hvis eksplisitt gitt, konverter til string; ellers bruk
+      // første option. N2-fiksen (final-review): første-kjørings-stien her
+      // beholdt tidligere en eksplisitt verdi UTENFOR options uendret (kun
+      // koersjon til string), mens oppdaterings-stien (_updateControlSpec
+      // under, DOM-halvdelen) alltid har snappet en slik verdi til
+      // options[0] — de to stiene var altså uenige om SAMME spec avhengig av
+      // om det var celledens første eller n-te kjøring. Align'et her på
+      // oppdaterings-stiens oppførsel: snap + advarsel, ALDRI en verdi som
+      // ikke finnes i options-lista.
       if (raw.value !== undefined) {
-        spec.value = String(raw.value);
+        var strValue = String(raw.value);
+        if (spec.options.indexOf(strValue) === -1) {
+          warnings.push('dropdown: value ikke i options — snappet til første: ' + strValue);
+          spec.value = spec.options[0];
+        } else {
+          spec.value = strValue;
+        }
       } else {
         spec.value = spec.options[0];
       }
@@ -427,9 +441,19 @@
         if (newSpec.options.indexOf(stored) === -1) stored = newSpec.options[0];
         ctrl.input.value = stored;
       } else if (newSpec.type === 'number') {
+        // N3-fiksen (final-review): min/max/step er VALGFRIE for number
+        // (normalizeSpec kopierer dem kun inn når eksplisitt gitt). Om ny
+        // spec UTELATER en av dem (kilden fjernet f.eks. `max=10` fra
+        // ui.number(...)-kallet), må attributtet FJERNES her — å bare la
+        // være å sette en ny verdi lot den forrige kjøringens min/max/step
+        // henge igjen som en STALE begrensning ingen gjeldende spec lenger
+        // ber om.
         if (newSpec.min != null) { ctrl.input.min = newSpec.min; if (stored < newSpec.min) stored = newSpec.min; }
+        else ctrl.input.removeAttribute('min');
         if (newSpec.max != null) { ctrl.input.max = newSpec.max; if (stored > newSpec.max) stored = newSpec.max; }
+        else ctrl.input.removeAttribute('max');
         if (newSpec.step != null) ctrl.input.step = newSpec.step;
+        else ctrl.input.removeAttribute('step');
         ctrl.input.value = stored;
       } else if (newSpec.type === 'checkbox' || newSpec.type === 'switch') {
         ctrl.input.checked = !!stored;

@@ -90,9 +90,16 @@ test('normalizeSpec: dropdown coerces options to strings', () => {
   assert.strictEqual(res.spec.value, '1');
 });
 
-test('normalizeSpec: dropdown with explicit value not in options coerces and uses it', () => {
+// N2-fiksen (final-review): normalizeSpec (første-kjørings-stien) og
+// _updateControlSpec (oppdaterings-stien, DOM-halvdelen — se
+// tests/js/ui-dom.test.js) var uenige om en eksplisitt dropdown-verdi som
+// ikke finnes i options: oppdaterings-stien har alltid snappet til
+// options[0], mens denne testen tidligere kodifiserte at FØRSTE kjøring
+// beholdt den vilkårlige verdien uendret. Align'et nå på snap+advarsel.
+test('normalizeSpec: dropdown with explicit value not in options snaps to first + warns', () => {
   const res = Ui.normalizeSpec({ type: 'dropdown', options: ['a', 'b'], value: 'c' });
-  assert.strictEqual(res.spec.value, 'c');
+  assert.strictEqual(res.spec.value, 'a', 'snappet til options[0], ikke den vilkårlige "c"');
+  assert.ok(res.warnings.some(w => /value ikke i options/.test(w)), 'advarsel om snap');
 });
 
 test('normalizeSpec: dropdown with numeric value coerced to string', () => {

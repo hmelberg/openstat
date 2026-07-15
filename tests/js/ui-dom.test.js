@@ -57,6 +57,12 @@ class FakeEl {
   dispatchEvent(ev) { (this._listeners[ev.type] || []).forEach((fn) => fn(ev)); }
   setAttribute(name, v) { this[name] = v; }
   getAttribute(name) { return this[name]; }
+  // N3-fiksen (final-review): ui.js sin _updateControlSpec fjerner nå
+  // min/max/step via removeAttribute når ny spec utelater dem — den ekte
+  // DOM-en trenger dette (IDL-reflekterte attributter, tildeling av null/''
+  // fjerner dem ikke pålitelig), og stubben må derfor ha en ekte
+  // removeAttribute (ikke bare set/get) for at N3-testen skal bevise noe.
+  removeAttribute(name) { delete this[name]; }
 }
 
 function wait(ms) {
@@ -490,6 +496,26 @@ test('number: verdi og min/max/step overføres til input-elementet', () => {
   assert.strictEqual(numInput.min, 0);
   assert.strictEqual(numInput.max, 10);
   assert.strictEqual(numInput.step, 2);
+});
+
+// N3-fiksen (final-review): _updateControlSpec fjerner nå min/max/step via
+// removeAttribute når en re-registrering UTELATER dem — før fiksen ble de
+// bare ikke oppdatert, så en tidligere kjørings min=0/max=10/step=2 ble
+// hengende igjen som en STALE begrensning selv etter at kilden fjernet dem
+// fra ui.number(...)-kallet.
+test('number: re-registrering UTEN min/max/step fjerner tidligere attributter (N3, final-review)', () => {
+  const { Ui, cellEl } = freshEnv();
+  Ui.registerControl(JSON.stringify({ type: 'number', name: 'n', value: 5, min: 0, max: 10, step: 2 }));
+  const strip = cellEl.children[0];
+  const numInput = strip.children[0].children[1];
+  assert.strictEqual(numInput.min, 0);
+  assert.strictEqual(numInput.max, 10);
+  assert.strictEqual(numInput.step, 2);
+
+  Ui.registerControl(JSON.stringify({ type: 'number', name: 'n', value: 5 }));
+  assert.strictEqual(numInput.min, undefined, 'min-attributt fjernet, ikke stale 0');
+  assert.strictEqual(numInput.max, undefined, 'max-attributt fjernet, ikke stale 10');
+  assert.strictEqual(numInput.step, undefined, 'step-attributt fjernet, ikke stale 2');
 });
 
 test('ukjent kontrolltype: registerControl varsler og returnerer null, ingen stripe-endring', () => {
