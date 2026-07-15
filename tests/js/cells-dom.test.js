@@ -1146,6 +1146,72 @@ test('Restart & kjør alle: window.mdNotebookSession fraværende → klikk gjør
 // final-review F3: Restart & kjør alle skal IKKE virke mens en Kjør alle/
 // Forklar-kjøring allerede pågår — uten denne guarden kunne Restart rive
 // vekk e/_g under føttene på den pågående kjøringen.
+// ---- Task 2 (ui-widgets W1): cellIndexById / cellElementAt / contentLoaded→Ui.resetDocument ----
+
+test('cellIndexById: finner celle med gitt id', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python id=first\na = 1\n#%% python id=target\na + 1\n';
+  C.init('python');
+  assert.strictEqual(C.active(), true);
+
+  assert.strictEqual(C.cellIndexById('target'), 1);
+  assert.strictEqual(C.cellIndexById('first'), 0);
+});
+
+test('cellIndexById: id finnes ikke → -1', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python id=first\na = 1\n';
+  C.init('python');
+
+  assert.strictEqual(C.cellIndexById('nope'), -1);
+});
+
+test('cellElementAt: returnerer riktig DOM-node for en gyldig indeks', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 1\n#%% python\na + 1\n';
+  C.init('python');
+
+  const cell1 = cellParts(containerEl, 1);
+  assert.strictEqual(C.cellElementAt(1), cell1.wrap);
+});
+
+test('cellElementAt: ugyldig/manglende indeks → null', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 1\n';
+  C.init('python');
+
+  assert.strictEqual(C.cellElementAt(99), null);
+});
+
+test('cellElementAt: notatbok uten rendret rot (aldri aktiv) → null, ingen krasj', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = 'print(1)\n'; // ingen markører → aldri aktiv, NB.root forblir null
+  C.init('python');
+  assert.strictEqual(C.active(), false);
+
+  assert.strictEqual(C.cellElementAt(0), null);
+});
+
+test('contentLoaded(): kaller window.Ui.resetDocument når Ui er lastet', () => {
+  const { C, scriptInputEl } = freshEnv();
+  let resetCalls = 0;
+  global.Ui = { resetDocument: () => { resetCalls++; } };
+  scriptInputEl.value = '#%% python\n1\n';
+
+  C.contentLoaded();
+
+  assert.strictEqual(resetCalls, 1, 'Ui.resetDocument() skal kalles ved contentLoaded()');
+  delete global.Ui;
+});
+
+test('contentLoaded(): window.Ui fraværende (ikke lastet ennå) → ingen krasj', () => {
+  const { C, scriptInputEl } = freshEnv();
+  delete global.Ui;
+  scriptInputEl.value = '#%% python\n1\n';
+
+  assert.doesNotThrow(() => C.contentLoaded());
+});
+
 test('Restart & kjør alle: nekter mens mdIsScriptRunning() er true (kaller ikke mdNotebookSession.restart())', async () => {
   const { C, scriptInputEl, containerEl, getBtnRunClicks } = freshEnv();
   let restarted = false;

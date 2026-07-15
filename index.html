@@ -575,6 +575,7 @@
   <script src="js/micropython-engine.js"></script>
   <script src="js/dash.js"></script>
   <script src="js/cells.js"></script>
+  <script src="js/ui.js"></script>
   <script src="js/dash-webr.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tabulator-tables@6.3.1/dist/js/tabulator.min.js" defer></script>
@@ -3140,6 +3141,15 @@
             try { await __ensurePyDash(ctx.py); }
             catch (e) { console.warn('pyodide/dash.py:', e); }
           }
+          // ui-import likeens (spec 2, ui-widgets W1) — se __ensureUi. Feiler
+          // gracefully (console.warn): en 404 (ui.py mangler ennå/Task 4-
+          // plassholderen ikke deployet) skal IKKE abortere kjøringen —
+          // scriptet feiler naturlig lenger nede når `import ui` ikke finner
+          // modulen, akkurat som enhver annen reell ImportError.
+          if (/^\s*(?:import|from)\s+ui\b/m.test(script)) {
+            try { await __ensureUi(ctx.py); }
+            catch (e) { console.warn('pyodide/ui.py:', e); }
+          }
           try {
             setStatus(ctx.rightStatus, t('Sjekker pakker…'));
             await ctx.py.loadPackagesFromImports(script, {
@@ -3631,6 +3641,24 @@
     let pyodide = null;
     let pyInterruptBuf = null;
     let scriptRunInProgress = false;
+    // ── ui-widgets (spec 2, W1): kjørekontekst per celle ────────────────────
+    // Settes/nullstilles ved de FIRE kjøre-brakettene (Kjør alle-segmentløkka,
+    // mdRunNotebookCell sin enkelt-celle-sti, microdata-replay-løkka — kun
+    // for målsegmentet). window.Ui.registerControl (Task 3) leser denne
+    // synkront (pyodide kjører på hovedtråden) for å vite hvilken celle en
+    // `ui.*`-kontroll registreres mot. null utenfor en kjøring, eller når
+    // notatboken er inaktiv/kjøringen ikke er celle-adressert — da faller
+    // Ui-siden tilbake til "plain script"-oppførsel (spec §krav).
+    let nbUiRunCtx = null;
+    window.mdUiRunCtx = function () { return nbUiRunCtx; };
+    // Bygger konteksten for en gitt celleindeks — cellEl hentes FERSKT via
+    // Cells.cellElementAt (aldri cachet: cellens node byttes ut ved enhver
+    // struktur-re-rendring, samme final-review F6-mønster som resten av
+    // notatbok-kjøringen respekterer).
+    function _nbUiCtxFor(cellIdx) {
+      var el = (window.Cells && window.Cells.cellElementAt) ? window.Cells.cellElementAt(cellIdx) : null;
+      return { cellIdx: cellIdx, cellEl: el };
+    }
     // ── Notatbok-sesjon (fase B1, plan 2026-07-14) ──────────────────────
     // Holder e/_g i live mellom per-celle-kjøringer (senere oppgaver).
     // "Kjør alle" (btnRun) re-booter alltid ubetinget og markerer deretter
@@ -7962,6 +7990,36 @@ json.dumps(out)
       return __pyDashP;
     }
 
+    // ── python-modus: registrer pyodide/ui.py som modulen `ui` (lazy) ──────
+    // Nøyaktig samme mønster som __ensurePyDash (spec 2, ui-widgets W1) —
+    // MÅ kjøres FØR micropip-løkka i python-modusens preRun, samme grunn:
+    // ellers feiler find_spec('ui') og micropip prøver å installere en
+    // PyPI-pakke `ui` (feil og irrelevant). pyodide/ui.py bygges fullt ut i
+    // Task 4 — her ligger kun en minimal plassholder (Task 2) slik at
+    // ledningen er ende-til-ende-testbar før DOM-halvdelen (Task 3) finnes.
+    // 404/fetch-feil skal ALDRI kaste videre og avbryte kjøringen (samme
+    // "fail gracefully" som resten av lazy-lasterne her) — kalleren
+    // (preRun-hooken) fanger og console.warn i stedet.
+    var __uiP = null;
+    function __ensureUi(py) {
+      if (__uiP) return __uiP;
+      var base = window.location.href.replace(/[^/]+$/, '');
+      __uiP = fetch(base + 'pyodide/ui.py?v=' + (window.M2PY_VERSION || '1'))
+        .then(function (r) { if (!r.ok) throw new Error('pyodide/ui.py: ' + r.status); return r.text(); })
+        .then(function (code) {
+          return py.runPythonAsync(
+            'import sys, importlib.util\n' +
+            'def _reg_ui(src):\n' +
+            '    spec = importlib.util.spec_from_loader("ui", loader=None)\n' +
+            '    mod = importlib.util.module_from_spec(spec)\n' +
+            '    sys.modules["ui"] = mod\n' +
+            '    exec(compile(src, "ui.py", "exec"), mod.__dict__)\n' +
+            '_reg_ui(' + JSON.stringify(code) + ')');
+        })
+        .catch(function (e) { __uiP = null; throw e; });
+      return __uiP;
+    }
+
     async function runStatxScript(script, ctx) {
       var rightStatus = ctx && ctx.rightStatus ? ctx.rightStatus : window.rightStatus;
       try {
@@ -8963,6 +9021,30 @@ async def _m2py_run_segment(_seg_json):
           : scriptInput.value;
         var _scriptOpts = extractScriptOptions(rawScript);
         var effectiveScript = rawScript.replace(/^[ \t]*(?:#|\/\/)[ \t]*options\.[A-Za-z_]\w*[ \t]*=.*$\n?/gm, '');
+        // B1-fiksen (final-review): python-modusens preRun (~3138) registrerer
+        // pyodide/dash.py og pyodide/ui.py som modulene `dash`/`ui` FØR
+        // kjøring — men preRun kalles KUN fra btnRun sin fulle "Kjør alle"-
+        // sløyfe (~9328), ALDRI herfra. Denne per-celle-stien hoppet derfor
+        // historisk over BEGGE registreringene: et kaldt/ferskt Pyodide-
+        // session-boot (ingen tidligere "Kjør alle" i denne fanen) fulgt av
+        // ▶ på en enkelt widget-celle feilet med ModuleNotFoundError: ui
+        // (og, samme rot-årsak, tilsvarende for `import dash`). Samme
+        // regex-vakt som preRun bruker, men kjørt mot effectiveScript — HELE
+        // dokumentteksten (se kommentaren ved buildDocumentSegments rett
+        // under: cellens egen payload.text er ALDRI autoritativ for
+        // dokument-brede fakta) — fordi importen kan stå i en tidligere
+        // celle enn den som faktisk kjøres nå, i samme levende sesjon.
+        // Feiler gracefully (console.warn), akkurat som preRun: en 404 skal
+        // ikke abortere kjøringen — scriptet feiler naturlig lenger nede
+        // når `import ui`/`import dash` ikke finner modulen.
+        if (/^\s*(?:import|from)\s+dash\b/m.test(effectiveScript)) {
+          try { await __ensurePyDash(py); }
+          catch (e) { console.warn('pyodide/dash.py (per-celle):', e); }
+        }
+        if (/^\s*(?:import|from)\s+ui\b/m.test(effectiveScript)) {
+          try { await __ensureUi(py); }
+          catch (e) { console.warn('ui-modul kunne ikke lastes:', e); }
+        }
         var _displayAll = String(_scriptOpts.display || '').toLowerCase() === 'all';
         // Segmentoppløsning: samme vei som "Kjør alle" (bootNotebookSession),
         // så cellens "# use" og #options.* leses fra HELE dokumentet, aldri
@@ -9048,12 +9130,30 @@ async def _m2py_run_segment(_seg_json):
             }
             var _rrc = null;
             var _rerr = null;
+            // ui-widgets kjørekontekst (Task 2): KUN målsegmentet i replayen
+            // representerer en adresserbar celle her — tidligere segmenter
+            // kjøres kun for å gjenoppbygge sesjonstilstanden (deres output
+            // forkastes, se kommentaren over), en ui.*-kontroll registrert
+            // der ville aldri kunne rerunnes meningsfullt. Nullstilles rett
+            // etter kjøringen uansett utfall (try/catch over dekker begge).
+            nbUiRunCtx = _isTargetSeg ? _nbUiCtxFor(payload.cellIdx) : null;
+            // ui-widgets (Task 3-review): eksplisitt kjøringsstart for
+            // stale-soppen — nullstiller ordinal/registrert-sett slik at
+            // endCellRun under sopper korrekt selv når rerunen har NULL
+            // ui.*-kall igjen.
+            if (_isTargetSeg && window.Ui && window.Ui.beginCellRun) window.Ui.beginCellRun(payload.cellIdx);
             try {
               py.globals.set('_m2py_seg_json', JSON.stringify(_rseg));
               _rrc = await py.runPythonAsync('await _m2py_run_segment(_m2py_seg_json)');
             } catch (segE) {
               _rerr = segE;
             }
+            nbUiRunCtx = null;
+            // ui-widgets (Task 3): stale-sopp for målcellens kontrollstripe
+            // — kun målsegmentet var en adressert celle her (se kommentaren
+            // over), tidligere segmenter fikk aldri en ctx og skal derfor
+            // heller ikke sopes.
+            if (_isTargetSeg && window.Ui && window.Ui.endCellRun) window.Ui.endCellRun(payload.cellIdx);
             if (py && typeof py.setStdout === 'function') py.setStdout();
             if (py && typeof py.setStderr === 'function') py.setStderr();
             if (_capErr) console.warn('[stderr]', _capErr.trim());
@@ -9122,6 +9222,15 @@ async def _m2py_run_segment(_seg_json):
         if (py && typeof py.setStderr === 'function') {
           py.setStderr({ batched: function (s) { nbCellStderr += s + '\n'; } });
         }
+        // ui-widgets kjørekontekst (Task 2): denne grenen kjører NØYAKTIG én
+        // celle (payload.cellIdx) mot den levende sesjonen — nullstilles i
+        // den delte finally under (dekker også replay-grenen over, som
+        // allerede har nullstilt sin egen per-segment, så dette er et
+        // idempotent sikkerhetsnett, ikke en dobbel-mening).
+        nbUiRunCtx = _nbUiCtxFor(payload.cellIdx);
+        // ui-widgets (Task 3-review): eksplisitt kjøringsstart — se
+        // replay-grenens tilsvarende kommentar over.
+        if (window.Ui && window.Ui.beginCellRun) window.Ui.beginCellRun(payload.cellIdx);
         py.globals.set('_m2py_seg_json', JSON.stringify(targetSeg));
         var rc = await py.runPythonAsync('await _m2py_run_segment(_m2py_seg_json)');
         if (py && typeof py.setStdout === 'function') py.setStdout();
@@ -9138,6 +9247,12 @@ async def _m2py_run_segment(_seg_json):
         if (py && typeof py.setStdout === 'function') py.setStdout();
         if (py && typeof py.setStderr === 'function') py.setStderr();
         if (isMicrodataReplay) setStatus(rightStatus, '');
+        nbUiRunCtx = null;
+        // ui-widgets (Task 3): stale-sopp for cellens kontrollstripe. Denne
+        // delte finally'en dekker BEGGE grener (replay og direkte enkelt-
+        // celle) — endCellRun er idempotent (se js/ui.js), så et duplikat-
+        // kall her etter replay-grenens EGET kall over er trygt.
+        if (window.Ui && window.Ui.endCellRun) window.Ui.endCellRun(payload.cellIdx);
         scriptRunInProgress = false;
         setRunButtonsUi('idle');
         if (activeEditorMode === 'duckdb') { refreshDatasetSidebarFromDuck(); }
@@ -9301,8 +9416,25 @@ async def _m2py_run_segment(_seg_json):
             var _sd = window.Cells.segmentDisplay(i);
             if (_sd && _sd.explicit) segments[i]._nb = { echo: false, last: true };
           }
+          // ui-widgets kjørekontekst (Task 2): Kjør alle sin segmentløkke —
+          // celleindeksen kommer fra den justerte planen (Cells.cellIdxForSegment,
+          // samme NB.runPlan sinkForSegment/segmentDisplay leser), null når
+          // planen ikke er justert (ingen 1:1-mapping) eller notatboken er
+          // inaktiv. Nullstilt igjen rett etter kjøringen, uavhengig av
+          // rc === 'stop' (break under er dermed også dekket).
+          var _uiIdx = _nbActive ? window.Cells.cellIdxForSegment(i) : null;
+          nbUiRunCtx = (_uiIdx !== null && _uiIdx !== undefined) ? _nbUiCtxFor(_uiIdx) : null;
+          // ui-widgets (Task 3-review): eksplisitt kjøringsstart for
+          // stale-soppen — samme betingelse som satte konteksten over.
+          if (_uiIdx !== null && _uiIdx !== undefined && window.Ui && window.Ui.beginCellRun) window.Ui.beginCellRun(_uiIdx);
           py.globals.set('_m2py_seg_json', JSON.stringify(segments[i]));
           const rc = await py.runPythonAsync('await _m2py_run_segment(_m2py_seg_json)');
+          nbUiRunCtx = null;
+          // ui-widgets (Task 3): stale-sopp for denne cellens kontrollstripe
+          // — kun når planen faktisk ga en celleindeks for segmentet (se
+          // _uiIdx over; null når notatboken er inaktiv/planen ikke er
+          // justert, samme betingelse som satte nbUiRunCtx i utgangspunktet).
+          if (_uiIdx !== null && _uiIdx !== undefined && window.Ui && window.Ui.endCellRun) window.Ui.endCellRun(_uiIdx);
           appendOutput(stdout.slice(renderedLen), asHtml, suppress, _sink);
           renderedLen = stdout.length;
           if (rc === 'stop') break;
@@ -9337,6 +9469,19 @@ async def _m2py_run_segment(_seg_json):
         if (py && typeof py.setStderr === 'function') py.setStderr();
         explainRunActive = false;
         scriptRunInProgress = false;
+        // ui-widgets kjørekontekst (Task 2): sikkerhetsnett — løkka over
+        // nullstiller allerede etter hvert segment, dette dekker en feil
+        // kastet FØR løkka når til å nullstille selv (f.eks. under segment-
+        // bygging), idempotent med løkkas egen nullstilling.
+        nbUiRunCtx = null;
+        // ui-widgets (Task 3): samme sikkerhetsnett-logikk for stale-sopp —
+        // dekker et unntak kastet MIDT i et segments py.runPythonAsync (FØR
+        // løkkas egen endCellRun-linje rekker å kjøre). _uiIdx er var-
+        // deklarert inni løkka, altså funksjonsscopet: den beholder verdien
+        // fra siste forsøkte iterasjon selv om unntaket hoppet ut av
+        // løkka-blokken. endCellRun er idempotent, så dette er trygt også
+        // i det vanlige tilfellet der løkka allerede sopte ferdig selv.
+        if (typeof _uiIdx !== 'undefined' && _uiIdx !== null && window.Ui && window.Ui.endCellRun) window.Ui.endCellRun(_uiIdx);
         setRunButtonsUi('idle');
         // duckdb-modus: sidepanelet mates fra wasm-katalogen — fire-and-forget.
         if (activeEditorMode === 'duckdb') { refreshDatasetSidebarFromDuck(); }

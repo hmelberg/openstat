@@ -104,6 +104,14 @@ compatibility.
 R facade: `ui_slider(...)`, `ui_dropdown(...)` etc. emitting the same JSON
 via the existing webR→JS channel (DashWebR precedent).
 
+**Parity is a goal, not a straitjacket** (user decision 2026-07-15): small,
+documented differences between the language facades are acceptable where a
+runtime makes exact parity hard. Concretely for W2: brython/micropython
+MODES have no notebook support (spec 1 §3.3), so their `ui` facades ship as
+API-compatible fallbacks (return defaults in scripts; dash v2 remains the
+interactive story there) until those runners gain cell support; full cell
+widgets land in pyodide (W1, done) and R-mode notebooks (W2).
+
 ### Rendering
 
 Native HTML elements + our own CSS on openstat's existing tokens
@@ -123,6 +131,12 @@ individually behind the protocol later.
   renderer is refactored, not the dash API.
 - Microdata cells: `ui` is not available (replay-through semantics make
   widget reruns pathological); a notice explains.
+- **Known W1 limitation (fix in W2):** when a microdata cell is per-cell
+  run (replay-through), NON-target python segments replay with `ui.*`
+  returning spec DEFAULTS (their run context is null by design), so the
+  rebuilt session state can diverge from the values the visible widgets
+  show. W2 direction: bracket all replayed segments with their aligned
+  cell idx so replays consume stored widget values.
 
 ## Track 2 — ipywidgets bridge (pyodide-only, isolated)
 
@@ -168,7 +182,10 @@ runtime because it never touches the runtime: it edits text and reruns.
 ## Phasing
 
 - **W1 — `ui` core (pyodide):** protocol + renderer + python facade +
-  rerun semantics + tests; ship.
+  rerun semantics + tests; ship. **Done 2026-07-15** — browser-verified
+  end-to-end (slider/dropdown/button, per-cell + Run All, DOM-identity
+  preserved across reruns, zero-ui sweep, plain-script fallback, example
+  notebook); see `.superpowers/sdd/task-w1-5-report.md`.
 - **W2 — `ui` everywhere:** brython + micropython facades (same module),
   R facade; notice for microdata.
 - **W3 — ipywidgets bridge v1** (per track 2 scope).

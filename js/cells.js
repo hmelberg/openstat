@@ -281,6 +281,12 @@
       // dokument A. Må kalles FØR render()/exit() under, ellers rekker en
       // per-celle-kjøring å starte mot den gamle sesjonen først.
       if (global.mdNotebookSession) global.mdNotebookSession.invalidate();
+      // Ui-verdilageret (Task 3) er også dokument-scoped: et nytt dokument må
+      // glemme forrige dokuments kontrollverdier/strips, akkurat som pyodide-
+      // sesjonen over. Ui er ikke nødvendigvis lastet ennå (lazy, kun ved
+      // "import ui") — dobbelt-guardet, speiler stilen resten av fila bruker
+      // for globaler som kan mangle i stub-DOM-testene.
+      if (global.Ui && global.Ui.resetDocument) global.Ui.resetDocument();
       NB.htmlTrusted = !(opts && opts.untrusted === true);
       NB.rawOverride = false;
       var ta = $('scriptInput');
@@ -689,6 +695,39 @@
     C.sinkForSegment = function (i) {
       if (NB.runSinks && NB.runSinks[i]) return NB.runSinks[i];
       return C.errorHost();
+    };
+
+    // Segment-indeks → celleindeks i den justerte planen (Task 2, ui-widgets
+    // W1): index.html sin "Kjør alle"-segmentløkke trenger cellens indeks
+    // (ikke bare sinken) for å bygge kjørekonteksten window.mdUiRunCtx()
+    // leser fra. Samme kilde som sinkForSegment/segmentDisplay (NB.runPlan) —
+    // null når planen ikke er justert (ingen 1:1-mapping, se beginRun).
+    C.cellIdxForSegment = function (i) {
+      if (!NB.runPlan) return null;
+      var idx = NB.runPlan[i];
+      return idx === undefined ? null : idx;
+    };
+
+    // Celle-id → celleindeks (Task 2, ui-widgets W1): scanner NB.cells sin
+    // attrs.id, samme "levende tilstand"-antakelse som sinkForSegment (ikke
+    // et cachet oppslag — cellene kan endre indeks ved struktur-re-rendring).
+    // -1 når id ikke finnes, eller notatboken er inaktiv.
+    C.cellIndexById = function (id) {
+      for (var i = 0; i < NB.cells.length; i++) {
+        if (NB.cells[i] && NB.cells[i].attrs && NB.cells[i].attrs.id === id) return i;
+      }
+      return -1;
+    };
+
+    // Celleindeks → gjeldende DOM-node (Task 2, ui-widgets W1): brukes av
+    // window.mdUiRunCtx() sin cellEl-oppslag. Querier NB.root direkte (samme
+    // '.nb-cell[data-idx="…"]'-mønster som beginRun bruker) i stedet for å
+    // cache en referanse — cellens node byttes ut ved enhver struktur-
+    // re-rendring (final-review F6-mønsteret), en frisk oppslag er alltid
+    // korrekt. null når notatboken ikke har en rendret rot, eller idx mangler.
+    C.cellElementAt = function (idx) {
+      if (!NB.root) return null;
+      return NB.root.querySelector('.nb-cell[data-idx="' + idx + '"]') || null;
     };
 
     // Visningspolicy per segment (§4 "Display policy" i spec): brukes av
