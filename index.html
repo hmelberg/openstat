@@ -9274,18 +9274,29 @@ async def _m2py_run_segment(_seg_json):
             }
             var _rrc = null;
             var _rerr = null;
-            // ui-widgets kjørekontekst (Task 2): KUN målsegmentet i replayen
-            // representerer en adresserbar celle her — tidligere segmenter
-            // kjøres kun for å gjenoppbygge sesjonstilstanden (deres output
-            // forkastes, se kommentaren over), en ui.*-kontroll registrert
-            // der ville aldri kunne rerunnes meningsfullt. Nullstilles rett
-            // etter kjøringen uansett utfall (try/catch over dekker begge).
-            nbUiRunCtx = _isTargetSeg ? _nbUiCtxFor(payload.cellIdx) : null;
-            // ui-widgets (Task 3-review): eksplisitt kjøringsstart for
-            // stale-soppen — nullstiller ordinal/registrert-sett slik at
-            // endCellRun under sopper korrekt selv når rerunen har NULL
-            // ui.*-kall igjen.
-            if (_isTargetSeg && window.Ui && window.Ui.beginCellRun) window.Ui.beginCellRun(payload.cellIdx);
+            // ui-widgets kjørekontekst (Task 4/N1-fiksen): ALLE replayede
+            // segmenter bracketes nå med sin justerte celleindeks — samme
+            // mønster som "Kjør alle" sin segmentløkke (~9569,
+            // window.Cells.cellIdxForSegment). Før N1 fikk kun målsegmentet
+            // en ctx, så `ui.*`-kall i tidligere celler (kjørt for å
+            // gjenoppbygge sesjonstilstanden) leste alltid spec-DEFAULTS i
+            // stedet for cellens lagrede/synlige verdi — sesjonstilstanden
+            // kunne dermed avvike fra det stripene faktisk viste. _aligned[_ri]
+            // er samme justerte plan som feilmeldingens _failCellNum under bruker.
+            // Mikrodata-segmenter selv kaller aldri `ui.*` (DSL-en oversettes
+            // til ren datahåndtering), så ctx der er virkningsløs — men
+            // bracketes likevel for konsistens med "Kjør alle". Non-target
+            // segmenters OUTPUT forkastes fortsatt akkurat som før (se
+            // kommentaren over løkka) — kun ctx/verdi-semantikken endres.
+            // Nullstilles rett etter kjøringen uansett utfall (try/catch over
+            // dekker begge, ytre finally er sikkerhetsnett som før).
+            var _rCellIdx = (_aligned && _aligned[_ri] !== undefined) ? _aligned[_ri] : null;
+            nbUiRunCtx = (_rCellIdx !== null && _rCellIdx !== undefined) ? _nbUiCtxFor(_rCellIdx) : null;
+            // ui-widgets (Task 3-review, nå for ALLE segmenter): eksplisitt
+            // kjøringsstart for stale-soppen — nullstiller ordinal/
+            // registrert-sett slik at endCellRun under sopper korrekt selv
+            // når rerunen har NULL ui.*-kall igjen.
+            if (_rCellIdx !== null && _rCellIdx !== undefined && window.Ui && window.Ui.beginCellRun) window.Ui.beginCellRun(_rCellIdx);
             try {
               py.globals.set('_m2py_seg_json', JSON.stringify(_rseg));
               _rrc = await py.runPythonAsync('await _m2py_run_segment(_m2py_seg_json)');
@@ -9293,11 +9304,11 @@ async def _m2py_run_segment(_seg_json):
               _rerr = segE;
             }
             nbUiRunCtx = null;
-            // ui-widgets (Task 3): stale-sopp for målcellens kontrollstripe
-            // — kun målsegmentet var en adressert celle her (se kommentaren
-            // over), tidligere segmenter fikk aldri en ctx og skal derfor
-            // heller ikke sopes.
-            if (_isTargetSeg && window.Ui && window.Ui.endCellRun) window.Ui.endCellRun(payload.cellIdx);
+            // ui-widgets (Task 3, nå for ALLE segmenter): stale-sopp for
+            // segmentets aligned celles kontrollstripe — kjøres for hvert
+            // segment i replayen, ikke bare målsegmentet (se kommentaren over
+            // ctx-settingen).
+            if (_rCellIdx !== null && _rCellIdx !== undefined && window.Ui && window.Ui.endCellRun) window.Ui.endCellRun(_rCellIdx);
             if (py && typeof py.setStdout === 'function') py.setStdout();
             if (py && typeof py.setStderr === 'function') py.setStderr();
             if (_capErr) console.warn('[stderr]', _capErr.trim());
@@ -9318,8 +9329,9 @@ async def _m2py_run_segment(_seg_json):
               return { text: (_capOut || '').trim() };
             }
             if (_segFailed) {
-              var _failCellIdx = (_aligned && _aligned[_ri] !== undefined) ? _aligned[_ri] : null;
-              var _failCellNum = (_failCellIdx !== null) ? (_failCellIdx + 1) : (_ri + 1);
+              // Samme justerte celleindeks som ctx-brakettene over (_rCellIdx)
+              // — beholdt som eget navn her for lesbarhet ved feilmeldingen.
+              var _failCellNum = (_rCellIdx !== null && _rCellIdx !== undefined) ? (_rCellIdx + 1) : (_ri + 1);
               return { error: t('Feil i celle {n} under kjøring fra toppen: {msg}', { n: _failCellNum, msg: _failMsg }) };
             }
           }
