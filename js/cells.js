@@ -203,6 +203,18 @@
   var KIND_FOR_TYPE = { python: 'pyodide', r: 'r', duckdb: 'duckdb', microdata: 'microdata' };
   C.KIND_FOR_TYPE = KIND_FOR_TYPE;
 
+  // Celletype → #@param-språk (spec 2 W4, Task 2): python-familien (python +
+  // aliasene pyodide/py normalisert til 'python' av resolveType, samt
+  // brython/micropython som deler python-literal-syntaks: True/False,
+  // enkelt-kvoterte strenger) skriver via formatLiteral(lang='python');
+  // 'r' skriver TRUE/FALSE og støtter <- i tillegg til =. duckdb/microdata/
+  // statx/md/html/skip har INGEN mapping her (null) — parse-gate per planens
+  // Global Constraints ("microdata/duckdb cells: out of scope for W4"):
+  // ParamForms.decorate hoppes bevisst over for disse celletypene, samme
+  // "null → inert" prinsipp som KIND_FOR_TYPE bruker for ikke-kjørbare typer.
+  var PARAM_LANG_FOR_TYPE = { python: 'python', brython: 'python', micropython: 'python', r: 'r' };
+  C.paramLangForType = function (type) { return PARAM_LANG_FOR_TYPE[type] || null; };
+
   // Juster planen mot de faktiske segment-kindene fra kjøretiden: hvis
   // leder-oppføringen (preambel) ble strippet bort før segmentering
   // (f.eks. #-direktivlinjer i microdata-modus), fjern den fra planen.
@@ -294,6 +306,13 @@
       // her følger Ui.resetDocument-presedensen — samme dobbelt-guard for
       // stub-DOM-tester der globalen kan mangle.
       if (global.IpwBridge && global.IpwBridge.reset) global.IpwBridge.reset();
+      // #@param-skjemaene (spec 2 W4, Task 2) er også dokument-scoped: et nytt
+      // dokument må glemme forrige dokuments skjema-tilstand (cellEl-
+      // referanser til nå-orphanede noder) OG kansellere evt. ventende
+      // run:auto-debounce-timere — uten dette kunne en gammel 150ms-timer fra
+      // det FORRIGE dokumentet fyre etter at et nytt dokument er lastet og
+      // (hvis samme celleindeks tilfeldigvis finnes der òg) kjøre feil celle.
+      if (global.ParamForms && global.ParamForms.resetDocument) global.ParamForms.resetDocument();
       NB.htmlTrusted = !(opts && opts.untrusted === true);
       NB.rawOverride = false;
       var ta = $('scriptInput');
@@ -495,6 +514,17 @@
       // JUSTERT plan-indeksering) er unødvendig her — cellens egen node holdes.
       c._out = out;
       c._wrap = wrap;
+      // Post-build seam (spec 2 W4, Task 2): #@param-skjema-stripe. Kun for
+      // celletyper ParamForms faktisk vet hvordan den skal skrive literaler
+      // for (paramLangForType → null for duckdb/microdata/statx/md/html/skip
+      // — parse-gate per planens Global Constraints). Stripa settes inn i
+      // `wrap` (cellens rot-node) som FØRSTE barn, FØR .ui-controls hvis den
+      // skulle finnes (se ParamForms sin egen _insertStrip/reorder) — samme
+      // "cellen sin rot er stripe-verten" som js/ui.js sin _ensureStrip bruker.
+      var paramLang = C.paramLangForType(type);
+      if (paramLang && global.ParamForms && typeof global.ParamForms.decorate === 'function') {
+        global.ParamForms.decorate(idx, wrap, c.source, paramLang);
+      }
       return wrap;
     }
 
@@ -574,10 +604,38 @@
       }
     }
 
+    // Serialiser NB.cells → #scriptInput + oppdater plan/linjenummer. Felles
+    // kjerne mellom onEdit sin debouncede flush og updateCellSource (Task 2)
+    // sitt UMIDDELBARE (ikke-debouncede) skriv — begge ender opp med å måtte
+    // gjøre nøyaktig det samme etter at NB.cells er mutert (spec §Task 2:
+    // "reuse the existing flush path — read onEdit/flushPendingEdit and
+    // factor or call").
+    function serializeAndSync() {
+      var ta = $('scriptInput');
+      var text = C.serializeCells(NB.cells);
+      NB.lastSerialized = text;
+      ta.value = text;
+      NB.plan = C.segmentPlan(text, NB.docMode);
+      if (global.updateLineNumbers) global.updateLineNumbers();
+      return text;
+    }
+
     function onEdit(idx, value) {
       var c = NB.cells[idx];
       c.source = value;
       c.hasBody = true;
+      // SYNKRON kildesynk mot skjema-tilstanden (W4 review-fiks 1a,
+      // krysskanal-race): ParamForms sitt splice-grunnlag (st.source +
+      // st.entries med ferske lineIdx-er) må følge HVERT tastetrykk, ikke
+      // 250ms-debouncen under — ellers ville en skjema-kontroll avfyrt
+      // INNENFOR debounce-vinduet splice inn i en foreldet kilde og stille
+      // miste nettopp-skrevet tekst (repro: skriv `y = 1` på linja over en
+      // #@param-slider, dra slideren < 250ms etter). syncSource er DOM-fri
+      // og billig (ren re-parse av én celles tekst); den VISUELLE
+      // oppdateringen av kontrollene hører fortsatt til refresh i doFlush.
+      if (global.ParamForms && typeof global.ParamForms.syncSource === 'function') {
+        global.ParamForms.syncSource(idx, value);
+      }
       markStaleIfRan(idx);
       if (NB.editTimer) { clearTimeout(NB.editTimer); NB.editTimer = null; }
       // Selve flush-kroppen holdes i en navngitt lukning (NB.pendingFlush) i
@@ -587,15 +645,29 @@
       var doFlush = function () {
         NB.editTimer = null;
         NB.pendingFlush = null;
-        var ta = $('scriptInput');
-        var text = C.serializeCells(NB.cells);
-        NB.lastSerialized = text;
-        ta.value = text;
-        NB.plan = C.segmentPlan(text, NB.docMode);
-        if (global.updateLineNumbers) global.updateLineNumbers();
+        serializeAndSync();
+        // GJELDENDE kilde, ikke den closure-fangede `value` (W4 review-fiks
+        // 1b): en skjema-kontroll kan ha kalt Cells.updateCellSource (og
+        // dermed endret c.source) ETTER tastetrykket som armerte denne
+        // debouncen men FØR den fyrte — å flushe med den fangede verdien
+        // ville da rulle skjemaets tilstand tilbake til før kontroll-
+        // endringen og desynke videre. serializeAndSync() over serialiserte
+        // allerede nettopp c.source; refresh/markør-skanningen under må se
+        // NØYAKTIG samme tekst.
+        var cur = NB.cells[idx] ? NB.cells[idx].source : value;
+        // Manuell tekst-redigering (Task 2): re-parse cellens #@param-linjer
+        // og oppdater skjema-kontrollene i place — IKKE synkront per
+        // tastetrykk (ville vært distraherende midt i skriving), men her,
+        // hooket på AKKURAT samme 250ms-debounce som resten av flush-en,
+        // slik planen ber om. Strukturelle endringer (linje lagt til/fjernet,
+        // type endret) bygger stripa på nytt inni ParamForms.refresh selv —
+        // cells.js trenger ikke vite forskjellen.
+        if (global.ParamForms && typeof global.ParamForms.refresh === 'function') {
+          global.ParamForms.refresh(idx, cur);
+        }
         // Skrev brukeren en ny #%%-markør inni cellen? Da har strukturen
         // endret seg — full re-rendring (bevisst handling, fokus-hopp ok).
-        var lines = String(value).split('\n');
+        var lines = String(cur).split('\n');
         for (var i = 0; i < lines.length; i++) {
           if (C.isMarkerLine(lines[i])) { render(); return; }
         }
@@ -603,6 +675,46 @@
       NB.pendingFlush = doFlush;
       NB.editTimer = setTimeout(doFlush, 250);
     }
+
+    // Cells.updateCellSource(idx, newSource) (spec 2 W4, Task 2): den
+    // PROGRAMMATISKE motparten til onEdit — brukt av ParamForms når en
+    // skjema-kontroll endrer verdi (control → writeValue → HIT). I motsetning
+    // til onEdit (drevet av en ekte 'input'-DOM-hendelse på cellens egen
+    // textarea) MÅ denne selv synkronisere den synlige textareaen (c._ta) —
+    // å sette .value programmatisk fyrer ALDRI en 'input'-hendelse, så uten
+    // denne linja ville brukeren dratt en slider og sett cellens Python-tekst
+    // henge igjen uendret til neste manuelle redigering.
+    //
+    // KRITISK ingen-ombygging-disiplin (samme prinsipp som js/ui.js sin
+    // _updateControlSpec): INGEN rebuild av celle-noden her — kun c._ta.value
+    // + autoSize i place. En slider midt i en drag ville ellers blitt revet
+    // ned av sin EGEN endring (control → updateCellSource → en hypotetisk
+    // rebuild → ny DOM-node → dragens 'input'-lytter peker på en fjernet
+    // node). c._out/output røres ikke i det hele tatt (ingen kjøring skjedde).
+    //
+    // Kaller til slutt ParamForms.refresh(idx, newSource) (guardet) — IKKE
+    // for å lukke en loop tilbake til onEdit (updateCellSource fyrer aldri en
+    // 'input'-hendelse på c._ta, så onEdit sin debounce trigges ALDRI av
+    // dette kallet — ingen sirkularitet finnes), men fordi updateCellSource
+    // er et generelt Cells-API som i prinsippet kan kalles av annet enn
+    // ParamForms selv: skjemaet skal uansett reflektere den nyeste kilden.
+    // ParamForms.refresh sin egen "no-op når verdien allerede stemmer"-vakt
+    // (se js/param-forms.js) gjør AKKURAT dette kallet en trygg no-op for
+    // kontrollen som selv utløste endringen (formatLiteral→currentValue
+    // rundtures byte-nøyaktig til samme typede verdi) — den drasende
+    // slideren sin range-input røres dermed ALDRI av dette tilbakekallet.
+    C.updateCellSource = function (idx, newSource) {
+      var c = NB.cells[idx];
+      if (!c) return;
+      c.source = newSource;
+      c.hasBody = true;
+      if (c._ta) { c._ta.value = newSource; autoSize(c._ta); }
+      markStaleIfRan(idx);
+      serializeAndSync();
+      if (global.ParamForms && typeof global.ParamForms.refresh === 'function') {
+        global.ParamForms.refresh(idx, newSource);
+      }
+    };
 
     // Kjør cellens ventende redigering (250ms debounce) SYNKRONT — kalt fra
     // runCell() FØR kjøringen leser #scriptInput, slik at index.html sin
@@ -827,6 +939,20 @@
       }).then(function () {
         setRunningUi(idx, false);
         updateSessionChip();
+        // Skjema-stripe-rekkefølge (spec 2 W4, Task 2 — sameksistens med
+        // js/ui.js sin .ui-controls): ParamForms.decorate setter .param-form
+        // inn som cellens FØRSTE barn ved cellNode-bygging, FØR noen
+        // .ui-controls-stripe finnes (den lages først når kjørende
+        // Python/R-kode faktisk kaller ui.*). js/ui.js sin _ensureStrip vet
+        // ingenting om .param-form og insertBefore-er sin egen stripe FØR
+        // cellEl.firstChild uansett — hvis DENNE kjøringen nettopp opprettet
+        // .ui-controls for første gang, havner den dermed FORAN .param-form.
+        // Reassert rekkefølgen her (etter hver kjøring, den ENESTE plassen
+        // .ui-controls kan dukke opp for første gang) i stedet for å endre
+        // js/ui.js (utenfor denne oppgavens filliste).
+        if (global.ParamForms && typeof global.ParamForms.reorder === 'function' && c._wrap) {
+          global.ParamForms.reorder(c._wrap);
+        }
       });
     };
 

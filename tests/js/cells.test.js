@@ -226,3 +226,21 @@ test('alignPlan: preambel finnes ikke (planen starter ikke med en ekte preambel)
   const aligned = C.alignPlan(plan, p.cells, 'python', ['r']); // feil lengde/kind, og plan[0] er ikke preambel
   assert.strictEqual(aligned, null);
 });
+
+// ---- paramLangForType (spec 2 W4, Task 2): celletype → #@param-språk ------
+
+test('paramLangForType: python-familien (python/brython/micropython) → "python"', () => {
+  assert.strictEqual(C.paramLangForType('python'), 'python');
+  assert.strictEqual(C.paramLangForType('brython'), 'python');
+  assert.strictEqual(C.paramLangForType('micropython'), 'python');
+});
+
+test('paramLangForType: r → "r"', () => {
+  assert.strictEqual(C.paramLangForType('r'), 'r');
+});
+
+test('paramLangForType: duckdb/microdata/statx/md/html/skip/ukjent → null (parse-gate, #@param inert)', () => {
+  ['duckdb', 'microdata', 'statx', 'md', 'html', 'skip', 'nonsense', undefined, null].forEach((type) => {
+    assert.strictEqual(C.paramLangForType(type), null, 'type=' + type);
+  });
+});
