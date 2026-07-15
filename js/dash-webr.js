@@ -53,6 +53,22 @@
     await global.M2PY.getWebR().evalRVoid('.dash_reset()');
   };
 
+  // invalidateDefs: forget the memoized "webr/dash.R already sourced" state
+  // WITHOUT touching R (unlike reset(), which assumes the defs are still
+  // live and calls into them). Needed specifically after something ELSE has
+  // wiped webR's globalenv (index.html's "Restart & kjør alle" R-reset does
+  // `rm(list=ls(envir=globalenv()))`, which deletes dashboard()/slider()/etc.
+  // right alongside user variables, since dash.R sources them at top level —
+  // see B2 exit-gate finding). Without this, ensureDefs()'s memoized promise
+  // stays resolved/truthy after the wipe, so the NEXT run's ensureDefs() call
+  // is a no-op and dash.R is never re-sourced — `dashboard(...)` then fails
+  // with "could not find function" even though the calling script is
+  // unchanged. Exposed as its own method (not folded into reset()) because
+  // reset() is also called on every ordinary "Kjør alle" run that uses
+  // dashboard() (see index.html ~7960), where re-sourcing every time would
+  // be correct but wasteful — only a full env wipe needs this.
+  G.invalidateDefs = function () { _defsP = null; };
+
   async function dashShelter() {
     if (_shelter) return _shelter;
     var webR = global.M2PY.getWebR();

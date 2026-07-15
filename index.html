@@ -9103,12 +9103,23 @@ async def _m2py_run_segment(_seg_json):
             try {
               await webR.evalRVoid('rm(list = ls(envir = globalenv()), envir = globalenv())');
             } catch (e) { console.warn('R restart: rm(list=ls()) feilet', e); }
-            if (window.DashWebR && window.DashWebR.reset) {
-              try { await window.DashWebR.reset(); }
-              catch (e) { console.warn('R restart: DashWebR.reset() feilet', e); }
-            }
-            try { await __uiResetR(); }
-            catch (e) { console.warn('R restart: __uiResetR() feilet', e); }
+            // B2 exit-gate fiks: rm(list=ls(envir=globalenv())) over sletter
+            // IKKE bare brukervariabler — webr/ui.R og webr/dash.R sourcer
+            // ui_slider()/dashboard() m.fl. RETT INN i globalenv (samme miljø),
+            // så disse forsvinner i samme slag. __uiRP/DashWebR sin _defsP var
+            // fortsatt et LØST promise etter dette (minnet «alt lastet»), så
+            // den gamle DashWebR.reset()/__uiResetR()-sekvensen prøvde å kalle
+            // funksjoner (.dash_reset()/.ui_begin()) som var borte — feilet
+            // stille (console.warn), og neste kjørings ui_*()/dashboard()-kall
+            // traff "could not find function" selv om DOKUMENTET var uendret.
+            // Funnet ved sveip: R-widgets sluttet å virke etter «Restart &
+            // kjør alle». Fiksen glemmer memoiseringen i stedet for å late som
+            // reset er meningsfullt — neste kjørings eksisterende, allerede
+            // gatede __ensureUiR()/DashWebR.ensureDefs()-kall (runHybridR/
+            // per-celle/forklar) sourcer da friskt på nytt, akkurat som første
+            // gang denne økten.
+            __uiRP = null;
+            if (window.DashWebR && window.DashWebR.invalidateDefs) window.DashWebR.invalidateDefs();
             return nbEnsureSession(true);
           })();
         }
