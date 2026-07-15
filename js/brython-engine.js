@@ -325,8 +325,79 @@
     }
   }
 
+  // ── Notatbok-sesjon (fase C, spec 2026-07-16) ─────────────────────────
+  // ÉN levende økt for celle-for-celle-kjøring: datasett bindes ÉN gang i
+  // ensure() (IKKE per celle slik run() gjør — brukerens mutasjoner av
+  // datasettvariabler skal overleve mellom celler), og duck-broen deles på
+  // tvers av celler (views registreres én gang, spørringscachen gjenbrukes).
+  // Vanlige scripts (uten #%%) bruker run() uendret — paramount-invarianten.
+  var __nb = { live: false, duck: null };
+
+  async function nbEnsure(loads) {
+    if (__nb.live) return;
+    var mod = await load();
+    var spec = await buildDatasetSpec(loads);
+    __lastSpec = spec;   // "Publiser dashboard" leser herfra, som ved run()
+    if (Object.keys(spec).length) {
+      await ensureLibs(mod, ['pandas_brython']);   // _bind_datasets bygger DataFrames
+      var bindErr = mod._bind_datasets(JSON.stringify(spec));
+      if (bindErr) throw new Error(String(bindErr));
+    }
+    __nb.duck = beginDuckBridge(spec);
+    __nb.live = true;
+  }
+
+  async function nbRunCell(source) {
+    // Kontrakt som run(): resolver ALLTID {text, error} — aldri reject.
+    try {
+      if (!__nb.live) {
+        return { text: '', error: 'notebookSession.ensure() må kalles før runCell()' };
+      }
+      var mod = await load();
+      await ensureLibs(mod, scanImports(source));
+      var duck = __nb.duck;
+      mod._snapshot();   // duck-replay-spoling gjelder KUN denne cellens pass
+      var text = '', err = null, pass;
+      for (pass = 0; pass < MAX_DUCK_PASSES; pass++) {
+        if (pass > 0) mod._rollback();
+        text = mod._execute_code(source);
+        err = mod._get_last_error();
+        if (err !== PENDING_MARKER) break;
+        if (!duck.hasPending()) {
+          return { text: '', error: 'duckdb_brython: replay uten ventende spørringer (intern feil)' };
+        }
+        await duck.flush();
+      }
+      if (err === PENDING_MARKER) {
+        return { text: '', error: 'duckdb-spørringene stabiliserer seg ikke etter ' +
+                 MAX_DUCK_PASSES + ' pass — bygges SQL-tekstene av ikke-deterministiske ' +
+                 'verdier (f.eks. random uten seed)?' };
+      }
+      return { text: String(text == null ? '' : text), error: err ? String(err) : null };
+    } catch (e) {
+      return { text: '', error: (e && e.message) || String(e) };
+    }
+  }
+
+  async function nbReset() {
+    var mod = await load();
+    var err = mod._reset();
+    if (err) throw new Error(String(err));
+    // live=false → neste ensure() re-resolver # load og rebinder datasett
+    // (rene frames tilbake etter reset). __brythonDuck.register er
+    // idempotent (typebevisst DROP + CREATE VIEW, index.html ~2707), så
+    // en frisk bro kan trygt re-registrere de samme viewene.
+    __nb.live = false;
+    __nb.duck = null;
+  }
+
+  function nbInvalidate() { __nb.live = false; __nb.duck = null; }
+  function nbIsLive() { return __nb.live; }
+
   global.BrythonEngine = {
     load: load, run: run, _scanImports: scanImports,
-    getLastDatasetSpec: function () { return __lastSpec; }
+    getLastDatasetSpec: function () { return __lastSpec; },
+    notebookSession: { ensure: nbEnsure, runCell: nbRunCell, reset: nbReset,
+                       invalidate: nbInvalidate, isLive: nbIsLive }
   };
 })(typeof window !== 'undefined' ? window : globalThis);
