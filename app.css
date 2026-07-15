@@ -1159,8 +1159,26 @@
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   grid-template-areas: "left ptop" "left utop" "left body" "left pbot" "left ubot";
-  column-gap: 10px; align-items: start; min-width: 0;
+  column-gap: 0; align-items: start; min-width: 0;
 }
+/* Final-review-fiks (Low): column-gap: 10px gjaldt UBETINGET før, altså også
+   når "left"-arealet er tomt (ingen venstre-plasserte kontroller i det hele
+   tatt — det vanlige tilfellet for en celle uten widgets) — da fikk
+   .nb-output-body et 10px venstre-innrykk den ikke trengte, siden den auto-
+   krympede (0-bredde) "left"-grid-kolonnen uansett ikke okkuperer synlig
+   plass. Gapet skal bare finnes NÅR det faktisk er noe å skille FRA i venstre-
+   kolonnen. :has() er baseline (bredt støttet i alle store nettlesere siden
+   2023) og det finnes ingen eksisterende :has-avoidance/JS-klasse-veksling
+   for tilsvarende betingede stilvalg andre steder i denne fila eller i
+   js/cells.js å følge presedens for — derfor :has() fremfor en ekstra
+   JS-satt klasse. :not(:empty) i tillegg: en .nb-strips-left-node kan bli
+   stående igjen TOM (og dermed display:none via regelen rett under) etter at
+   ALLE venstre-plasserte kontroller er fjernet fra kilden — noden finnes da
+   fortsatt i DOM-en, så et bart :has(.nb-strips-left) ville feilaktig slått
+   gapet på igjen for en usynlig, tom kolonne (nøyaktig samme klasse feil som
+   selve denne fiksen adresserer, bare i et fjernings- fremfor et
+   aldri-opprettet-tilfelle). */
+.nb-output:has(.nb-strips-left:not(:empty)) { column-gap: 10px; }
 .nb-output-body { grid-area: body; min-width: 0; overflow-x: auto; }
 .param-form[data-pos="top"] { grid-area: ptop; }
 .ui-controls[data-pos="top"] { grid-area: utop; }

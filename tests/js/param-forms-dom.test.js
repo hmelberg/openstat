@@ -626,6 +626,45 @@ test('refresh: placement ENDRET på samme linje (top → left) → bygges på ny
   assert.strictEqual(Number(input.value), 7, 'verdien (7, fra kildeteksten) overlever plassering-byttet');
 });
 
+// Final-review-fiks (Low): param-før-ui-invarianten i den DELTE venstre-
+// kolonnen ("param-form skal alltid stå FØR ui-controls", se app.css sin
+// .nb-output-kommentar og js/ui.js sin _ensureStrip-kommentar) må overleve en
+// STRUKTURELL ombygging av #@param-skjemaet, ikke bare gjelde ved første
+// _insertStrip-kall. Feilen (før fiksen): _insertStrip sin left-gren brukte
+// wrap.appendChild(strip) — det setter alltid den FERSKE param-form-noden
+// BAKERST i wrap, selv når en .ui-controls-node (satt inn av js/ui.js under
+// en TIDLIGERE kjøring, og fortsatt liggende i samme delte wrap) allerede
+// bor der. Fiksen bruker insertBefore(strip, _findChild(wrap, 'ui-controls'))
+// (null-safe — ingen ui-controls-node ennå → insertBefore(strip, null)
+// oppfører seg som appendChild).
+test('_insertStrip (left): param-form settes inn FØR en allerede tilstedeværende .ui-controls i den delte venstre-kolonnen, OGSÅ etter en strukturell rebuild', () => {
+  const { ParamForms, cellEl, outEl } = freshEnv();
+  const src = 'x = 3  #@param {type:"slider", min:0, max:10, placement:"left"}';
+  ParamForms.decorate(0, cellEl, src, 'python');
+  const wrap = outEl.children.find((c) => c.classList.contains('nb-strips-left'));
+  assert.ok(wrap, '.nb-strips-left opprettet');
+
+  // Simuler js/ui.js sin _ensureStrip: en .ui-controls-node for 'left' legges
+  // inn i den DELTE wrap-en (slik en samtidig venstre-plassert ui.slider(...)
+  // ville gjort under en kjøring).
+  const uiStrip = new FakeEl('div');
+  uiStrip.className = 'ui-controls';
+  uiStrip.setAttribute('data-pos', 'left');
+  wrap.appendChild(uiStrip);
+  assert.deepStrictEqual(wrap.children.map((c) => c.className), ['param-form', 'ui-controls'],
+    'param-form FØR ui-controls rett etter decorate');
+
+  // Strukturell endring i kildeteksten (en ny #@param-linje lagt til) →
+  // ParamForms._build fjerner den gamle param-form-noden og bygger en FERSK
+  // — uten fiksen endte den ferske noden BAKERST i wrap, altså ETTER
+  // ui-controls-noden fra js/ui.js (brutt rekkefølge).
+  const newSrc = src + '\ny = 1  #@param {type:"number", placement:"left"}';
+  ParamForms.refresh(0, newSrc);
+
+  assert.deepStrictEqual(wrap.children.map((c) => c.className), ['param-form', 'ui-controls'],
+    'param-form fortsatt FØR ui-controls etter strukturell rebuild — invarianten overlever');
+});
+
 test('mixed placements i én celle (topp-slider + venstre-dropdown + bunn-checkbox) → tre containere populert riktig', () => {
   const { ParamForms, cellEl, outEl } = freshEnv();
   const src = [

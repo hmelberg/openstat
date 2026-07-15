@@ -929,3 +929,79 @@ test('endCellRun: sopper stale kontroller fra ALLE posisjons-containere samtidig
   assert.strictEqual(leftWrap.children.find((c) => c.classList.contains('ui-controls')).children.length, 0,
     'c sopet fra VENSTRE-stripa');
 });
+
+// ---- Final-review BLOCKER: posisjons-skopet stale-sveip i _ensureStrip ----
+//
+// Reviewer-repro: en celle med kontroller i >=2 posisjoner (mixed
+// placements), en F6-strukturell re-rendring (cellEl bytter identitet, SAMME
+// cellIdx — begge posisjoners cache-de striper er nå stale samtidig), deretter
+// to kjøringer PÅ RAD uten noen ny re-rendring. Feilen (før fiksen): sveipet i
+// _ensureStrip slettet _controls-oppføringer for HELE cellIdx-en når KUN én
+// posisjon sin stripe var stale — det slo dermed også ut den andre
+// posisjonens SAMME-run-oppføring (allerede bygget friskt i sin egen,
+// fortsatt gyldige stripe), som dermed ble en levende orphan uten
+// _controls-oppføring. Kjøringen ETTER DET fant ingen `existing` for den
+// nøkkelen og bygde en ANDRE, duplikat node ved siden av. Fiksen skoper
+// sveipet til `cellIdx === cellIdx && placement === pos` — kun DEN stale
+// posisjonen sveipes.
+function buildFreshCellStruct() {
+  const cellEl = new FakeEl('div');
+  cellEl.className = 'nb-cell';
+  const inputEl = new FakeEl('div');
+  inputEl.className = 'nb-input';
+  const outEl = new FakeEl('div');
+  outEl.className = 'nb-output';
+  const bodyEl = new FakeEl('div');
+  bodyEl.className = 'nb-output-body';
+  outEl.appendChild(bodyEl);
+  cellEl.appendChild(inputEl);
+  cellEl.appendChild(outEl);
+  return { cellEl, outEl, bodyEl };
+}
+
+function countTopAndLeft(outEl) {
+  const topStrip = outEl.children.find((c) => c.classList.contains('ui-controls') && c.getAttribute('data-pos') === 'top');
+  const leftWrap = outEl.children.find((c) => c.classList.contains('nb-strips-left'));
+  const leftStrip = leftWrap && leftWrap.children.find((c) => c.classList.contains('ui-controls'));
+  return { top: topStrip ? topStrip.children.length : 0, left: leftStrip ? leftStrip.children.length : 0 };
+}
+
+test('_ensureStrip: F6 (cellEl-identitetsbytte) etterfulgt av to kjøringer på rad → INGEN duplikat-kontroll i noen posisjon (posisjons-skopet sveip)', () => {
+  const { Ui, outEl: outElA, setCtx } = freshEnv({ cellIdx: 0 });
+
+  function runOnce() {
+    Ui.beginCellRun(0);
+    Ui.registerControl(JSON.stringify({ type: 'slider', name: 'a', min: 0, max: 10, value: 3 }));
+    Ui.registerControl(JSON.stringify({ type: 'text', name: 'b', value: 'x', placement: 'left' }));
+    Ui.endCellRun(0);
+  }
+
+  // Kjøring 1 på cellEl A.
+  runOnce();
+  assert.deepStrictEqual(countTopAndLeft(outElA), { top: 1, left: 1 }, 'kjøring 1: ett element per posisjon');
+
+  // F6: strukturell re-rendring — cellEl bytter identitet (ny B), samme
+  // cellIdx. Begge posisjoners cache-de striper (fra A) er nå stale.
+  const B = buildFreshCellStruct();
+  setCtx({ cellIdx: 0, cellEl: B.cellEl });
+
+  // Kjøring 2 (rett etter F6) — begge stripene bygges friskt i B.
+  runOnce();
+  assert.deepStrictEqual(countTopAndLeft(B.outEl), { top: 1, left: 1 }, 'kjøring 2 (post-F6): fortsatt ett element per posisjon');
+
+  // Kjøring 3 — INGEN videre re-rendring. Før fiksen dukket en duplikat opp
+  // her (en levende orphan fra kjøring 2 mistet sin _controls-oppføring).
+  runOnce();
+  assert.deepStrictEqual(countTopAndLeft(B.outEl), { top: 1, left: 1 },
+    'kjøring 3: fortsatt ett element per posisjon — ingen duplikat');
+
+  // Kjøring 4, for god måls skyld (reviewer-repro sin egen ekstra runde).
+  runOnce();
+  assert.deepStrictEqual(countTopAndLeft(B.outEl), { top: 1, left: 1 },
+    'kjøring 4: fortsatt ett element per posisjon — ingen duplikat');
+
+  // Én entry per posisjon impliserer også én _controls-oppføring per nøkkel
+  // (skulle sveipet slettet en SAMME-run-oppføring uten å fjerne DOM-noden,
+  // hadde neste kjøring bygget en ANDRE node ved siden av — nettopp
+  // duplikat-symptomet assertene over utelukker).
+});

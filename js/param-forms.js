@@ -766,7 +766,17 @@
       strip.setAttribute('data-pos', pos);
       if (pos === 'left') {
         var wrap = _ensureLeftWrapper(outEl);
-        if (wrap) wrap.appendChild(strip);
+        // Final-review-fiks (Low): param-før-ui-invarianten ("param-form
+        // FØR ui-controls" i den delte venstre-kolonnen) må gjelde ved HVER
+        // ombygging, ikke bare første gang. appendChild satte alltid stripa
+        // BAKERST i wrap — på en strukturell rebuild (f.eks. en ny #@param-
+        // linje lagt til) der js/ui.js sin .ui-controls-node fra en tidligere
+        // kjøring fortsatt lever i samme wrap, endte den fersk-bygde
+        // param-form-noden BAK ui-controls-noden, brutt rekkefølge. Sett
+        // derfor inn RETT FØR en evt. eksisterende .ui-controls-node i stedet
+        // (null-safe: ingen .ui-controls der ennå → insertBefore(strip, null)
+        // legger til bakerst, identisk med appendChild).
+        if (wrap) wrap.insertBefore(strip, _findChild(wrap, 'ui-controls'));
         return;
       }
       var before = _findChild(outEl, 'ui-controls') || _findChild(outEl, 'nb-output-body');

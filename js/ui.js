@@ -588,9 +588,21 @@
       // kontroller (en helt annen, fortsatt gyldig stripe) er foreldede).
       // Sveipes derfor KUN når byPos[pos] FANTES men var stale, aldri når
       // den bare var fraværende.
+      //
+      // Final-review-fiks (BLOCKER): sveipet må skopes til DENNE posisjonen
+      // (cellIdx OG placement === pos), ikke til HELE cellIdx-en. Kun
+      // stripa for `pos` er stale her — andre posisjoners striper (f.eks.
+      // 'top' mens 'left' er den stale) er fortsatt like levende og innsatt
+      // som før F6-byttet. Å slette ALLE _controls-oppføringer for cellIdx
+      // rammer da også SAMME-run-registreringer fra de andre posisjonene
+      // (de er allerede bygget på nytt i denne kjøringen, i sin egen
+      // fortsatt-gyldige stripe) — de mister sin _controls-oppføring uten å
+      // miste DOM-noden sin, og blir en levende orphan: neste kjøring finner
+      // ingen `existing` for den nøkkelen og bygger en ANDRE node ved siden
+      // av, altså en duplikat-kontroll.
       if (strip) {
         Object.keys(_controls).forEach(function (key) {
-          if (_controls[key].cellIdx === cellIdx) delete _controls[key];
+          if (_controls[key].cellIdx === cellIdx && _controls[key].placement === pos) delete _controls[key];
         });
       }
       strip = document.createElement('div');
