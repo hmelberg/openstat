@@ -95,7 +95,7 @@
       if (VALID_PLACEMENTS[placementVal]) {
         spec.placement = placementVal;
       } else {
-        warnings.push('ukjent placement: ' + placementVal);
+        warnings.push('ugyldig placement: ' + placementVal);
       }
     }
 

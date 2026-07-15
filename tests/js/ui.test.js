@@ -273,7 +273,7 @@ test('normalizeSpec: ugyldig placement → advarsel + IGNORERES (spec.placement 
   const res = Ui.normalizeSpec({ type: 'text', placement: 'middle' });
   assert.ok(res.spec, 'spec skal ikke nulles av en ugyldig placement');
   assert.strictEqual(res.spec.placement, undefined);
-  assert.ok(res.warnings.some((w) => /ukjent placement/.test(w)));
+  assert.ok(res.warnings.some((w) => /ugyldig placement/.test(w)));
 });
 
 test('normalizeSpec: placement er en KJENT nøkkel — varsler ikke som "ukjent nøkkel"', () => {

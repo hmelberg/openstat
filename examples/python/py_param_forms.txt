@@ -27,6 +27,9 @@ vanlige "endret, ikke kjørt"-markeringen (stale-tint) inntil du trykker
 `#@title` og `#@markdown` (Colabs celle-tittel/tekst-kommentarer) er
 **ikke støttet ennå** — kommer i en senere runde.
 
+Legg til `placement:"left"` (eller `"top"`/`"bottom"`) i metadata-objektet
+for å plassere akkurat den kontrollen i en annen stripe enn cellens standard.
+
 **R støttes også:** `x <- 3  #@param {type:"slider", min:0, max:10}` —
 parseren kjenner igjen både `=` og R sin `<-` som tildelingsoperator.
 

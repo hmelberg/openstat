@@ -1,7 +1,10 @@
 # Notebook widgets — design (spec 2 of 3)
 
 **Status:** all three tracks delivered (W1–W4) — see Phasing below for
-per-phase browser-verification evidence.
+per-phase browser-verification evidence. **Placement extension shipped
+2026-07-15** (Tasks 1–4: strips-to-output-slot + `widgets=` attr, R Run-All
+parity, per-control `placement` keyword, exit-gate cleanup/examples/sweep —
+see `.superpowers/sdd/task-place-4-report.md`).
 **Date:** 2026-07-15
 **Builds on:** spec 1 (`2026-07-13-notebook-cells-design.md`) — the `#%%` cell
 format, notebook rendering, and the phase-B1 per-cell run machinery

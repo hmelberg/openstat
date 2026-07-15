@@ -401,6 +401,28 @@ test('beginRun(0) (tall, bakoverkompatibelt) → fortsatt null-sinks (runHybridR
   assert.strictEqual(sinks, null);
 });
 
+// ---- alignedPlanForKinds (plass-fase Task 2: planoppslag uten beginRun sine sluk-bivirkninger) ----
+
+test('alignedPlanForKinds: r-dokument, eksakt kind-match → justert plan (ingen sluk-bivirkninger)', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% r\n1\n#%% r\n2\n';
+  C.init('r');
+  assert.strictEqual(C.active(), true);
+
+  const aligned = C.alignedPlanForKinds(['r', 'r']);
+  assert.deepStrictEqual(aligned, [0, 1]);
+});
+
+test('alignedPlanForKinds: reelt avvik (ingen 1:1-mapping) → null', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% r\n1\n#%% r\n2\n';
+  C.init('r');
+  assert.strictEqual(C.active(), true);
+
+  const aligned = C.alignedPlanForKinds(['pyodide', 'r']); // r-cellene matcher ikke 'pyodide'
+  assert.strictEqual(aligned, null);
+});
+
 // ---- segmentDisplay (Task 10: notatbok-visningspolicy, spec §4 "Display policy") ----
 
 test('segmentDisplay: preambel-segment er ikke eksplisitt, celle-segmenter er', () => {
@@ -1380,7 +1402,6 @@ test('onEdit: ParamForms.syncSource kalles SYNKRONT per tastetrykk — FØR 250m
     syncSource: (idx, src) => syncCalls.push([idx, src]),
     refresh: (idx, src) => refreshCalls.push([idx, src]),
     resetDocument: () => {},
-    reorder: () => {},
   };
   try {
     scriptInputEl.value = '#%% python\nx = 3  #@param {type:"number"}';
@@ -1408,7 +1429,6 @@ test('doFlush: refresh/markørskann bruker GJELDENDE c.source — en updateCellS
     syncSource: () => {},
     refresh: (idx, src) => refreshCalls.push([idx, src]),
     resetDocument: () => {},
-    reorder: () => {},
   };
   try {
     scriptInputEl.value = '#%% python\nx = 3  #@param {type:"number"}';

@@ -11,12 +11,13 @@ R kan ikke spørre nettleseren om en verdi midt i kjøringen (webR kjører i en
 egen worker), så R-fasaden bruker en **deklarer-og-injiser**-modell i stedet
 for pythons pull-modell: `ui_slider()` m.fl. *deklarerer* en kontrollspec, og
 returnerer verdien som allerede ligger lagret fra forrige kjøring (eller sin
-egen default første gang). Kontrollene dukker først opp **etter** at cellen
-har kjørt én gang — det er selve kjøringen som leser deklarasjonene og bygger
-stripa. Endrer du en kontroll, kjøres cellen (eller en annen navngitt celle
-via `rerun=`) automatisk på nytt, med den nye verdien injisert før kjøring.
-Per-celle ▶ er derfor selve samspillet: første ▶ tegner kontrollene, senere
-endringer i dem trigger nye kjøringer bak kulissene.
+egen default første gang). Kontrollene tegnes idet cellen kjører — enten via
+per-celle ▶ eller «Kjør alle» — og det er selve kjøringen som leser
+deklarasjonene og bygger stripa. Endrer du en kontroll, kjøres cellen (eller
+en annen navngitt celle via `rerun=`) automatisk på nytt, med den nye verdien
+injisert før kjøring. Legg til `placement = "left"` (eller `"top"`/`"bottom"`)
+i et `ui_*()`-kall for å plassere akkurat den kontrollen i en annen stripe enn
+cellens standard.
 
 #%% r
 n <- ui_slider(1, 10, value = 3, label = "Multiplikator")
