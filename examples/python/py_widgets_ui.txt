@@ -26,10 +26,15 @@ art = ui.dropdown(sorted(iris["species"].unique()), label="Art")
 iris[iris["species"] == art].head(n)
 
 #%% python id=plot
+# Denne cellen BRUKER widget-verdiene (n og art fra cellen over — cellene
+# deler sesjon), men har ingen egne widgets: den oppdateres derfor ikke av
+# seg selv når du endrer kontrollene. Det er Oppdater-knappen under som
+# kjører den på nytt (rerun="plot" peker på id-en i denne cellens header).
 import plotly.express as px
 
-px.scatter(iris, x="sepal_length", y="petal_length", color="species",
-           title="Iris — kronblad mot begerblad")
+sub = iris[iris["species"] == art].head(n)
+px.scatter(sub, x="sepal_length", y="petal_length",
+           title=f"Iris — {art}, første {n} rader")
 
 #%% python
 import ui

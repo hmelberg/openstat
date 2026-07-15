@@ -1405,3 +1405,20 @@ body[data-theme="dark"] .nb-undo-btn:hover { color: #1a1b26; }
 .param-form-row input[type="range"] { accent-color: var(--accent); flex: 0 1 160px; }
 .param-form-row input[type="checkbox"] { accent-color: var(--accent); margin: 0; }
 .param-form :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Kjør-chip (run-chip): satt inn av ParamForms._showRunChip ved SLUTTEN av
+   den topp-meste param-form-stripa (js/param-forms.js) når en IKKE-auto
+   #@param-endring nettopp er skrevet inn og cellen dermed har en ventende
+   endring ingen har kjørt ennå. Bevisst diskret (liten aksent-omrandet
+   pille, ikke en primærknapp/spinner) — handlingen bor der brukerens
+   oppmerksomhet nettopp var (skjema-stripa), i TILLEGG til, ikke i stedet
+   for, celle-hodets ▶ (Colab har ingen tilsvarende knapp). */
+.param-form-runchip {
+  align-self: flex-start;
+  display: inline-flex; align-items: center; gap: 4px;
+  background: transparent; color: var(--accent);
+  border: 1px solid var(--accent); border-radius: 999px;
+  padding: 2px 10px; font-size: 11.5px; line-height: 1.6;
+  cursor: pointer;
+}
+.param-form-runchip:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.param-form-runchip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
