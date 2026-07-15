@@ -245,6 +245,73 @@ test('paramLangForType: duckdb/microdata/statx/md/html/skip/ukjent → null (par
   });
 });
 
+// ---- forklarCellSteps / mdNarrationText (fase B2 Task 2: skrittvis celleavspilling) ----
+
+test('forklarCellSteps: kode-celler blir "code"-steg, md blir "md"-steg, skip/html utelates', () => {
+  const doc = '#%% md\nHallo\n#%% python\n1+1\n#%% skip\nx = 1\n#%% html\n<b>hei</b>\n#%% python\n2+2';
+  const steps = C.forklarCellSteps(doc, 'python');
+  assert.deepStrictEqual(steps.map(s => s.kind), ['md', 'code', 'code']);
+  assert.strictEqual(steps[0].source, 'Hallo');
+  assert.strictEqual(steps[1].source, '1+1');
+  assert.strictEqual(steps[2].source, '2+2');
+});
+
+test('forklarCellSteps: ikke-kjørbar kodetype (uten SEG_MARKER, f.eks. brython) utelates helt — verken kjørt eller lest', () => {
+  const doc = '#%% brython\nprint(1)\n#%% python\n1+1';
+  const steps = C.forklarCellSteps(doc, 'python');
+  assert.deepStrictEqual(steps.map(s => s.kind), ['code']);
+  assert.strictEqual(steps[0].source, '1+1');
+});
+
+test('forklarCellSteps: ikke-blank preambel er ETT "code"-steg (speiler segmentPlan)', () => {
+  const doc = '# load noe\n#%% python\n1+1';
+  const steps = C.forklarCellSteps(doc, 'python');
+  assert.deepStrictEqual(steps.map(s => s.kind), ['code', 'code']);
+  assert.strictEqual(steps[0].source, '# load noe');
+});
+
+test('forklarCellSteps: blank/manglende preambel gir intet steg', () => {
+  const doc = '#%% python\n1+1';
+  const steps = C.forklarCellSteps(doc, 'python');
+  assert.strictEqual(steps.length, 1);
+  assert.strictEqual(steps[0].kind, 'code');
+});
+
+test('forklarCellSteps: tom md-celle er fortsatt ETT "md"-steg (tomhet håndteres av mdNarrationText/blokkbygger, ikke her)', () => {
+  const doc = '#%% md\n#%% python\n1';
+  const steps = C.forklarCellSteps(doc, 'python');
+  assert.deepStrictEqual(steps.map(s => s.kind), ['md', 'code']);
+  assert.strictEqual(steps[0].source, '');
+});
+
+test('mdNarrationText: overskrifter, emphasis, lenker, inline-kode og lister strippes rimelig', () => {
+  const src = '# Tittel\n\nDette er **fet** og *kursiv* tekst med `kode` og en [lenke](https://x.no).\n\n- punkt en\n- punkt to';
+  const out = C.mdNarrationText(src);
+  assert.ok(out.indexOf('#') === -1, 'ingen # igjen: ' + out);
+  assert.ok(out.indexOf('*') === -1, 'ingen * igjen: ' + out);
+  assert.ok(out.indexOf('`') === -1, 'ingen ` igjen: ' + out);
+  assert.ok(out.indexOf('](') === -1, 'ingen markdown-lenkesyntaks igjen: ' + out);
+  assert.ok(out.indexOf('Tittel') !== -1);
+  assert.ok(out.indexOf('fet') !== -1 && out.indexOf('kursiv') !== -1);
+  assert.ok(out.indexOf('lenke') !== -1 && out.indexOf('https://x.no') === -1);
+  assert.ok(out.indexOf('punkt en') !== -1 && out.indexOf('punkt to') !== -1);
+});
+
+test('mdNarrationText: kodeblokk-gjerder fjernes, innhold beholdes; blockquote/hr strippes', () => {
+  const src = '```python\nprint(1)\n```\n\n> et sitat\n\n---';
+  const out = C.mdNarrationText(src);
+  assert.ok(out.indexOf('```') === -1);
+  assert.ok(out.indexOf('print(1)') !== -1);
+  assert.ok(out.indexOf('et sitat') !== -1);
+  assert.ok(out.indexOf('---') === -1);
+});
+
+test('mdNarrationText: tom/ren-whitespace kilde → tom streng', () => {
+  assert.strictEqual(C.mdNarrationText(''), '');
+  assert.strictEqual(C.mdNarrationText('   \n  \n'), '');
+  assert.strictEqual(C.mdNarrationText(null), '');
+});
+
 // ---- celle-verktøylinje: strukturelle teksttransformer (fase B2 Task 1) ----
 // Alle operasjoner returnerer { cells, warnings } og bygger sin nye tekst via
 // eksisterende cellBlock/serializeCells + en full re-parse — round-trip-

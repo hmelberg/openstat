@@ -241,6 +241,71 @@
     return null;
   };
 
+  // ---------- skrittvis (forklar) celleavspilling (fase B2 Task 2) ----------
+
+  // Rekkefølgen forklar skal spille av et notatbok-dokument i: kjørbare
+  // kode-celler (SAMME kjørbarhets-gate som segmentPlan bruker for Kjør
+  // alle — gjenbrukt herfra, ALDRI duplisert) blir kjør-og-tal-steg, md-
+  // celler blir tale-only-steg, i DOKUMENT-rekkefølge. Skip/html/ikke-
+  // kjørbare kodetyper (brython/micropython/statx m.fl. uten SEG_MARKER,
+  // eller en celletype som ikke matcher docMode sin kjøretid) er HELT
+  // utelatt — verken kjørt eller lest opp (task-2-brief: "skip cells and
+  // blanked/non-runnable types are skipped entirely"). En ikke-kjørbar
+  // (blank) preambel gir intet steg — speiler segmentPlan sin egen
+  // preambel-betingelse. index.html vet ingenting om cellemodellen her:
+  // den bygger bare selve tale/kode-blokkene (kommentar-konvensjonen,
+  // markdown-narrasjon) ut fra {kind, source} denne funksjonen returnerer.
+  C.forklarCellSteps = function (text, docMode) {
+    var parsed = C.parseCells(text);
+    var cells = parsed.cells;
+    var codePlan = C.segmentPlan(text, docMode);
+    var codeSet = {};
+    for (var i = 0; i < codePlan.length; i++) codeSet[codePlan[i]] = true;
+    var steps = [];
+    for (var idx = 0; idx < cells.length; idx++) {
+      if (codeSet[idx]) {
+        steps.push({ kind: 'code', cellIdx: idx, source: cells[idx].source });
+        continue;
+      }
+      var c = cells[idx];
+      if (c.headerRaw === null) continue; // ikke-kjørbar preambel — intet steg
+      if (C.resolveType(c, docMode) === 'md') {
+        steps.push({ kind: 'md', cellIdx: idx, source: c.source });
+      }
+      // skip / html / ikke-kjørbare kodetyper: verken kjørt eller lest opp
+    }
+    return steps;
+  };
+
+  // md-celletekst → tale-tekst: rimelig markdown-stripping for TTS (IKKE en
+  // full renderer — målet er lesbar tale, ikke korrekt syntaks-gjenkjenning).
+  // Rekkefølgen er bevisst: kodegjerder/inline-kode FØR generisk tag-
+  // fjerning; bilder FØR lenker FØR emphasis (så '![alt](url)' og
+  // '[tekst](url)' ikke feiltolkes som stjerne-emphasis via '*' i url-en);
+  // '***' FØR '**' FØR '*' (samme grunn — grådig lengste-match-rekkefølge
+  // unngår at et trippel-par bare mister ett lag). Linjeskift kollapses til
+  // mellomrom (TTS leser løpende tekst, ikke avsnitts-struktur).
+  C.mdNarrationText = function (src) {
+    var s = String(src == null ? '' : src);
+    s = s.replace(/```[^\n]*\n?/g, '');
+    s = s.replace(/`([^`]+)`/g, '$1');
+    s = s.replace(/!\[([^\]]*)\]\([^)]*\)/g, function (m, alt) { return alt || ''; });
+    s = s.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1');
+    s = s.replace(/^\s{0,3}#{1,6}\s+/gm, '');
+    s = s.replace(/^\s{0,3}>\s?/gm, '');
+    s = s.replace(/^\s*([-*+]|\d+[.)])\s+/gm, '');
+    s = s.replace(/^\s*(-{3,}|\*{3,}|_{3,})\s*$/gm, '');
+    s = s.replace(/\*\*\*([^*]+)\*\*\*/g, '$1');
+    s = s.replace(/\*\*([^*]+)\*\*/g, '$1');
+    s = s.replace(/\*([^*]+)\*/g, '$1');
+    s = s.replace(/___([^_]+)___/g, '$1');
+    s = s.replace(/__([^_]+)__/g, '$1');
+    s = s.replace(/_([^_]+)_/g, '$1');
+    s = s.replace(/<[^>]+>/g, '');
+    s = s.split(/\n+/).map(function (l) { return l.trim(); }).filter(Boolean).join(' ');
+    return s.replace(/\s+/g, ' ').trim();
+  };
+
   // ---------- celle-verktøylinje: strukturelle teksttransformer (fase B2) ----------
   // Spec §1 "Serialization round-trip" tabellen sier hver operasjon ER en
   // teksttransform (sett inn/fjern/bytt/skriv om header-linjer). Alle seks

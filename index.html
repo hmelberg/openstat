@@ -6502,6 +6502,99 @@ json.dumps(out)
       return blocks;
     }
 
+    /**
+     * Fase B2 Task 2: bygger ETT forklar-steg fra kilden til én notatbok-
+     * kode-celle. Samme ledende/etterfølgende-hele-kommentarlinje-konvensjon
+     * som parseExplainBlocks (parseForklarCommentLine, tales før/etter
+     * kjøring — widgets tas med "gratis") — MEN uten videre splitting: en
+     * kode-celle er ALLTID nøyaktig ett steg (task-2-brief: "its code runs
+     * as one step"), uansett interne blanke linjer eller inline-//-
+     * kommentarer (ingen sub-blokker slik parseExplainBlocks lager for
+     * microdata-modus). Blanke linjer INNI cellen bevares (IKKE filtrert
+     * bort, i motsetning til parseExplainBlocks — der er de allerede umulige
+     * siden \n{2,} splitter FØR denne funksjonen ser gruppen; her er de en
+     * reell del av kildekoden). Returnerer null for en celle uten både kode
+     * og kommentarer å tale (helt tom kropp — gir intet steg).
+     */
+    function buildForklarCellCodeBlock(source) {
+      const lines = String(source == null ? '' : source).split(/\r?\n/);
+      if (!lines.some(l => l.trim())) return null;
+      let lo = 0;
+      while (lo < lines.length && parseForklarCommentLine(lines[lo]) !== null && parseForklarCommentLine(lines[lo]).type !== 'none') lo++;
+      let hi = lines.length - 1;
+      while (hi >= lo && parseForklarCommentLine(lines[hi]) !== null && parseForklarCommentLine(lines[hi]).type !== 'none') hi--;
+      const preCommentItems = [];
+      let skipCodeSpeech = false;
+      for (let i = 0; i < lo; i++) {
+        const p = parseForklarCommentLine(lines[i]);
+        if (!p || p.type === 'none') continue;
+        if (p.type === 'skipCodeSpeech') {
+          skipCodeSpeech = true;
+          if (p.text && p.text.trim()) preCommentItems.push({ silent: true, text: p.text.trim(), kwargs: {} });
+        } else if (p.type === 'speech') {
+          preCommentItems.push({ silent: false, text: p.text || '', kwargs: p.kwargs || {} });
+        } else if (p.type === 'widget' || p.type === 'widgetError') {
+          preCommentItems.push(p);
+        }
+      }
+      const codeLines = lines.slice(lo, hi + 1);
+      const postCommentItems = [];
+      for (let i = hi + 1; i < lines.length; i++) {
+        const p = parseForklarCommentLine(lines[i]);
+        if (!p || p.type === 'none') continue;
+        if (p.type === 'speech') postCommentItems.push({ silent: false, text: p.text || '', kwargs: p.kwargs || {} });
+        else if (p.type === 'skipCodeSpeech' && p.text && p.text.trim()) {
+          postCommentItems.push({ silent: true, text: p.text.trim(), kwargs: {} });
+        }
+      }
+      const code = codeLines.join('\n');
+      const codeTrim = code.trim();
+      if (!codeTrim && !preCommentItems.length && !postCommentItems.length) return null;
+      return { code, codeTrim, commentItems: preCommentItems, postCommentItems, skipCodeSpeech };
+    }
+
+    /**
+     * Fase B2 Task 2: bygger ETT tale-only forklar-steg fra kilden til én
+     * md-celle — koden er ALLTID tom (intet kjører, intet nytt rendres),
+     * hele md-teksten (rimelig markdown-strippet via Cells.mdNarrationText,
+     * den rene halvdelen — node-testet) leses opp som ETT utsagn. Gjenbruker
+     * DEN SAMME "ingen kode"-veien som forklarRunOne*Block allerede har for
+     * rene kommentar-avsnitt (speakForklarCommentItems + clearForklarHighlightBand,
+     * ingen kjøring) — ingen ny avspillingslogikk trengs. Returnerer null for
+     * en tom/ren-whitespace md-celle (intet å tale — intet steg).
+     */
+    function buildForklarMdNarrationBlock(source) {
+      const text = (window.Cells && window.Cells.mdNarrationText)
+        ? window.Cells.mdNarrationText(source)
+        : String(source == null ? '' : source).trim();
+      if (!text) return null;
+      return {
+        code: '', codeTrim: '',
+        commentItems: [{ silent: false, text: text, kwargs: {} }],
+        postCommentItems: [], skipCodeSpeech: false
+      };
+    }
+
+    /**
+     * Fase B2 Task 2: erstatter blank-linje-seksjonering (parseExplainBlocks)
+     * med CELLE-basert seksjonering når dokumentet er en notatbok. Rekkefølgen
+     * kommer fra Cells.forklarCellSteps (ren halvdel, js/cells.js) — kode-
+     * cellers kjørbarhets-gate er DEN SAMME som segmentPlan bruker (Kjør
+     * alle), gjenbrukt derfra, IKKE duplisert her. #%%-header-linjene er
+     * ALDRI en del av c.source (parseCells sitt eget header/kropp-skille),
+     * så de blir aldri talt eller kjørt — helt i tråd med kravet.
+     */
+    function buildForklarBlocksForNotebook(text, docMode) {
+      const steps = (window.Cells && window.Cells.forklarCellSteps) ? window.Cells.forklarCellSteps(text, docMode) : [];
+      const blocks = [];
+      for (let i = 0; i < steps.length; i++) {
+        const st = steps[i];
+        const b = st.kind === 'md' ? buildForklarMdNarrationBlock(st.source) : buildForklarCellCodeBlock(st.source);
+        if (b) blocks.push(b);
+      }
+      return blocks;
+    }
+
     function buildForklarFlatWork(segments) {
       const flat = [];
       for (let si = 0; si < segments.length; si++) {
@@ -9855,6 +9948,23 @@ async def _m2py_run_segment(_seg_json):
         return;
       }
       const snapshotScript = rawScript;
+      // Notatbok aktiv (fase B2 Task 2): samme presedens som Kjør alle
+      // (linje ~9596 over, "Gates på active(), IKKE hasMarkers()") — med
+      // Rå tekst-valget på kjører Forklar som et vanlig skript (#%%-linjer
+      // er bare kommentarer, blank-linje-seksjonering uendret). Cellevisningen
+      // skjuler #scriptInput/#outputArea/forklarLineHighlight helt
+      // (.container.nb-hidden, se app.css) — Forklar MÅ derfor forlate
+      // cellevisningen FØR selve kjøringen, ellers kjører hele løpet usett
+      // bak en skjult .container (verifisert: dette er dagens faktiske
+      // oppførsel før denne fiksen). Forlater UTEN {raw:true}, så
+      // rawOverride ikke settes — js/cells.js sin egen tick()-heuristikk
+      // (poll hvert sekund) tar notatboken tilbake til cellevisning helt av
+      // seg selv når #scriptInput får sitt opprinnelige #%%-merkede innhold
+      // igjen i finally-blokken under (programmatisk endring, ingen
+      // brukertasting) — «bonus»-gjeninntreden per task-2-brief, uten en
+      // eneste ekstra kodelinje.
+      const forklarNbActive = !!(window.Cells && window.Cells.active());
+      if (forklarNbActive) window.Cells.exit();
       scriptInput.value = '';
       prepareForklarOutputPane();
       lastOutputMode = 'run';
@@ -10166,7 +10276,12 @@ def _run_microdata_chunk(_code):
           // en Forklar-økt gjenbrukt Forklars e/_g uten de innlastede datasettene.
           nbSetSessionLive(false);
         }
-        const forklarBlocks = parseExplainBlocks(extractBlockWidgets(snapshotScript), activeEditorMode);
+        // Fase B2 Task 2: notatbok → celle-baserte steg (se forklarNbActive
+        // over) i stedet for blank-linje-seksjonering; vanlig skript (og
+        // notatbok med Rå tekst-valget på) er byte-for-byte uendret.
+        const forklarBlocks = forklarNbActive
+          ? buildForklarBlocksForNotebook(extractBlockWidgets(snapshotScript), activeEditorMode)
+          : parseExplainBlocks(extractBlockWidgets(snapshotScript), activeEditorMode);
         forklarSessionFlatWork = forklarBlocks;
         forklarFlatMetaArr = new Array(forklarBlocks.length).fill(null);
         function forklarApplyGotoTruncate(g) {
