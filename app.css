@@ -518,10 +518,17 @@
       white-space: pre;
       /* overflow-x: auto arves fra .output-area pre */
     }
-    /* R-mode: plot-bilder skal ikke dominere vertikalt */
-    .output-area img.m2py-plot {
+    /* R-mode: plot-bilder skal ikke dominere vertikalt. Scopet til BEGGE
+       output-mål (klassisk #outputArea OG notatbokens .nb-output-body,
+       se runNotebookRCell/runHybridR sin errorHost()-trailing-slot) — uten
+       .nb-output-body-grenen fikk per-celle/«Kjør alle»-i-notatbok-plott
+       ALDRI denne maks-størrelsen (kun det gamle #outputArea-tilfellet var
+       dekket). Plotly styrer sin egen .plotly-container og fanges bevisst
+       IKKE her (selektoren er plain img, ikke en universalselektor). */
+    .output-area img.m2py-plot,
+    .nb-output-body img.m2py-plot {
       max-width: 100%;
-      max-height: 60vh;
+      max-height: 480px;
       height: auto;
       object-fit: contain;
       display: block;
@@ -541,7 +548,13 @@
     .result-copy-wrap { position: relative; }
     .result-copy-wrap:hover .output-copy-btn, .result-copy-wrap:focus-within .output-copy-btn { opacity: 1; }
     .result-copy-wrap > .plotly-container { margin-left: auto; margin-right: auto; }
-    .output-matplotlib-img { display: block; max-width: 100%; height: auto; margin: 12px auto; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-code); }
+    /* matplotlib-PNG: samme maks-størrelse-avtale som .m2py-plot over — var
+       tidligere UBEGRENSET i høyden (kun max-width var satt), se figur-fiks
+       2026-07 issue 2. Klassen settes uskopet av renderOutput (delt mellom
+       #outputArea og .nb-output-body, se mdRenderOutput-kommentaren ved
+       'output-matplotlib-img' i index.html) — trenger derfor ikke egen
+       .nb-output-body-gren slik m2py-plot gjør. */
+    .output-matplotlib-img { display: block; max-width: 100%; height: auto; max-height: 480px; object-fit: contain; margin: 12px auto; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-code); }
     /* W3 Task 3: ipywidgets-slot — selve widget-DOM-en (Lumino attach via
        IpwBridge.renderView) styles seg selv (pinnet html-manager sitt CSS);
        her kun ytre avstand, tokens-only, samme mønster som andre embeds over. */
