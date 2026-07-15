@@ -510,9 +510,11 @@
   // ctx (aldri cachet, samme F6-forbehold som resten av notatbok-kjøringen);
   // .nb-output er cellens direkte barn (se js/cells.js sin cellNode).
   // Fallback #outputArea UENDRET (samme node/streng som før) når ctx mangler
-  // -- vanlig skript uten notatbok, eller notatboken er inaktiv. R-dashbord
-  // (webr/dash.R → js/dash-webr.js sin mount()) kaller ALDRI D.create() --
-  // R-dash mounter fortsatt ubetinget til #outputArea via sin egen vei
+  // -- vanlig skript uten notatbok, eller notatboken er inaktiv. MERK: R-
+  // (dash-webr.js:131) og brython/micropython-veiene kaller OGSÅ D.create(),
+  // men deres kjørestier setter aldri nbUiRunCtx — DET er invarianten som
+  // holder dem på #outputArea, ikke hvem som kaller create. En fremtidig
+  // per-celle-R-sti som setter ctx ville derfor omdirigere R-dash hit
   // (bevisst urørt, se Task B2-3-rapporten: en per-celle-trygg R-dash krever
   // en egen webR-registerrestrukturering, utenfor denne oppgavens omfang).
   function mountContainer() {

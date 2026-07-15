@@ -1638,9 +1638,10 @@
       // rett etterpå. Mirror av Brython/MicroPython sin runSelf-sjekk
       // (index.html ~3218: `outputArea.querySelector('.dash') ? appendOutput
       // : renderOutput`), her mot cellens EGEN slot i stedet for #outputArea.
-      // R-dashbord mounter aldri hit (uendret webr/dash.R-vei til
-      // #outputArea, se Task B2-3-rapporten) — hasDash er derfor alltid
-      // false for R-celler, res.rparts-grenen er dermed urørt.
+      // R-dashbord havner ikke her fordi R-kjørestiene aldri setter
+      // nbUiRunCtx (mountContainer faller da til #outputArea — se
+      // js/dash.js) — hasDash er derfor alltid false for R-celler,
+      // res.rparts-grenen er dermed urørt.
       var hasDash = !!(out.querySelector && out.querySelector('.dash'));
       if (res && res.rparts) {
         if (typeof global.renderROutputParts === 'function') {
