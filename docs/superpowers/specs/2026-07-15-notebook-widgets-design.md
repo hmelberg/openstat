@@ -162,7 +162,11 @@ individually behind the protocol later.
   `with self.out:`), so it ships together with Output-widget support later;
   `Output`/`with out:` capture (needs a display-publisher seam we don't
   have without an IPython shell); `jslink`; third-party widgets (embed-amd
-  CDN loading "best effort", no promises); widget state in share links.
+  CDN loading "best effort", no promises); widget state in share links;
+  **`FileUpload`** — frontend→kernel binary buffers are dropped in v1
+  (`_ipw_dispatch` hardcodes `"buffers": []`), so FileUpload silently
+  never delivers its bytes; ships when the buffer path is threaded
+  through (likely with `Output`).
   **Accepted v1 limitations (browser-verified 2026-07-15, exit gate):** a
   per-cell rerun of a cell that creates a widget accumulates comms in the
   JS registry (+3 per `IntSlider` rerun, e.g. 15→18→21→24 across three
@@ -172,7 +176,10 @@ individually behind the protocol later.
   rerun — a real lifecycle decision out of v1 scope). `observe` callbacks
   run outside any captured cell, so `print(...)` inside a callback lands
   in the browser console, not the cell's output — documented in the
-  example notebook's intro.
+  example notebook's intro. Python-side, old `Widget`/comm-manager entries
+  survive session restarts in the persistent interpreter (JS reset never
+  sends `comm_close` into python) — unreachable from a fresh `_g`,
+  memory-only, harmless.
 - **Frontend correction (research 2026-07-15):** `HTMLManager`'s
   `_create_comm`/`_get_comm_info` are no-op stubs — live comms require
   subclassing it with a real comm implementation (a hand-rolled
