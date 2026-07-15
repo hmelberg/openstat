@@ -234,6 +234,13 @@
         continue;
       }
 
+      // Fail-safe for non-raw types: if valueRaw contains #, treat as fatal
+      // (raw type allows # by design — it's verbatim source code).
+      if (meta.type !== 'raw' && valueRaw.indexOf('#') !== -1) {
+        console.warn('ParamForms.parse: linje ' + (i + 1) + ': #@param-verdien inneholder # — linjen hoppes over');
+        continue;
+      }
+
       entries.push({
         lineIdx: i,
         varName: varName,

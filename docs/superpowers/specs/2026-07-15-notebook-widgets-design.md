@@ -203,7 +203,9 @@ dropdown-from-list, boolean, string, date; `#@title`, `{run:"auto"}`.
 Rendering reuses track 1's controls; a change rewrites the assignment's
 value **in the canonical text** (fits the text-canonical philosophy — the
 form IS the code) and reruns the cell when `run:"auto"`. Works in every
-runtime because it never touches the runtime: it edits text and reruns.
+runtime because it never touches the runtime: it edits text and reruns. Form
+interactions clear the cell textarea's browser undo-stack (programmatic
+`.value` writes), so the undo control remains independent.
 
 ## Phasing
 

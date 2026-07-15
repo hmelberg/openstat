@@ -564,3 +564,30 @@ test('R-modus: boolean-kontroll skriver TRUE/FALSE (ikke Python sin True/False)'
   checkbox.dispatchEvent({ type: 'change' });
   assert.deepStrictEqual(updateCellSourceCalls[0], [0, 'flag <- FALSE  #@param {type:"boolean"}']);
 });
+
+test('komposisjon: decorate mottaker/bruker lang=\'r\' for #%% r-celle i python-dokument → boolean skriver TRUE/FALSE', () => {
+  // Simuler en python-modus notebook som inkluderer en r-celle.
+  // Cells.paramLangForType ville gitt 'r' basert på cellen sin type/deklarasjon.
+  const { ParamForms, cellEl, updateCellSourceCalls } = freshEnv();
+
+  // Decorate kalles med lang='r' — stemmer med at cellen er #%% r.
+  const src = 'show_details <- FALSE #@param {type:"boolean"}';
+  ParamForms.decorate(2, cellEl, src, 'r');
+
+  assert.strictEqual(cellEl.children.length, 3, 'stripa bygd');
+  const strip = cellEl.children[0];
+  assert.ok(strip.classList.contains('param-form'));
+
+  const checkboxRow = strip.children[0];
+  const checkbox = checkboxRow.children[1];
+  assert.strictEqual(checkbox.type, 'checkbox', 'boolean → checkbox');
+  assert.strictEqual(checkbox.checked, false, 'seedet fra FALSE');
+
+  // Endre til true — skal skrive TRUE (R-stil), ikke True (Python-stil)
+  checkbox.checked = true;
+  checkbox.dispatchEvent({ type: 'change' });
+
+  assert.strictEqual(updateCellSourceCalls.length, 1);
+  assert.deepStrictEqual(updateCellSourceCalls[0], [2, 'show_details <- TRUE #@param {type:"boolean"}'],
+    'R-modus skriver TRUE, ikke True');
+});

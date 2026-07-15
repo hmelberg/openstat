@@ -421,6 +421,29 @@ test('pin: multiple #@param on one line → skipped + warned', () => {
   assert.ok(spy.calls.length >= 1);
 });
 
+test('pin: non-raw value containing # → skipped + warned (fail-safe for comment-in-value)', () => {
+  const spy = warnSpy();
+  const src = 'x = 3 # note #@param {type:"slider", min:0, max:10}';
+  const entries = PF.parse(src, 'python');
+  spy.restore();
+  // valueRaw er '3 # note' — inneholder # for slider (non-raw) → fatal advarsel + linja hoppes over.
+  // TRYGT: ingen entry betyr at writeValue aldri kan nå (og korruptere) linja.
+  assert.strictEqual(entries.length, 0);
+  assert.ok(spy.calls.some((c) => /inneholder #/.test(c)));
+});
+
+test('pin: raw-type value containing # is allowed (raw is verbatim by design)', () => {
+  const src = 'x = some_func() # with comment #@param {type:"raw"}';
+  const entries = PF.parse(src, 'python');
+  // raw-type tillater # i verdien — det er bare rå kildekode
+  assert.strictEqual(entries.length, 1);
+  assert.strictEqual(entries[0].meta.type, 'raw');
+  assert.strictEqual(entries[0].valueRaw, 'some_func() # with comment');
+  // Round-trip byte-exact — verdien skal aldri bli korrupt
+  const out = PF.writeValue(src, entries[0], PF.currentValue(entries[0], 'python'), 'python');
+  assert.strictEqual(out, src);
+});
+
 // ===== formatLiteral (exposed for direct testing per plan's writeValue doc) =====
 
 test('formatLiteral: quote escaped; lone inner backslash left intact', () => {
