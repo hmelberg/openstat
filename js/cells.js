@@ -287,6 +287,15 @@
     var i = idx;
     if (i < -1) i = -1;
     if (i > cells.length - 1) i = cells.length - 1;
+    // Preambel-vern (B2-review, Critical): «sett inn FØRST» (i === -1) i et
+    // dokument MED implisitt preambel ville splice den nye '#%% type'-
+    // headeren FORAN preambel-teksten — ved re-parse blir preambelen
+    // (typisk '# load'-/'#options.*'-linjer!) da KROPPEN til den nye cellen,
+    // og dokumentet mister preambelen sin permanent. En preambel MÅ stå
+    // først (samme filosofi som moveCell sitt preambel-vern over): «over
+    // preambelen» er et meningsløst sted, så klem til rett ETTER den i
+    // stedet.
+    if (i === -1 && cells.length && cells[0].headerRaw === null) i = 0;
     var blocks = cells.map(C.cellBlock);
     // Header + ÉN blank kroppslinje (spec §1: "insert a #%% header (+ blank
     // line)") — se cellBlock/parseCells-samspillet: en trailing '\n' her gir
@@ -738,6 +747,18 @@
     // tekstfelt — nøyaktig oppskriften fra spec/task-1-brief.
     function buildToolbar(c, idx, type) {
       var tools = el('div', 'nb-tools');
+      // Alle interaktive verktøylinje-elementer samles på celleobjektet så
+      // setNbButtonsDisabled kan deaktivere dem under en kjøring (B2-review,
+      // Important) — samme livssyklus som c._runBtn. Grense-deaktiverte
+      // knapper (↑ på første, ↓ på siste) markeres med _staticDisabled slik
+      // at re-aktiveringen etter kjøringen ikke ved et uhell slår dem PÅ.
+      c._toolEls = [];
+      function track(node, staticDisabled) {
+        if (staticDisabled) { node.disabled = true; node._staticDisabled = true; }
+        c._toolEls.push(node);
+        tools.appendChild(node);
+        return node;
+      }
       function toolBtn(cls, label, title, handler) {
         var b = el('button', 'nb-tool-btn ' + cls, label);
         b.type = 'button';
@@ -745,17 +766,15 @@
         b.addEventListener('click', handler);
         return b;
       }
-      tools.appendChild(toolBtn('nb-tool-add-above', '+▲', t('Legg til celle over'),
+      track(toolBtn('nb-tool-add-above', '+▲', t('Legg til celle over'),
         function () { toolbarInsert(idx - 1, type); }));
-      tools.appendChild(toolBtn('nb-tool-add-below', '+▼', t('Legg til celle under'),
+      track(toolBtn('nb-tool-add-below', '+▼', t('Legg til celle under'),
         function () { toolbarInsert(idx, type); }));
-      var upBtn = toolBtn('nb-tool-up', '↑', t('Flytt celle opp'), function () { toolbarMove(idx, -1); });
-      var downBtn = toolBtn('nb-tool-down', '↓', t('Flytt celle ned'), function () { toolbarMove(idx, 1); });
-      if (idx === 0) upBtn.disabled = true;
-      if (idx === NB.cells.length - 1) downBtn.disabled = true;
-      tools.appendChild(upBtn);
-      tools.appendChild(downBtn);
-      tools.appendChild(toolBtn('nb-tool-split', '✂', t('Del celle ved markøren'),
+      track(toolBtn('nb-tool-up', '↑', t('Flytt celle opp'), function () { toolbarMove(idx, -1); }),
+        idx === 0);
+      track(toolBtn('nb-tool-down', '↓', t('Flytt celle ned'), function () { toolbarMove(idx, 1); }),
+        idx === NB.cells.length - 1);
+      track(toolBtn('nb-tool-split', '✂', t('Del celle ved markøren'),
         function () { toolbarSplit(idx); }));
       // Type-bytte og slå-sammen-med-forrige gir ingen mening for den
       // underforståtte preambel-cellen (headerRaw null — ingen header-linje å
@@ -763,10 +782,8 @@
       // transformene no-op'er begge her uansett, men UI-et utelater dem helt
       // i stedet for å tilby en knapp som alltid feiler stille).
       if (c.headerRaw !== null) {
-        var mergeBtn = toolBtn('nb-tool-merge', '⤒', t('Slå sammen med forrige celle'),
-          function () { toolbarMerge(idx); });
-        if (idx === 0) mergeBtn.disabled = true;
-        tools.appendChild(mergeBtn);
+        track(toolBtn('nb-tool-merge', '⤒', t('Slå sammen med forrige celle'),
+          function () { toolbarMerge(idx); }), idx === 0);
 
         var typeSel = el('select', 'nb-tool-type');
         typeSel.title = t('Bytt celletype');
@@ -777,9 +794,9 @@
         });
         typeSel.value = type;
         typeSel.addEventListener('change', function () { toolbarChangeType(idx, typeSel.value); });
-        tools.appendChild(typeSel);
+        track(typeSel);
       }
-      tools.appendChild(toolBtn('nb-tool-delete', '🗑', t('Slett celle'), function () { toolbarDelete(idx); }));
+      track(toolBtn('nb-tool-delete', '🗑', t('Slett celle'), function () { toolbarDelete(idx); }));
       return tools;
     }
 
@@ -811,13 +828,37 @@
       render();
     }
 
+    // Felles PORT for enhver strukturell verktøylinje-operasjon (B2-review,
+    // Important + Minor) — kalt FØRST i hver handler, FØR NB.cells leses:
+    //  1. Kjøre-guard (speiler C.runCell/onRestartClick sin egen sjekk):
+    //     en strukturell render() midt i et Kjør alle-løp river vekk
+    //     .nb-output-nodene kjøringen ruter inn i (F6-faren) — stille
+    //     avvisning, akkurat som runCell.
+    //  2. flushPendingEdit (speiler runCell sin "skriv → kjør"-disiplin):
+    //     en armert 250ms-redigeringsdebounce ville ellers kunne fyre ETTER
+    //     den strukturelle re-rendringen — mot en closure-fanget idx som nå
+    //     peker på en annen (eller fjernet) celle — og re-serialisere gammel
+    //     tilstand over det ferske dokumentet. Flushen anvender redigeringen
+    //     synkront NÅ, så transformen under opererer på den ferskeste kilden.
+    function toolbarGate() {
+      if (global.mdIsScriptRunning && global.mdIsScriptRunning()) return false;
+      flushPendingEdit();
+      return true;
+    }
+
     function toolbarInsert(afterIdx, type) {
+      if (!toolbarGate()) return;
+      // Speil insertCellAfter sitt preambel-vern for FOKUS-målet: «over
+      // preambelen» klemmes til «rett etter preambelen» i den rene halvdelen
+      // (se insertCellAfter) — den nye cellen lander da på indeks 1, ikke 0.
+      if (afterIdx === -1 && NB.cells.length && NB.cells[0].headerRaw === null) afterIdx = 0;
       var r = C.insertCellAfter(NB.cells, afterIdx, type);
       commitStructuralOp(r.cells);
       focusCellAt(afterIdx + 1, 0);
     }
 
     function toolbarMove(idx, dir) {
+      if (!toolbarGate()) return;
       var wrapBefore = NB.cells[idx] && NB.cells[idx]._wrap;
       var r = C.moveCell(NB.cells, idx, dir);
       if (r.cells === NB.cells) { flashHint(wrapBefore); return; }
@@ -826,6 +867,7 @@
     }
 
     function toolbarSplit(idx) {
+      if (!toolbarGate()) return;
       var c = NB.cells[idx];
       var wrapBefore = c && c._wrap;
       var offset = 0;
@@ -840,6 +882,7 @@
     }
 
     function toolbarMerge(idx) {
+      if (!toolbarGate()) return;
       var prev = NB.cells[idx - 1];
       // Fokuser markøren PÅ SAMMENFØYNINGSPUNKTET (slutten av forrige celles
       // ORIGINALE kilde — fanget FØR operasjonen muterer NB.cells) — ikke
@@ -855,6 +898,7 @@
     }
 
     function toolbarChangeType(idx, newType) {
+      if (!toolbarGate()) return;
       var wrapBefore = NB.cells[idx] && NB.cells[idx]._wrap;
       var r = C.changeCellType(NB.cells, idx, newType);
       if (r.cells === NB.cells) { flashHint(wrapBefore); return; }
@@ -867,6 +911,7 @@
     // som gjenoppretter den PRE-operasjon-serialiserte teksten byte-for-byte
     // (samme tekst NB.lastSerialized pekte på RETT FØR denne slettingen).
     function toolbarDelete(idx) {
+      if (!toolbarGate()) return;
       var preOpText = NB.lastSerialized;
       var r = C.deleteCell(NB.cells, idx);
       if (r.cells === NB.cells) { flashHint(NB.cells[idx] && NB.cells[idx]._wrap); return; }
@@ -1379,6 +1424,16 @@
       for (var i = 0; i < NB.cells.length; i++) {
         var c = NB.cells[i];
         if (c && c._runBtn) c._runBtn.disabled = disabled;
+        // Verktøylinje-kontrollene følger samme livssyklus (B2-review):
+        // strukturelle operasjoner er like farlige midt i en kjøring som en
+        // ny kjøring er (toolbarGate er den harde vakten; dette er den
+        // synlige speilingen). _staticDisabled (grense-↑/↓, se buildToolbar)
+        // vinner alltid over re-aktivering.
+        if (c && c._toolEls) {
+          for (var j = 0; j < c._toolEls.length; j++) {
+            c._toolEls[j].disabled = disabled || !!c._toolEls[j]._staticDisabled;
+          }
+        }
       }
       if (NB.restartBtn) NB.restartBtn.disabled = disabled;
     }

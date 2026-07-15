@@ -273,6 +273,26 @@ test('insertCellAfter: idx=-1 setter inn FØRST (add over første celle)', () =>
   assert.strictEqual(r.cells[0].type, 'r');
 });
 
+test('insertCellAfter: idx=-1 med implisitt preambel → klemmes til ETTER preambelen (preambel-vern)', () => {
+  // B2-review Critical-repro: uten vernet ville '#%% python'-headeren
+  // splices FORAN preambel-teksten, og '# load x\nprint(1)' bli den nye
+  // cellens KROPP — dokumentet mister preambelen sin permanent.
+  const doc = '# load x\nprint(1)\n#%% python\ny=2\n';
+  const cells = C.parseCells(doc).cells;
+  const r = C.insertCellAfter(cells, -1, 'python');
+  assert.strictEqual(r.cells[0].headerRaw, null, 'preambelen står fortsatt FØRST');
+  assert.strictEqual(r.cells[0].source, '# load x\nprint(1)', 'preambel-innholdet er intakt');
+  assert.strictEqual(r.cells[1].headerRaw, '#%% python', 'den nye cellen landet rett ETTER preambelen');
+  assert.strictEqual(r.cells[1].source, '');
+  assert.strictEqual(C.serializeCells(r.cells), '# load x\nprint(1)\n#%% python\n\n#%% python\ny=2\n');
+});
+
+test('insertCellAfter: idx=-1 UTEN preambel setter fortsatt inn helt først (vernet er preambel-spesifikt)', () => {
+  const cells = C.parseCells('#%% r\n1\n').cells;
+  const r = C.insertCellAfter(cells, -1, 'md');
+  assert.strictEqual(r.cells[0].headerRaw, '#%% md');
+});
+
 test('insertCellAfter: ukjent type → advarsel + fallback python', () => {
   const cells = C.parseCells('#%% python\n1').cells;
   const r = C.insertCellAfter(cells, 0, 'sprocket');
