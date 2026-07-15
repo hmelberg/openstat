@@ -185,7 +185,13 @@ runtime because it never touches the runtime: it edits text and reruns.
   preserved across reruns, zero-ui sweep, plain-script fallback, example
   notebook); see `.superpowers/sdd/task-w1-5-report.md`.
 - **W2 — `ui` everywhere:** brython + micropython facades (same module),
-  R facade; notice for microdata.
+  R facade; notice for microdata. **Done 2026-07-15** — browser-verified
+  end-to-end (R declare-and-inject model: per-cell slider/dropdown/button,
+  Run All defaults-only with no stale values, controls survive as strips
+  from earlier per-cell runs; R example notebook). brython/micropython
+  facades confirmed as documented API-compatible fallbacks (defaults, no
+  render — real cell support pending those runners' notebook support, see
+  Scope notes above); see `.superpowers/sdd/task-w2-5-report.md`.
 - **W3 — ipywidgets bridge v1** (per track 2 scope).
 - **W4 — `#@param` forms.**
 

@@ -1,0 +1,32 @@
+# label: Widgets — ui_slider/ui_dropdown (R-notatbok)
+#options.mode = r
+#options.title = "Widgets — ui_slider/ui_dropdown (R)"
+#options.description = "ui_*()-funksjonene i R: deklarer-og-injiser-modellen for glidebryter, nedtrekksmeny og knapp"
+# load https://raw.githubusercontent.com/hmelberg/openstat/main/data/iris.csv as iris
+
+#%% md
+# Widgets med `ui_*()` i R
+
+R kan ikke spørre nettleseren om en verdi midt i kjøringen (webR kjører i en
+egen worker), så R-fasaden bruker en **deklarer-og-injiser**-modell i stedet
+for pythons pull-modell: `ui_slider()` m.fl. *deklarerer* en kontrollspec, og
+returnerer verdien som allerede ligger lagret fra forrige kjøring (eller sin
+egen default første gang). Kontrollene dukker først opp **etter** at cellen
+har kjørt én gang — det er selve kjøringen som leser deklarasjonene og bygger
+stripa. Endrer du en kontroll, kjøres cellen (eller en annen navngitt celle
+via `rerun=`) automatisk på nytt, med den nye verdien injisert før kjøring.
+Per-celle ▶ er derfor selve samspillet: første ▶ tegner kontrollene, senere
+endringer i dem trigger nye kjøringer bak kulissene.
+
+#%% r
+n <- ui_slider(1, 10, value = 3, label = "Multiplikator")
+n * 100
+
+#%% r id=plot
+plot(iris$sepal_length, iris$petal_length,
+     col = factor(iris$species), pch = 19,
+     main = paste("Iris — kronblad mot begerblad (n =", n, ")"),
+     xlab = "sepal_length", ylab = "petal_length")
+
+#%% r
+ui_button("Oppdater", rerun = "plot")
