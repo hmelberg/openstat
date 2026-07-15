@@ -23,7 +23,9 @@ n <- ui_slider(1, 10, value = 3, label = "Multiplikator")
 n * 100
 
 #%% r
-farge <- ui_dropdown(c("blå", "rød", "grønn"), label = "Farge")
+# R forstår bare engelske fargenavn i col= — verdiene må derfor være
+# gyldige R-farger (norske etiketter kan mappes med switch() om ønskelig).
+farge <- ui_dropdown(c("steelblue", "firebrick", "seagreen"), label = "Farge")
 
 #%% r id=plot
 plot(iris$sepal_length, iris$petal_length,
