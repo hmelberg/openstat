@@ -25,13 +25,20 @@ paste("Utvalg:", nrow(utvalg), "rader — snitt sepal_length:",
 # Uten run:"auto": endringen skrives i teksten og cellen blir stale — kjør selv.
 farge <- 'steelblue' #@param ["steelblue", "firebrick", "seagreen"]
 vis_rutenett <- TRUE #@param {type:"boolean"}
-plot(utvalg$sepal_length, utvalg$petal_length,
-     col = farge, pch = 19,
-     main = paste("Iris — første", antall, "rader"),
-     xlab = "sepal_length", ylab = "petal_length")
-if (vis_rutenett) grid()
+{
+  plot(utvalg$sepal_length, utvalg$petal_length,
+       col = farge, pch = 19,
+       main = paste("Iris — første", antall, "rader"),
+       xlab = "sepal_length", ylab = "petal_length")
+  if (vis_rutenett) grid()
+}
 
 #%% md
 Tips: `placement:"left"` i metaen legger akkurat det feltet i en kolonne til
 venstre for resultatet — f.eks.
 `terskel <- 5 #@param {type:"number", placement:"left"}`.
+
+Merk: «Kjør alle» evaluerer R setning for setning — hold flertrinns plott
+(`plot()` + `grid()`/`abline()` osv.) samlet i én `{ }`-blokk, slik cellen
+over gjør, ellers feiler etterfølgende plott-setninger med «plot.new has
+not been called yet».
