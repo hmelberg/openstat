@@ -224,6 +224,37 @@ def test_snapshot_rollback_rewinds_rebindings():
     assert br._shared_vars['sxx'] == 1
     assert 'nytt_navn' not in br._shared_vars
 
+def test_reset_clears_user_vars():
+    br._execute_code('zz_fasec = 99')
+    assert br._reset() == ''
+    out = br._execute_code("'zz_fasec' in globals()")
+    assert 'False' in out
+
+
+def test_reset_keeps_baseline_show():
+    br._reset()
+    out = br._execute_code("show('fasec-baseline')")
+    assert 'fasec-baseline' in out
+
+
+def test_reset_clears_last_error():
+    br._execute_code('1/0')
+    assert br._get_last_error() != ''
+    assert br._reset() == ''
+    assert br._get_last_error() == ''
+
+
+def test_reset_twice_is_safe():
+    assert br._reset() == ''
+    assert br._reset() == ''
+
+
+def test_reset_keeps_registered_modules():
+    assert br._register_module('fasec_dummy', 'V = 7') == ''
+    br._reset()
+    out = br._execute_code('import fasec_dummy\nfasec_dummy.V')
+    assert '7' in out
+
 if __name__ == '__main__':
     # NOTE: iterate in declaration order (not sorted alphabetically) — several
     # tests share state via module globals (e.g. test_figure_embed_marker

@@ -100,3 +100,35 @@ def test_pending_signal(capsys):
 def test_indented_last_line_not_evaled_out_of_context(capsys):
     out = run(capsys, 'if True:\n    y = 5\n    y')
     assert mr._get_last_error() == ''
+
+
+def test_reset_clears_user_vars(capsys):
+    run(capsys, 'zz_fasec = 99')
+    assert mr._reset() == ''
+    out = run(capsys, "print('zz_fasec' in globals())")
+    assert 'False' in out
+
+
+def test_reset_keeps_baseline_show(capsys):
+    mr._reset()
+    out = run(capsys, "show('fasec-baseline')")
+    assert 'fasec-baseline' in out
+
+
+def test_reset_clears_last_error(capsys):
+    run(capsys, '1/0')
+    assert mr._get_last_error() != ''
+    assert mr._reset() == ''
+    assert mr._get_last_error() == ''
+
+
+def test_reset_twice_is_safe(capsys):
+    assert mr._reset() == ''
+    assert mr._reset() == ''
+
+
+def test_reset_keeps_registered_modules(capsys):
+    assert mr._register_module('fasec_dummy_mpy', 'V = 7') == ''
+    mr._reset()
+    out = run(capsys, 'import fasec_dummy_mpy\nprint(fasec_dummy_mpy.V)')
+    assert '7' in out

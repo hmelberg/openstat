@@ -211,3 +211,23 @@ def _bind_datasets(spec_json):
         return ''
     except Exception:
         return traceback.format_exc()
+
+# Boot-baseline for fase C (spec 2026-07-16): et grunt bilde av
+# _shared_vars slik de så ut ved boot — ATSKILT fra _snapshot/_rollback-
+# paret, som er reservert duck-replay-løkken (per kjøring). _reset() spoler
+# brukerglobals tilbake hit ("Restart & kjør alle" i notatbok), men beholder
+# registrerte biblioteker i sys.modules — samme avveining som R-modusens
+# rm(list=ls()) (og samme grunt-kopi-forbehold som _rollback dokumenterer:
+# muterte objekter DELES med baselinen; grunne kopier er kontrakten her).
+_baseline_vars = dict(_shared_vars)
+
+def _reset():
+    """Spol brukerglobals tilbake til boot-baseline; ''/traceback-kontrakt."""
+    global _last_error
+    try:
+        _shared_vars.clear()
+        _shared_vars.update(_baseline_vars)
+        _last_error = ''
+        return ''
+    except BaseException:
+        return traceback.format_exc()
