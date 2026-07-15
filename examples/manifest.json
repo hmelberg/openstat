@@ -719,6 +719,11 @@
       "group": null
     },
     {
+      "file": "python/py_ipywidgets.txt",
+      "label": "ipywidgets — ekte Jupyter-widgets (pyodide)",
+      "group": null
+    },
+    {
       "file": "python/py_notatbok_celler.txt",
       "label": "Notatbok — celler med #%% (python + markdown)",
       "group": null

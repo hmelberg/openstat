@@ -1,0 +1,86 @@
+# label: ipywidgets — ekte Jupyter-widgets (pyodide)
+#options.mode = python
+#options.title = "ipywidgets — ekte Jupyter-widgets"
+#options.description = "Ekte ipywidgets (samme protokoll som i Jupyter/Colab) via en lat, pinnet bro"
+
+#%% md
+# ipywidgets — ekte Jupyter-widgets
+
+`ui`-modulen (se eksempelet «Widgets — ui.slider/dropdown») er en enkel
+**pull**-modell som lever i nettleseren. Denne notatboken viser i stedet
+**broen** til ekte `ipywidgets` — samme bibliotek (og samme
+comm-protokoll) som i ordentlig Jupyter eller Google Colab. Kontrollene
+lever nå som ekte Python-objekter i kjernen (traitlets), og verdier
+synkroniseres BEGGE veier mellom nettleser og Python — ikke bare lest ut
+igjen ved neste kjøring.
+
+Første gang et dokument kjører `import ipywidgets`, installerer pyodide
+en pinnet pakkesett (ipywidgets + IPython m.fl., **~10 MB**) og laster en
+pinnet frontend-bunt — dette skjer kun én gang per sesjon (og kun for
+dokumenter som faktisk importerer `ipywidgets`; et vanlig script uten
+denne importen laster ingenting ekstra).
+
+**v1-omfang:** standardkontroller (slider, dropdown, ...), `observe` og
+verdisynk begge veier, visning i cellens output. **Ikke støttet ennå:**
+`interact()` og `Output`-widgeten (planlagt senere) — så `observe`-
+callbacker under kjører UTENFOR en fanget celle: `print(...)` inni en
+callback havner i nettleserens konsoll, ikke i cellens output.
+
+#%% python
+import ipywidgets as w
+
+n = w.IntSlider(value=5, min=0, max=20, description="Antall")
+n
+
+#%% python
+andel = w.FloatSlider(value=2.5, min=0, max=10, step=0.1, description="Andel")
+andel
+
+#%% python
+art = w.Dropdown(
+    options=["setosa", "versicolor", "virginica"],
+    description="Art",
+)
+art
+
+#%% md
+### `observe` — Python reagerer på endringer i sanntid
+
+`observe` registrerer en callback som kjører i Python HVER gang
+kontrollen over (`n`) endrer verdi i nettleseren — ingen celle kjøres på
+nytt. Callbacken under oppdaterer en `Label`s tekst; siden `Label`-en
+allerede er vist (cellen har kjørt), oppdateres den synlige teksten
+LIVE når du drar i sliderene over.
+
+#%% python
+status = w.Label(value=f"Antall er nå: {n.value}")
+
+def _vis_antall(change):
+    status.value = f"Antall er nå: {change['new']}"
+    print("observe-callback kjørte:", change["new"])  # havner i konsollen (v1)
+
+n.observe(_vis_antall, names="value")
+status
+
+#%% md
+### Python leser kontrollens verdi (kernel-sync)
+
+Kontrollens verdi lever i Python-objektet `n` — å lese `n.value` gir
+akkurat den verdien slideren viser akkurat nå (dra i den over, kjør
+cellen under på nytt, og se den følge med).
+
+#%% python
+n.value
+
+#%% md
+### Ett steg: opprett, endre, vis
+
+En vanlig idiom: opprett en kontroll, endre den med det samme, og vis
+den — alt i samme celle. Broen bufrer eventuelle endringer som kommer
+inn før frontend-registreringen er ferdig, slik at rekkefølgen alltid
+blir riktig: slideren under skal vise **2**, ikke startverdien 5.
+
+#%% python
+s = w.IntSlider(5)
+s.value = 2
+s
