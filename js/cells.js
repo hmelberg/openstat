@@ -287,6 +287,13 @@
       // "import ui") — dobbelt-guardet, speiler stilen resten av fila bruker
       // for globaler som kan mangle i stub-DOM-testene.
       if (global.Ui && global.Ui.resetDocument) global.Ui.resetDocument();
+      // ipywidgets-broen (spec 2 W3, Task 2) er også dokument-scoped: nytt
+      // dokument → glem forrige dokuments widget-modeller/comm-register
+      // (js/ipywidgets-bridge.js). mdNotebookSession.invalidate() over gjør
+      // også dette (belte-og-bukser: reset() er idempotent), men speilingen
+      // her følger Ui.resetDocument-presedensen — samme dobbelt-guard for
+      // stub-DOM-tester der globalen kan mangle.
+      if (global.IpwBridge && global.IpwBridge.reset) global.IpwBridge.reset();
       NB.htmlTrusted = !(opts && opts.untrusted === true);
       NB.rawOverride = false;
       var ta = $('scriptInput');

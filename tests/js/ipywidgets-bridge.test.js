@@ -153,6 +153,41 @@ test('registry: targetOf returns the target_name recorded at open, undefined onc
   assert.strictEqual(reg.targetOf('h'), undefined);
 });
 
+test('_closeAllComms: fires on_close for every open comm with a kernel-shaped comm_close msg, and empties the registry', () => {
+  const reg = IpwBridge._createRegistry();
+  const closed = [];
+  reg.open('m1', 'jupyter.widget');
+  reg.open('m2', 'jupyter.widget');
+  reg.onClose('m1', (msg) => closed.push(msg));
+  reg.onClose('m2', (msg) => closed.push(msg));
+
+  IpwBridge._closeAllComms(reg);
+
+  assert.strictEqual(closed.length, 2);
+  const ids = closed.map((m) => m.content.comm_id).sort();
+  assert.deepStrictEqual(ids, ['m1', 'm2']);
+  closed.forEach((m) => assert.deepStrictEqual(m.content.data, {}));
+  assert.deepStrictEqual(reg.ids(), []);
+  assert.strictEqual(reg.has('m1'), false);
+});
+
+test('_closeAllComms: no-op on an empty registry (no throw, no warnings)', () => {
+  const reg = IpwBridge._createRegistry();
+  withCapturedWarnings((calls) => {
+    IpwBridge._closeAllComms(reg);
+    assert.deepStrictEqual(calls, []);
+  });
+  assert.deepStrictEqual(reg.ids(), []);
+});
+
+test('_closeAllComms: a comm with no on_close listeners still gets cleaned out (registry emptied)', () => {
+  const reg = IpwBridge._createRegistry();
+  reg.open('silent', 'jupyter.widget');
+  IpwBridge._closeAllComms(reg);
+  assert.strictEqual(reg.has('silent'), false);
+  assert.deepStrictEqual(reg.ids(), []);
+});
+
 test('IpwBridge._registry is a live singleton independent from freshly created registries', () => {
   const fresh = IpwBridge._createRegistry();
   IpwBridge._registry.open('shared-singleton-probe', 'jupyter.widget');

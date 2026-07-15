@@ -117,6 +117,23 @@
   IpwBridge._createRegistry = createRegistry; // fabrikk: friske instanser til testing
   IpwBridge._registry = createRegistry(); // den levende singletonen broen selv bruker
 
+  // _closeAllComms(registry) — brann on_close for HVER åpen comm og tøm
+  // registeret (via registry.close, som selv sletter oppføringen). Dette er
+  // reset() sin eksplisitte modell-disponering (Task 1-review carry-over):
+  // en ekte WidgetModel registrerer _handle_comm_closed som on_close-lytter
+  // i konstruktøren sin, så å fyre on_close her får modellen til å rydde
+  // seg selv (close(true) — comm_live av, views destrueres) FØR manageren
+  // kastes. Meldingsformen ({content: {comm_id, data: {}}}) speiler en ekte
+  // kernel-initiert comm_close. Ren og node-testbar (ingen DOM/manager) —
+  // dette er den stub-testbare sømmen reset() (DOM-halvdelen) bygger på.
+  function closeAllComms(registry) {
+    registry.ids().forEach(function (commId) {
+      registry.close(commId, { content: { comm_id: commId, data: {} } });
+    });
+  }
+
+  IpwBridge._closeAllComms = closeAllComms;
+
   // IpwBridge._toKernel(commId, dataJson, buffers) — Python→JS-dispatch-
   // funksjonen, bundet av pyodide/ipw_setup.py sitt oppsett (Task 2). Satt
   // til null her (ingen Python koblet ennå); shim.send() advarer og dropper
@@ -379,14 +396,58 @@
     };
 
     // reset() — dokumentbytte/økt-restart (mdNotebookSession restart/
-    // invalidate, Cells.contentLoaded — se Task 2). Kaster manager-
-    // instansen (nye _models/views neste ensure()) og tømmer comm-
-    // registeret, slik at gamle model_id-er fra en død økt aldri kan
-    // route'es eller renderes ved et uhell. Nettverkslasten (_loadPromise)
-    // beholdes — bundlene er allerede lastet og trenger ikke lastes igjen.
+    // invalidate, Cells.contentLoaded — se Task 2). Tre trinn (Task 1-review
+    // carry-over: eksplisitt disponering, ikke bare null-setting):
+    //   (1) _closeAllComms (den rene, node-testede sømmen over): fyr
+    //       on_close for hver åpen comm — ekte WidgetModel-er rydder seg
+    //       selv (close(true): comm_live av, views destrueres) og
+    //       registeret tømmes underveis (close sletter oppføringen).
+    //   (2) manager-side belte-og-bukser: clear_state() (ManagerBase sin
+    //       egen walk-alle-modeller-og-close — async, fire-and-forget med
+    //       .catch) hvis den finnes; ellers get_model(id).close(true) for
+    //       id-ene som VAR åpne (fanget før trinn 1). Modeller som alt
+    //       lukket seg i trinn 1 er idempotente (close returnerer cached
+    //       promise; comm_live er alt av, så ingen ny shim.close-runde).
+    //   (3) registry.reset() som sikkerhetsnett + _manager = null, slik at
+    //       gamle model_id-er fra en død økt aldri kan route'es eller
+    //       renderes ved et uhell (neste ensure() bygger en frisk manager).
+    // Nettverkslasten (_loadPromise) beholdes — bundlene er allerede lastet
+    // og gjentatt define() av samme AMD-modul-id-er er unødvendig/fragilt.
     IpwBridge.reset = function () {
-      IpwBridge._registry.reset();
+      var mgr = _manager;
       _manager = null;
+      var staleIds = IpwBridge._registry.ids();
+      try {
+        IpwBridge._closeAllComms(IpwBridge._registry);
+      } catch (e) {
+        console.warn('IpwBridge: reset — comm-lukking feilet', e);
+      }
+      if (mgr) {
+        try {
+          if (typeof mgr.clear_state === 'function') {
+            var p = mgr.clear_state();
+            if (p && typeof p.catch === 'function') {
+              p.catch(function (e) {
+                console.warn('IpwBridge: reset — clear_state feilet', e);
+              });
+            }
+          } else if (typeof mgr.get_model === 'function') {
+            staleIds.forEach(function (id) {
+              var mp = mgr.get_model(id);
+              if (mp && typeof mp.then === 'function') {
+                mp.then(function (m) {
+                  if (m && typeof m.close === 'function') m.close(true);
+                }).catch(function (e) {
+                  console.warn('IpwBridge: reset — modell-lukking feilet for ' + id, e);
+                });
+              }
+            });
+          }
+        } catch (e) {
+          console.warn('IpwBridge: reset — manager-opprydding feilet', e);
+        }
+      }
+      IpwBridge._registry.reset();
     };
   }
 })(typeof window !== 'undefined' ? window : global);
