@@ -3643,11 +3643,11 @@
     let scriptRunInProgress = false;
     // ── ui-widgets (spec 2, W1): kjørekontekst per celle ────────────────────
     // Settes/nullstilles ved de FIRE kjøre-brakettene (Kjør alle-segmentløkka,
-    // mdRunNotebookCell sin enkelt-celle-sti, microdata-replay-løkka — kun
-    // for målsegmentet). window.Ui.registerControl (Task 3) leser denne
-    // synkront (pyodide kjører på hovedtråden) for å vite hvilken celle en
-    // `ui.*`-kontroll registreres mot. null utenfor en kjøring, eller når
-    // notatboken er inaktiv/kjøringen ikke er celle-adressert — da faller
+    // mdRunNotebookCell sin enkelt-celle-sti, microdata-replay-løkka som
+    // brackets alle segmenter — N1-fiksen). window.Ui.registerControl (Task 3)
+    // leser denne synkront (pyodide kjører på hovedtråden) for å vite hvilken
+    // celle en `ui.*`-kontroll registreres mot. null utenfor en kjøring, eller
+    // når notatboken er inaktiv/kjøringen ikke er celle-adressert — da faller
     // Ui-siden tilbake til "plain script"-oppførsel (spec §krav).
     let nbUiRunCtx = null;
     window.mdUiRunCtx = function () { return nbUiRunCtx; };
@@ -7662,6 +7662,72 @@ json.dumps(out)
       return outputParts;
     }
 
+    // ── R-modus: webr/ui.R (lazy), declare-og-injiser-modellen (spec 2,
+    // ui-widgets W2, Task 2) ────────────────────────────────────────────────
+    // webR = worker + PostMessage-kanal (ingen COOP/COEP her, eval_js ubrukt)
+    // - ui_*() kan derfor IKKE spørre JS-siden om verdien synkront slik
+    // pyodide/ui.py sin registerControl()-kall gjør. webr/ui.R løser dette
+    // ved å DEKLARERE specs i et R-side register og lese verdier fra en
+    // FORHÅNDS-INJISERT `.ui_values` - se webr/ui.R sin filhode-kommentar.
+    // UI_R_REGEX gater ALT arbeidet under (både her og i runNotebookRCell/
+    // runHybridR) - vanlige R-kjøringer uten ui_*-kall betaler ingenting.
+    var UI_R_REGEX = /\bui_(slider|dropdown|checkbox|switch|number|text|button)\s*\(/;
+
+    // __ensureUiR: nøyaktig samme leveringsmønster som DashWebR.ensureDefs
+    // (js/dash-webr.js) - fetch + evalRVoid av kildeteksten, memoisert i et
+    // modulnivå-promise som nullstilles ved feil (neste kall prøver på nytt).
+    // Denne stien er UAVHENGIG av dash-webr.js (kan trigges uten at noe
+    // dashboard() noensinne har kjørt) - jsonlite installeres derfor
+    // defensivt her også, samme oppskrift som runHybridR sin json-load-gren
+    // (~7709-7713) bruker for "# load ... as json".
+    var __uiRP = null;
+    function __ensureUiR() {
+      if (__uiRP) return __uiRP;
+      __uiRP = (async function () {
+        try { await webR.installPackages(['jsonlite'], { quiet: true }); }
+        catch (e) { console.warn('R jsonlite install error (ui):', e); }
+        var base = window.location.href.replace(/[^/]+$/, '');
+        var r = await fetch(base + 'webr/ui.R?v=' + (window.M2PY_VERSION || '1'));
+        if (!r.ok) throw new Error('webr/ui.R: ' + r.status);
+        await webR.evalRVoid(await r.text());
+      })().catch(function (e) { __uiRP = null; throw e; });
+      return __uiRP;
+    }
+
+    // Nullstill R-side ordinal/register FØR en kjøring (samme idiom som
+    // DashWebR.reset() - no-op hvis defs aldri er lastet denne økten,
+    // gjettet via __uiRP i stedet for en egen loaded-flagg). Fjerner OGSÅ
+    // `.ui_values` fra .GlobalEnv (review-fiks, Important): per-celle-
+    // injeksjonen skriver den inn i det PERSISTENTE globale miljøet og
+    // ingenting annet rydder den — uten rm her ville "Restart & kjør alle"
+    // etter en per-celle slider-justering lese den justerte verdien i
+    // stedet for de dokumenterte defaultene (Run All-kontrakten: defaults,
+    // ingen kontroller). rm(list=..., envir=globalenv()) er den robuste
+    // formen (verifisert med Rscript); exists-vakten gjør kallet idempotent
+    // når `.ui_values` aldri ble injisert.
+    async function __uiResetR() {
+      if (!__uiRP) return;
+      try {
+        await __uiRP;
+        await webR.evalRVoid('.ui_begin(); if (exists(".ui_values", envir = globalenv(), inherits = FALSE)) rm(list = ".ui_values", envir = globalenv())');
+      }
+      catch (e) { console.warn('ui: reset (R)', e); }
+    }
+
+    // .ui_registry_json()-lesing - speiler dash-webr.js sin evalRString
+    // (samme evalR + toJs + destroy-idiom), men mot DENNE fila sin egen
+    // `webR`-variabel (index.html har den direkte i scope, i motsetning til
+    // dash-webr.js som må hente den via global.M2PY.getWebR()).
+    async function __uiEvalRString(code) {
+      var obj = await webR.evalR(code);
+      try {
+        var js = await obj.toJs();
+        return (js && js.values && js.values[0] != null) ? String(js.values[0]) : '';
+      } finally {
+        try { await webR.destroy(obj); } catch (e) {}
+      }
+    }
+
     async function runHybridR(src, py, runOpts) {
       runOpts = runOpts || {};
       var showCommands = runOpts.showCommands !== false; // default true
@@ -7861,6 +7927,26 @@ json.dumps(out)
         } catch (e) {
           outputParts.push({ type: 'error', text: 'dash: ' + ((e && e.message) || e) });
         }
+      }
+
+      // ui-widgets (declare-og-injiser-modellen, spec 2 W2): "Kjør alle" har
+      // INGEN per-celle-integrasjon (dokumentert tilpasning, se spec) —
+      // ui_*() skal likevel være DEFINERT (ellers "kunne ikke finne
+      // funksjonen ui_slider" — en ekte feil scriptet ellers ikke ville
+      // fått) og returnere sine defaults (ingen `.ui_values` injiseres her;
+      // __uiResetR fjerner også en evt. gjenliggende `.ui_values` fra
+      // tidligere per-celle-kjøringer, så defaults faktisk gjelder).
+      // BEGGE kallene er gatet på UI_R_REGEX (review-fiks, Minor): et
+      // ui-fritt dokument skal kjøre strengt identisk med før — også når
+      // ui.R alt er lastet i økten. Ingen kontroll rendres, registeret
+      // leses aldri her (samme "NO control rendering" som DashWebR-blokken
+      // over, men uten et mount()-motstykke: ui-widgets har ingen Kjør
+      // alle-visning); et ui-fritt dokument leser heller aldri registeret
+      // eller kaller ui_*, så en hoppet-over reset kan ikke observeres der.
+      if (UI_R_REGEX.test(src)) {
+        try { await __ensureUiR(); }
+        catch (e) { outputParts.push({ type: 'error', text: 'ui: ' + ((e && e.message) || e) }); }
+        await __uiResetR();
       }
 
       // ── Phase 2: run R segments via captureR — interleaved code/output/plot
@@ -8947,6 +9033,15 @@ async def _m2py_run_segment(_seg_json):
       if (!webRReady) {
         return { error: t('WebR er ikke klar ennå. Vent og prøv igjen.') };
       }
+      var cellIdx = payload && payload.cellIdx;
+      // ui-widgets (declare-og-injiser-modellen, spec 2 W2, Task 2): gates på
+      // HELE dokumentteksten (scriptInput.value), ikke bare denne cellen —
+      // en celle kan lese en widget deklarert av en hjelpefunksjon et annet
+      // sted i dokumentet uten selv å inneholde literal "ui_slider(" osv.
+      // ALLE ui-stegene under (ensure/injeksjon/registeroppdatering) ligger
+      // BAK denne ene sjekken — R-celler i ikke-ui-dokumenter forblir
+      // byte-for-byte identiske med FØR Task 2.
+      var uiActive = UI_R_REGEX.test(scriptInput.value || '');
       scriptRunInProgress = true;
       setRunButtonsUi('running');
       try {
@@ -8962,8 +9057,57 @@ async def _m2py_run_segment(_seg_json):
           setStatus(leftStatus, t('Klar (R).'));
         }
         if (!webRShelter) webRShelter = await new webR.Shelter();
+
+        // (1) sikre webr/ui.R er sourced (lazy, memoisert) FØR cellen kjører.
+        // Feiler den (404 etc.), console.warn + fall gjennom med uiActive =
+        // false: cellen feiler da naturlig lenger nede når ui_slider() ikke
+        // finnes, akkurat som enhver annen reell "kunne ikke finne
+        // funksjonen"-feil — ingen stille fallback til noe halvveis.
+        if (uiActive) {
+          try { await __ensureUiR(); }
+          catch (e) { console.warn('webr/ui.R:', e); uiActive = false; }
+        }
+
+        // (2) nullstill ordinal-telleren + injiser lagrede verdier FØR
+        // kjøringen — i ETT evalRVoid, med .ui_begin() FØRST (review-fiks,
+        // Minor): var de to separate kall, ville en fromJSON-feil hoppe
+        // over begin og la ordinalene drifte (w0/w1-nøklene forskyves mot
+        // forrige kjørings). I ett uttrykk med begin først er ordinal-
+        // resetten alltid utført selv om injeksjonen feiler etterpå.
+        // Ui.valuesForCell returnerer ALLEREDE en JSON-streng ({"n":7,...})
+        // — denne ENE JSON.stringify her pakker den strengen inn som en
+        // trygt escapet R-strengliteral (dobbel-stringify-idiomet:
+        // js/dash-webr.js sin .dash_run()-kode gjør begge stringify-stegene
+        // selv fordi den starter fra et rått JS-objekt, her er steg én
+        // allerede gjort inni Ui.valuesForCell).
+        if (uiActive) {
+          try {
+            var _uiValuesJson = (window.Ui && typeof window.Ui.valuesForCell === 'function')
+              ? window.Ui.valuesForCell(cellIdx) : '{}';
+            await webR.evalRVoid('.ui_begin(); .ui_values <- jsonlite::fromJSON(' + JSON.stringify(_uiValuesJson) + ')');
+          } catch (e) { console.warn('ui: injeksjon (R):', e); }
+        }
+
+        // (3) selve kjøringen — uendret.
         var captured = await webRShelter.captureR(cellText, { withAutoprint: true });
         var outputParts = captureRToOutputParts(captured);
+
+        // (4) post-run: les registeret (.ui_registry_json() returnerer OG
+        // TØMMER det, se webr/ui.R) og bygg/oppdater cellens kontrollstripe.
+        // Kalles ogsa når registeret er tomt ("[]") — det er nettopp DA
+        // mark-og-sopp-mekanismen i Ui.registerFromRegistry (js/ui.js) skal
+        // fjerne kontroller kilden ikke lenger deklarerer (samme resonnement
+        // som Ui.beginCellRun/endCellRun sin dokumentasjon der: en rerun med
+        // NULL ui_*-kall skal sope bort forrige kjørings kontroller).
+        if (uiActive) {
+          try {
+            var specsJson = await __uiEvalRString('.ui_registry_json()');
+            if (specsJson && window.Ui && typeof window.Ui.registerFromRegistry === 'function') {
+              window.Ui.registerFromRegistry(cellIdx, specsJson);
+            }
+          } catch (e) { console.warn('ui: registeroppdatering (R):', e); }
+        }
+
         await refreshDatasetSidebarFromR();
         return { rparts: outputParts };
       } catch (e) {
@@ -9130,18 +9274,29 @@ async def _m2py_run_segment(_seg_json):
             }
             var _rrc = null;
             var _rerr = null;
-            // ui-widgets kjørekontekst (Task 2): KUN målsegmentet i replayen
-            // representerer en adresserbar celle her — tidligere segmenter
-            // kjøres kun for å gjenoppbygge sesjonstilstanden (deres output
-            // forkastes, se kommentaren over), en ui.*-kontroll registrert
-            // der ville aldri kunne rerunnes meningsfullt. Nullstilles rett
-            // etter kjøringen uansett utfall (try/catch over dekker begge).
-            nbUiRunCtx = _isTargetSeg ? _nbUiCtxFor(payload.cellIdx) : null;
-            // ui-widgets (Task 3-review): eksplisitt kjøringsstart for
-            // stale-soppen — nullstiller ordinal/registrert-sett slik at
-            // endCellRun under sopper korrekt selv når rerunen har NULL
-            // ui.*-kall igjen.
-            if (_isTargetSeg && window.Ui && window.Ui.beginCellRun) window.Ui.beginCellRun(payload.cellIdx);
+            // ui-widgets kjørekontekst (Task 4/N1-fiksen): ALLE replayede
+            // segmenter bracketes nå med sin justerte celleindeks — samme
+            // mønster som "Kjør alle" sin segmentløkke (~9569,
+            // window.Cells.cellIdxForSegment). Før N1 fikk kun målsegmentet
+            // en ctx, så `ui.*`-kall i tidligere celler (kjørt for å
+            // gjenoppbygge sesjonstilstanden) leste alltid spec-DEFAULTS i
+            // stedet for cellens lagrede/synlige verdi — sesjonstilstanden
+            // kunne dermed avvike fra det stripene faktisk viste. _aligned[_ri]
+            // er samme justerte plan som feilmeldingens _failCellNum under bruker.
+            // Mikrodata-segmenter selv kaller aldri `ui.*` (DSL-en oversettes
+            // til ren datahåndtering), så ctx der er virkningsløs — men
+            // bracketes likevel for konsistens med "Kjør alle". Non-target
+            // segmenters OUTPUT forkastes fortsatt akkurat som før (se
+            // kommentaren over løkka) — kun ctx/verdi-semantikken endres.
+            // Nullstilles rett etter kjøringen uansett utfall (try/catch over
+            // dekker begge, ytre finally er sikkerhetsnett som før).
+            var _rCellIdx = (_aligned && _aligned[_ri] !== undefined) ? _aligned[_ri] : null;
+            nbUiRunCtx = (_rCellIdx !== null && _rCellIdx !== undefined) ? _nbUiCtxFor(_rCellIdx) : null;
+            // ui-widgets (Task 3-review, nå for ALLE segmenter): eksplisitt
+            // kjøringsstart for stale-soppen — nullstiller ordinal/
+            // registrert-sett slik at endCellRun under sopper korrekt selv
+            // når rerunen har NULL ui.*-kall igjen.
+            if (_rCellIdx !== null && _rCellIdx !== undefined && window.Ui && window.Ui.beginCellRun) window.Ui.beginCellRun(_rCellIdx);
             try {
               py.globals.set('_m2py_seg_json', JSON.stringify(_rseg));
               _rrc = await py.runPythonAsync('await _m2py_run_segment(_m2py_seg_json)');
@@ -9149,11 +9304,11 @@ async def _m2py_run_segment(_seg_json):
               _rerr = segE;
             }
             nbUiRunCtx = null;
-            // ui-widgets (Task 3): stale-sopp for målcellens kontrollstripe
-            // — kun målsegmentet var en adressert celle her (se kommentaren
-            // over), tidligere segmenter fikk aldri en ctx og skal derfor
-            // heller ikke sopes.
-            if (_isTargetSeg && window.Ui && window.Ui.endCellRun) window.Ui.endCellRun(payload.cellIdx);
+            // ui-widgets (Task 3, nå for ALLE segmenter): stale-sopp for
+            // segmentets aligned celles kontrollstripe — kjøres for hvert
+            // segment i replayen, ikke bare målsegmentet (se kommentaren over
+            // ctx-settingen).
+            if (_rCellIdx !== null && _rCellIdx !== undefined && window.Ui && window.Ui.endCellRun) window.Ui.endCellRun(_rCellIdx);
             if (py && typeof py.setStdout === 'function') py.setStdout();
             if (py && typeof py.setStderr === 'function') py.setStderr();
             if (_capErr) console.warn('[stderr]', _capErr.trim());
@@ -9174,8 +9329,9 @@ async def _m2py_run_segment(_seg_json):
               return { text: (_capOut || '').trim() };
             }
             if (_segFailed) {
-              var _failCellIdx = (_aligned && _aligned[_ri] !== undefined) ? _aligned[_ri] : null;
-              var _failCellNum = (_failCellIdx !== null) ? (_failCellIdx + 1) : (_ri + 1);
+              // Samme justerte celleindeks som ctx-brakettene over (_rCellIdx)
+              // — beholdt som eget navn her for lesbarhet ved feilmeldingen.
+              var _failCellNum = (_rCellIdx !== null && _rCellIdx !== undefined) ? (_rCellIdx + 1) : (_ri + 1);
               return { error: t('Feil i celle {n} under kjøring fra toppen: {msg}', { n: _failCellNum, msg: _failMsg }) };
             }
           }
@@ -9745,6 +9901,15 @@ async def _m2py_run_segment(_seg_json):
           if (forklarJumpToNextBlock) { forklarJumpToNextBlock = false; skipRest = true; }
           await forklarCheckpoint(myAbort);
           if (forklarGotoBlockIdx !== null || myAbort.aborted) return;
+          // ui-widgets: før kjøring av R-blokk, sikr at ui.R er initialisert
+          // og null stilles (samme pattern som runHybridR, se W2-review-fiks).
+          // UI_R_REGEX gater ALT arbeidet — et ui-fritt dokument kjører
+          // identisk som før, ingen ekstra overhead.
+          if (UI_R_REGEX.test(block.codeTrim)) {
+            try { await __ensureUiR(); }
+            catch (e) { outputArea.innerHTML = '<pre class="error">ui: ' + escapeHtml(String((e && e.message) || e)) + '</pre>'; return; }
+            await __uiResetR();
+          }
           try {
             if (!webRShelter) webRShelter = await new webR.Shelter();
             const captured = await webRShelter.captureR(block.codeTrim, { withAutoprint: true });

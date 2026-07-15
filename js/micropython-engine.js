@@ -27,7 +27,16 @@
     pandas_mpy:         { aliases: [], deps: ['plotly_express_mpy'], js: [] },
     plotly_express_mpy: { aliases: [], deps: [], js: [] },
     duckdb_mpy:         { aliases: ['duckdb'], deps: ['pandas_mpy'], js: [] },
-    dash:               { aliases: [], deps: [], js: [{ url: 'js/dash.js', global: 'Dash' }] }
+    dash:               { aliases: [], deps: [], js: [{ url: 'js/dash.js', global: 'Dash' }] },
+    // ui_mpy.py/ui.py (W2): filnavnet skiller seg fra det offentlige
+    // importnavnet (samme mønster som brython-registerets numpy_brython/
+    // numpy), løst via alias. js/ui.js er allerede script-tag-lastet i
+    // index.html (window.Ui finnes derfor typisk allerede) — loadJsDep()
+    // under hopper allerede over enhver url der window[global] finnes, så
+    // denne oppføringen kan ALDRI dobbel-kjøre IIFE-en og nullstille
+    // Ui-tilstand.
+    ui_mpy:             { aliases: ['ui'], deps: [],
+                          js: [{ url: 'js/ui.js', global: 'Ui' }] }
   };
 
   function scanImports(code) {

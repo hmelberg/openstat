@@ -65,7 +65,15 @@
                               deps: ['numpy_brython'], js: [] },
     // MERK: denne oppføringen har forsvunnet i to parallell-økt-kollisjoner —
     // ved konflikt her: BEHOLD den. js-deps er {url, global}-objekter, ikke strenger.
-    dash:                   { aliases: [], deps: [], js: [{ url: 'js/dash.js', global: 'Dash' }] }
+    dash:                   { aliases: [], deps: [], js: [{ url: 'js/dash.js', global: 'Dash' }] },
+    // ui_brython.py/ui.py (W2): filnavnet skiller seg fra det offentlige
+    // importnavnet (samme mønster som numpy_brython/numpy), løst via alias.
+    // js/ui.js er allerede script-tag-lastet i index.html for notatbok-siden
+    // (window.Ui finnes derfor typisk allerede) — loadJsDep() over hopper
+    // allerede over enhver url der window[global] finnes, så denne
+    // oppføringen kan ALDRI dobbel-kjøre IIFE-en og nullstille Ui-tilstand.
+    ui_brython:             { aliases: ['ui'], deps: [],
+                              js: [{ url: 'js/ui.js', global: 'Ui' }] }
   };
 
   function scanImports(code) {

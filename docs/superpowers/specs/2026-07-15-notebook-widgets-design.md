@@ -131,12 +131,10 @@ individually behind the protocol later.
   renderer is refactored, not the dash API.
 - Microdata cells: `ui` is not available (replay-through semantics make
   widget reruns pathological); a notice explains.
-- **Known W1 limitation (fix in W2):** when a microdata cell is per-cell
-  run (replay-through), NON-target python segments replay with `ui.*`
-  returning spec DEFAULTS (their run context is null by design), so the
-  rebuilt session state can diverge from the values the visible widgets
-  show. W2 direction: bracket all replayed segments with their aligned
-  cell idx so replays consume stored widget values.
+- **W1 limitation resolved (W2, N1, fixed 2026-07-15):** microdata replay
+  now brackets ALL replayed segments — not just the target — with their
+  aligned cell idx, so `ui.*` calls in non-target replayed python cells
+  consume stored widget values instead of spec defaults.
 
 ## Track 2 — ipywidgets bridge (pyodide-only, isolated)
 
@@ -187,7 +185,13 @@ runtime because it never touches the runtime: it edits text and reruns.
   preserved across reruns, zero-ui sweep, plain-script fallback, example
   notebook); see `.superpowers/sdd/task-w1-5-report.md`.
 - **W2 — `ui` everywhere:** brython + micropython facades (same module),
-  R facade; notice for microdata.
+  R facade; notice for microdata. **Done 2026-07-15** — browser-verified
+  end-to-end (R declare-and-inject model: per-cell slider/dropdown/button,
+  Run All defaults-only with no stale values, controls survive as strips
+  from earlier per-cell runs; R example notebook). brython/micropython
+  facades confirmed as documented API-compatible fallbacks (defaults, no
+  render — real cell support pending those runners' notebook support, see
+  Scope notes above); see `.superpowers/sdd/task-w2-5-report.md`.
 - **W3 — ipywidgets bridge v1** (per track 2 scope).
 - **W4 — `#@param` forms.**
 

@@ -53,6 +53,17 @@ class FakeEl {
   remove() { if (this._parentNode) this._parentNode.removeChild(this); }
   get parentNode() { return this._parentNode; }
   get firstChild() { return this.children[0] || null; }
+  // W1-carryover (a): _registerInto fanger nextSibling FØR den fjerner en
+  // type-byttet kontroll, for å insertBefore den nye noden på nøyaktig samme
+  // plass (i stedet for å appende til slutten av stripa). Ekte DOM-noder har
+  // nextSibling innebygd — stubben trenger en tilsvarende, avledet av
+  // parentNode sin children-liste (ingen egen tilstand å holde synkron).
+  get nextSibling() {
+    if (!this._parentNode) return null;
+    const idx = this._parentNode.children.indexOf(this);
+    if (idx === -1) return null;
+    return this._parentNode.children[idx + 1] || null;
+  }
   addEventListener(ev, fn) { (this._listeners[ev] = this._listeners[ev] || []).push(fn); }
   dispatchEvent(ev) { (this._listeners[ev.type] || []).forEach((fn) => fn(ev)); }
   setAttribute(name, v) { this[name] = v; }
@@ -101,6 +112,14 @@ function freshEnv(opts) {
       const map = opts.idMap || {};
       return Object.prototype.hasOwnProperty.call(map, id) ? map[id] : -1;
     },
+    // registerFromRegistry/valuesForCell (W2, Task 1) drives cellEl-oppslag
+    // og cellKey-utledning via disse to i stedet for mdUiRunCtx() — enkel
+    // default her: samme cellEl for den ene stubbede cellIdx-en, cellKeyAt
+    // faller tilbake til String(idx) (samme som ui.js sin egen fallback når
+    // Cells mangler helt). Enkelttester overstyrer disse direkte på
+    // global.Cells når scenarioet (f.eks. et indeksskift) krever det.
+    cellElementAt: (idx) => (idx === cellIdx ? cellEl : null),
+    cellKeyAt: (idx) => String(idx),
   };
   global.mdIsScriptRunning = () => !!opts.scriptRunning;
 
@@ -532,4 +551,237 @@ test('ukjent kontrolltype: registerControl varsler og returnerer null, ingen str
   assert.strictEqual(res, null);
   assert.ok(warned >= 1);
   assert.strictEqual(cellEl.children.length, 2, 'ingen stripe opprettet for en avvist spec');
+});
+
+// ============================================================================
+// W2 Task 1: registerFromRegistry, valuesForCell, cellKey-stabilitet,
+// W1-carryover-polering (insertBefore-posisjon, reduce-catch).
+// ============================================================================
+
+// ---- registerFromRegistry: bulk-registrering fra et JSON-array -----------
+
+test('registerFromRegistry: renderer N kontroller fra ett JSON-array, gjenbruker lagret verdi, sopper stale ved neste kall', async () => {
+  const { Ui, cellEl } = freshEnv({ cellIdx: 6 });
+  Ui.registerFromRegistry(6, JSON.stringify([
+    { type: 'slider', name: 'a', min: 0, max: 10, value: 3 },
+    { type: 'text', name: 'b', value: 'hei' },
+    { type: 'checkbox', name: 'c', value: true },
+  ]));
+  const strip = cellEl.children[0];
+  assert.strictEqual(strip.children.length, 3, 'tre kontroller rendret fra registryet');
+
+  // Simuler brukerendring på slideren ('a') via UI — lagres umiddelbart.
+  const rangeInput = strip.children[0].children[1];
+  rangeInput.value = '7';
+  rangeInput.dispatchEvent({ type: 'input' });
+  await wait(200);
+
+  // Andre kall (R-cellen kjørte på nytt, kilden kaller nå kun ui_slider):
+  // 'a' skal gjenbruke lagret verdi 7 (ikke spec-default 3); 'b' og 'c' er
+  // borte fra registryet → sopes akkurat som pyodide-veiens mark-og-sopp.
+  Ui.registerFromRegistry(6, JSON.stringify([
+    { type: 'slider', name: 'a', min: 0, max: 10, value: 3 },
+  ]));
+  assert.strictEqual(strip.children.length, 1, "'b' og 'c' sopt bort, kun 'a' igjen");
+  const values = JSON.parse(Ui.valuesForCell(6));
+  assert.deepStrictEqual(values, { a: 7 }, 'lagret verdi 7 gjenbrukt, ikke spec-default 3');
+});
+
+test('registerFromRegistry: null/ugyldig spec i arrayet varsler og hoppes over, resten registreres', () => {
+  const { Ui, cellEl } = freshEnv({ cellIdx: 1 });
+  const origWarn = console.warn;
+  let warned = 0;
+  console.warn = () => { warned++; };
+  try {
+    Ui.registerFromRegistry(1, JSON.stringify([
+      { type: 'text', name: 'ok', value: 'hei' },
+      { type: 'unknowntype', name: 'bad' },
+    ]));
+  } finally {
+    console.warn = origWarn;
+  }
+  const strip = cellEl.children[0];
+  assert.strictEqual(strip.children.length, 1, 'kun den gyldige kontrollen ble rendret');
+  assert.ok(warned >= 1, 'console.warn kalt for den forkastede specen');
+});
+
+test('registerFromRegistry: ugyldig JSON → console.warn, ingen krasj', () => {
+  const { Ui } = freshEnv({ cellIdx: 1 });
+  const origWarn = console.warn;
+  let warned = 0;
+  console.warn = () => { warned++; };
+  try {
+    assert.doesNotThrow(() => Ui.registerFromRegistry(1, '{not json'));
+  } finally {
+    console.warn = origWarn;
+  }
+  assert.ok(warned >= 1);
+});
+
+test('registerFromRegistry: specsJson er ikke et array → console.warn, ingen krasj', () => {
+  const { Ui } = freshEnv({ cellIdx: 1 });
+  const origWarn = console.warn;
+  let warned = 0;
+  console.warn = () => { warned++; };
+  try {
+    assert.doesNotThrow(() => Ui.registerFromRegistry(1, JSON.stringify({ type: 'text' })));
+  } finally {
+    console.warn = origWarn;
+  }
+  assert.ok(warned >= 1);
+});
+
+test('registerFromRegistry: Cells.cellElementAt finner ingen node → no-op, ingen krasj', () => {
+  const { Ui } = freshEnv({ cellIdx: 2 });
+  global.Cells.cellElementAt = () => null;
+  assert.doesNotThrow(() => {
+    Ui.registerFromRegistry(2, JSON.stringify([{ type: 'text', name: 'a', value: '1' }]));
+  });
+});
+
+// ---- valuesForCell: navn-keyet verdi-eksport ------------------------------
+
+test('valuesForCell: JSON-objekt keyet på kontrollnavnet ALENE (uten celle-prefiks) — R sitt .ui_values-format', () => {
+  const { Ui } = freshEnv({ cellIdx: 8 });
+  Ui.registerFromRegistry(8, JSON.stringify([
+    { type: 'number', name: 'n', value: 7 },
+    { type: 'text', name: 'w0', value: 'a' },
+    { type: 'button', name: 'go', label: 'Kjør' },
+  ]));
+  const values = JSON.parse(Ui.valuesForCell(8));
+  assert.deepStrictEqual(values, { n: 7, w0: 'a' }, 'button har ingen lagret verdi og er derfor ekskludert');
+});
+
+test('valuesForCell: celle uten registrerte kontroller → tomt objekt', () => {
+  const { Ui } = freshEnv({ cellIdx: 3 });
+  assert.deepStrictEqual(JSON.parse(Ui.valuesForCell(3)), {});
+});
+
+// ---- W2-carryover (d): id-stabil nøkkel overlever et indeksskift ---------
+
+test('id-stabil nøkkel: kontrollverdi overlever et strukturelt indeksskift (Cells.cellKeyAt styrer nøkkelen, ikke råindeksen)', async () => {
+  const { Ui, cellEl, setCtx } = freshEnv({ cellIdx: 2 });
+  // Samme stabile id ('mycell') uansett hvilken råindeks cellen står på —
+  // simulerer Cells.cellKeyAt sin attrs.id-gren for en id-tagget celle.
+  global.Cells.cellKeyAt = () => 'mycell';
+  global.Cells.cellElementAt = () => cellEl;
+
+  const first = Ui.registerControl(JSON.stringify({ type: 'slider', name: 'x', min: 0, max: 100, value: 5 }));
+  assert.strictEqual(JSON.parse(first), 5);
+
+  const strip = cellEl.children[0];
+  const rangeInput = strip.children[0].children[1];
+  rangeInput.value = '77';
+  rangeInput.dispatchEvent({ type: 'input' });
+  await wait(200);
+
+  // Cellen "flytter" til råindeks 5 (en celle satt inn over den et sted) —
+  // ctx.cellIdx endres, men den stabile cellKey-en ('mycell') er den samme.
+  setCtx({ cellIdx: 5, cellEl: cellEl });
+  const second = Ui.registerControl(JSON.stringify({ type: 'slider', name: 'x', min: 0, max: 100, value: 5 }));
+  assert.strictEqual(JSON.parse(second), 77,
+    'lagret verdi 77 overlever indeksskiftet — ikke spec-defaulten 5, selv om råindeksen (2→5) endret seg');
+});
+
+test('registerFromRegistry: id-stabil nøkkel overlever indeksskift (register cellKey "mycell" ved idx 2, re-registrer samme nøkkel ved idx 5)', () => {
+  const { Ui, cellEl: cellEl2 } = freshEnv({ cellIdx: 2 });
+  const cellEl5 = cellEl2; // samme underliggende DOM-node gjenbrukt for enkelhets skyld i denne stubben
+  global.Cells.cellKeyAt = () => 'mycell';
+  global.Cells.cellElementAt = (idx) => (idx === 2 || idx === 5 ? cellEl5 : null);
+
+  Ui.registerFromRegistry(2, JSON.stringify([{ type: 'number', name: 'n', value: 1 }]));
+  let values = JSON.parse(Ui.valuesForCell(2));
+  assert.deepStrictEqual(values, { n: 1 });
+
+  // Brukeren endret ALDRI verdien her (registerFromRegistry setter kun
+  // spec-defaulten ved første registrering) — re-registrer under samme
+  // stabile nøkkel ('mycell') på en NY råindeks (5): verdien 1 skal
+  // fortsatt være der (lagret på cellKey, ikke på råindeksen 2).
+  Ui.registerFromRegistry(5, JSON.stringify([{ type: 'number', name: 'n', value: 1 }]));
+  values = JSON.parse(Ui.valuesForCell(5));
+  assert.deepStrictEqual(values, { n: 1 }, 'verdien overlevde re-registrering under samme cellKey på ny råindeks');
+  // valuesForCell(2) skal gi SAMME resultat (nøkkelen er cellKey-basert, ikke råindeks-basert).
+  assert.deepStrictEqual(JSON.parse(Ui.valuesForCell(2)), { n: 1 });
+});
+
+test('idx-mismatch + type-bytte: slettet verdi når type endres over indeksskift (slider val 7 ved idx 2 → dropdown ved idx 5)', async () => {
+  const { Ui, cellEl: cellEl2, setCtx } = freshEnv({ cellIdx: 2 });
+  const cellEl5 = cellEl2;
+  global.Cells.cellKeyAt = () => 'x';
+  global.Cells.cellElementAt = (idx) => (idx === 2 || idx === 5 ? cellEl5 : null);
+
+  // Registrer slider ved idx 2, bruker endrer til verdi 7
+  Ui.registerControl(JSON.stringify({ type: 'slider', name: 'x', min: 0, max: 100, value: 5 }));
+  let strip = cellEl2.children[0];
+  const sliderInput = strip.children[0].children[1];
+  sliderInput.value = '7';
+  sliderInput.dispatchEvent({ type: 'input' });
+  await wait(200);
+
+  // "Cellen flytter" fra idx 2 til idx 5 (strukturelt indeksskift) OG type endrer fra slider til dropdown
+  setCtx({ cellIdx: 5, cellEl: cellEl5 });
+  const res = Ui.registerControl(JSON.stringify({ type: 'dropdown', name: 'x', options: ['a', 'b', 'c'] }));
+
+  // Verdien skal være dropdown-defaulten ('a'), IKKE den gamle slider-verdien 7
+  assert.strictEqual(JSON.parse(res), 'a', 'dropdown default, ikke stale slider-verdi 7 fra idx-mismatch-scenarioet');
+
+  // Hent den OPPDATERTE stripa (idx 5 sin stripe er nå første barn)
+  strip = cellEl2.children[0];
+  assert.strictEqual(strip.children.length, 1, 'stripa har kun den nye dropdown-kontrollen');
+  const newWidget = strip.children[0];
+  const select = newWidget.children[1];
+  assert.strictEqual(select.tag, 'select', 'ny dropdown-kontroll opprettet');
+});
+
+// ---- W1-carryover (a): type-bytte beholder ORIGINAL stripe-posisjon ------
+
+test('type-bytte (B2) beholder ORIGINAL stripe-posisjon — insertBefore på gammel plass, ikke append til slutt (W1-carryover a)', () => {
+  const { Ui, cellEl } = freshEnv({ cellIdx: 0 });
+  Ui.registerControl(JSON.stringify({ type: 'text', name: 'a', value: '1' }));
+  Ui.registerControl(JSON.stringify({ type: 'slider', name: 'b', min: 0, max: 10, value: 5 }));
+  Ui.registerControl(JSON.stringify({ type: 'text', name: 'c', value: '3' }));
+  const strip = cellEl.children[0];
+  assert.strictEqual(strip.children.length, 3, 'tre kontroller (a, b, c) i rekkefølge');
+
+  // Bytt type på den MIDTERSTE kontrollen (b: slider → dropdown) — skal
+  // fortsatt stå i midten etterpå, ikke hoppe til slutten av stripa.
+  const res = Ui.registerControl(JSON.stringify({ type: 'dropdown', name: 'b', options: ['x', 'y'] }));
+  assert.strictEqual(JSON.parse(res), 'x');
+  assert.strictEqual(strip.children.length, 3, 'fortsatt tre kontroller, ingen dobling');
+  const middleSelect = strip.children[1].children[1];
+  assert.strictEqual(middleSelect.tag, 'select', 'midterste plass har nå b sitt nye dropdown-input');
+
+  const firstInput = strip.children[0].children[1];
+  const lastInput = strip.children[2].children[1];
+  assert.strictEqual(firstInput.value, '1', 'a er urørt, fortsatt først');
+  assert.strictEqual(lastInput.value, '3', 'c er urørt, fortsatt sist');
+});
+
+// ---- W1-carryover (b): trailing .catch på _rerunFor sin reduce-kjede ------
+
+test('_rerunFor: reduce-kjeden har en avsluttende .catch — et rerun-mål som kaster SYNKRONT varsler i stedet for en unhandled rejection (W1-carryover b)', async () => {
+  const { Ui, cellEl } = freshEnv({ cellIdx: 4 });
+  global.Cells.runCell = () => { throw new Error('boom'); };
+
+  const origWarn = console.warn;
+  const warned = [];
+  console.warn = (...args) => { warned.push(args); };
+  let unhandled = null;
+  const onUnhandled = (err) => { unhandled = err; };
+  process.on('unhandledRejection', onUnhandled);
+
+  try {
+    Ui.registerControl(JSON.stringify({ type: 'text', name: 'x', value: 'a' }));
+    const strip = cellEl.children[0];
+    const textInput = strip.children[0].children[1];
+    textInput.value = 'b';
+    textInput.dispatchEvent({ type: 'change' });
+    await wait(250);
+  } finally {
+    console.warn = origWarn;
+    process.removeListener('unhandledRejection', onUnhandled);
+  }
+
+  assert.ok(warned.length >= 1, 'console.warn kalt via reduce-kjedens avsluttende .catch');
+  assert.strictEqual(unhandled, null, 'ingen unhandled rejection skal boble ut av _rerunFor');
 });
