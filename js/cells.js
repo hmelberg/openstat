@@ -241,6 +241,198 @@
     return null;
   };
 
+  // ---------- celle-verktøylinje: strukturelle teksttransformer (fase B2) ----------
+  // Spec §1 "Serialization round-trip" tabellen sier hver operasjon ER en
+  // teksttransform (sett inn/fjern/bytt/skriv om header-linjer). Alle seks
+  // funksjonene under følger derfor SAMME oppskrift: bygg den TILTENKTE
+  // teksten (via cellBlock/serializeCells-byggeklosser eller direkte
+  // linjesplitting), kjør den gjennom parseCells på nytt, og returner DE
+  // ferske celleobjektene derfra. Round-trip-garantien over
+  // (serializeCells(parseCells(t).cells) === t, se cells.test.js) gjør at
+  // "resultatets serialisering er den tiltenkte teksten"-kravet er oppfylt
+  // AUTOMATISK — vi trenger aldri håndbygge celleobjekter med riktige
+  // startLine/endLine/headerLine selv (kun parseCells vet hvordan).
+  //
+  // Konsistent returform for ALLE seks (task-brief: "decide a consistent
+  // {cells, warnings} return"): { cells: Cell[], warnings: string[] }.
+  // Ugyldig indeks/grense/preambel-forbudte operasjoner er no-op'er som
+  // returnerer SAMME cells-referanse (===) + en forklarende advarsel, ALDRI
+  // en kastet feil — samme "advarsel, ikke feil"-filosofi som parseHeader.
+
+  // Kjenner igjen en type-token (case-insensitiv, aliaser) — samme regelsett
+  // som parseHeader sin egen toks[0]-gjenkjenning, faktorisert ut hit fordi
+  // insertCellAfter/changeCellType begge trenger den UTENFOR en hel
+  // header-linje (kun selve typeteksten fra en dropdown, f.eks.).
+  function normalizeType(tok) {
+    if (tok == null) return null;
+    var t0 = String(tok).toLowerCase();
+    if (ALIASES[t0]) t0 = ALIASES[t0];
+    return TYPES.indexOf(t0) !== -1 ? t0 : null;
+  }
+  C.normalizeType = normalizeType;
+
+  // Sett inn en ny celle (header + tom kropp) rett etter cells[idx].
+  // idx === -1 setter inn FØRST i dokumentet ("legg til over" den nåværende
+  // første cellen). idx klemmes til [-1, cells.length-1] — en avvikende
+  // indeks fra kalleren gir dermed fortsatt et fornuftig resultat (append)
+  // i stedet for et no-op, i motsetning til de andre operasjonene: å SETTE
+  // INN en celle har ingen "ugyldig posisjon" i seg selv, bare en klemmet en.
+  C.insertCellAfter = function (cells, idx, type) {
+    var warnings = [];
+    var norm = normalizeType(type);
+    if (type != null && norm === null) {
+      warnings.push('ukjent celletype: ' + type + ' — bruker python');
+    }
+    var useType = norm || 'python';
+    var i = idx;
+    if (i < -1) i = -1;
+    if (i > cells.length - 1) i = cells.length - 1;
+    var blocks = cells.map(C.cellBlock);
+    // Header + ÉN blank kroppslinje (spec §1: "insert a #%% header (+ blank
+    // line)") — se cellBlock/parseCells-samspillet: en trailing '\n' her gir
+    // hasBody:true, source:'' etter re-parse (verifisert i testene).
+    blocks.splice(i + 1, 0, '#%% ' + useType + '\n');
+    var text = blocks.join('\n');
+    var p = C.parseCells(text);
+    return { cells: p.cells, warnings: warnings.concat(p.warnings) };
+  };
+
+  // Fjern cellens span (header + kropp) helt. Siste gjenværende celle i
+  // dokumentet er et spesialtilfelle (brief: "delete last remaining cell
+  // leaves one empty implicit cell") — vi VALGTE dette fremfor no-op, slik
+  // at brukeren alltid kan tømme dokumentet helt via verktøylinjen; en tom
+  // implisitt preambelcelle er uansett hva parseCells('') selv produserer.
+  C.deleteCell = function (cells, idx) {
+    if (idx < 0 || idx >= cells.length) {
+      return { cells: cells, warnings: ['ugyldig celleindeks: ' + idx] };
+    }
+    if (cells.length === 1) {
+      return { cells: C.parseCells('').cells, warnings: [] };
+    }
+    var blocks = cells.map(C.cellBlock);
+    blocks.splice(idx, 1);
+    var text = blocks.join('\n');
+    var p = C.parseCells(text);
+    return { cells: p.cells, warnings: p.warnings };
+  };
+
+  // Bytt cells[idx] med sin nabo i retning dir (-1 = opp, +1 = ned).
+  // Grensetilfeller (første celle opp / siste celle ned) er no-op'er uten
+  // advarsel — det er ikke en feiltilstand, bare "ingenting å gjøre" (samme
+  // som en piltast mot kanten av en liste). Den underforståtte preambel-
+  // cellen (headerRaw === null, alltid på plass 0, se parseCells) kan
+  // derimot ALDRI flyttes og ALDRI byttes inn i: den har ingen header-linje
+  // som markerer hvor kroppen dens begynner — et bytte ville gjort
+  // preambelens rå tekst til KROPPEN til nabocellen sin header i stedet for
+  // et eget dokument-nivå-element, og dermed korrumpert strukturen (se
+  // task-1-brief "move at boundaries no-ops" + design-notatet i cells.test.js).
+  C.moveCell = function (cells, idx, dir) {
+    if (idx < 0 || idx >= cells.length) {
+      return { cells: cells, warnings: ['ugyldig celleindeks: ' + idx] };
+    }
+    var j = idx + (dir < 0 ? -1 : 1);
+    if (j < 0 || j >= cells.length) return { cells: cells, warnings: [] };
+    if (cells[idx].headerRaw === null || cells[j].headerRaw === null) {
+      return { cells: cells, warnings: ['kan ikke flytte eller bytte plass med den underforståtte preambel-cellen'] };
+    }
+    var blocks = cells.map(C.cellBlock);
+    var tmp = blocks[idx]; blocks[idx] = blocks[j]; blocks[j] = tmp;
+    var text = blocks.join('\n');
+    var p = C.parseCells(text);
+    return { cells: p.cells, warnings: p.warnings };
+  };
+
+  // Skriv om KUN typetoken på cells[idx] sin header-linje — attrs (id=,
+  // hide-code, style=, ...) bevares VERBATIM (task-brief: "rewrite header
+  // line preserving attrs"). Fremgangsmåten: parseHeader() forteller oss OM
+  // headerens første token ble tolket som en type (h.type !== null); i så
+  // fall strippes NØYAKTIG den rå ledende token'en (+ mellomrommet etter)
+  // fra header-resten via regex, og resten (attrs-delen, inkl. sitering)
+  // står urørt. Fantes det ingen type-token i utgangspunktet (attrs-only
+  // eller helt bar header), settes den nye typen inn FØRST i stedet.
+  // Preambel-celler (headerRaw null) har ingen header å skrive om — no-op
+  // + advarsel, som task-1-brief krever.
+  C.changeCellType = function (cells, idx, newType) {
+    if (idx < 0 || idx >= cells.length) {
+      return { cells: cells, warnings: ['ugyldig celleindeks: ' + idx] };
+    }
+    var c = cells[idx];
+    if (c.headerRaw === null) {
+      return { cells: cells, warnings: ['kan ikke endre type på den underforståtte preambel-cellen'] };
+    }
+    var norm = normalizeType(newType);
+    if (!norm) {
+      return { cells: cells, warnings: ['ukjent celletype: ' + newType] };
+    }
+    var h = C.parseHeader(c.headerRaw);
+    var m = MARKER_RE.exec(c.headerRaw);
+    var rest = (m && m[1]) || '';
+    var remainder = h.type !== null ? rest.replace(/^\s*\S+\s*/, '') : rest;
+    var newHeaderRaw = remainder ? ('#%% ' + norm + ' ' + remainder) : ('#%% ' + norm);
+    var blocks = cells.map(C.cellBlock);
+    blocks[idx] = C.cellBlock({ headerRaw: newHeaderRaw, hasBody: c.hasBody, source: c.source });
+    var text = blocks.join('\n');
+    var p = C.parseCells(text);
+    return { cells: p.cells, warnings: p.warnings };
+  };
+
+  // Del cells[idx] sin kilde i to celler ved lineOffset (0-indeksert linje
+  // INNE i cellens KILDE — dvs. antall '\n' før markøren, slik en textareas
+  // selectionStart→linje-utregning gir). Linjer [0, lineOffset) blir
+  // værende i den OPPRINNELIGE cellen (header uendret); linjer
+  // [lineOffset, n) flyttes til en NY celle rett etter, med SAMME type som
+  // originalen (c.type — ikke resolveType mot docMode, som ikke er kjent
+  // her: en implisitt/typeløs original gir en like typeløs ny celle, som
+  // arver dokumentmodus akkurat som originalen gjorde). lineOffset 0 (ingen
+  // linjer før markøren) eller lineOffset >= n ("forbi slutten", ingenting å
+  // flytte ut) er begge no-op'er (task-1-brief). En celle uten kropp har
+  // n=0, så ENHVER offset der er automatisk "forbi slutten".
+  C.splitCell = function (cells, idx, lineOffset) {
+    if (idx < 0 || idx >= cells.length) {
+      return { cells: cells, warnings: ['ugyldig celleindeks: ' + idx] };
+    }
+    var c = cells[idx];
+    var lines = c.hasBody ? String(c.source).split('\n') : [];
+    var n = lines.length;
+    if (lineOffset <= 0 || lineOffset >= n) return { cells: cells, warnings: [] };
+    var firstSrc = lines.slice(0, lineOffset).join('\n');
+    var restSrc = lines.slice(lineOffset).join('\n');
+    var newHeaderRaw = c.type ? ('#%% ' + c.type) : '#%%';
+    var blocks = cells.map(C.cellBlock);
+    blocks[idx] = C.cellBlock({ headerRaw: c.headerRaw, hasBody: true, source: firstSrc });
+    blocks.splice(idx + 1, 0, C.cellBlock({ headerRaw: newHeaderRaw, hasBody: true, source: restSrc }));
+    var text = blocks.join('\n');
+    var p = C.parseCells(text);
+    return { cells: p.cells, warnings: p.warnings };
+  };
+
+  // Slå sammen cells[idx] med cellen FØR den (spec §1: "merge with previous |
+  // delete this cell's header line") — vi bygger derfor den fulle
+  // dokumentteksten (serializeCells, samme byggeklosser som resten av denne
+  // seksjonen) og fjerner NØYAKTIG cur sin header-linje (cur.headerLine,
+  // ferske og korrekte fordi `cells` alltid kommer fra en nylig re-parse —
+  // enten den opprinnelige render()-parsen eller resultatet av en tidligere
+  // toolbar-operasjon). Å slette header-linjen fjerner grensen mellom de to
+  // cellene, så prev sin kropp og cur sin kropp smelter sammen til ÉTT
+  // sammenhengende span ved re-parse — ingen håndrullet kombineringslogikk
+  // trengs (fungerer likt uansett om prev er en ekte celle ELLER selve den
+  // underforståtte preambelen). Første celle (idx <= 0, ingen forrige å slå
+  // sammen med) er en grense-no-op + advarsel — dette dekker AUTOMATISK
+  // "preambel kan ikke slås sammen med forrige" fra task-1-brief, siden
+  // preambelen (headerRaw null) alltid er nøyaktig cells[0].
+  C.mergeWithPrevious = function (cells, idx) {
+    if (idx <= 0 || idx >= cells.length) {
+      return { cells: cells, warnings: ['ingen forrige celle å slå sammen med: ' + idx] };
+    }
+    var cur = cells[idx];
+    var text = C.serializeCells(cells);
+    var lines = text.split('\n');
+    lines.splice(cur.headerLine, 1);
+    var newText = lines.join('\n');
+    var p = C.parseCells(newText);
+    return { cells: p.cells, warnings: p.warnings };
+  };
+
   // ---------- DOM-halvdel (kun browser) ----------
   if (typeof document !== 'undefined') (function () {
     var t = typeof global.t === 'function' ? global.t : function (s) { return s; };
@@ -254,7 +446,13 @@
                // celleindeks; sesjonschip/Restart-knapp-referanser og en
                // engangs-vakt for onStateChange-abonnementet.
                stale: {}, ranOk: {}, sessionChip: null, restartBtn: null,
-               sessionListenerAttached: false };
+               sessionListenerAttached: false,
+               // Fase B2 Task 1: 2-sekunders "Angre"-toast etter Slett celle
+               // (task-1-brief: "instead of a confirm dialog"). Toasten er en
+               // ENKELT closure-singleton (samme mønster som chip/sessionChip
+               // over) — en ny sletting FØR forrige toasts 2s er omme erstatter
+               // (ikke stabler) forrige toast, se showUndoToast.
+               undoToast: null, undoTimer: null };
 
     function $(id) { return document.getElementById(id); }
     function el(tag, cls, text) {
@@ -525,7 +723,188 @@
       if (paramLang && global.ParamForms && typeof global.ParamForms.decorate === 'function') {
         global.ParamForms.decorate(idx, wrap, c.source, paramLang);
       }
+      wrap.appendChild(buildToolbar(c, idx, type));
       return wrap;
+    }
+
+    // Fase B2 Task 1: hover/focus-within-verktøylinje for strukturelle
+    // operasjoner. Absolutt posisjonert (se app.css .nb-tools) — bevisst
+    // UTENFOR .nb-cell sitt grid-flow, slik at den ikke forstyrrer
+    // ParamForms/Ui sine "jeg er alltid FØRSTE barn"-antakelser (deres
+    // striper settes inn via insertBefore(wrap.firstChild), som denne
+    // ordinære appendChild-en ved slutten av cellNode aldri kolliderer med).
+    // Hver knapp: ren transform (js/cells.js sin egen C.*-funksjon) →
+    // #scriptInput → full render() → fokus tilbake på berørt celles
+    // tekstfelt — nøyaktig oppskriften fra spec/task-1-brief.
+    function buildToolbar(c, idx, type) {
+      var tools = el('div', 'nb-tools');
+      function toolBtn(cls, label, title, handler) {
+        var b = el('button', 'nb-tool-btn ' + cls, label);
+        b.type = 'button';
+        b.title = title;
+        b.addEventListener('click', handler);
+        return b;
+      }
+      tools.appendChild(toolBtn('nb-tool-add-above', '+▲', t('Legg til celle over'),
+        function () { toolbarInsert(idx - 1, type); }));
+      tools.appendChild(toolBtn('nb-tool-add-below', '+▼', t('Legg til celle under'),
+        function () { toolbarInsert(idx, type); }));
+      var upBtn = toolBtn('nb-tool-up', '↑', t('Flytt celle opp'), function () { toolbarMove(idx, -1); });
+      var downBtn = toolBtn('nb-tool-down', '↓', t('Flytt celle ned'), function () { toolbarMove(idx, 1); });
+      if (idx === 0) upBtn.disabled = true;
+      if (idx === NB.cells.length - 1) downBtn.disabled = true;
+      tools.appendChild(upBtn);
+      tools.appendChild(downBtn);
+      tools.appendChild(toolBtn('nb-tool-split', '✂', t('Del celle ved markøren'),
+        function () { toolbarSplit(idx); }));
+      // Type-bytte og slå-sammen-med-forrige gir ingen mening for den
+      // underforståtte preambel-cellen (headerRaw null — ingen header-linje å
+      // skrive om, og ingen "forrige" som ikke allerede ER den — de rene
+      // transformene no-op'er begge her uansett, men UI-et utelater dem helt
+      // i stedet for å tilby en knapp som alltid feiler stille).
+      if (c.headerRaw !== null) {
+        var mergeBtn = toolBtn('nb-tool-merge', '⤒', t('Slå sammen med forrige celle'),
+          function () { toolbarMerge(idx); });
+        if (idx === 0) mergeBtn.disabled = true;
+        tools.appendChild(mergeBtn);
+
+        var typeSel = el('select', 'nb-tool-type');
+        typeSel.title = t('Bytt celletype');
+        TYPES.forEach(function (ty) {
+          var opt = el('option', null, ty);
+          opt.value = ty;
+          typeSel.appendChild(opt);
+        });
+        typeSel.value = type;
+        typeSel.addEventListener('change', function () { toolbarChangeType(idx, typeSel.value); });
+        tools.appendChild(typeSel);
+      }
+      tools.appendChild(toolBtn('nb-tool-delete', '🗑', t('Slett celle'), function () { toolbarDelete(idx); }));
+      return tools;
+    }
+
+    // Sett cellens fremdriftsindeks etter en strukturell operasjon: fokuser
+    // dens tekstfelt, og — hvis oppgitt — plasser markøren på cursorPos
+    // (tegnoffset inn i cellens NYE kilde). setSelectionRange finnes ikke på
+    // test-harnessets lette DOM-stub — vaktet, ekte nettlesere har den alltid.
+    function focusCellAt(targetIdx, cursorPos) {
+      var c = NB.cells[targetIdx];
+      if (!c || !c._ta) return;
+      c._ta.focus();
+      if (cursorPos != null && typeof c._ta.setSelectionRange === 'function') {
+        c._ta.setSelectionRange(cursorPos, cursorPos);
+      }
+    }
+
+    // Felles hale for enhver strukturell verktøylinje-operasjon som FAKTISK
+    // endret noe: skriv den nye teksten til #scriptInput, hold linjenumrene
+    // synkront (samme kall som serializeAndSync gjør), full re-rendring
+    // (struktur-endring = rebuild, per spec), gjenopprett fokus. Selve
+    // pure-transformen + no-op-sjekken (result.cells === NB.cells → uendret
+    // referanse, se js/cells.js sin ren halvdel) gjøres av HVER kaller for
+    // seg, siden hver operasjon har sin egen no-op-begrunnelse (flashHint) og
+    // sitt eget fokusmål.
+    function commitStructuralOp(newCells) {
+      var ta = $('scriptInput');
+      ta.value = C.serializeCells(newCells);
+      if (global.updateLineNumbers) global.updateLineNumbers();
+      render();
+    }
+
+    function toolbarInsert(afterIdx, type) {
+      var r = C.insertCellAfter(NB.cells, afterIdx, type);
+      commitStructuralOp(r.cells);
+      focusCellAt(afterIdx + 1, 0);
+    }
+
+    function toolbarMove(idx, dir) {
+      var wrapBefore = NB.cells[idx] && NB.cells[idx]._wrap;
+      var r = C.moveCell(NB.cells, idx, dir);
+      if (r.cells === NB.cells) { flashHint(wrapBefore); return; }
+      commitStructuralOp(r.cells);
+      focusCellAt(idx + dir, null);
+    }
+
+    function toolbarSplit(idx) {
+      var c = NB.cells[idx];
+      var wrapBefore = c && c._wrap;
+      var offset = 0;
+      if (c && c._ta) {
+        var pos = c._ta.selectionStart || 0;
+        offset = String(c._ta.value).slice(0, pos).split('\n').length - 1;
+      }
+      var r = C.splitCell(NB.cells, idx, offset);
+      if (r.cells === NB.cells) { flashHint(wrapBefore); return; }
+      commitStructuralOp(r.cells);
+      focusCellAt(idx + 1, 0);
+    }
+
+    function toolbarMerge(idx) {
+      var prev = NB.cells[idx - 1];
+      // Fokuser markøren PÅ SAMMENFØYNINGSPUNKTET (slutten av forrige celles
+      // ORIGINALE kilde — fanget FØR operasjonen muterer NB.cells) — ikke
+      // slutten av den ferdig sammenslåtte teksten. Speiler mergeWithPrevious
+      // sin egen kombineringslogikk (se js/cells.js): prev uten kropp bidrar
+      // ingen tegn, så sømmen er da posisjon 0.
+      var seamPos = prev && prev.hasBody ? String(prev.source).length : 0;
+      var wrapBefore = NB.cells[idx] && NB.cells[idx]._wrap;
+      var r = C.mergeWithPrevious(NB.cells, idx);
+      if (r.cells === NB.cells) { flashHint(wrapBefore); return; }
+      commitStructuralOp(r.cells);
+      focusCellAt(idx - 1, seamPos);
+    }
+
+    function toolbarChangeType(idx, newType) {
+      var wrapBefore = NB.cells[idx] && NB.cells[idx]._wrap;
+      var r = C.changeCellType(NB.cells, idx, newType);
+      if (r.cells === NB.cells) { flashHint(wrapBefore); return; }
+      commitStructuralOp(r.cells);
+      focusCellAt(idx, null);
+    }
+
+    // Slett celle: INGEN confirm-dialog (task-1-brief: "less friction, text
+    // is canonical anyway") — i stedet en 2-sekunders flytende "Angre"-toast
+    // som gjenoppretter den PRE-operasjon-serialiserte teksten byte-for-byte
+    // (samme tekst NB.lastSerialized pekte på RETT FØR denne slettingen).
+    function toolbarDelete(idx) {
+      var preOpText = NB.lastSerialized;
+      var r = C.deleteCell(NB.cells, idx);
+      if (r.cells === NB.cells) { flashHint(NB.cells[idx] && NB.cells[idx]._wrap); return; }
+      commitStructuralOp(r.cells);
+      focusCellAt(Math.min(idx, NB.cells.length - 1), null);
+      showUndoToast(preOpText);
+    }
+
+    // Flytende Angre-knapp (2s, se toolbarDelete): closure-singleton (samme
+    // "kun én om gangen"-mønster som NB.chip/NB.sessionChip) — en ny sletting
+    // FØR forrige toasts tidsavbrudd erstatter den (ingen stabling). Selve
+    // klikket setter #scriptInput tilbake til preOpText BYTE-FOR-BYTE og
+    // rendrer på nytt — ingen egen gjenopprettings-logikk, samme
+    // sett-verdi-og-render()-oppskrift som resten av verktøylinjen.
+    function showUndoToast(preOpText) {
+      hideUndoToast();
+      var toast = el('div', 'nb-undo-toast');
+      toast.appendChild(el('span', 'nb-undo-label', t('Celle slettet')));
+      var btn = el('button', 'nb-undo-btn', t('Angre'));
+      btn.type = 'button';
+      btn.addEventListener('click', function () {
+        var ta = $('scriptInput');
+        ta.value = preOpText;
+        if (global.updateLineNumbers) global.updateLineNumbers();
+        render();
+        hideUndoToast();
+      });
+      toast.appendChild(btn);
+      NB.root.appendChild(toast);
+      NB.undoToast = toast;
+      var h = global.setTimeout(function () { hideUndoToast(); }, 2000);
+      if (h && typeof h.unref === 'function') h.unref();
+      NB.undoTimer = h;
+    }
+
+    function hideUndoToast() {
+      if (NB.undoTimer) { global.clearTimeout(NB.undoTimer); NB.undoTimer = null; }
+      if (NB.undoToast) { NB.undoToast.remove(); NB.undoToast = null; }
     }
 
     function renderNonCode(out, type, src) {
