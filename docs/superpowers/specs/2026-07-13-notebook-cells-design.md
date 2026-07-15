@@ -344,6 +344,29 @@ run's output rendered into **that cell's slot**. Design:
 Phase A and B1 remain independently shippable if a future phase stalls;
 with B2 done, all three phases of spec 1 are complete.
 
+- **Phase C — PLANNED (user request 2026-07-16): brython/micropython
+  notebook execution.** Lifts the §3.3 restriction for the two
+  main-thread Python engines so notebooks (and with them widgets and
+  `#@param`) work in brython/micropython modes. Most of the stack is
+  already in place and language-ready: the `ui` facades ship with
+  identical APIs (`brython/ui_brython.py`, `micropython/ui_mpy.py`,
+  alias `ui` in both engine registries), `PARAM_LANG_FOR_TYPE` already
+  maps both modes to python literals, and the §4 display-policy AST
+  walker already covers them. What's missing is the execution seam:
+  - `SEG_MARKER` + `KIND_FOR_TYPE` entries for `brython`/`micropython`
+    in `cells.js`, and whatever segment-loop support Run All needs in
+    those engines (they run whole scripts today, not `## lang` segments
+    — this is the sizing unknown).
+  - Per-cell dispatch: accept the new kinds in `mdRunNotebookCell`
+    (index.html ~9439) with the same ensure-hooks bracketing
+    (`beginCellRun`/`endCellRun`, run context) the pyodide path uses.
+  - Since both engines run on the main thread, the pyodide pull model
+    applies directly — no declare-then-inject variant needed.
+  - Session semantics need a decision at planning time: both engines'
+    state/restart model differs from pyodide's ensure/invalidate
+    lifecycle (brython re-executes in page context; micropython has its
+    own interpreter instance).
+
 ## 7. Compatibility, sync, risks
 
 - **Gating:** all new code paths require `#%%` markers (plus a supported
