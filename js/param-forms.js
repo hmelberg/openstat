@@ -385,8 +385,392 @@
   }
 
   // ---------- DOM-halvdel (Task 2) ----------
-  // Kommer i Task 2: skjema-stripe-rendring i celler, Cells.updateCellSource-
-  // integrasjon, run:auto-debounce-rerun. Denne fila har bevisst INGEN
-  // `if (typeof document !== 'undefined')`-seksjon ennå — legges til i
-  // Task 2 samme sted som ui.js/cells.js sine DOM-halvdeler.
+  // Skjema-stripe-rendring i celler: én `.param-form`-node per celle, satt
+  // inn av Cells sin cellNode (post-build-sømmen, js/cells.js) som cellens
+  // FØRSTE barn — FØR en evt. `.ui-controls`-stripe (js/ui.js), se
+  // ParamForms.reorder under. Byggerne her er EGNE, minimale kontroller
+  // (planens "B2 dedup: felles builder-modul" — bevisst IKKE gjenbrukt fra
+  // js/ui.js/js/dash.js i W4, samme avgrensning som js/ui.js selv dokumenterer
+  // for SIN egen duplisering mot js/dash.js).
+  //
+  // Arkitektur: `_forms[cellIdx]` er dokument-scoped tilstand (cellEl, lang,
+  // gjeldende `entries` fra siste parse, `strip`-noden, og `controls`-listen
+  // parallell med `entries`) — akkurat nok til at ParamForms.refresh kan
+  // avgjøre "samme struktur, bare ny verdi" (oppdater kontroller i place)
+  // kontra "strukturen endret seg" (bygg stripa på nytt) uten å måtte
+  // re-diffe hele DOM-treet.
+  if (typeof document !== 'undefined') {
+    var _forms = {};      // cellIdx -> { cellEl, lang, source, entries, strip, controls }
+    var _runTimers = {};  // "cellIdx:lineIdx" -> debounce-timer-håndtak (run:auto slider)
+
+    function _el(tag, cls, text) {
+      var n = document.createElement(tag);
+      if (cls) n.className = cls;
+      if (text != null) n.textContent = text;
+      return n;
+    }
+
+    function _sliderMeta(entry) {
+      var meta = entry.meta;
+      return {
+        min: meta.min !== undefined ? meta.min : 0,
+        max: meta.max !== undefined ? meta.max : 100,
+        step: meta.step !== undefined ? meta.step : 1
+      };
+    }
+
+    // ---- kontroll-byggere (én per type) -----------------------------------
+    // Alle returnerer { input, readout?, extra? } — `input` er selve
+    // skjema-elementet (lagt i raden ETTER label-spanen), `readout` en
+    // valgfri verdi-visning (kun slider), `extra` en usynlig ledsager-node
+    // (datalist for dropdown+allow-input).
+
+    function _buildText(cellIdx, entry, value, lang) {
+      var input = document.createElement('input');
+      input.type = 'text';
+      input.value = value == null ? '' : String(value);
+      input.addEventListener('change', function () { _commit(cellIdx, entry, input.value, lang); });
+      return { input: input };
+    }
+
+    // raw: BEVISST et vanlig, unadorned tekstfelt uten kvotering/escaping —
+    // Task 1-rapporten flagget at formatLiteral('raw') setter verdien inn
+    // VERBATIM som kildekode (ingen streng-literal). Det er riktig by design
+    // (brukeren redigerer sin EGEN kode via dette feltet, ikke en tilfeldig
+    // streng) — kontrollen her gjør derfor ingen sanering utover det
+    // tekstfeltet i seg selv naturlig gir.
+    function _buildRaw(cellIdx, entry, value, lang) {
+      var input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'param-form-raw';
+      input.value = value == null ? '' : String(value);
+      input.addEventListener('change', function () { _commit(cellIdx, entry, input.value, lang); });
+      return { input: input };
+    }
+
+    function _buildDropdown(cellIdx, entry, value, lang) {
+      var meta = entry.meta;
+      var options = meta.options || [];
+      if (meta.allowInput) {
+        var input = document.createElement('input');
+        input.type = 'text';
+        input.value = value == null ? '' : String(value);
+        var listId = 'param-form-list-' + cellIdx + '-' + entry.lineIdx;
+        input.setAttribute('list', listId);
+        var datalist = document.createElement('datalist');
+        datalist.id = listId;
+        options.forEach(function (opt) {
+          var o = document.createElement('option');
+          o.value = opt;
+          datalist.appendChild(o);
+        });
+        input.addEventListener('change', function () { _commit(cellIdx, entry, input.value, lang); });
+        return { input: input, extra: datalist };
+      }
+      var select = document.createElement('select');
+      options.forEach(function (opt) {
+        var o = document.createElement('option');
+        o.value = opt; o.textContent = opt;
+        select.appendChild(o);
+      });
+      select.value = value;
+      select.addEventListener('change', function () { _commit(cellIdx, entry, select.value, lang); });
+      return { input: select };
+    }
+
+    function _buildCheckbox(cellIdx, entry, value, lang) {
+      var input = document.createElement('input');
+      input.type = 'checkbox';
+      input.checked = !!value;
+      input.addEventListener('change', function () { _commit(cellIdx, entry, input.checked, lang); });
+      return { input: input };
+    }
+
+    function _buildNumber(cellIdx, entry, value, lang) {
+      var input = document.createElement('input');
+      input.type = 'number';
+      if (entry.meta.type === 'integer') input.step = 1;
+      else if (entry.meta.step !== undefined) input.step = entry.meta.step;
+      if (entry.meta.min !== undefined) input.min = entry.meta.min;
+      if (entry.meta.max !== undefined) input.max = entry.meta.max;
+      input.value = value;
+      input.addEventListener('change', function () { _commit(cellIdx, entry, input.value, lang); });
+      return { input: input };
+    }
+
+    function _buildDate(cellIdx, entry, value, lang) {
+      var input = document.createElement('input');
+      input.type = 'date';
+      input.value = value == null ? '' : String(value);
+      input.addEventListener('change', function () { _commit(cellIdx, entry, input.value, lang); });
+      return { input: input };
+    }
+
+    function _buildSlider(cellIdx, entry, value, lang) {
+      var range = _sliderMeta(entry);
+      var input = document.createElement('input');
+      input.type = 'range';
+      input.min = range.min; input.max = range.max; input.step = range.step;
+      input.value = value;
+      var readout = _el('span', 'param-form-value', String(value));
+      // 'input' (ikke 'change'): live oppdatering av readout OG av kilden
+      // mens brukeren drar — run:auto sin faktiske kjøring debounces separat
+      // (_scheduleRun, 150ms) slik at hver piksel IKKE trigger en kjøring,
+      // men teksten/readouten følger draget umiddelbart (samme UX-valg som
+      // js/ui.js sin _buildSlider).
+      input.addEventListener('input', function () {
+        readout.textContent = String(input.value);
+        _commit(cellIdx, entry, input.value, lang);
+      });
+      return { input: input, readout: readout };
+    }
+
+    var _BUILDERS = {
+      string: function (cellIdx, entry, value, lang) {
+        return entry.meta.options ? _buildDropdown(cellIdx, entry, value, lang) : _buildText(cellIdx, entry, value, lang);
+      },
+      boolean: _buildCheckbox,
+      number: _buildNumber,
+      integer: _buildNumber,
+      slider: _buildSlider,
+      date: _buildDate,
+      raw: _buildRaw
+    };
+
+    // ---- run:auto debounce (150ms for slider, umiddelbar ellers) ----------
+
+    function _runNow(cellIdx) {
+      // Samme nekt-mønster som js/ui.js sin _rerunFor: nektes (drop, ikke kø)
+      // mens skriptet allerede kjører — neste endring re-trigger sin egen
+      // debounce/umiddelbare kall.
+      if (global.mdIsScriptRunning && global.mdIsScriptRunning()) return;
+      if (global.Cells && typeof global.Cells.runCell === 'function') global.Cells.runCell(cellIdx);
+    }
+
+    function _scheduleRun(cellIdx, entry, debounced) {
+      var key = cellIdx + ':' + entry.lineIdx;
+      if (_runTimers[key]) { clearTimeout(_runTimers[key]); _runTimers[key] = null; }
+      if (!debounced) { _runNow(cellIdx); return; }
+      _runTimers[key] = setTimeout(function () {
+        _runTimers[key] = null;
+        _runNow(cellIdx);
+      }, 150);
+    }
+
+    // Kontroll endret → writeValue → Cells.updateCellSource → evt. run:auto.
+    // st.source (cellens NÅVÆRENDE kildetekst, holdt i _forms) er
+    // writeValue sitt cellSource-argument — IKKE hele dokumentet (entry.lineIdx
+    // er celle-relativ, se js/param-forms.js sin rene halvdel).
+    function _commit(cellIdx, entry, newValue, lang) {
+      var st = _forms[cellIdx];
+      if (!st) return;
+      var newSource = ParamForms.writeValue(st.source, entry, newValue, lang);
+      st.source = newSource;
+      if (global.Cells && typeof global.Cells.updateCellSource === 'function') {
+        global.Cells.updateCellSource(cellIdx, newSource);
+      }
+      if (entry.meta.runAuto) _scheduleRun(cellIdx, entry, entry.meta.type === 'slider');
+    }
+
+    function _buildEntryControl(cellIdx, entry, value, lang) {
+      var builder = _BUILDERS[entry.meta.type] || _buildText;
+      var built = builder(cellIdx, entry, value, lang);
+      var row = _el('label', 'param-form-row');
+      row.appendChild(_el('span', 'param-form-label', entry.varName));
+      row.appendChild(built.input);
+      if (built.readout) row.appendChild(built.readout);
+      if (built.extra) row.appendChild(built.extra);
+      return { row: row, input: built.input, readout: built.readout, entry: entry };
+    }
+
+    // Sett `strip` inn i `cellEl` som FØRSTE barn — MEN før en evt. allerede
+    // tilstedeværende `.ui-controls`-stripe (js/ui.js), slik at
+    // .param-form ALLTID kommer før .ui-controls når begge finnes (planens
+    // eksplisitte rekkefølgekrav). Det vanlige tilfellet (skjemaet dekoreres
+    // FØR cellen noensinne har kjørt, altså FØR .ui-controls i det hele tatt
+    // finnes) gjør dette til en ren "sett som cellEl.firstChild"; det
+    // uvanlige tilfellet (en .ui-controls dukker opp SENERE, når cellen
+    // kjøres) håndteres i stedet av ParamForms.reorder (kalt fra
+    // js/cells.js sin runCell etter hver kjøring).
+    function _insertStrip(cellEl, strip) {
+      var kids = cellEl.children || [];
+      var uiControls = null;
+      for (var i = 0; i < kids.length; i++) {
+        if (kids[i].classList && kids[i].classList.contains('ui-controls')) { uiControls = kids[i]; break; }
+      }
+      if (uiControls) cellEl.insertBefore(strip, uiControls);
+      else if (cellEl.firstChild) cellEl.insertBefore(strip, cellEl.firstChild);
+      else cellEl.appendChild(strip);
+    }
+
+    // Bygg (eller gjenbygg) skjema-stripa for cellIdx fra bunnen av — kalt av
+    // BÅDE decorate (alltid) og refresh (kun ved strukturell endring, se
+    // under). En eldre stripe (fra en TIDLIGERE _build for SAMME cellIdx,
+    // fortsatt festet til SAMME cellEl) fjernes eksplisitt først — i den
+    // vanlige "cellNode bygde en helt ny cellEl"-flyten er dette en no-op
+    // (den forrige stripa henger på en allerede orphanet cellEl og trengs
+    // ikke ryddes), men gjør funksjonen trygg å kalle to ganger på rad for
+    // samme, fortsatt-tilkoblede cellEl også.
+    function _build(cellIdx, cellEl, source, lang) {
+      var prev = _forms[cellIdx];
+      if (prev && prev.strip && prev.strip.parentNode === cellEl) prev.strip.remove();
+      var entries = ParamForms.parse(source, lang);
+      if (!entries.length) {
+        _forms[cellIdx] = { cellEl: cellEl, lang: lang, source: source, entries: [], strip: null, controls: [] };
+        return;
+      }
+      var strip = _el('div', 'param-form');
+      var controls = [];
+      for (var i = 0; i < entries.length; i++) {
+        var entry = entries[i];
+        var value = ParamForms.currentValue(entry, lang);
+        var ctrl = _buildEntryControl(cellIdx, entry, value, lang);
+        strip.appendChild(ctrl.row);
+        controls.push(ctrl);
+      }
+      _insertStrip(cellEl, strip);
+      _forms[cellIdx] = { cellEl: cellEl, lang: lang, source: source, entries: entries, strip: strip, controls: controls };
+    }
+
+    // To entry-lister har "samme struktur" (→ oppdater kontroller i place)
+    // når de har identisk lengde og hver enkelt entry er UENDRET i alt som
+    // påvirker HVILKEN kontroll som tegnes (linje, variabelnavn, type,
+    // slider/number-intervall, dropdown-options, allow-input) — kun selve
+    // VERDIEN har lov til å avvike. Alt annet (lagt til/fjernet en
+    // #@param-linje, byttet type, nytt options-sett, …) er strukturelt →
+    // full ombygging.
+    function _sameOptions(a, b) {
+      a = a || []; b = b || [];
+      if (a.length !== b.length) return false;
+      for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+      return true;
+    }
+    function _sameStructure(oldEntries, newEntries) {
+      if (oldEntries.length !== newEntries.length) return false;
+      for (var i = 0; i < oldEntries.length; i++) {
+        var a = oldEntries[i], b = newEntries[i];
+        if (a.lineIdx !== b.lineIdx || a.varName !== b.varName || a.meta.type !== b.meta.type) return false;
+        if (a.meta.type === 'slider' || a.meta.type === 'number') {
+          if (a.meta.min !== b.meta.min || a.meta.max !== b.meta.max || a.meta.step !== b.meta.step) return false;
+        }
+        if (!!a.meta.allowInput !== !!b.meta.allowInput) return false;
+        if (!_sameOptions(a.meta.options, b.meta.options)) return false;
+      }
+      return true;
+    }
+
+    // Oppdater ÉN kontrolls viste verdi fra en fersk entry — NO-OP (rører
+    // ikke DOM-en i det hele tatt) når den nye verdien allerede er det
+    // kontrollen viser. Dette er selve no-løkke-garantien planen etterspør:
+    // Cells.updateCellSource kaller ParamForms.refresh etter HVER commit
+    // (også kontrollens EGEN), og siden formatLiteral→currentValue rundtures
+    // byte-/verdi-nøyaktig, er den kontrollen som nettopp ble endret ALLTID
+    // en no-op her — en slider midt i en drag mister aldri fokus/blir aldri
+    // skrevet til av sin egen sykel.
+    function _updateControlValue(ctrl, newEntry, lang) {
+      var newValue = ParamForms.currentValue(newEntry, lang);
+      ctrl.entry = newEntry;
+      var type = newEntry.meta.type;
+      if (type === 'slider' || type === 'number' || type === 'integer') {
+        if (Number(ctrl.input.value) === Number(newValue)) return;
+        ctrl.input.value = newValue;
+        if (ctrl.readout) ctrl.readout.textContent = String(newValue);
+      } else if (type === 'boolean') {
+        if (!!ctrl.input.checked === !!newValue) return;
+        ctrl.input.checked = !!newValue;
+      } else {
+        if (String(ctrl.input.value) === String(newValue)) return;
+        ctrl.input.value = newValue;
+      }
+    }
+
+    /**
+     * ParamForms.decorate(cellIdx, cellEl, source, lang) — bygg (alltid)
+     * skjema-stripa for denne cellen. Kalt fra js/cells.js sin cellNode
+     * (post-build-sømmen) for HVER celle ved hver (re)rendring — cellEl er
+     * da alltid en FERSK node, så en ubetinget full bygging her er korrekt
+     * (ingen forsøk på å gjenbruke DOM-noder på tvers av en strukturell
+     * re-rendring, samme "F6-mønster" som resten av notatbok-rendringen).
+     * Ingen entries → ingen stripe i det hele tatt (zero-effekt-kravet for
+     * dokumenter/celler uten #@param).
+     */
+    ParamForms.decorate = function (cellIdx, cellEl, source, lang) {
+      if (!cellEl) return;
+      _build(cellIdx, cellEl, source, lang);
+    };
+
+    /**
+     * ParamForms.refresh(cellIdx, source) — re-parse cellens kildetekst og
+     * oppdater skjemaet: samme struktur → kontrollverdier oppdateres I PLACE
+     * (ingen ombygging, se _updateControlValue over); strukturell endring
+     * (linje lagt til/fjernet, type/intervall/options endret) → stripa bygges
+     * på nytt (_build, samme sti som decorate). Kalt fra to steder i
+     * js/cells.js: onEdit sin 250ms-debounce (manuell tekst-redigering) og
+     * Cells.updateCellSource (en kontrolls EGEN endring — se _updateControlValue
+     * sin no-op-garanti for hvorfor dette ikke er en sirkulær ombyggings-loop).
+     * Merk: `decorate` lagrer ALLTID en `_forms`-oppføring (cellEl + lang),
+     * selv for en celle UTEN #@param-linjer (entries: []) — en fersk
+     * #@param-linje skrevet inn i en tidligere param-fri celle er dermed en
+     * ordinær STRUKTURELL endring (0 → 1 entries) som _build (under) bygger
+     * stripa for, akkurat som ethvert annet lagt-til/fjernet-linje-tilfelle.
+     * Ingen `_forms`-oppføring i det hele tatt for denne cellIdx-en (decorate
+     * ble aldri kalt — f.eks. en celletype ParamForms ikke dekorerer, se
+     * Cells.paramLangForType) → total no-op; refresh kan ALDRI initialisere
+     * en celle på egen hånd, kun bygge videre på en decorate som alt har kjørt.
+     */
+    ParamForms.refresh = function (cellIdx, source) {
+      var st = _forms[cellIdx];
+      if (!st) return;
+      var newEntries = ParamForms.parse(source, st.lang);
+      if (!_sameStructure(st.entries, newEntries)) {
+        _build(cellIdx, st.cellEl, source, st.lang);
+        return;
+      }
+      for (var i = 0; i < newEntries.length; i++) {
+        _updateControlValue(st.controls[i], newEntries[i], st.lang);
+      }
+      st.entries = newEntries;
+      st.source = source;
+    };
+
+    /**
+     * ParamForms.reorder(cellEl) — reassert at `.param-form` (om den finnes)
+     * står FØR `.ui-controls` (om DEN finnes) blant cellEl sine direkte barn.
+     * Nødvendig fordi js/ui.js sin _ensureStrip ikke vet noe om .param-form
+     * og alltid setter .ui-controls inn som cellEl.firstChild — hvis
+     * .ui-controls dukker opp FØRSTE gang EN cellekjøring (den eneste
+     * anledningen den kan oppstå), etter at .param-form allerede var
+     * cellEl.firstChild, må rekkefølgen rettes opp her. No-op når en av de
+     * to (eller begge) mangler, eller når rekkefølgen allerede stemmer.
+     */
+    ParamForms.reorder = function (cellEl) {
+      if (!cellEl || !cellEl.children) return;
+      var kids = cellEl.children;
+      var form = null, controls = null, formIdx = -1, controlsIdx = -1;
+      for (var i = 0; i < kids.length; i++) {
+        var k = kids[i];
+        if (!k.classList) continue;
+        if (k.classList.contains('param-form')) { form = k; formIdx = i; }
+        else if (k.classList.contains('ui-controls')) { controls = k; controlsIdx = i; }
+      }
+      if (!form || !controls || formIdx < controlsIdx) return;
+      cellEl.insertBefore(form, controls);
+    };
+
+    /**
+     * ParamForms.resetDocument() — nytt dokument (Cells.contentLoaded, samme
+     * dokument-scoped-reset-kjede som Ui.resetDocument/IpwBridge.reset):
+     * glem all skjema-tilstand OG kanseller enhver ventende run:auto-
+     * debounce-timer. Uten timer-kanselleringen kunne en løs 150ms-timer fra
+     * FORRIGE dokument fyre `Cells.runCell(idx)` mot et NYTT dokuments celle
+     * på samme indeks.
+     */
+    ParamForms.resetDocument = function () {
+      Object.keys(_runTimers).forEach(function (key) {
+        if (_runTimers[key]) clearTimeout(_runTimers[key]);
+      });
+      _runTimers = {};
+      _forms = {};
+    };
+  }
 })(typeof window !== 'undefined' ? window : global);

@@ -1233,3 +1233,29 @@
 /* :focus-visible generisk for øvrige kontroller i stripa (tekst/tall/
    dropdown/knapp) — samme oppskrift-familie som Pico bruker for fokusringen. */
 .ui-controls :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* ── #@param-skjemaer (spec 2 W4, Task 2): js/param-forms.js DOM-halvdel ──
+   .param-form settes inn av ParamForms.decorate som cellens FØRSTE barn —
+   FØR en evt. .ui-controls-stripe over (se ParamForms.reorder/js/cells.js sin
+   runCell) — samme grid-column: 1/-1-triks og samme "barn nummer én"-plass i
+   .nb-cell sitt grid. Bevisst visuelt distinkt fra .ui-controls (Colab-stil
+   skjema: én rad PER kontroll, etikett venstre/kontroll høyre, en tynn
+   aksent-kant i stedet for ui-controls sin flate bakgrunn) — de to stripene
+   skal kunne sameksistere i samme celle uten å se ut som duplikater. */
+.param-form { display: flex; flex-direction: column; gap: 6px;
+  grid-column: 1 / -1; padding: 8px 10px;
+  background: var(--bg-panel); border: 1px solid var(--border);
+  border-left: 3px solid var(--accent); border-radius: 6px; }
+.param-form:empty { display: none; }
+.param-form-row { display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; font-size: 12.5px; color: var(--text); }
+.param-form-label { color: var(--text-muted); white-space: nowrap; }
+.param-form-value { min-width: 2.5em; text-align: right; font-variant-numeric: tabular-nums; }
+.param-form-row select, .param-form-row input[type="text"], .param-form-row input[type="number"],
+.param-form-row input[type="date"] {
+  background: var(--bg-code); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 3px 7px; font-size: 12.5px; flex: 0 1 220px; min-width: 0; }
+.param-form-row input[type="number"] { flex-basis: 6em; }
+.param-form-row input[type="range"] { accent-color: var(--accent); flex: 0 1 160px; }
+.param-form-row input[type="checkbox"] { accent-color: var(--accent); margin: 0; }
+.param-form :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
