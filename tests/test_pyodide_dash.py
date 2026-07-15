@@ -114,3 +114,68 @@ def test_controls_rekjoerer_kort_med_navneoverlapp(dash):
     assert len(calls["addControls"]) == 1
     assert len(calls["updateCard"]) == before + 1  # kortet rekjoert med delt default
     assert calls["updateCard"][-1]["payload"]["value"] == 2020
+
+
+# ---- fase B2 Task 3: _reap() -- proxy-frigjøring for DØDE dashboards ----
+# FakeDashJs.isAlive over returnerer alltid True (uendret, andre tester
+# stoler på det) -- disse to testene overstyrer isAlive per test for å
+# gjøre _reap()'s faktiske filtrering observerbar, med en FakeProxy som
+# (i motsetning til modulens egen CPython-fallback create_proxy, som bare
+# returnerer callable-en uendret uten .destroy()) faktisk sporer destroy().
+
+def test_reap_destroy_proxies_for_doede_dashboards(dash, monkeypatch):
+    destroyed = []
+
+    class FakeProxy:
+        def __init__(self, f):
+            self.f = f
+
+        def destroy(self):
+            destroyed.append(self.f)
+
+    monkeypatch.setattr(dash, "create_proxy", FakeProxy)
+    js_dash = fake(dash)
+    alive = {}
+    js_dash.isAlive = lambda id_: alive.get(id_, False)
+
+    d1 = dash.Dash()
+    alive[d1.id] = True
+    d1.add(lambda n: n, n=3)  # widget-kort -> on_change registreres via _proxy
+    assert len(d1._proxies) == 1
+
+    # Simuler at d1 sin DOM-rot ble frakoblet (per-celle-purge/outputArea-
+    # tømming eller D.sweepDisconnected(), se dash.test.js) -- INGEN nytt
+    # dashboard er laget ennå, så _reap() har ikke kjørt igjen.
+    alive[d1.id] = False
+    assert destroyed == []  # ingen automatisk reaping bare fordi isAlive endret seg
+
+    # Konstruksjon av et NYTT dashboard kjører _reap() FØR den registrerer
+    # seg selv (se Dash.__init__) -- d1 er nå død, dens proxy skal destroyes.
+    d2 = dash.Dash()
+    alive[d2.id] = True
+    assert destroyed == [d1._proxies[0].f]
+    assert [entry[0] for entry in dash._live] == [d2.id]
+
+
+def test_reap_lar_levende_dashboards_vaere(dash, monkeypatch):
+    destroyed = []
+
+    class FakeProxy:
+        def __init__(self, f):
+            self.f = f
+
+        def destroy(self):
+            destroyed.append(self.f)
+
+    monkeypatch.setattr(dash, "create_proxy", FakeProxy)
+    js_dash = fake(dash)
+    alive = {}
+    js_dash.isAlive = lambda id_: alive.get(id_, False)
+
+    d1 = dash.Dash()
+    alive[d1.id] = True
+    d1.add(lambda n: n, n=3)
+    d2 = dash.Dash()  # d1 fortsatt "alive" -> ikke reaped
+    alive[d2.id] = True
+    assert destroyed == []
+    assert {entry[0] for entry in dash._live} == {d1.id, d2.id}

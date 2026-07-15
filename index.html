@@ -571,8 +571,12 @@
   <script src="js/i18n.js"></script>
   <script src="https://cdn.jsdelivr.net/pyodide/v314.0.2/full/pyodide.js"></script>
   <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-  <script src="js/brython-engine.js"></script>
-  <script src="js/micropython-engine.js"></script>
+  <!-- Cache-busting (B2 Task 4-fiks): samme literal versjonsstreng som
+       app.css sin ?v= over (statiske <script>-tagger kan ikke lese
+       window.M2PY_VERSION — det settes av en senere <script>-blokk, lenge
+       etter at nettleseren allerede har startet disse to lastingene). -->
+  <script src="js/brython-engine.js?v=2026-07-13a"></script>
+  <script src="js/micropython-engine.js?v=2026-07-13a"></script>
   <script src="js/dash.js"></script>
   <script src="js/cells.js"></script>
   <script src="js/ui.js"></script>
@@ -6291,92 +6295,6 @@ json.dumps(out)
     }
 
     /**
-     * To typer steg (rekkefølge = linjerekkefølge i kilden):
-     * 1) //widget … — alltid én egen seksjon med tom kode; blandes aldri med tale/kode-blokker.
-     * 2) Vanlig forklar-blokk: sammenhengende //-linjer (tale, //-, osv.) + påfølgende kode til neste //.
-     * Widget-linjer vises ikke i Forklar-editoren (kun block.code, som er tom for widget-steg).
-     */
-    function splitMicrodataExplainSections(text) {
-      const lines = (text || '').split(/\r?\n/);
-      const sections = [];
-      let i = 0;
-      function isCommentLine(line) {
-        return /^\s*\/\//.test(line);
-      }
-      function pushSpeechOnlySection(items, skip) {
-        if (items.length > 0) {
-          sections.push({
-            code: '',
-            commentItems: items.slice(),
-            codeTrim: '',
-            skipCodeSpeech: !!skip
-          });
-        }
-      }
-      while (i < lines.length) {
-        if (isCommentLine(lines[i])) {
-          const head = parseForklarCommentLine(lines[i]);
-          if (head.type === 'widget' || head.type === 'widgetError') {
-            sections.push({
-              code: '',
-              commentItems: [
-                head.type === 'widget'
-                  ? { type: 'widget', name: head.name, payload: head.payload || {} }
-                  : { type: 'widgetError', message: head.message || 'Ugyldig widget' }
-              ],
-              codeTrim: '',
-              skipCodeSpeech: false
-            });
-            i++;
-            continue;
-          }
-        }
-        const commentItems = [];
-        let skipCodeSpeech = false;
-        while (i < lines.length && isCommentLine(lines[i])) {
-          const parsed = parseForklarCommentLine(lines[i]);
-          if (parsed.type === 'widget' || parsed.type === 'widgetError') {
-            pushSpeechOnlySection(commentItems, skipCodeSpeech);
-            commentItems.length = 0;
-            skipCodeSpeech = false;
-            sections.push({
-              code: '',
-              commentItems: [
-                parsed.type === 'widget'
-                  ? { type: 'widget', name: parsed.name, payload: parsed.payload || {} }
-                  : { type: 'widgetError', message: parsed.message || 'Ugyldig widget' }
-              ],
-              codeTrim: '',
-              skipCodeSpeech: false
-            });
-            i++;
-            continue;
-          }
-          if (parsed.type === 'skipCodeSpeech') {
-            skipCodeSpeech = true;
-            if (parsed.text && String(parsed.text).trim()) {
-              commentItems.push({ silent: true, text: String(parsed.text).trim(), kwargs: {} });
-            }
-          } else if (parsed.type === 'speech') {
-            commentItems.push({ silent: false, text: parsed.text || '', kwargs: parsed.kwargs || {} });
-          }
-          i++;
-        }
-        const codeLines = [];
-        while (i < lines.length && !isCommentLine(lines[i])) {
-          codeLines.push(lines[i]);
-          i++;
-        }
-        const code = codeLines.join('\n');
-        const codeTrim = code.trim();
-        if (commentItems.length > 0 || codeTrim) {
-          sections.push({ code: code, commentItems: commentItems, codeTrim: codeTrim, skipCodeSpeech: skipCodeSpeech });
-        }
-      }
-      return sections;
-    }
-
-    /**
      * Finner en inline //-kommentar på en kodelinje (KODE // KOMMENTAR).
      * Returnerer { code, comment, skipCodeSpeech } der comment === null hvis
      * linjen ikke har en brukbar inline-kommentar. Full-linje-kommentarer
@@ -6502,32 +6420,99 @@ json.dumps(out)
       return blocks;
     }
 
-    function buildForklarFlatWork(segments) {
-      const flat = [];
-      for (let si = 0; si < segments.length; si++) {
-        const seg = segments[si];
-        const kind = seg.kind || 'microdata';
-        const segText = (seg.text || '').trim();
-        if (!segText) continue;
-        if (kind === 'microdata') {
-          const sections = splitMicrodataExplainSections(seg.text);
-          for (let bi = 0; bi < sections.length; bi++) {
-            flat.push({ kind: 'microdata', block: sections[bi] });
-          }
-        } else if (kind === 'pyodide') {
-          const pySections = splitMicrodataExplainSections(seg.text);
-          for (let bi = 0; bi < pySections.length; bi++) {
-            flat.push({ kind: 'pyodide', block: pySections[bi] });
-          }
-        } else if (kind === 'r') {
-          const rSections = splitMicrodataExplainSections(seg.text);
-          for (let bi = 0; bi < rSections.length; bi++) {
-            flat.push({ kind: 'r', block: rSections[bi] });
-          }
+    /**
+     * Fase B2 Task 2: bygger ETT forklar-steg fra kilden til én notatbok-
+     * kode-celle. Samme ledende/etterfølgende-hele-kommentarlinje-konvensjon
+     * som parseExplainBlocks (parseForklarCommentLine, tales før/etter
+     * kjøring — widgets tas med "gratis") — MEN uten videre splitting: en
+     * kode-celle er ALLTID nøyaktig ett steg (task-2-brief: "its code runs
+     * as one step"), uansett interne blanke linjer eller inline-//-
+     * kommentarer (ingen sub-blokker slik parseExplainBlocks lager for
+     * microdata-modus). Blanke linjer INNI cellen bevares (IKKE filtrert
+     * bort, i motsetning til parseExplainBlocks — der er de allerede umulige
+     * siden \n{2,} splitter FØR denne funksjonen ser gruppen; her er de en
+     * reell del av kildekoden). Returnerer null for en celle uten både kode
+     * og kommentarer å tale (helt tom kropp — gir intet steg).
+     */
+    function buildForklarCellCodeBlock(source) {
+      const lines = String(source == null ? '' : source).split(/\r?\n/);
+      if (!lines.some(l => l.trim())) return null;
+      let lo = 0;
+      while (lo < lines.length && parseForklarCommentLine(lines[lo]) !== null && parseForklarCommentLine(lines[lo]).type !== 'none') lo++;
+      let hi = lines.length - 1;
+      while (hi >= lo && parseForklarCommentLine(lines[hi]) !== null && parseForklarCommentLine(lines[hi]).type !== 'none') hi--;
+      const preCommentItems = [];
+      let skipCodeSpeech = false;
+      for (let i = 0; i < lo; i++) {
+        const p = parseForklarCommentLine(lines[i]);
+        if (!p || p.type === 'none') continue;
+        if (p.type === 'skipCodeSpeech') {
+          skipCodeSpeech = true;
+          if (p.text && p.text.trim()) preCommentItems.push({ silent: true, text: p.text.trim(), kwargs: {} });
+        } else if (p.type === 'speech') {
+          preCommentItems.push({ silent: false, text: p.text || '', kwargs: p.kwargs || {} });
+        } else if (p.type === 'widget' || p.type === 'widgetError') {
+          preCommentItems.push(p);
         }
       }
-      return flat;
+      const codeLines = lines.slice(lo, hi + 1);
+      const postCommentItems = [];
+      for (let i = hi + 1; i < lines.length; i++) {
+        const p = parseForklarCommentLine(lines[i]);
+        if (!p || p.type === 'none') continue;
+        if (p.type === 'speech') postCommentItems.push({ silent: false, text: p.text || '', kwargs: p.kwargs || {} });
+        else if (p.type === 'skipCodeSpeech' && p.text && p.text.trim()) {
+          postCommentItems.push({ silent: true, text: p.text.trim(), kwargs: {} });
+        }
+      }
+      const code = codeLines.join('\n');
+      const codeTrim = code.trim();
+      if (!codeTrim && !preCommentItems.length && !postCommentItems.length) return null;
+      return { code, codeTrim, commentItems: preCommentItems, postCommentItems, skipCodeSpeech };
     }
+
+    /**
+     * Fase B2 Task 2: bygger ETT tale-only forklar-steg fra kilden til én
+     * md-celle — koden er ALLTID tom (intet kjører, intet nytt rendres),
+     * hele md-teksten (rimelig markdown-strippet via Cells.mdNarrationText,
+     * den rene halvdelen — node-testet) leses opp som ETT utsagn. Gjenbruker
+     * DEN SAMME "ingen kode"-veien som forklarRunOne*Block allerede har for
+     * rene kommentar-avsnitt (speakForklarCommentItems + clearForklarHighlightBand,
+     * ingen kjøring) — ingen ny avspillingslogikk trengs. Returnerer null for
+     * en tom/ren-whitespace md-celle (intet å tale — intet steg).
+     */
+    function buildForklarMdNarrationBlock(source) {
+      const text = (window.Cells && window.Cells.mdNarrationText)
+        ? window.Cells.mdNarrationText(source)
+        : String(source == null ? '' : source).trim();
+      if (!text) return null;
+      return {
+        code: '', codeTrim: '',
+        commentItems: [{ silent: false, text: text, kwargs: {} }],
+        postCommentItems: [], skipCodeSpeech: false
+      };
+    }
+
+    /**
+     * Fase B2 Task 2: erstatter blank-linje-seksjonering (parseExplainBlocks)
+     * med CELLE-basert seksjonering når dokumentet er en notatbok. Rekkefølgen
+     * kommer fra Cells.forklarCellSteps (ren halvdel, js/cells.js) — kode-
+     * cellers kjørbarhets-gate er DEN SAMME som segmentPlan bruker (Kjør
+     * alle), gjenbrukt derfra, IKKE duplisert her. #%%-header-linjene er
+     * ALDRI en del av c.source (parseCells sitt eget header/kropp-skille),
+     * så de blir aldri talt eller kjørt — helt i tråd med kravet.
+     */
+    function buildForklarBlocksForNotebook(text, docMode) {
+      const steps = (window.Cells && window.Cells.forklarCellSteps) ? window.Cells.forklarCellSteps(text, docMode) : [];
+      const blocks = [];
+      for (let i = 0; i < steps.length; i++) {
+        const st = steps[i];
+        const b = st.kind === 'md' ? buildForklarMdNarrationBlock(st.source) : buildForklarCellCodeBlock(st.source);
+        if (b) blocks.push(b);
+      }
+      return blocks;
+    }
+
     function countForklarCodeBlocksBefore(flatArr, k) {
       let n = 0;
       for (let i = 0; i < k; i++) {
@@ -9039,8 +9024,12 @@ async def _m2py_run_segment(_seg_json):
       // R-modus (final-review F4, minimal variant): denne sesjonen er en
       // Pyodide-sesjon (e/_g) — R-kjøringer bruker webR direkte og skal ALDRI
       // få "Restart & kjør alle" til å boote Pyodide. Ekte R-sesjonsreset
-      // (rm(list=ls()) + DashWebR.reset) ved Restart er fase B2 (se spec §6).
-      // MERK: sjekker activeEditorMode === 'r' direkte, IKKE
+      // (rm(list=ls()) + DashWebR.reset + __uiResetR) ved Restart er
+      // implementert i window.mdNotebookSession.restart() rett over dette
+      // objektet (fase B2 Task 3) — IKKE her, siden denne r-modus-grenen
+      // også nås idempotent uten noen aktiv restart (ingen annen kjent
+      // kallsti i dag, men rm() hører hjemme i restart-viljen, ikke i
+      // ensure()-kontrakten). MERK: sjekker activeEditorMode === 'r' direkte, IKKE
       // runtimeForMode(...) !== 'pyodide' — duckdb-modusens notatbok-sesjon
       // (bootNotebookSession) kaller py.runPythonAsync(setupCode) ubetinget
       // for duckdb også (loads/#duckdb-bro), så den TRENGER Pyodide selv om
@@ -9096,6 +9085,45 @@ async def _m2py_run_segment(_seg_json):
         // kjørings widgets åpner friske comms helt av seg selv (comm_open
         // via OpenstatComm). Guarded: broen er lazy og finnes kanskje aldri.
         if (window.IpwBridge && window.IpwBridge.reset) window.IpwBridge.reset();
+        // Ekte R-sesjonsreset (fase B2 Task 3 — F4-kommentaren over
+        // nbEnsureSession dokumenterte dette som en gjenstående oppgave):
+        // webR-interpreteren er PERSISTENT for hele sidens levetid (ingen
+        // reboot, i motsetning til Pyodide-siden over) — uten dette rm()-
+        // kallet beholder "Restart & kjør alle" i r-modus ALLE variabler
+        // fra forrige kjøring i .GlobalEnv, og en etterfølgende "Kjør alle"
+        // ville sett en R-økt som IKKE er restartet i det hele tatt (kun
+        // Pyodide-siden, som r-modus uansett aldri booter, se F4). Speiler
+        // EKSAKT runHybridR sin egen dash/ui-opprydding (~8065-8092): reset()
+        // og __uiResetR() er allerede idempotente/no-op når defs aldri er
+        // lastet denne økten. Guardet på webRReady: Restart-knappen kan i
+        // prinsippet klikkes før webR er lastet (ingen disabled-vakt der i
+        // dag) — uten guarden ville et umodent `webR`-objekt kastet her.
+        if (activeEditorMode === 'r' && webRReady) {
+          return (async function () {
+            try {
+              await webR.evalRVoid('rm(list = ls(envir = globalenv()), envir = globalenv())');
+            } catch (e) { console.warn('R restart: rm(list=ls()) feilet', e); }
+            // B2 exit-gate fiks: rm(list=ls(envir=globalenv())) over sletter
+            // IKKE bare brukervariabler — webr/ui.R og webr/dash.R sourcer
+            // ui_slider()/dashboard() m.fl. RETT INN i globalenv (samme miljø),
+            // så disse forsvinner i samme slag. (MERK presist: punktum-
+            // prefiksede navn som .dash_reset/.ui_begin OVERLEVER rm-en —
+            // ls() lister dem ikke — det som forsvant var de vanlige API-
+            // funksjonene ui_slider()/dashboard() m.fl.) __uiRP/DashWebR sin
+            // _defsP var fortsatt et LØST promise etter dette (minnet «alt
+            // lastet»), så neste kjørings ui_*()/dashboard()-kall traff
+            // "could not find function" selv om DOKUMENTET var uendret.
+            // Funnet ved sveip: R-widgets sluttet å virke etter «Restart &
+            // kjør alle». Fiksen glemmer memoiseringen i stedet for å late som
+            // reset er meningsfullt — neste kjørings eksisterende, allerede
+            // gatede __ensureUiR()/DashWebR.ensureDefs()-kall (runHybridR/
+            // per-celle/forklar) sourcer da friskt på nytt, akkurat som første
+            // gang denne økten.
+            __uiRP = null;
+            if (window.DashWebR && window.DashWebR.invalidateDefs) window.DashWebR.invalidateDefs();
+            return nbEnsureSession(true);
+          })();
+        }
         return nbEnsureSession(true);
       },
       // Nytt dokument (eksempler, share/GitHub, dyplenker) → gammel sesjon er
@@ -9130,6 +9158,20 @@ async def _m2py_run_segment(_seg_json):
       var asHtml = document.querySelector('input[name="outputMode"]:checked').value === 'html';
       var suppress = suppressEmbedded.checked;
       renderOutput(raw, asHtml, suppress, target);
+    };
+
+    // Append-variant (fase B2 Task 4b): js/cells.js sin renderCellResult
+    // bruker denne i stedet for mdRenderOutput når cellens .nb-output-slot
+    // allerede har et montert dashboard (js/dash.js sin D.create(), mount-to-
+    // slot) — mdRenderOutput/renderOutput sin innerHTML=''-tømming ville
+    // ellers revet ned dashbordet idet run-resultatets tekst rendres rett
+    // etter kjøring. Samme underliggende appendOutput() som "Kjør alle" sin
+    // segmentløkke og Brython/MicroPython sin runSelf allerede bruker for
+    // akkurat dette formålet (index.html ~3218/~9783).
+    window.mdAppendOutput = function (raw, target) {
+      var asHtml = document.querySelector('input[name="outputMode"]:checked').value === 'html';
+      var suppress = suppressEmbedded.checked;
+      appendOutput(raw, asHtml, suppress, target);
     };
 
     // ── Notatbok: per-celle-kjøring mot levende sesjon (fase B1 Task 2/3,
@@ -9374,6 +9416,37 @@ async def _m2py_run_segment(_seg_json):
           return { error: t('Fant ikke cellens segment i dokumentet (planavvik) — prøv Kjør alle.') };
         }
         var targetSeg = segments[_segIdx];
+        // dash v2 (fase B2 Task 3 — browser-investigert): window.Dash.create()
+        // (js/dash.js, kalt fra pyodide/dash.py sin Dash.__init__) skriver DOM
+        // DIREKTE til #outputArea — HELT UTENOM denne cellens egen .nb-output-
+        // slot (samme forbehold som Brython/MicroPython sin runSelf lenger
+        // oppe, og "Kjør alle" sin egen ubetingede purge rett før segment-
+        // løkka, ~9799). Uten dette ville en per-celle-rerun av en
+        // dashboard()-celle STAPLE en ny <div class="dash"> oppå den forrige
+        // for HVER kjøring: forrige rots DOM-node blir ALDRI frakoblet av
+        // per-celle-stien (ingen outputArea.innerHTML=''-tømming skjedde her
+        // før denne fiksen), så D.create() sin egen lazy `!isConnected`-sweep
+        // aldri fanger den opp — både JS-registeret (_dashes/_cards) og
+        // python-sidens `_live`-proxyliste (pyodide/dash.py sin _reap(), som
+        // kun sjekker isAlive() ved NESTE Dash()-konstruksjon) vokser ett
+        // element per rerun, ubegrenset, helt til brukeren klikker "Kjør
+        // alle" (browser-verifisert: 3 per-celle-reruns av en dashboard()-
+        // celle uten denne fiksen ga 3 `.dash`-noder i #outputArea, ikke 1).
+        // Tømmes UBETINGET (samme idiom som "Kjør alle" — outputArea brukes
+        // aldri til vanlig per-celle tekst-/plott-output, kun dash skriver
+        // direkte dit, så en unødvendig tømming her er alltid virkningsløs
+        // for andre celletyper) + eksplisitt sweep (ikke bare vent på neste
+        // create() — en rerun som IKKE lenger kaller dashboard(), f.eks. etter
+        // redigering, skal likevel rydde forrige runs oppføring NÅ, ikke ved
+        // et vilkårlig FREMTIDIG dashboard()-kall et annet sted i dokumentet).
+        // MERK (kjent, ikke fikset her): #outputArea ligger inni `.container`,
+        // som får `.nb-hidden` mens notatbok-cellevisningen er aktiv — en
+        // python-dashboard() bygget per-celle er derfor teknisk ryddig
+        // (bounded), men usynlig for brukeren i Kolonner/Stablet-visning helt
+        // uavhengig av denne fiksen. Se Task 3-rapporten.
+        purgePlots(outputArea);
+        outputArea.innerHTML = '';
+        if (window.Dash && typeof window.Dash.sweepDisconnected === 'function') window.Dash.sweepDisconnected();
         if (isMicrodataReplay) {
           // ── Kjør fra toppen GJENNOM målcellen (spec §4-unntaket) ──────────
           // Alle segmenter 0..target kjøres i dokumentrekkefølge mot den
@@ -9673,6 +9746,13 @@ async def _m2py_run_segment(_seg_json):
         // Eskapeluke (spec §4): '#options.display = all' slår av notatbok-
         // visningspolicyen igjen (vis alt, echo følger _showCmds som vanlig).
         var _displayAll = String(_scriptOpts.display || '').toLowerCase() === 'all';
+        // Motsatt vei (Task 4, B2): '#options.display = last' slår PÅ notatbok-
+        // visningspolicyen (kun siste uttrykk, echo følger _showCmds) for et
+        // UMERKET/ikke-notatbok-script — samme _nb-flagg som den eksplisitte
+        // notatbokcellen bruker (~linje under, _nbActive-grenen), men uten
+        // Cells.active()-porten. Uten direktivet: byte-for-byte uendret (feltet
+        // settes aldri, _m2py_run_segment sin _nb-fallback er identisk til før).
+        var _displayLast = String(_scriptOpts.display || '').toLowerCase() === 'last';
         var _mr = currentMode();
         var _ctx = { py: py, rightStatus: rightStatus, showCommands: _showCmds, profile: _scriptOpts.profile };
         if (_mr.runSelf) { await _mr.runSelf(effectiveScript, _ctx); return; }
@@ -9742,6 +9822,14 @@ async def _m2py_run_segment(_seg_json):
           if (segments[i].kind === 'pyodide' && _nbActive && !_displayAll) {
             var _sd = window.Cells.segmentDisplay(i);
             if (_sd && _sd.explicit) segments[i]._nb = { echo: false, last: true };
+          } else if (segments[i].kind === 'pyodide' && !_nbActive && _displayLast) {
+            // Umerket script (Task 4, B2): '#options.display = last' uten
+            // notatbok-kontekst — samme siste-uttrykk-visning, men echo
+            // følger _showCmds som vanlig (ingen "echo"-nøkkel her, så
+            // _m2py_run_segment sin fallback til _showCmds slår inn), i
+            // motsetning til den eksplisitte notatbokcellen over som alltid
+            // tvinger echo av.
+            segments[i]._nb = { last: true };
           }
           // ui-widgets kjørekontekst (Task 2): Kjør alle sin segmentløkke —
           // celleindeksen kommer fra den justerte planen (Cells.cellIdxForSegment,
@@ -9855,6 +9943,23 @@ async def _m2py_run_segment(_seg_json):
         return;
       }
       const snapshotScript = rawScript;
+      // Notatbok aktiv (fase B2 Task 2): samme presedens som Kjør alle
+      // (linje ~9596 over, "Gates på active(), IKKE hasMarkers()") — med
+      // Rå tekst-valget på kjører Forklar som et vanlig skript (#%%-linjer
+      // er bare kommentarer, blank-linje-seksjonering uendret). Cellevisningen
+      // skjuler #scriptInput/#outputArea/forklarLineHighlight helt
+      // (.container.nb-hidden, se app.css) — Forklar MÅ derfor forlate
+      // cellevisningen FØR selve kjøringen, ellers kjører hele løpet usett
+      // bak en skjult .container (verifisert: dette er dagens faktiske
+      // oppførsel før denne fiksen). Forlater UTEN {raw:true}, så
+      // rawOverride ikke settes — js/cells.js sin egen tick()-heuristikk
+      // (poll hvert sekund) tar notatboken tilbake til cellevisning helt av
+      // seg selv når #scriptInput får sitt opprinnelige #%%-merkede innhold
+      // igjen i finally-blokken under (programmatisk endring, ingen
+      // brukertasting) — «bonus»-gjeninntreden per task-2-brief, uten en
+      // eneste ekstra kodelinje.
+      const forklarNbActive = !!(window.Cells && window.Cells.active());
+      if (forklarNbActive) window.Cells.exit();
       scriptInput.value = '';
       prepareForklarOutputPane();
       lastOutputMode = 'run';
@@ -10136,13 +10241,39 @@ async def _m2py_run_segment(_seg_json):
         const asHtml = document.querySelector('input[name="outputMode"]:checked').value === 'html';
         const suppress = suppressEmbedded.checked;
         let explainInit = null;
+        // B2 exit-gate fiks: Forklar bygde sitt EGET e/_g uten NOENGANG å hente/
+        // skrive "# load … as X"-direktivets data — bootNotebookSession ("Kjør
+        // alle"/per-celle-kjøring, linje ~8885) gjør dette rutinemessig, Forklar
+        // gjorde det aldri. Funnet ved sveip: ETHVERT python-script med en
+        // # load-linje (inkl. selve standard-oppstartseksempelet, notatbok eller
+        // ikke) feilet i Kjør skrittvis med NameError på aliaset, siden filen
+        // aldri ble bundet i _g. Pre-eksisterende, uavhengig av notatbok-celler.
+        // Speiler bootNotebookSession sin henting+FS-skriving nøyaktig; selve
+        // bindingen (_g[alias] = …) limes inn i explainInit rett under via
+        // buildWebDataLoaderPreamble (samme presedens som bootNotebookSession,
+        // linje ~8930). Tom for microdata-modus (ingen # load å hente) → uendret
+        // no-op der (buildWebDataLoaderPreamble([]) returnerer '').
+        let _forklarPyLoads = [];
+        if (activeEditorMode === 'python' && py) {
+          try {
+            const _fdl = await window.DataLoader.resolveAndFetchLoads(snapshotScript,
+              { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey });
+            const _fRawLoads = _fdl.loads || [];
+            if (_fRawLoads.some(function (l) { return l.bytes; })) py.FS.mkdirTree('/home/pyodide/_webdata');
+            _forklarPyLoads = _fRawLoads.map(function (l) {
+              const _path = '/home/pyodide/_webdata/' + l.alias + '.' + l.format;
+              py.FS.writeFile(_path, l.bytes);
+              return { alias: l.alias, format: l.format, path: _path };
+            });
+          } catch (e) { console.warn('forklar # load:', e); }
+        }
         if (activeEditorMode !== 'r') {
           const catalogJson = microdataCatalog && microdataCatalog.variables
             ? JSON.stringify(microdataCatalog.variables)
             : null;
           const catalogArg = catalogJson !== null ? JSON.stringify(catalogJson) : 'None';
           const pageBase = window.location.href.replace(/[^/]+$/, '');
-          explainInit = getInterpreterCorePython(catalogArg, pageBase, null) + `
+          explainInit = getInterpreterCorePython(catalogArg, pageBase, null) + buildWebDataLoaderPreamble(_forklarPyLoads) + `
 _forklar_last_chunk_out = ""
 def _run_microdata_chunk(_code):
     global result, _forklar_last_chunk_out
@@ -10161,12 +10292,35 @@ def _run_microdata_chunk(_code):
     _g["to_microdata"] = to_microdata
 `;
           await py.runPythonAsync(explainInit);
-          // Forklar bygger sitt EGET e/_g her (uten loads) — notatbok-sesjonen
-          // (fase B1) er død etterpå, ellers ville en per-celle-kjøring etter
-          // en Forklar-økt gjenbrukt Forklars e/_g uten de innlastede datasettene.
+          // Forklar bygger sitt EGET e/_g her (nå MED # load-dataene bundet inn,
+          // se _forklarPyLoads over) — notatbok-sesjonen (fase B1) er død
+          // etterpå, ellers ville en per-celle-kjøring etter en Forklar-økt
+          // gjenbrukt Forklars e/_g uten en fersk innlasting.
           nbSetSessionLive(false);
         }
-        const forklarBlocks = parseExplainBlocks(extractBlockWidgets(snapshotScript), activeEditorMode);
+        // B2 exit-gate fiks: Forklar har sin EGEN kjøresløyfe (forklarRunOnePyodideBlock
+        // under) og kalte ALDRI modeRegistry.python.preRun — i motsetning til hoved-
+        // kjøringen (linje ~9747: `_mr.preRun(effectiveScript, _ctx)`), som sikrer
+        // ui/dash/ipywidgets-fasadene og micropip-installerer manglende pakker FØR
+        // kjøring. Funnet ved sveip: Kjør skrittvis på en `import ui`-notatbok (fx.
+        // py_widgets_ui-eksempelet) feilet med ModuleNotFoundError: No module named
+        // 'ui', selv om nøyaktig samme celle kjører fint via ▶/Kjør alle. Ett kall,
+        // FØR blokk-løkken, på HELE dokumentteksten (samme presedens som hoved-
+        // kjøringens ett-kall-for-hele-scriptet — se linje ~9747) — ikke per blokk,
+        // siden `import ui`/`import dash`/`import ipywidgets` kan stå i en HVILKEN
+        // SOM HELST celle, og pyodide-sesjonen (og dermed sys.modules) er felles for
+        // hele Forklar-kjøringen uansett. R-siden har sitt eget, allerede fungerende
+        // motstykke (__ensureUiR, linje ~10184) — uendret.
+        if (activeEditorMode === 'python' && modeRegistry.python.preRun) {
+          try { await modeRegistry.python.preRun(snapshotScript, { py: py, rightStatus: rightStatus }); }
+          catch (e) { console.warn('forklar preRun:', e); }
+        }
+        // Fase B2 Task 2: notatbok → celle-baserte steg (se forklarNbActive
+        // over) i stedet for blank-linje-seksjonering; vanlig skript (og
+        // notatbok med Rå tekst-valget på) er byte-for-byte uendret.
+        const forklarBlocks = forklarNbActive
+          ? buildForklarBlocksForNotebook(extractBlockWidgets(snapshotScript), activeEditorMode)
+          : parseExplainBlocks(extractBlockWidgets(snapshotScript), activeEditorMode);
         forklarSessionFlatWork = forklarBlocks;
         forklarFlatMetaArr = new Array(forklarBlocks.length).fill(null);
         function forklarApplyGotoTruncate(g) {

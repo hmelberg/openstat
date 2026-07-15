@@ -1165,6 +1165,46 @@
 .nb-restart-btn:hover { border-color: var(--accent); color: var(--accent); }
 .nb-restart-btn:disabled { opacity: .5; cursor: default; }
 
+/* ── Fase B2 Task 1: celle-verktøylinje (js/cells.js buildToolbar) ─────────
+   Absolutt posisjonert OG bevisst UTENFOR .nb-cell sitt grid — den skal
+   ikke forstyrre ParamForms/Ui sine "jeg er alltid FØRSTE barn"-antakelser
+   (se cellNode). Skjult (opacity 0 + pointer-events:none) til cellen
+   hovres/fokuseres, akkurat som .nb-edit-btn sitt reveal-mønster, MEN med
+   pointer-events lagt til i tillegg — denne stripa inneholder en
+   destruktiv handling (slett), så den skal være helt uinteraktiv (ikke bare
+   usynlig) når den ikke er avslørt, i motsetning til den ufarlige
+   redigerings-affordansen .nb-edit-btn allerede tillater å være klikkbar-
+   men-usynlig i sin rendrede hviletilstand. */
+.nb-tools { position: absolute; top: 6px; right: 8px; z-index: 2; display: flex; gap: 4px;
+  align-items: center; opacity: 0; pointer-events: none; transition: opacity .15s ease; }
+.nb-cell:hover .nb-tools, .nb-cell:focus-within .nb-tools { opacity: 1; pointer-events: auto; }
+/* Rendrede md/html-celler har en .nb-edit-btn i SAMME hjørne (top:6/right:8,
+   22×22px) — skyv verktøylinjen til venstre for den her, så de to aldri
+   overlapper i den (eneste) tilstanden der begge kan vises samtidig
+   (rendret + hover). Se .nb-edit-btn over. */
+.nb-cell.nb-rendered-only .nb-tools { right: 36px; }
+.nb-tool-btn { display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; padding: 0; border: 1px solid var(--border); border-radius: 3px;
+  background: var(--bg-panel); color: var(--text-muted); font-size: 11px; line-height: 1;
+  cursor: pointer; }
+.nb-tool-btn:hover { border-color: var(--accent); color: var(--accent); }
+.nb-tool-btn:disabled { opacity: .35; cursor: default; }
+.nb-tool-btn.nb-tool-delete:hover { border-color: #c0392b; color: #c0392b; }
+.nb-tool-type { font-size: 11px; padding: 2px 4px; border: 1px solid var(--border);
+  border-radius: 3px; background: var(--bg-panel); color: inherit; height: 20px; }
+/* Angre-toast (2s, task-1-brief: "instead of a confirm dialog") — flytende
+   over notatbok-rota, ikke inni noen celle (cellen den gjaldt kan være
+   borte). Nøytral farge (samme border/bg-panel-oppskrift som resten av
+   verktøylinjen) — dette er en informativ affordanse, ikke en advarsel. */
+.nb-undo-toast { position: sticky; bottom: 12px; left: 0; z-index: 8; margin-top: 8px;
+  display: inline-flex; align-items: center; gap: 10px; padding: 6px 10px;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--bg-panel);
+  box-shadow: 0 2px 8px rgba(0,0,0,.18); font-size: 12.5px; }
+.nb-undo-btn { font-size: 12.5px; padding: 3px 10px; border: 1px solid var(--accent);
+  border-radius: 4px; background: transparent; color: var(--accent); cursor: pointer; }
+.nb-undo-btn:hover { background: var(--accent); color: #fff; }
+body[data-theme="dark"] .nb-undo-btn:hover { color: #1a1b26; }
+
 /* ── ui-widgets (spec 2026-07-15, W1): kontrollstripe per celle, js/ui.js ──
    .ui-controls settes inn av Ui.registerControl som cellens FØRSTE barn —
    FØR .nb-input/.nb-output — slik at den overlever output-tømming

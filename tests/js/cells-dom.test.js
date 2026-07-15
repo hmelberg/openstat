@@ -180,6 +180,13 @@ function freshEnv() {
   global.mdIsStackedLayout = undefined;
   global.requestAnimationFrame = () => {};
   global.purgePlots = undefined;
+  // B2-review-fiks 2: verktøylinje-handlerne sjekker nå mdIsScriptRunning()
+  // (toolbarGate) — en tidligere test i FILA som satte den til () => true
+  // uten opprydding ville ellers lekke inn og stille avvise alle senere
+  // testers strukturelle operasjoner. freshEnv nullstiller, som for de
+  // andre md*-globalene over.
+  global.mdIsScriptRunning = undefined;
+  global.mdRunNotebookCell = undefined;
 
   delete require.cache[require.resolve(CELLS_PATH)];
   const C = require(CELLS_PATH);
@@ -558,8 +565,18 @@ function cellParts(containerEl, idx) {
   const out = nodes.find((n) => n.classList && n.classList.contains('nb-output'));
   const input = nodes.find((n) => n.classList && n.classList.contains('nb-input'));
   const runBtn = nodes.find((n) => n.tag === 'button' && n.classList && n.classList.contains('nb-runbtn'));
-  return { wrap, ta, out, input, runBtn };
+  const addAboveBtn = nodes.find((n) => n.classList && n.classList.contains('nb-tool-add-above'));
+  const addBelowBtn = nodes.find((n) => n.classList && n.classList.contains('nb-tool-add-below'));
+  const upBtn = nodes.find((n) => n.classList && n.classList.contains('nb-tool-up'));
+  const downBtn = nodes.find((n) => n.classList && n.classList.contains('nb-tool-down'));
+  const splitBtn = nodes.find((n) => n.classList && n.classList.contains('nb-tool-split'));
+  const mergeBtn = nodes.find((n) => n.classList && n.classList.contains('nb-tool-merge'));
+  const deleteBtn = nodes.find((n) => n.classList && n.classList.contains('nb-tool-delete'));
+  const typeSelect = nodes.find((n) => n.classList && n.classList.contains('nb-tool-type'));
+  return { wrap, ta, out, input, runBtn, addAboveBtn, addBelowBtn, upBtn, downBtn,
+           splitBtn, mergeBtn, deleteBtn, typeSelect };
 }
+function click(node) { node.dispatchEvent({ type: 'click' }); }
 
 // .nb-bar (Task 5): sesjonschip + Restart-knapp lever der, ikke inni en celle.
 function nbBar(containerEl) {
@@ -1194,13 +1211,30 @@ test('cellElementAt: notatbok uten rendret rot (aldri aktiv) → null, ingen kra
 
 // ---- cellKeyAt (ui-widgets W2, Task 1): stabil celle-nøkkel for Ui-verdilageret ----
 
-test('cellKeyAt: celle med id returnerer id-en (ikke indeksen)', () => {
+// B2 Task 4-fiks: id-grenen prefikses med '#' (kollisjonssikkert mot den
+// indeks-baserte fallback-grenen under — se testen lenger ned).
+test('cellKeyAt: celle med id returnerer "#" + id-en (ikke den rå id-en, ikke indeksen)', () => {
   const { C, scriptInputEl } = freshEnv();
   scriptInputEl.value = '#%% python id=first\na = 1\n#%% python id=target\na + 1\n';
   C.init('python');
 
-  assert.strictEqual(C.cellKeyAt(0), 'first');
-  assert.strictEqual(C.cellKeyAt(1), 'target');
+  assert.strictEqual(C.cellKeyAt(0), '#first');
+  assert.strictEqual(C.cellKeyAt(1), '#target');
+});
+
+// Kollisjonsfaren fiksen dekker: uten '#'-prefikset ville en celle med
+// id === "0" produsert NØYAKTIG samme streng ("0") som indeks-fallbacken
+// for en HELT ANNEN, id-løs celle som tilfeldigvis står på råindeks 0 —
+// begge ville delt ÉN oppføring i js/ui.js sitt _values/_controls-lager
+// (verdiene ville lekket mellom de to cellene).
+test('cellKeyAt: en celle med id="0" kolliderer IKKE med indeks-fallbacken til en id-løs celle på råindeks 0', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 1\n#%% python id=0\nb = 2\n';
+  C.init('python');
+
+  assert.strictEqual(C.cellKeyAt(0), '0', 'id-løs celle på indeks 0: indeks-fallback, uendret');
+  assert.strictEqual(C.cellKeyAt(1), '#0', 'id="0"-cellen: prefikset, IKKE den rå "0"');
+  assert.notStrictEqual(C.cellKeyAt(0), C.cellKeyAt(1), 'de to nøklene må aldri kollidere');
 });
 
 test('cellKeyAt: celle uten id faller tilbake til indeksen som streng', () => {
@@ -1227,12 +1261,12 @@ test('cellKeyAt: id-tagget celle beholder SAMME nøkkel etter et strukturelt ind
   const { C, scriptInputEl } = freshEnv();
   scriptInputEl.value = '#%% python id=stable\na = 1\n';
   C.init('python');
-  assert.strictEqual(C.cellKeyAt(0), 'stable');
+  assert.strictEqual(C.cellKeyAt(0), '#stable');
 
   // Sett inn en ny celle FORAN 'stable' — den flytter fra indeks 0 til 1.
   scriptInputEl.value = '#%% python\nb = 2\n#%% python id=stable\na = 1\n';
   C.contentLoaded();
-  assert.strictEqual(C.cellKeyAt(1), 'stable', 'samme id-baserte nøkkel på den nye råindeksen');
+  assert.strictEqual(C.cellKeyAt(1), '#stable', 'samme id-baserte nøkkel på den nye råindeksen');
 });
 
 test('contentLoaded(): kaller window.Ui.resetDocument når Ui er lastet', () => {
@@ -1349,4 +1383,289 @@ test('doFlush: refresh/markørskann bruker GJELDENDE c.source — en updateCellS
   } finally {
     delete global.ParamForms;
   }
+});
+
+// ============================================================================
+// Fase B2 Task 1: celle-verktøylinje (.nb-tools) — strukturelle operasjoner.
+// Hver test: knapp-klikk/select-endring → #scriptInput er den forventede
+// serialiserte teksten (Rå tekst-round-trip) + fokus landet på riktig celles
+// tekstfelt. Se js/cells.js sin ren halvdel (cells.test.js) for selve
+// transform-logikken — disse testene dekker KUN DOM-limet.
+// ============================================================================
+
+function undoToastParts(containerEl) {
+  const root = nbRoot(containerEl);
+  const toast = root.children.find((n) => n.classList && n.classList.contains('nb-undo-toast'));
+  if (!toast) return { toast: undefined, btn: undefined };
+  const btn = collectNodes(toast, []).find((n) => n.tag === 'button' && n.classList.contains('nb-undo-btn'));
+  return { toast, btn };
+}
+
+test('verktøylinje: knapper finnes på hver celle; merge/type-dropdown mangler kun på preambelen', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '# load x\n#%% python\n1\n';
+  C.init('python');
+  const preamble = cellParts(containerEl, 0);
+  const real = cellParts(containerEl, 1);
+  assert.ok(preamble.addAboveBtn && preamble.addBelowBtn && preamble.upBtn &&
+    preamble.downBtn && preamble.splitBtn && preamble.deleteBtn, 'preambelen har de generelle knappene');
+  assert.strictEqual(preamble.mergeBtn, undefined, 'preambelen har INGEN slå-sammen-knapp');
+  assert.strictEqual(preamble.typeSelect, undefined, 'preambelen har INGEN type-dropdown');
+  assert.ok(real.mergeBtn, 'en ekte celle har slå-sammen-knapp');
+  assert.ok(real.typeSelect, 'en ekte celle har type-dropdown');
+});
+
+test('verktøylinje: opp/ned deaktivert ved dokumentgrensene', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\n1\n#%% r\n2\n';
+  C.init('python');
+  const first = cellParts(containerEl, 0);
+  const last = cellParts(containerEl, 1);
+  assert.strictEqual(first.upBtn.disabled, true);
+  assert.strictEqual(last.downBtn.disabled, true);
+  assert.ok(!first.downBtn.disabled, 'første celle kan fortsatt flyttes NED');
+  assert.ok(!last.upBtn.disabled, 'siste celle kan fortsatt flyttes OPP');
+});
+
+test('type-dropdown: verdien reflekterer cellens gjeldende (resolverte) type', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% r id=x\n1\n#%%\n2\n';
+  C.init('python');
+  assert.strictEqual(cellParts(containerEl, 0).typeSelect.value, 'r');
+  assert.strictEqual(cellParts(containerEl, 1).typeSelect.value, 'python', 'typeløs celle arver docMode');
+});
+
+test('+ under: setter inn ny celle med samme type rett etter, #scriptInput oppdatert, fokus på den NYE cellen', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\n1\n';
+  C.init('python');
+  click(cellParts(containerEl, 0).addBelowBtn);
+  // NB: originalteksten hadde en avsluttende blank linje (source '1\n' — helt
+  // normalt, editoren la til et sluttlinjeskift), som dermed havner FORAN den
+  // nye cellens header etter innsettingen (samme "bevar innhold, ikke kast
+  // det" -prinsipp som resten av serialiseringen — se cells.test.js).
+  assert.strictEqual(scriptInputEl.value, '#%% python\n1\n\n#%% python\n');
+  const inserted = cellParts(containerEl, 1);
+  assert.strictEqual(global.document.activeElement, inserted.ta, 'fokus landet på den nye cellen');
+});
+
+test('+ over på FØRSTE celle: setter inn en ny celle FØRST, resten skyves ned', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\n1\n';
+  C.init('python');
+  click(cellParts(containerEl, 0).addAboveBtn);
+  assert.strictEqual(scriptInputEl.value, '#%% python\n\n#%% python\n1\n');
+  assert.strictEqual(global.document.activeElement, cellParts(containerEl, 0).ta);
+});
+
+test('flytt ned/opp: bytter naboceller, #scriptInput reflekterer bytte, fokus følger den flyttede cellen', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python id=a\n1\n#%% r id=b\n2\n';
+  C.init('python');
+  click(cellParts(containerEl, 0).downBtn);
+  // NB: cellen som opprinnelig var SIST (r/id=b) hadde en avsluttende blank
+  // linje i kilden sin (vanlig sluttlinjeskift) — den blanke linja flytter
+  // MED cellen til dens nye posisjon (spec: "swap adjacent spans" — hele
+  // spennet, inkl. avsluttende blanke linjer, bytter plass som én enhet).
+  assert.strictEqual(scriptInputEl.value, '#%% r id=b\n2\n\n#%% python id=a\n1');
+  assert.strictEqual(global.document.activeElement, cellParts(containerEl, 1).ta,
+    'den flyttede cellen (nå på plass 1) har fokus');
+});
+
+test('flytt opp på FØRSTE celle → no-op (ingen krasj, ingen endring)', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\n1\n#%% r\n2\n';
+  C.init('python');
+  const before = scriptInputEl.value;
+  assert.doesNotThrow(() => click(cellParts(containerEl, 0).upBtn));
+  assert.strictEqual(scriptInputEl.value, before);
+});
+
+test('del ved markøren: selectionStart → linjeoffset, ny celle får samme type, fokus på ny hale-celle (cursor 0)', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na\nb\nc\n';
+  C.init('python');
+  const cell0 = cellParts(containerEl, 0);
+  // Marker rett etter 'a\nb\n' (linje 2, dvs. offset=2) — 'c' skal flyttes ut.
+  cell0.ta.selectionStart = cell0.ta.value.indexOf('c');
+  click(cell0.splitBtn);
+  assert.strictEqual(scriptInputEl.value, '#%% python\na\nb\n#%% python\nc\n');
+  const tail = cellParts(containerEl, 1);
+  assert.strictEqual(global.document.activeElement, tail.ta);
+});
+
+test('del ved linje 0 (markør på starten) → no-op', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na\nb\n';
+  C.init('python');
+  const cell0 = cellParts(containerEl, 0);
+  cell0.ta.selectionStart = 0;
+  const before = scriptInputEl.value;
+  assert.doesNotThrow(() => click(cell0.splitBtn));
+  assert.strictEqual(scriptInputEl.value, before);
+});
+
+test('slå sammen med forrige: headerlinja fjernes, kroppene smelter sammen, fokus + markør på sømmen', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python id=a\n1\n#%% r\n2\n';
+  C.init('python');
+  const cell1 = cellParts(containerEl, 1);
+  click(cell1.mergeBtn);
+  assert.strictEqual(scriptInputEl.value, '#%% python id=a\n1\n2\n');
+  const merged = cellParts(containerEl, 0);
+  assert.strictEqual(global.document.activeElement, merged.ta);
+});
+
+test('type-dropdown-endring: skriver om KUN typen, attrs bevares, fokus blir værende i samme celle', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python id=x hide-code\n1+1\n';
+  C.init('python');
+  const cell0 = cellParts(containerEl, 0);
+  cell0.typeSelect.value = 'r';
+  cell0.typeSelect.dispatchEvent({ type: 'change' });
+  assert.strictEqual(scriptInputEl.value, '#%% r id=x hide-code\n1+1\n');
+  assert.strictEqual(global.document.activeElement, cellParts(containerEl, 0).ta);
+});
+
+test('slett celle: #scriptInput mister spannet, Angre-toast vises, "Angre" gjenoppretter TEKSTEN BYTE-FOR-BYTE', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  const original = '#%% md\ntekst\n#%% python\n1+1\n';
+  scriptInputEl.value = original;
+  C.init('python');
+  click(cellParts(containerEl, 0).deleteBtn);
+  assert.strictEqual(scriptInputEl.value, '#%% python\n1+1\n');
+
+  const { toast, btn } = undoToastParts(containerEl);
+  assert.ok(toast, 'Angre-toast skal vises etter sletting');
+  assert.ok(btn, 'Angre-knappen skal finnes i toasten');
+
+  click(btn);
+  assert.strictEqual(scriptInputEl.value, original, 'Angre gjenoppretter EKSAKT tekst fra før slettingen');
+  assert.strictEqual(undoToastParts(containerEl).toast, undefined, 'toasten fjernes etter Angre-klikk');
+});
+
+test('slett siste gjenværende celle → tom implisitt celle (#scriptInput blir tom streng)', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\nx=1\n';
+  C.init('python');
+  click(cellParts(containerEl, 0).deleteBtn);
+  assert.strictEqual(scriptInputEl.value, '');
+});
+
+test('slett: ugyldig no-op-vei (ingen krasj) — knappen finnes uansett for enhver gyldig idx', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\n1\n#%% r\n2\n#%% md\nx\n';
+  C.init('python');
+  assert.doesNotThrow(() => click(cellParts(containerEl, 1).deleteBtn));
+  assert.strictEqual(scriptInputEl.value, '#%% python\n1\n#%% md\nx\n');
+});
+
+// ---- B2-review-fikser: preambel-vern, kjøre-guard, flush-før-op -----------
+
+test('+ over på PREAMBELEN: ny celle settes inn ETTER preambelen — preambelen (# load) forblir først og intakt', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '# load x\nprint(1)\n#%% python\ny=2\n';
+  C.init('python');
+  click(cellParts(containerEl, 0).addAboveBtn);
+  assert.strictEqual(scriptInputEl.value, '# load x\nprint(1)\n#%% python\n\n#%% python\ny=2\n',
+    'preambelen står først, den nye cellen rett etter');
+  const inserted = cellParts(containerEl, 1);
+  assert.strictEqual(global.document.activeElement, inserted.ta,
+    'fokus landet på den NYE cellen (idx 1, etter preambelen) — ikke på preambelen');
+});
+
+test('kjøre-guard: alle strukturelle operasjoner avvises stille mens mdIsScriptRunning() er true', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\n1\n#%% r\n2\n';
+  C.init('python');
+  global.mdIsScriptRunning = () => true;
+  try {
+    const before = scriptInputEl.value;
+    const c0 = cellParts(containerEl, 0);
+    const c1 = cellParts(containerEl, 1);
+    click(c0.addAboveBtn);
+    click(c0.addBelowBtn);
+    click(c0.downBtn);
+    click(c0.splitBtn);
+    click(c1.mergeBtn);
+    c1.typeSelect.value = 'md';
+    c1.typeSelect.dispatchEvent({ type: 'change' });
+    click(c0.deleteBtn);
+    assert.strictEqual(scriptInputEl.value, before,
+      'ingen av de sju operasjonene fikk endre dokumentet under en kjøring');
+    const root = nbRoot(containerEl);
+    const toast = root.children.find((n) => n.classList && n.classList.contains('nb-undo-toast'));
+    assert.strictEqual(toast, undefined, 'sletting avvist → ingen Angre-toast');
+  } finally {
+    delete global.mdIsScriptRunning;
+  }
+});
+
+test('setNbButtonsDisabled: verktøylinje-knappene deaktiveres under en kjøring og re-aktiveres etterpå — grense-↑/↓ forblir deaktivert', async () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\n1\n#%% python\n2\n';
+  C.init('python');
+  global.mdIsScriptRunning = () => false;
+  let release;
+  global.mdRunNotebookCell = () => new Promise((r) => { release = () => r({ text: 'ok' }); });
+  try {
+    const p = C.runCell(0);
+    const first = cellParts(containerEl, 0);
+    const last = cellParts(containerEl, 1);
+    assert.strictEqual(first.deleteBtn.disabled, true, 'slett deaktivert midt i kjøringen');
+    assert.strictEqual(first.addBelowBtn.disabled, true);
+    assert.strictEqual(last.typeSelect.disabled, true, 'type-dropdown deaktivert også');
+    release();
+    await p;
+    assert.strictEqual(first.deleteBtn.disabled, false, 'slett re-aktivert etter kjøringen');
+    assert.strictEqual(last.typeSelect.disabled, false);
+    assert.strictEqual(first.upBtn.disabled, true, '↑ på FØRSTE celle er statisk deaktivert — re-aktiveringen slår den ikke på');
+    assert.strictEqual(last.downBtn.disabled, true, '↓ på SISTE celle likeså');
+  } finally {
+    delete global.mdIsScriptRunning;
+    delete global.mdRunNotebookCell;
+  }
+});
+
+test('flush-før-op: en armert redigeringsdebounce anvendes FØR den strukturelle operasjonen — begge overlever', async () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\nx = 1\n#%% r\n2\n';
+  C.init('python');
+  const cell0 = cellParts(containerEl, 0);
+  // Tastetrykk i celle 0 armerer 250ms-debouncen (flushes IKKE ennå):
+  cell0.ta.value = 'x = 99\n';
+  cell0.ta.dispatchEvent({ type: 'input' });
+  assert.ok(scriptInputEl.value.indexOf('x = 99') === -1, 'sanity: debouncen har ikke fyrt ennå');
+  // Strukturell operasjon INNENFOR debounce-vinduet: flytt celle 0 ned.
+  // (Den redigerte kilden 'x = 99\n' ender med linjeskift — den blanke
+  // linja følger cellen i byttet, samme format-bevaring som move-testen over.)
+  click(cell0.downBtn);
+  assert.strictEqual(scriptInputEl.value, '#%% r\n2\n\n#%% python\nx = 99\n',
+    'både redigeringen (x = 99, flushet synkront først) og flyttingen er til stede');
+  // Og ingen forsinket debounce-refire ødelegger noe i etterkant:
+  await new Promise((r) => setTimeout(r, 320));
+  assert.strictEqual(scriptInputEl.value, '#%% r\n2\n\n#%% python\nx = 99\n',
+    'teksten er stabil etter at debounce-vinduet har passert');
+});
+
+// B2 Task 4-fiks: C.exit() må flushe en ventende redigeringsdebounce FØR den
+// bytter til Rå tekst — mirroring av toolbarGate/runCell sin flush-først-
+// disiplin over. Før fiksen kansellerte exit() bare timeren (clearTimeout)
+// uten å kjøre den ventende doFlush-lukningen, så en redigering skrevet
+// <250ms før klikk på "Rå tekst" ble stille DROPPET fra #scriptInput.
+test('exit({raw:true}) flusher en ventende redigeringsdebounce synkront FØR bytte til Rå tekst', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 2\n';
+  C.init('python');
+  const { ta } = cellParts(containerEl, 0);
+  ta.value = 'a = 10\n';
+  ta.dispatchEvent({ type: 'input' }); // starter 250ms-debouncen (ekte timer)
+  assert.strictEqual(scriptInputEl.value, '#%% python\na = 2\n',
+    'debouncen har ikke rukket å fyre ennå — #scriptInput er fortsatt den gamle teksten');
+
+  C.exit({ raw: true });
+
+  assert.strictEqual(scriptInputEl.value, '#%% python\na = 10\n',
+    'exit() skal flushe debouncen synkront FØR Rå tekst-bytte — ikke droppe redigeringen');
+  assert.strictEqual(C.active(), false);
 });

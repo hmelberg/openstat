@@ -50,7 +50,7 @@
 **Files:** Modify `index.html`, `js/cells.js`, `js/param-forms.js`, `js/ui.js` (key prefix)
 
 - `#options.display = last`: extractScriptOptions already parses; wire it so an UNMARKED script with the option gets `_nb`-style last-only display (echo follows show_commands) — the exec core supports the flags; the gate today requires Cells.active(); add the option-driven path (small, mirrors the display=all escape).
-- Small fixes: (a) `C.exit()` flushes pending edit debounce first; (b) `#@param [1,2,3]` numeric options — parse per-item literals, write back unquoted numerics (tests); (c) `?v=` cache-busting on brython/micropython engine script tags (match the repo's existing versioning param convention); (d) `cellKeyAt` id-prefix `'#'` + adjust consumers/tests.
+- Small fixes: (0) slett død kode `splitMicrodataExplainSections` + `buildForklarFlatWork` i index.html (null kallsteder, bekreftet i B2 T2-review); (a) `C.exit()` flushes pending edit debounce first; (b) `#@param [1,2,3]` numeric options — parse per-item literals, write back unquoted numerics (tests); (c) `?v=` cache-busting on brython/micropython engine script tags (match the repo's existing versioning param convention); (d) `cellKeyAt` id-prefix `'#'` + adjust consumers/tests.
 - [ ] Tests for each; suites green.
 - [ ] Commit `fix: B2-småfikser — display=last for umarkerte, exit-flush, numeriske #@param-options, cache-busting, nøkkelprefiks`.
 
@@ -59,3 +59,12 @@
 - [ ] Full suites; abridged browser sweep: toolbar ops (all seven) with round-trip checks via Rå tekst; skrittvis on the widgets example; Restart in R-mode actually clears `.GlobalEnv` (verify a variable is gone); dash-cell rerun stability; display=last unmarked script; plain-script + share-link regression; both themes on the toolbar.
 - [ ] Spec 1 §6: mark B2 done (list what shipped; note the R-dash decision from Task 3). README one-line touch if warranted.
 - [ ] Commit `docs+test(cells): fase B2 exit gate`.
+
+### Task 4b: dash mount-to-slot (render-target-fullføringen for dashboards)
+
+**Files:** Modify `js/dash.js` (mount-rot-valg), `index.html` if seam needed
+
+- Found in Task 3: python dash-celler i notatbok-visning rendrer inn i det SKJULTE `#outputArea` (dash v2 skriver DOM dit direkte under kjøring). Spec 1 §5/§6 lover «full render-target threading incl. dashboards» i B2.
+- Fix: `D.create`/mount-roten velger den kjørende cellens output-slot når notatbok-kontekst finnes — les `window.mdUiRunCtx()` (samme kontekst ui bruker) guarded; fallback `#outputArea` som i dag. Per-celle rerun: sloten purges allerede + sweepDisconnected (Task 3) → én levende dash per celle. Run All: segment-konteksten er satt (B1/W1-bracketene) → dash havner i riktig celle også der.
+- Verify: browser — dash-celle i notatbok: dashboard SYNLIG i cellens slot; rerun ×3 stabil; plain script dash uendret (ingen ctx → outputArea); dash i to ulike celler samtidig → hver i sin slot; R-dash uendret (mount går via dash-webr til outputArea — kun python-stien endres, dokumenter).
+- [ ] Commit `feat(dash): dashboards monteres i cellens slot i notatbøker (render-target-fullføring)`.

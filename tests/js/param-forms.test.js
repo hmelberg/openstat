@@ -88,6 +88,23 @@ test('parse: array + allow-input object → allowInput true, options preserved',
   assert.strictEqual(entries[0].meta.allowInput, true);
 });
 
+// B2 Task 4-fiks: bart numerisk array-literal — options er fortsatt strenger
+// (DOM <option>-verdier), men optionTypes husker at ELEMENTENE var tall
+// (looseJsonParse gir ekte JS-tall for numeriske literaler), slik at
+// writeValue kan formatere den valgte verdien tilbake UNQUOTED.
+test('parse: bare NUMERIC array literal → options stringified, optionTypes all "number"', () => {
+  const entries = PF.parse('n = 5 #@param [1, 2, 3]', 'python');
+  assert.strictEqual(entries[0].meta.type, 'string', 'meta.type forblir "string" — det er kontroll-dispatchens type, uendret');
+  assert.deepStrictEqual(entries[0].meta.options, ['1', '2', '3']);
+  assert.deepStrictEqual(entries[0].meta.optionTypes, ['number', 'number', 'number']);
+});
+
+test('parse: BLANDET array-literal ([1, "to", 3]) → optionTypes per element', () => {
+  const entries = PF.parse('n = 1 #@param [1, "to", 3]', 'python');
+  assert.deepStrictEqual(entries[0].meta.options, ['1', 'to', '3']);
+  assert.deepStrictEqual(entries[0].meta.optionTypes, ['number', 'string', 'number']);
+});
+
 // ===== parse: loose JSON object metas =====
 
 test('parse: loose unquoted-key meta (slider, min/max/step)', () => {
@@ -279,6 +296,39 @@ test('writeValue: dropdown (string type from bare array) quoted on write', () =>
   const entries = PF.parse(src, 'python');
   const out = PF.writeValue(src, entries[0], 'c', 'python');
   assert.strictEqual(out, 'x = \'c\'  #@param ["a", "b", "c"]');
+});
+
+// B2 Task 4-fiks — reviewerens repro: n = 5 #@param [1, 2, 3], velg "2" i
+// dropdownen → skal skrive n = 2 (unquoted numerisk literal), IKKE n = '2'
+// (meta.type er 'string' — uten per-opsjon-typingen ville formatLiteral
+// kvotert verdien som en streng).
+test('writeValue: numerisk bart array-literal skriver UNQUOTED tallverdi ved valg (reviewer-repro)', () => {
+  const src = 'n = 5 #@param [1, 2, 3]';
+  const entries = PF.parse(src, 'python');
+  const out = PF.writeValue(src, entries[0], '2', 'python');
+  assert.strictEqual(out, 'n = 2 #@param [1, 2, 3]');
+});
+
+test('writeValue: blandet array-literal — numerisk opsjon unquoted, streng-opsjon quoted (per-element)', () => {
+  const src = 'n = 1 #@param [1, "to", 3]';
+  const entries = PF.parse(src, 'python');
+  assert.strictEqual(PF.writeValue(src, entries[0], '3', 'python'), 'n = 3 #@param [1, "to", 3]',
+    'numerisk opsjon "3" → unquoted 3');
+  assert.strictEqual(PF.writeValue(src, entries[0], 'to', 'python'), "n = 'to' #@param [1, \"to\", 3]",
+    'streng-opsjon "to" → quoted \'to\'');
+});
+
+test('writeValue: rene objekt-form-options ({"type":"string","options":[...]}, INGEN bart array-prefiks) er UENDRET — ingen optionTypes, quoted som før fiksen', () => {
+  const src = 'x = "a" #@param {"type": "string", "options": ["a", "b"]}';
+  const entries = PF.parse(src, 'python');
+  // Ingen ledende "["-array her — options kommer fra objekt-nøkkelen
+  // "options" (linje ~178 i param-forms.js), en HELT ANNEN grein enn den
+  // bare array-literal-formen som nå produserer optionTypes. Denne entryen
+  // har derfor ingen optionTypes, og writeValue faller tilbake til
+  // entry.meta.type ('string') akkurat som før fiksen.
+  assert.strictEqual(entries[0].meta.optionTypes, undefined);
+  assert.strictEqual(PF.writeValue(src, entries[0], 'b', 'python'),
+    'x = \'b\' #@param {"type": "string", "options": ["a", "b"]}');
 });
 
 // ===== currentValue: typed seed for the control =====
