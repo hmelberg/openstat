@@ -14,9 +14,14 @@
   var ALIASES = { py: 'python', pyodide: 'python', markdown: 'md', text: 'md' };
   var NONCODE = { md: 1, html: 1, skip: 1 };
   // slide/speak/rerun/sync er reservert for spec 2/3 — parses, brukes ikke ennå.
-  var KNOWN_KEYS = { id: 1, style: 1, slide: 1, speak: 1, rerun: 1, sync: 1 };
+  // widgets (widget-plassering-fasen): styrer hvor .param-form/.ui-controls-
+  // stripene havner i cellens .nb-output (se cellNode) — top|bottom|left,
+  // default top når fraværende eller ugyldig (WIDGETS_POS under).
+  var KNOWN_KEYS = { id: 1, style: 1, slide: 1, speak: 1, rerun: 1, sync: 1, widgets: 1 };
   var KNOWN_FLAGS = { 'hide-code': 1, 'hide-output': 1, slide: 1 };
   var STYLES = { note: 1, warn: 1, card: 1 };
+  var WIDGETS_POS = { top: 1, bottom: 1, left: 1 };
+  C.WIDGETS_POS = WIDGETS_POS;
   var ID_RE = /^[A-Za-z0-9_-]+$/;
   // Fase A: modusene der notebook-rendring og segmentkjøring er støttet.
   var SUPPORTED_MODES = { python: 1, r: 1, duckdb: 1, microdata: 1 };
@@ -74,6 +79,7 @@
         if (!KNOWN_KEYS[key]) res.warnings.push('ukjent attributt: ' + key);
         if (key === 'id' && !ID_RE.test(val)) { res.warnings.push('ugyldig id: ' + val); return; }
         if (key === 'style' && !STYLES[val]) res.warnings.push('ukjent style: ' + val);
+        if (key === 'widgets' && !WIDGETS_POS[val]) res.warnings.push('ukjent widgets-plassering: ' + val);
         res.attrs[key] = val;
       } else {
         var flag = tok.toLowerCase();
@@ -772,23 +778,40 @@
       input.appendChild(ta);
       c._ta = ta;
 
+      // Widget-plassering-fasen: .nb-output er nå en WRAPPER, ikke selve
+      // sluket. Den inneholder (i FAST DOM-rekkefølge, uansett plassering):
+      // .param-form? (ParamForms.decorate, under), .ui-controls? (js/ui.js
+      // sin _ensureStrip, satt inn ved kjøring), og til slutt
+      // .nb-output-body — SLUKET all kjøre-output/purge/rendring skjer mot
+      // (renderCellResult, beginRun, sinkForSegment/errorHost, dash sin
+      // mountContainer). Stripene lever DERMED strukturelt utenfor
+      // .nb-output-body og overlever enhver output-purge helt uten egen
+      // preserve-logikk. widgets=top|bottom|left (default top, se
+      // WIDGETS_POS) er REN CSS: DOM-rekkefølgen over er alltid den samme,
+      // kun `order`/flex-direction (app.css) styrer om stripene havner over,
+      // under eller til venstre for kroppen — js/cells.js, js/ui.js og
+      // js/param-forms.js forblir alle plasserings-agnostiske.
       var out = el('div', 'nb-output');
+      var widgetsPos = WIDGETS_POS[c.attrs.widgets] ? c.attrs.widgets : 'top';
+      out.classList.add('nb-widgets-' + widgetsPos);
+      var body = el('div', 'nb-output-body');
+      out.appendChild(body);
       if (nonCode && type !== 'skip') {
         wrap.classList.add('nb-rendered-only');
-        renderNonCode(out, type, c.source);
-        out.title = t('Dobbeltklikk for å redigere');
+        renderNonCode(body, type, c.source);
+        body.title = t('Dobbeltklikk for å redigere');
         var enterEdit = function () {
           wrap.classList.remove('nb-rendered-only');
           autoSize(ta); ta.focus();
         };
-        out.addEventListener('dblclick', enterEdit);
+        body.addEventListener('dblclick', enterEdit);
         var editBtn = el('button', 'nb-edit-btn', '✎');
         editBtn.type = 'button';
         editBtn.title = t('Dobbeltklikk for å redigere');
         editBtn.addEventListener('click', enterEdit);
         wrap.appendChild(editBtn);
         ta.addEventListener('blur', function () {
-          renderNonCode(out, type, ta.value);
+          renderNonCode(body, type, ta.value);
           wrap.classList.add('nb-rendered-only');
         });
       }
@@ -801,15 +824,19 @@
       // vet allerede nøyaktig hvilken celle den kjører, så et querySelector-
       // oppslag mot NB.root (som beginRun/sinkForSegment bruker for segment-
       // JUSTERT plan-indeksering) er unødvendig her — cellens egen node holdes.
-      c._out = out;
+      // c._out peker på .nb-output-body (SLUKET), ikke wrapperen — all
+      // run-output-skriving (renderCellResult, dash mount-to-slot-sjekken
+      // under) er dermed body-scoped by construction.
+      c._out = body;
       c._wrap = wrap;
       // Post-build seam (spec 2 W4, Task 2): #@param-skjema-stripe. Kun for
       // celletyper ParamForms faktisk vet hvordan den skal skrive literaler
       // for (paramLangForType → null for duckdb/microdata/statx/md/html/skip
-      // — parse-gate per planens Global Constraints). Stripa settes inn i
-      // `wrap` (cellens rot-node) som FØRSTE barn, FØR .ui-controls hvis den
-      // skulle finnes (se ParamForms sin egen _insertStrip/reorder) — samme
-      // "cellen sin rot er stripe-verten" som js/ui.js sin _ensureStrip bruker.
+      // — parse-gate per planens Global Constraints). js/param-forms.js sin
+      // egen _build/_insertStrip finner `.nb-output` inni `wrap` og setter
+      // stripa inn der (FØR en evt. .ui-controls, alltid FØR .nb-output-body)
+      // — ParamForms.reorder-hacken (fase 2 W4) er borte: rekkefølgen er nå
+      // strukturell, ikke noe som må reasserteres etter hver kjøring.
       var paramLang = C.paramLangForType(type);
       if (paramLang && global.ParamForms && typeof global.ParamForms.decorate === 'function') {
         global.ParamForms.decorate(idx, wrap, c.source, paramLang);
@@ -1327,10 +1354,15 @@
       // regnes derfor som en fullstendig frisk kjøring av hver celle, uansett
       // om et enkelt segment feiler underveis (bevisst forenkling, spec §7).
       clearAllStale();
-      var outs = NB.root.querySelectorAll('.nb-cell .nb-output');
+      // Purger KUN .nb-output-body (sluket) — widget-plassering-fasen:
+      // .nb-output er nå en wrapper som også kan holde .param-form/
+      // .ui-controls-striper, og disse skal IKKE tømmes her (de overlever
+      // «Kjør alle» akkurat som de overlever enkelt-celle-rerun). Body sin
+      // besteforelder er cellens .nb-cell-wrap (body → .nb-output → .nb-cell).
+      var outs = NB.root.querySelectorAll('.nb-cell .nb-output-body');
       for (var i = 0; i < outs.length; i++) {
-        var cellEl = outs[i].parentNode;
-        if (cellEl.classList.contains('nb-noncode')) continue;   // md/html beholder rendringen
+        var cellEl = outs[i].parentNode && outs[i].parentNode.parentNode;
+        if (cellEl && cellEl.classList.contains('nb-noncode')) continue;   // md/html beholder rendringen
         purge(outs[i]);
         outs[i].innerHTML = '';
       }
@@ -1346,7 +1378,7 @@
       NB.runPlan = plan;
       NB.runSinks = [];
       for (var s = 0; s < plan.length; s++) {
-        var node = NB.root.querySelector('.nb-cell[data-idx="' + plan[s] + '"] .nb-output');
+        var node = NB.root.querySelector('.nb-cell[data-idx="' + plan[s] + '"] .nb-output-body');
         NB.runSinks.push(node || null);
       }
       return NB.runSinks;
@@ -1431,10 +1463,13 @@
     };
 
     // Samle-slot nederst: fallback ved planavvik og vert for feilmeldinger.
+    // Ingen strip-vert (ikke inni en .nb-cell, ingen widgets-konsept her) —
+    // derfor .nb-output-body direkte, samme sluk-klasse som alle andre
+    // run-output-mål, IKKE .nb-output-wrapperen.
     C.errorHost = function () {
       if (!NB.activeFlag) return null;
       if (!NB.trailing || !NB.trailing.isConnected) {
-        NB.trailing = el('div', 'nb-output nb-trailing');
+        NB.trailing = el('div', 'nb-output-body nb-trailing');
         NB.root.appendChild(NB.trailing);
       }
       return NB.trailing;
@@ -1515,20 +1550,12 @@
       }).then(function () {
         setRunningUi(idx, false);
         updateSessionChip();
-        // Skjema-stripe-rekkefølge (spec 2 W4, Task 2 — sameksistens med
-        // js/ui.js sin .ui-controls): ParamForms.decorate setter .param-form
-        // inn som cellens FØRSTE barn ved cellNode-bygging, FØR noen
-        // .ui-controls-stripe finnes (den lages først når kjørende
-        // Python/R-kode faktisk kaller ui.*). js/ui.js sin _ensureStrip vet
-        // ingenting om .param-form og insertBefore-er sin egen stripe FØR
-        // cellEl.firstChild uansett — hvis DENNE kjøringen nettopp opprettet
-        // .ui-controls for første gang, havner den dermed FORAN .param-form.
-        // Reassert rekkefølgen her (etter hver kjøring, den ENESTE plassen
-        // .ui-controls kan dukke opp for første gang) i stedet for å endre
-        // js/ui.js (utenfor denne oppgavens filliste).
-        if (global.ParamForms && typeof global.ParamForms.reorder === 'function' && c._wrap) {
-          global.ParamForms.reorder(c._wrap);
-        }
+        // Skjema-stripe-rekkefølge (widget-plassering-fasen): IKKE lenger en
+        // reorder-reassert her — js/param-forms.js og js/ui.js setter nå
+        // begge inn sin stripe på en FAST plass inni `.nb-output`
+        // (param-form, ui-controls, .nb-output-body, i den rekkefølgen,
+        // uansett hvilken av de to som dukker opp først), så rekkefølgen
+        // trenger aldri reasserteres i ettertid.
       });
     };
 
@@ -1669,7 +1696,7 @@
     // fremfor å kaste (kjøringen fullførte tross alt).
     function renderCellResult(idx, out, res) {
       if (out && !out.isConnected && NB.root) {
-        out = NB.root.querySelector('.nb-cell[data-idx="' + idx + '"] .nb-output');
+        out = NB.root.querySelector('.nb-cell[data-idx="' + idx + '"] .nb-output-body');
         if (!out) {
           console.warn('renderCellResult: celle', idx, 'finnes ikke lenger (strukturendring midt i kjøring) — resultat droppet');
           return;

@@ -1128,8 +1128,26 @@
   border-radius: 4px; background: var(--bg-code); color: inherit;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px;
   line-height: 1.45; padding: 6px 8px; box-sizing: border-box; }
-.nb-output { min-width: 0; overflow-x: auto; }
-.nb-output.nb-trailing { border-top: 1px dashed var(--border); padding-top: 8px; }
+/* Widget-plassering-fasen: .nb-output er en WRAPPER (js/cells.js sin
+   cellNode) som kan holde .param-form/.ui-controls-striper FØR selve
+   .nb-output-body (sluket ALL run-output skriver til/purges via). DOM-
+   rekkefølgen på stripene er alltid param-form → ui-controls → body — kun
+   `order`/flex-direction her styrer om de VISUELT havner over (top,
+   default), under (bottom) eller til venstre (left) for resultatet, se
+   widgets=top|bottom|left (js/cells.js KNOWN_KEYS). */
+.nb-output { display: flex; flex-direction: column; min-width: 0; }
+.nb-output-body { min-width: 0; overflow-x: auto; }
+.nb-output.nb-widgets-top > .param-form,
+.nb-output.nb-widgets-top > .ui-controls { order: 1; }
+.nb-output.nb-widgets-top > .nb-output-body { order: 2; }
+.nb-output.nb-widgets-bottom > .nb-output-body { order: 1; }
+.nb-output.nb-widgets-bottom > .param-form,
+.nb-output.nb-widgets-bottom > .ui-controls { order: 2; }
+.nb-output.nb-widgets-left { flex-direction: row; align-items: flex-start; gap: 10px; }
+.nb-output.nb-widgets-left > .param-form,
+.nb-output.nb-widgets-left > .ui-controls { flex: 0 0 auto; max-width: 240px; order: 1; }
+.nb-output.nb-widgets-left > .nb-output-body { flex: 1 1 auto; min-width: 0; order: 2; }
+.nb-output-body.nb-trailing { border-top: 1px dashed var(--border); padding-top: 8px; }
 /* Dokumenterte begrensningsmeldinger (R-celle utenfor R-modus, microdata i
    R-modus, dashboard krever Kjør alle — fase B1 Task 4): rolig info-boks,
    ikke en rød feilmelding (pre.error) — brukeren har ikke gjort noe galt. */
@@ -1220,16 +1238,16 @@
 .nb-undo-btn:hover { background: var(--accent); color: #fff; }
 body[data-theme="dark"] .nb-undo-btn:hover { color: #1a1b26; }
 
-/* ── ui-widgets (spec 2026-07-15, W1): kontrollstripe per celle, js/ui.js ──
-   .ui-controls settes inn av Ui.registerControl som cellens FØRSTE barn —
-   FØR .nb-input/.nb-output — slik at den overlever output-tømming
-   (beginRun/renderCellResult rører kun .nb-output). grid-column: 1/-1 er
-   nødvendig fordi .nb-cell er et grid: i .nb-layout-columns er det to
-   kolonner (input | output) — uten dette ville stripa falt inn i kun første
-   kolonne. Med full bredde ligger den i stedet som en kompakt, radbrytende
-   header-rad over begge soner, i alle layout-varianter. */
+/* ── ui-widgets (spec 2026-07-15, W1; flyttet inn i .nb-output i widget-
+   plassering-fasen): kontrollstripe per celle, js/ui.js. .ui-controls
+   settes inn av Ui.registerControl INNI cellens .nb-output-wrapper (se
+   js/ui.js sin _ensureStrip) — FØR .nb-output-body, ALDRI direkte tømt av
+   output-tømming (beginRun/renderCellResult rører kun .nb-output-body).
+   Bor nå i OUTPUT-kolonnen/-sonen (ikke lenger et fullbredde-bånd over
+   input+output) — se .nb-output sin egen widgets=top|bottom|left-styring
+   over for den faktiske plasseringen. */
 .ui-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px;
-  grid-column: 1 / -1; padding: 6px 10px;
+  padding: 6px 10px;
   background: var(--bg-code); border: 1px solid var(--border); border-radius: 6px; }
 .ui-controls:empty { display: none; }
 .ui-widget { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text); }
@@ -1289,20 +1307,21 @@ body[data-theme="dark"] .nb-undo-btn:hover { color: #1a1b26; }
    dropdown/knapp) — samme oppskrift-familie som Pico bruker for fokusringen. */
 .ui-controls :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-/* ── #@param-skjemaer (spec 2 W4, Task 2): js/param-forms.js DOM-halvdel ──
-   .param-form settes inn av ParamForms.decorate som cellens FØRSTE barn —
-   FØR en evt. .ui-controls-stripe over (se ParamForms.reorder/js/cells.js sin
-   runCell) — samme grid-column: 1/-1-triks og samme "barn nummer én"-plass i
-   .nb-cell sitt grid. Bevisst visuelt distinkt fra .ui-controls (Colab-stil
-   skjema: én rad PER kontroll, etikett venstre/kontroll høyre — se W-issue 3
-   over for hvorfor den tidligere venstre aksentkanten er borte) — de to
-   stripene skal kunne sameksistere i samme celle uten å se ut som duplikater. */
+/* ── #@param-skjemaer (spec 2 W4, Task 2; flyttet inn i .nb-output i widget-
+   plassering-fasen): js/param-forms.js DOM-halvdel. .param-form settes inn
+   av ParamForms.decorate INNI cellens .nb-output-wrapper, FØR en evt.
+   .ui-controls-stripe og alltid FØR .nb-output-body (se _insertStrip,
+   js/param-forms.js — strukturell rekkefølge, ingen reorder-reassert
+   lenger). Bevisst visuelt distinkt fra .ui-controls (Colab-stil skjema: én
+   rad PER kontroll, etikett venstre/kontroll høyre — se W-issue 3 under for
+   hvorfor den tidligere venstre aksentkanten er borte) — de to stripene skal
+   kunne sameksistere i samme celle uten å se ut som duplikater. */
 /* W-issue 3: den tidligere venstre aksentstripen (border-left: 3px solid
    var(--accent)) er fjernet — skjemaets Colab-stil (rad per kontroll,
    etikett venstre/kontroll høyre) og den lett distinkte bakgrunnen holder
    den fortsatt visuelt atskilt fra .ui-controls uten en ekstra farget kant. */
 .param-form { display: flex; flex-direction: column; gap: 6px;
-  grid-column: 1 / -1; padding: 8px 10px;
+  padding: 8px 10px;
   background: var(--bg-panel); border: 1px solid var(--border); border-radius: 6px; }
 .param-form:empty { display: none; }
 /* W-issue 2: justify-content:space-between spredte label/kontroll/lesevisning

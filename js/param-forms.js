@@ -421,9 +421,12 @@
 
   // ---------- DOM-halvdel (Task 2) ----------
   // Skjema-stripe-rendring i celler: én `.param-form`-node per celle, satt
-  // inn av Cells sin cellNode (post-build-sømmen, js/cells.js) som cellens
-  // FØRSTE barn — FØR en evt. `.ui-controls`-stripe (js/ui.js), se
-  // ParamForms.reorder under. Byggerne her er EGNE, minimale kontroller
+  // inn av Cells sin cellNode (post-build-sømmen, js/cells.js) INNI cellens
+  // `.nb-output`-wrapper (widget-plassering-fasen) — FAST plassering FØR en
+  // evt. `.ui-controls`-stripe (js/ui.js) og alltid FØR `.nb-output-body`,
+  // se _insertStrip under (ParamForms.reorder-hacken fra spec 2 W4 er borte:
+  // rekkefølgen er nå strukturell, ikke noe som reasserteres etter kjøring).
+  // Byggerne her er EGNE, minimale kontroller
   // (planens "B2 dedup: felles builder-modul" — bevisst IKKE gjenbrukt fra
   // js/ui.js/js/dash.js i W4, samme avgrensning som js/ui.js selv dokumenterer
   // for SIN egen duplisering mot js/dash.js).
@@ -663,37 +666,47 @@
       return { row: row, input: built.input, readout: built.readout, entry: entry };
     }
 
-    // Sett `strip` inn i `cellEl` som FØRSTE barn — MEN før en evt. allerede
-    // tilstedeværende `.ui-controls`-stripe (js/ui.js), slik at
-    // .param-form ALLTID kommer før .ui-controls når begge finnes (planens
-    // eksplisitte rekkefølgekrav). Det vanlige tilfellet (skjemaet dekoreres
-    // FØR cellen noensinne har kjørt, altså FØR .ui-controls i det hele tatt
-    // finnes) gjør dette til en ren "sett som cellEl.firstChild"; det
-    // uvanlige tilfellet (en .ui-controls dukker opp SENERE, når cellen
-    // kjøres) håndteres i stedet av ParamForms.reorder (kalt fra
-    // js/cells.js sin runCell etter hver kjøring).
-    function _insertStrip(cellEl, strip) {
-      var kids = cellEl.children || [];
-      var uiControls = null;
+    // Finn cellEl sitt (direkte) barn med gitt klasse — enkel lineær skann,
+    // samme mønster js/ui.js sin _ensureStrip bruker for symmetri (ingen
+    // querySelector-motor forutsettes å finnes på stub-DOM-er i tester).
+    function _findChild(parent, cls) {
+      var kids = (parent && parent.children) || [];
       for (var i = 0; i < kids.length; i++) {
-        if (kids[i].classList && kids[i].classList.contains('ui-controls')) { uiControls = kids[i]; break; }
+        if (kids[i].classList && kids[i].classList.contains(cls)) return kids[i];
       }
-      if (uiControls) cellEl.insertBefore(strip, uiControls);
-      else if (cellEl.firstChild) cellEl.insertBefore(strip, cellEl.firstChild);
-      else cellEl.appendChild(strip);
+      return null;
+    }
+
+    // Sett `strip` inn i cellens `.nb-output`-wrapper (widget-plassering-
+    // fasen — IKKE lenger `cellEl` selv/dens firstChild) — rett FØR en evt.
+    // allerede tilstedeværende `.ui-controls`-stripe (js/ui.js), ellers rett
+    // FØR `.nb-output-body` (alltid til stede, se js/cells.js sin cellNode).
+    // Dette garanterer DOM-rekkefølgen param-form → ui-controls → body helt
+    // uavhengig av hvilken av de to stripene som oppstår først — ingen
+    // reorder-reassert trengs lenger (ParamForms.reorder er fjernet).
+    // outEl mangler (cellEl har ingen `.nb-output`-barn, f.eks. en avvikende
+    // test-stub) → no-op, ingen krasj: stripa forblir da bare en løsrevet
+    // node ingen ser, samme «stille forkastet»-filosofi som resten av fila.
+    function _insertStrip(cellEl, strip) {
+      var outEl = _findChild(cellEl, 'nb-output');
+      if (!outEl) return;
+      var before = _findChild(outEl, 'ui-controls') || _findChild(outEl, 'nb-output-body');
+      if (before) outEl.insertBefore(strip, before);
+      else outEl.appendChild(strip);
     }
 
     // Bygg (eller gjenbygg) skjema-stripa for cellIdx fra bunnen av — kalt av
     // BÅDE decorate (alltid) og refresh (kun ved strukturell endring, se
     // under). En eldre stripe (fra en TIDLIGERE _build for SAMME cellIdx,
-    // fortsatt festet til SAMME cellEl) fjernes eksplisitt først — i den
-    // vanlige "cellNode bygde en helt ny cellEl"-flyten er dette en no-op
-    // (den forrige stripa henger på en allerede orphanet cellEl og trengs
-    // ikke ryddes), men gjør funksjonen trygg å kalle to ganger på rad for
-    // samme, fortsatt-tilkoblede cellEl også.
+    // fortsatt festet til SAMME .nb-output-wrapper) fjernes eksplisitt først
+    // — i den vanlige "cellNode bygde en helt ny cellEl"-flyten er dette en
+    // no-op (den forrige stripa henger på en allerede orphanet cellEl og
+    // trengs ikke ryddes), men gjør funksjonen trygg å kalle to ganger på
+    // rad for samme, fortsatt-tilkoblede cellEl også.
     function _build(cellIdx, cellEl, source, lang) {
+      var outEl = _findChild(cellEl, 'nb-output');
       var prev = _forms[cellIdx];
-      if (prev && prev.strip && prev.strip.parentNode === cellEl) prev.strip.remove();
+      if (prev && prev.strip && outEl && prev.strip.parentNode === outEl) prev.strip.remove();
       var entries = ParamForms.parse(source, lang);
       if (!entries.length) {
         _forms[cellIdx] = { cellEl: cellEl, lang: lang, source: source,
@@ -845,39 +858,10 @@
       st.entries = ParamForms.parse(source, st.lang);
     };
 
-    /**
-     * ParamForms.reorder(cellElOrIdx) — reassert at `.param-form` (om den
-     * finnes) står FØR `.ui-controls` (om DEN finnes) blant cellens direkte
-     * barn. Nødvendig fordi js/ui.js sin _ensureStrip ikke vet noe om
-     * .param-form og alltid setter .ui-controls inn som cellEl.firstChild —
-     * .ui-controls kan dukke opp FØRSTE gang under en cellekjøring (den
-     * eneste anledningen den kan oppstå): enkelt-celle-stien (js/cells.js
-     * sin runCell kaller hit med cellens _wrap-node) OG "Kjør alle"/replay-
-     * segmentløkkene i index.html (review-fiks 2 — de kaller hit med
-     * CELLEINDEKSEN, ved samme brakettpunkter som Ui.endCellRun). Et tall
-     * løses derfor til cellens gjeldende DOM-node via Cells.cellElementAt
-     * (friskt oppslag — noden byttes ved strukturell re-rendring, F6-
-     * mønsteret). No-op når en av de to stripene (eller begge) mangler,
-     * eller når rekkefølgen allerede stemmer.
-     */
-    ParamForms.reorder = function (cellElOrIdx) {
-      var cellEl = cellElOrIdx;
-      if (typeof cellElOrIdx === 'number') {
-        cellEl = (global.Cells && typeof global.Cells.cellElementAt === 'function')
-          ? global.Cells.cellElementAt(cellElOrIdx) : null;
-      }
-      if (!cellEl || !cellEl.children) return;
-      var kids = cellEl.children;
-      var form = null, controls = null, formIdx = -1, controlsIdx = -1;
-      for (var i = 0; i < kids.length; i++) {
-        var k = kids[i];
-        if (!k.classList) continue;
-        if (k.classList.contains('param-form')) { form = k; formIdx = i; }
-        else if (k.classList.contains('ui-controls')) { controls = k; controlsIdx = i; }
-      }
-      if (!form || !controls || formIdx < controlsIdx) return;
-      cellEl.insertBefore(form, controls);
-    };
+    // ParamForms.reorder er fjernet (widget-plassering-fasen): rekkefølgen
+    // param-form → ui-controls → .nb-output-body er nå strukturell (se
+    // _insertStrip/js/ui.js sin _ensureStrip) — det finnes ingenting å
+    // reassertere i ettertid lenger.
 
     /**
      * ParamForms.resetDocument() — nytt dokument (Cells.contentLoaded, samme

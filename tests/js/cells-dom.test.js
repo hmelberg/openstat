@@ -562,7 +562,12 @@ function cellParts(containerEl, idx) {
     n.dataset.idx === String(idx));
   const nodes = collectNodes(wrap, []);
   const ta = nodes.find((n) => n.tag === 'textarea');
-  const out = nodes.find((n) => n.classList && n.classList.contains('nb-output'));
+  // Widget-plassering-fasen: .nb-output er nå en WRAPPER (outWrap) som kan
+  // holde .param-form/.ui-controls-striper — run-output-sluket (det gamle
+  // `.out`-kontraktet testene under bruker) er `.nb-output-body`, samme node
+  // som c._out peker på i produksjonskoden.
+  const outWrap = nodes.find((n) => n.classList && n.classList.contains('nb-output'));
+  const out = nodes.find((n) => n.classList && n.classList.contains('nb-output-body'));
   const input = nodes.find((n) => n.classList && n.classList.contains('nb-input'));
   const runBtn = nodes.find((n) => n.tag === 'button' && n.classList && n.classList.contains('nb-runbtn'));
   const addAboveBtn = nodes.find((n) => n.classList && n.classList.contains('nb-tool-add-above'));
@@ -573,7 +578,7 @@ function cellParts(containerEl, idx) {
   const mergeBtn = nodes.find((n) => n.classList && n.classList.contains('nb-tool-merge'));
   const deleteBtn = nodes.find((n) => n.classList && n.classList.contains('nb-tool-delete'));
   const typeSelect = nodes.find((n) => n.classList && n.classList.contains('nb-tool-type'));
-  return { wrap, ta, out, input, runBtn, addAboveBtn, addBelowBtn, upBtn, downBtn,
+  return { wrap, ta, out, outWrap, input, runBtn, addAboveBtn, addBelowBtn, upBtn, downBtn,
            splitBtn, mergeBtn, deleteBtn, typeSelect };
 }
 function click(node) { node.dispatchEvent({ type: 'click' }); }
@@ -799,6 +804,54 @@ test('runCell: {notice} → pre.nb-notice (ikke pre.error) i cellens egen slot (
   assert.ok(noticeNode, 'begrensningsmeldingen skal vises som pre.nb-notice');
   assert.strictEqual(noticeNode.textContent, 'Dashboard-celler krever Kjør alle (fase B2)');
   assert.strictEqual(errNode, undefined, 'skal IKKE rendres som pre.error (den er rød/alarmerende, dette er ikke en feil)');
+});
+
+// ---- widget-plassering-fasen: widgets=top|bottom|left klasse-plumbing,
+// og strip-overlevelse gjennom en output-purge (js/cells.js sin cellNode:
+// .nb-output er nå en wrapper rundt .param-form?/.ui-controls?/.nb-output-body) ----
+
+test('widgets=top|bottom|left: klassen plumbes til .nb-output (default top når fraværende)', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python widgets=left\n1\n#%% python widgets=bottom\n2\n#%% python\n3\n#%% python widgets=weird\n4\n';
+  C.init('python');
+  assert.strictEqual(C.active(), true);
+
+  assert.ok(cellParts(containerEl, 0).outWrap.classList.contains('nb-widgets-left'));
+  assert.ok(cellParts(containerEl, 1).outWrap.classList.contains('nb-widgets-bottom'));
+  assert.ok(cellParts(containerEl, 2).outWrap.classList.contains('nb-widgets-top'), 'default er top');
+  assert.ok(cellParts(containerEl, 3).outWrap.classList.contains('nb-widgets-top'),
+    'ugyldig widgets-verdi (advart av parseHeader) faller tilbake til default top, ikke krasj');
+});
+
+test('strip (.param-form) overlever renderCellResult sin purge by construction — den lever UTENFOR .nb-output-body', async () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\nx = 1\n';
+  // Minimal ParamForms-stub som speiler den ekte _insertStrip-kontrakten:
+  // stripa settes inn i .nb-output, FØR .nb-output-body — kalt automatisk av
+  // cellNode (paramLangForType('python') === 'python', se js/cells.js).
+  global.ParamForms = {
+    decorate: function (idx, cellEl, source, lang) {
+      const outWrap = cellEl.children.find((c) => c.classList.contains('nb-output'));
+      const body = outWrap.children.find((c) => c.classList.contains('nb-output-body'));
+      const strip = document.createElement('div');
+      strip.className = 'param-form';
+      strip.textContent = 'STRIP';
+      outWrap.insertBefore(strip, body);
+    },
+  };
+  C.init('python');
+  global.mdIsScriptRunning = () => false;
+  global.mdRunNotebookCell = () => Promise.resolve({ text: 'hello' });
+
+  await C.runCell(0);
+
+  const { out, outWrap } = cellParts(containerEl, 0);
+  const strip = outWrap.children.find((n) => n.classList && n.classList.contains('param-form'));
+  assert.ok(strip, 'param-form-stripa overlevde runCell sin renderCellResult-purge');
+  assert.strictEqual(strip.textContent, 'STRIP', 'stripa er urørt — ingen ombygging skjedde');
+  assert.strictEqual(out.textContent, 'hello', 'run-output rendret i .nb-output-body, uavhengig av stripa');
+
+  delete global.ParamForms;
 });
 
 // ---- Task 5 (fase B1): kjøreknapper, Shift/Ctrl+Enter, stale-markering,

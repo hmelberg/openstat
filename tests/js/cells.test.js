@@ -51,6 +51,16 @@ test('parseHeader: advarsler — ukjent nøkkel/flagg/style, ugyldig id', () => 
   assert.strictEqual(bad.attrs.id, undefined);
 });
 
+test('parseHeader: widgets — top/bottom/left gyldig, andre verdier advarer (widget-plassering-fasen)', () => {
+  assert.deepStrictEqual(C.parseHeader('#%% python widgets=top').attrs, { widgets: 'top' });
+  assert.deepStrictEqual(C.parseHeader('#%% python widgets=top').warnings, []);
+  assert.deepStrictEqual(C.parseHeader('#%% python widgets=bottom').warnings, []);
+  assert.deepStrictEqual(C.parseHeader('#%% python widgets=left').warnings, []);
+  const bad = C.parseHeader('#%% python widgets=weird');
+  assert.match(bad.warnings[0], /ukjent widgets-plassering/);
+  assert.strictEqual(bad.attrs.widgets, 'weird', 'verdien beholdes selv om den advarer (samme filosofi som style)');
+});
+
 test('parseHeader: ukjent første token er attr, ikke type', () => {
   const h = C.parseHeader('#%% notatype');
   assert.strictEqual(h.type, null);

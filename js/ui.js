@@ -479,30 +479,46 @@
       return stored;
     }
 
-    // Lag (lazy) eller gjenbruk cellens .ui-controls-stripe. Settes inn som
-    // FØRSTE barn av cellens rot-node (sibling FØR .nb-input/.nb-output —
-    // se js/cells.js sin cellNode, linje ~439-483: input bygges/appendes
-    // først, deretter output, ingen egen header-sone utenfor input finnes
-    // fra før). Plassering som FØRSTE barn (ikke bare "før .nb-output")
-    // er et bevisst valg: i .nb-layout-columns er cellen et to-kolonners
-    // grid (input | output) — en stripe midt mellom dem ville falt inn i
-    // kolonne to sammen med output. Som ubetinget FØRSTE barn, med
-    // `grid-column: 1 / -1` i CSS-en (app.css), spenner den i stedet hele
-    // bredden som en header-rad over BEGGE soner, i alle layout-varianter
-    // (kolonner/stablet/kun-output). Ved en strukturell re-rendring bytter
-    // cellEl identitet (F6-mønsteret) — da bygges stripa på nytt (gamle
-    // DOM-referanser i _controls for cellen glemmes), men _values (selve
-    // verdiene) er dokument-scoped, ikke DOM-node-scoped, og overlever.
+    // Finn cellEl sitt (direkte) barn med gitt klasse — enkel lineær skann
+    // (ingen querySelector-motor forutsettes å finnes på stub-DOM-er i
+    // tester; speiler js/param-forms.js sin egen _findChild for symmetri).
+    function _findChild(parent, cls) {
+      var kids = (parent && parent.children) || [];
+      for (var i = 0; i < kids.length; i++) {
+        if (kids[i].classList && kids[i].classList.contains(cls)) return kids[i];
+      }
+      return null;
+    }
+
+    // Lag (lazy) eller gjenbruk cellens .ui-controls-stripe. Widget-
+    // plassering-fasen: settes inn INNI cellens `.nb-output`-wrapper (IKKE
+    // lenger `cellEl` sin egen firstChild) — rett FØR `.nb-output-body`,
+    // ellers rett etter en evt. `.param-form` (js/param-forms.js), som
+    // uansett alltid står FØR body. Dette gir DOM-rekkefølgen
+    // param-form → ui-controls → body strukturelt, uten behov for noen
+    // reorder-reassert i ettertid (se js/cells.js sin cellNode og app.css
+    // sin widgets=top|bottom|left `order`-styring — CSS alene avgjør om
+    // stripa VISUELT havner over, under eller til venstre for resultatet).
+    // Ved en strukturell re-rendring bytter cellEl identitet (F6-mønsteret)
+    // — da bygges stripa på nytt (gamle DOM-referanser i _controls for
+    // cellen glemmes), men _values (selve verdiene) er dokument-scoped,
+    // ikke DOM-node-scoped, og overlever. outEl mangler (cellEl har ingen
+    // `.nb-output`-barn) → stripa opprettes men forblir en løsrevet node,
+    // samme stille-forkastet-filosofi som resten av modulen.
     function _ensureStrip(cellEl, cellIdx) {
+      var outEl = _findChild(cellEl, 'nb-output');
       var strip = _strips[cellIdx];
-      if (strip && strip.parentNode === cellEl) return strip;
+      if (strip && strip.parentNode === outEl) return strip;
       Object.keys(_controls).forEach(function (key) {
         if (_controls[key].cellIdx === cellIdx) delete _controls[key];
       });
       strip = document.createElement('div');
       strip.className = 'ui-controls';
-      if (cellEl.firstChild) cellEl.insertBefore(strip, cellEl.firstChild);
-      else cellEl.appendChild(strip);
+      if (outEl) {
+        var body = _findChild(outEl, 'nb-output-body');
+        if (body) outEl.insertBefore(strip, body);
+        else outEl.appendChild(strip);
+      }
       _strips[cellIdx] = strip;
       return strip;
     }

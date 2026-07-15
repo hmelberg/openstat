@@ -9546,13 +9546,6 @@ async def _m2py_run_segment(_seg_json):
             // segment i replayen, ikke bare målsegmentet (se kommentaren over
             // ctx-settingen).
             if (_rCellIdx !== null && _rCellIdx !== undefined && window.Ui && window.Ui.endCellRun) window.Ui.endCellRun(_rCellIdx);
-            // #@param-skjemaer (W4 Task 2, review-fiks 2): replay-segmentene
-            // kan opprette .ui-controls for IKKE-mål-celler (registerControl
-            // kjører for hvert replayet segment, se ctx-settingen over) —
-            // js/cells.js sin runCell reorder-er kun MÅLcellens node etterpå,
-            // så rekkefølgen for de replayede cellene reassertes her, ved
-            // samme brakettpunkt som endCellRun.
-            if (_rCellIdx !== null && _rCellIdx !== undefined && window.ParamForms && window.ParamForms.reorder) window.ParamForms.reorder(_rCellIdx);
             if (py && typeof py.setStdout === 'function') py.setStdout();
             if (py && typeof py.setStderr === 'function') py.setStderr();
             if (_capErr) console.warn('[stderr]', _capErr.trim());
@@ -9850,12 +9843,6 @@ async def _m2py_run_segment(_seg_json):
           // _uiIdx over; null når notatboken er inaktiv/planen ikke er
           // justert, samme betingelse som satte nbUiRunCtx i utgangspunktet).
           if (_uiIdx !== null && _uiIdx !== undefined && window.Ui && window.Ui.endCellRun) window.Ui.endCellRun(_uiIdx);
-          // #@param-skjemaer (W4 Task 2, review-fiks 2): en .ui-controls-
-          // stripe kan dukke opp for FØRSTE gang i akkurat denne kjøringen
-          // (Ui sin _ensureStrip setter den inn som cellens firstChild, FORAN
-          // en eventuell .param-form) — reassert rekkefølgen ved samme
-          // brakettpunkt som endCellRun over, samme guardede mønster.
-          if (_uiIdx !== null && _uiIdx !== undefined && window.ParamForms && window.ParamForms.reorder) window.ParamForms.reorder(_uiIdx);
           appendOutput(stdout.slice(renderedLen), asHtml, suppress, _sink);
           renderedLen = stdout.length;
           if (rc === 'stop') break;
@@ -9903,11 +9890,6 @@ async def _m2py_run_segment(_seg_json):
         // løkka-blokken. endCellRun er idempotent, så dette er trygt også
         // i det vanlige tilfellet der løkka allerede sopte ferdig selv.
         if (typeof _uiIdx !== 'undefined' && _uiIdx !== null && window.Ui && window.Ui.endCellRun) window.Ui.endCellRun(_uiIdx);
-        // #@param-skjemaer (W4 Task 2, review-fiks 2): samme sikkerhetsnett-
-        // speiling for stripe-rekkefølgen som endCellRun-linja over —
-        // idempotent, dekker et unntak kastet før løkkas egen reorder rakk å
-        // kjøre.
-        if (typeof _uiIdx !== 'undefined' && _uiIdx !== null && window.ParamForms && window.ParamForms.reorder) window.ParamForms.reorder(_uiIdx);
         setRunButtonsUi('idle');
         // duckdb-modus: sidepanelet mates fra wasm-katalogen — fire-and-forget.
         if (activeEditorMode === 'duckdb') { refreshDatasetSidebarFromDuck(); }
