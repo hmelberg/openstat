@@ -36,6 +36,22 @@
   function createRegistry() {
     var shims = {}; // commId -> { targetName, onMsgCbs: [fn], onCloseCbs: [fn] }
 
+    // pending: commId -> [msg, msg, ...] — comm_msg-bufring for race'et der en
+    // comm_msg (kernel→frontend) treffer FØR on_msg er registrert for den
+    // comm_id-en (Task 3-review carry-over, Task 4 Part 0: ett-celle
+    // create-mutate-display, f.eks. `s = w.IntSlider(5); s.value = 2; s` —
+    // `s.value = 2` sin comm_msg kan komme mens comm_open-håndteringen
+    // fortsatt er inni ensure().then(...) (mikrotask) og FØR
+    // handle_comm_open rekker å kalle shim.on_msg). Nøkkelen finnes UANSETT
+    // om comm_id er ukjent (open() ikke kjørt ennå) ELLER kjent men uten
+    // on_msg-lytter ennå (open() kjørt, handle_comm_open ikke ferdig) — se
+    // route() under. Meldinger REPLAYES i rekkefølge FØRSTE gang on_msg
+    // registreres for comm_id-en, deretter tømmes køen (se onMsg/_replay
+    // under). Uavhengig struktur fra shims — overlever selv om shims[commId]
+    // ikke finnes ennå.
+    var pending = {};
+    var PENDING_CAP = 100; // vern mot ubegrenset minnevekst hvis on_msg aldri kommer
+
     function open(commId, targetName) {
       if (Object.prototype.hasOwnProperty.call(shims, commId)) {
         console.warn('IpwBridge: comm ' + commId + ' er allerede åpen — erstatter');
@@ -48,12 +64,47 @@
       return Object.prototype.hasOwnProperty.call(shims, commId);
     }
 
+    // _replayPending(commId) — kalles av onMsg RETT ETTER en ny on_msg-lytter
+    // er lagt til. Leverer eventuelle bufrede meldinger (i rekkefølge) til
+    // ALLE nåværende onMsgCbs for comm_id-en (i praksis kun den ene som nettopp
+    // registrerte seg — ekte WidgetModel har nøyaktig én on_msg-lytter), så
+    // tømmer køen. No-op hvis ingenting er bufret.
+    function _replayPending(commId) {
+      var queued = pending[commId];
+      if (!queued || !queued.length) return;
+      delete pending[commId];
+      var s = shims[commId];
+      if (!s) return; // bør aldri skje (onMsg krever shims[commId] over) — defensivt
+      queued.forEach(function (msg) {
+        s.onMsgCbs.forEach(function (cb) {
+          cb(msg);
+        });
+      });
+    }
+
+    // _bufferMsg(commId, msg) — legger msg bakerst i comm_id-ens kø. Fullt
+    // (>= PENDING_CAP) → advar og DROPP denne ene meldingen (køen for øvrig
+    // urørt) i stedet for ubegrenset vekst; returnerer false. Ellers push +
+    // true.
+    function _bufferMsg(commId, msg) {
+      if (!pending[commId]) pending[commId] = [];
+      var queued = pending[commId];
+      if (queued.length >= PENDING_CAP) {
+        console.warn('IpwBridge: comm_msg-buffer for ' + commId + ' er full (cap ' +
+          PENDING_CAP + ') — melding droppes');
+        return false;
+      }
+      queued.push(msg);
+      return true;
+    }
+
     function onMsg(commId, cb) {
       if (!shims[commId]) {
         console.warn('IpwBridge: on_msg registrert for ukjent comm_id: ' + commId);
         return;
       }
       shims[commId].onMsgCbs.push(cb);
+      _replayPending(commId);
     }
 
     function onClose(commId, cb) {
@@ -64,21 +115,32 @@
       shims[commId].onCloseCbs.push(cb);
     }
 
+    // route(commId, msg) — comm_msg (kernel→frontend). Leverer STRAKS hvis
+    // comm_id-en både finnes OG har minst én on_msg-lytter (normalflyten,
+    // uendret); ellers (ukjent comm_id ELLER kjent uten lytter ennå) BUFRES
+    // meldingen (se _bufferMsg over) i stedet for å advares/droppes — dette
+    // ER Task 4 Part 0-fiksen. Returnerer true hvis meldingen ble
+    // levert/lagt i køen, false kun ved bufferoverløp (se _bufferMsg).
     function route(commId, msg) {
       var s = shims[commId];
-      if (!s) {
-        console.warn('IpwBridge: comm_msg for ukjent comm_id: ' + commId);
-        return false;
+      if (s && s.onMsgCbs.length > 0) {
+        s.onMsgCbs.forEach(function (cb) {
+          cb(msg);
+        });
+        return true;
       }
-      s.onMsgCbs.forEach(function (cb) {
-        cb(msg);
-      });
-      return true;
+      return _bufferMsg(commId, msg);
     }
 
+    // close(commId, msg) — comm_close (kernel→frontend). comm_id ukjent for
+    // shims (aldri åpnet, ELLER kun bufrede comm_msg venter på den) advarer
+    // FORTSATT (uendret oppførsel — spek: "keep the unknown-id warn for
+    // closes") OG tømmer i tillegg en eventuell bufret kø stille (en lukket
+    // comm skal aldri replayes senere).
     function close(commId, msg) {
       var s = shims[commId];
       if (!s) {
+        if (pending[commId]) delete pending[commId];
         console.warn('IpwBridge: comm_close for ukjent comm_id: ' + commId);
         return false;
       }
@@ -86,11 +148,13 @@
         cb(msg);
       });
       delete shims[commId];
+      if (pending[commId]) delete pending[commId];
       return true;
     }
 
     function reset() {
       shims = {};
+      pending = {};
     }
 
     function targetOf(commId) {

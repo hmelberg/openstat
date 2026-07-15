@@ -47,7 +47,11 @@ test('registry: open then route delivers the message to the right shim only', ()
   assert.strictEqual(seenA[0].content.data.state.value, 7);
 });
 
-test('registry: route for unknown comm_id warns and does not throw', () => {
+test('registry: route for unknown comm_id buffers (no warn, no throw) instead of dropping — Task 4 Part 0', () => {
+  // Behaviour change from the pre-Task-4 registry (which warned+dropped): a
+  // comm_msg for an unknown comm_id can legitimately be a race (comm_open
+  // handling still pending) rather than an error, so it is buffered for
+  // later replay — see the buffer/replay tests below.
   const reg = IpwBridge._createRegistry();
   withCapturedWarnings((calls) => {
     let threw = false;
@@ -58,12 +62,104 @@ test('registry: route for unknown comm_id warns and does not throw', () => {
       threw = true;
     }
     assert.strictEqual(threw, false);
-    assert.strictEqual(result, false);
-    assert.ok(calls.some((c) => c.includes('does-not-exist')));
+    assert.strictEqual(result, true);
+    assert.deepStrictEqual(calls, []);
   });
 });
 
-test('registry: close cleans up bookkeeping (has() false, further route warns)', () => {
+test('registry: comm_msg for a not-yet-opened comm_id is buffered, then replayed in order once on_msg registers', () => {
+  const reg = IpwBridge._createRegistry();
+  const seen = [];
+
+  const ok1 = reg.route('z', { content: { data: { n: 1 } } });
+  const ok2 = reg.route('z', { content: { data: { n: 2 } } });
+  assert.strictEqual(ok1, true);
+  assert.strictEqual(ok2, true);
+  assert.strictEqual(seen.length, 0); // nothing to deliver to yet — no shim at all
+
+  // comm_open handling catches up: open() then on_msg registration (the real
+  // order in js/ipywidgets-bridge.js's _makeShim/handle_comm_open flow).
+  reg.open('z', 'jupyter.widget');
+  reg.onMsg('z', (msg) => seen.push(msg.content.data.n));
+
+  assert.deepStrictEqual(seen, [1, 2]); // order preserved, delivered on registration
+});
+
+test('registry: comm_msg for an open comm with no on_msg listener yet is buffered, replayed once a listener registers', () => {
+  const reg = IpwBridge._createRegistry();
+  reg.open('y', 'jupyter.widget');
+  const seen = [];
+
+  reg.route('y', { content: { data: { n: 'a' } } });
+  reg.route('y', { content: { data: { n: 'b' } } });
+  assert.strictEqual(seen.length, 0);
+
+  reg.onMsg('y', (msg) => seen.push(msg.content.data.n));
+
+  assert.deepStrictEqual(seen, ['a', 'b']);
+});
+
+test('registry: buffered comm_msg queue caps at 100 — overflow warns and drops without throwing', () => {
+  const reg = IpwBridge._createRegistry();
+  let lastOk;
+  withCapturedWarnings((calls) => {
+    for (let i = 0; i < 101; i++) {
+      lastOk = reg.route('overflow-id', { content: { data: { n: i } } });
+    }
+    assert.strictEqual(lastOk, false); // the 101st is dropped
+    assert.ok(calls.some((c) => c.includes('overflow-id')));
+  });
+
+  const seen = [];
+  reg.open('overflow-id', 'jupyter.widget');
+  reg.onMsg('overflow-id', (msg) => seen.push(msg.content.data.n));
+  assert.strictEqual(seen.length, 100); // only the first 100 survived the cap
+  assert.strictEqual(seen[0], 0);
+  assert.strictEqual(seen[99], 99);
+});
+
+test('registry: comm_close on a buffered-only (never-opened) comm_id still warns (unknown) but clears its pending queue', () => {
+  const reg = IpwBridge._createRegistry();
+  reg.route('ghost-buffer', { content: { data: {} } });
+
+  withCapturedWarnings((calls) => {
+    const ok = reg.close('ghost-buffer', { content: { data: {} } });
+    assert.strictEqual(ok, false);
+    assert.ok(calls.some((c) => c.includes('ghost-buffer')));
+  });
+
+  // Re-opening the same id afterwards must NOT replay the old (cleared) buffer.
+  const seen = [];
+  reg.open('ghost-buffer', 'jupyter.widget');
+  reg.onMsg('ghost-buffer', (msg) => seen.push(msg));
+  assert.deepStrictEqual(seen, []);
+});
+
+test('registry: normal flow (on_msg registered before comm_msg arrives) is unaffected by buffering', () => {
+  const reg = IpwBridge._createRegistry();
+  const seen = [];
+  reg.open('normal', 'jupyter.widget');
+  reg.onMsg('normal', (msg) => seen.push(msg.content.data.n));
+
+  const ok = reg.route('normal', { content: { data: { n: 42 } } });
+
+  assert.strictEqual(ok, true);
+  assert.deepStrictEqual(seen, [42]); // delivered immediately, no buffering involved
+});
+
+test('registry: reset() also clears any buffered (not-yet-opened) comm_msg queues', () => {
+  const reg = IpwBridge._createRegistry();
+  reg.route('will-reset', { content: { data: { n: 1 } } });
+
+  reg.reset();
+
+  const seen = [];
+  reg.open('will-reset', 'jupyter.widget');
+  reg.onMsg('will-reset', (msg) => seen.push(msg));
+  assert.deepStrictEqual(seen, []); // buffer was cleared by reset(), nothing to replay
+});
+
+test('registry: close cleans up bookkeeping (has() false, further route buffers instead of warning — Task 4 Part 0)', () => {
   const reg = IpwBridge._createRegistry();
   reg.open('c', 'jupyter.widget');
   reg.onMsg('c', () => {});
@@ -76,10 +172,13 @@ test('registry: close cleans up bookkeeping (has() false, further route warns)',
   assert.strictEqual(closeMsgs.length, 1);
   assert.strictEqual(reg.has('c'), false);
 
+  // Post-close, 'c' is an unknown comm_id from route()'s point of view — per
+  // Task 4 Part 0 this now buffers (no warn) rather than warn+drop, exactly
+  // like any other unknown-id comm_msg race.
   withCapturedWarnings((calls) => {
     const routed = reg.route('c', { content: { data: {} } });
-    assert.strictEqual(routed, false);
-    assert.ok(calls.some((c) => c.includes('c')));
+    assert.strictEqual(routed, true);
+    assert.deepStrictEqual(calls, []);
   });
 });
 
