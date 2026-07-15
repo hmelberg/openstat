@@ -7695,11 +7695,22 @@ json.dumps(out)
     }
 
     // Nullstill R-side ordinal/register FØR en kjøring (samme idiom som
-    // DashWebR.reset() - ubetinget kall, no-op hvis defs aldri er lastet
-    // denne økten, gjettet via __uiRP i stedet for en egen loaded-flagg).
+    // DashWebR.reset() - no-op hvis defs aldri er lastet denne økten,
+    // gjettet via __uiRP i stedet for en egen loaded-flagg). Fjerner OGSÅ
+    // `.ui_values` fra .GlobalEnv (review-fiks, Important): per-celle-
+    // injeksjonen skriver den inn i det PERSISTENTE globale miljøet og
+    // ingenting annet rydder den — uten rm her ville "Restart & kjør alle"
+    // etter en per-celle slider-justering lese den justerte verdien i
+    // stedet for de dokumenterte defaultene (Run All-kontrakten: defaults,
+    // ingen kontroller). rm(list=..., envir=globalenv()) er den robuste
+    // formen (verifisert med Rscript); exists-vakten gjør kallet idempotent
+    // når `.ui_values` aldri ble injisert.
     async function __uiResetR() {
       if (!__uiRP) return;
-      try { await __uiRP; await webR.evalRVoid('.ui_begin()'); }
+      try {
+        await __uiRP;
+        await webR.evalRVoid('.ui_begin(); if (exists(".ui_values", envir = globalenv(), inherits = FALSE)) rm(list = ".ui_values", envir = globalenv())');
+      }
       catch (e) { console.warn('ui: reset (R)', e); }
     }
 
@@ -7922,16 +7933,21 @@ json.dumps(out)
       // INGEN per-celle-integrasjon (dokumentert tilpasning, se spec) —
       // ui_*() skal likevel være DEFINERT (ellers "kunne ikke finne
       // funksjonen ui_slider" — en ekte feil scriptet ellers ikke ville
-      // fått) og returnere sine defaults (ingen `.ui_values` injiseres her).
-      // __uiResetR() nullstiller registeret UBETINGET (no-op om ui.R aldri
-      // er lastet denne økten) — ingen kontroll rendres, registeret leses
-      // aldri her (samme "NO control rendering" som DashWebR-blokken over,
-      // men uten et mount()-motstykke: ui-widgets har ingen Kjør alle-visning).
+      // fått) og returnere sine defaults (ingen `.ui_values` injiseres her;
+      // __uiResetR fjerner også en evt. gjenliggende `.ui_values` fra
+      // tidligere per-celle-kjøringer, så defaults faktisk gjelder).
+      // BEGGE kallene er gatet på UI_R_REGEX (review-fiks, Minor): et
+      // ui-fritt dokument skal kjøre strengt identisk med før — også når
+      // ui.R alt er lastet i økten. Ingen kontroll rendres, registeret
+      // leses aldri her (samme "NO control rendering" som DashWebR-blokken
+      // over, men uten et mount()-motstykke: ui-widgets har ingen Kjør
+      // alle-visning); et ui-fritt dokument leser heller aldri registeret
+      // eller kaller ui_*, så en hoppet-over reset kan ikke observeres der.
       if (UI_R_REGEX.test(src)) {
         try { await __ensureUiR(); }
         catch (e) { outputParts.push({ type: 'error', text: 'ui: ' + ((e && e.message) || e) }); }
+        await __uiResetR();
       }
-      await __uiResetR();
 
       // ── Phase 2: run R segments via captureR — interleaved code/output/plot
       // For hver R-blokk: splitt i top-level statements via R-parser, kjor hver
@@ -9052,10 +9068,15 @@ async def _m2py_run_segment(_seg_json):
           catch (e) { console.warn('webr/ui.R:', e); uiActive = false; }
         }
 
-        // (2) injiser lagrede verdier + nullstill ordinal-telleren FØR
-        // kjøringen. Ui.valuesForCell returnerer ALLEREDE en JSON-streng
-        // ({"n":7,...}) — denne ENE JSON.stringify her pakker den strengen
-        // inn som en trygt escapet R-strengliteral (dobbel-stringify-idiomet:
+        // (2) nullstill ordinal-telleren + injiser lagrede verdier FØR
+        // kjøringen — i ETT evalRVoid, med .ui_begin() FØRST (review-fiks,
+        // Minor): var de to separate kall, ville en fromJSON-feil hoppe
+        // over begin og la ordinalene drifte (w0/w1-nøklene forskyves mot
+        // forrige kjørings). I ett uttrykk med begin først er ordinal-
+        // resetten alltid utført selv om injeksjonen feiler etterpå.
+        // Ui.valuesForCell returnerer ALLEREDE en JSON-streng ({"n":7,...})
+        // — denne ENE JSON.stringify her pakker den strengen inn som en
+        // trygt escapet R-strengliteral (dobbel-stringify-idiomet:
         // js/dash-webr.js sin .dash_run()-kode gjør begge stringify-stegene
         // selv fordi den starter fra et rått JS-objekt, her er steg én
         // allerede gjort inni Ui.valuesForCell).
@@ -9063,8 +9084,7 @@ async def _m2py_run_segment(_seg_json):
           try {
             var _uiValuesJson = (window.Ui && typeof window.Ui.valuesForCell === 'function')
               ? window.Ui.valuesForCell(cellIdx) : '{}';
-            await webR.evalRVoid('.ui_values <- jsonlite::fromJSON(' + JSON.stringify(_uiValuesJson) + ')');
-            await webR.evalRVoid('.ui_begin()');
+            await webR.evalRVoid('.ui_begin(); .ui_values <- jsonlite::fromJSON(' + JSON.stringify(_uiValuesJson) + ')');
           } catch (e) { console.warn('ui: injeksjon (R):', e); }
         }
 
