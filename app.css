@@ -542,6 +542,10 @@
     .result-copy-wrap:hover .output-copy-btn, .result-copy-wrap:focus-within .output-copy-btn { opacity: 1; }
     .result-copy-wrap > .plotly-container { margin-left: auto; margin-right: auto; }
     .output-matplotlib-img { display: block; max-width: 100%; height: auto; margin: 12px auto; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-code); }
+    /* W3 Task 3: ipywidgets-slot — selve widget-DOM-en (Lumino attach via
+       IpwBridge.renderView) styles seg selv (pinnet html-manager sitt CSS);
+       her kun ytre avstand, tokens-only, samme mønster som andre embeds over. */
+    .ipw-view { margin: 8px 0; max-width: 100%; overflow-x: auto; }
     .status { font-size: var(--base-font-size); color: var(--text-muted); margin-right: 12px; }
     .error { color: #e11d48; }
     .autocomplete-list { position: absolute; z-index: 100; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 6px; max-height: 220px; overflow-y: auto; box-shadow: 0 4px 12px rgba(0,0,0,0.15); font-family: 'Fira Code', 'Consolas', monospace; font-size: var(--base-font-size); left: 50px; right: 12px; top: 12px; }

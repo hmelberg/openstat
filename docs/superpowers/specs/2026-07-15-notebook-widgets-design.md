@@ -162,7 +162,24 @@ individually behind the protocol later.
   `with self.out:`), so it ships together with Output-widget support later;
   `Output`/`with out:` capture (needs a display-publisher seam we don't
   have without an IPython shell); `jslink`; third-party widgets (embed-amd
-  CDN loading "best effort", no promises); widget state in share links.
+  CDN loading "best effort", no promises); widget state in share links;
+  **`FileUpload`** — frontend→kernel binary buffers are dropped in v1
+  (`_ipw_dispatch` hardcodes `"buffers": []`), so FileUpload silently
+  never delivers its bytes; ships when the buffer path is threaded
+  through (likely with `Output`).
+  **Accepted v1 limitations (browser-verified 2026-07-15, exit gate):** a
+  per-cell rerun of a cell that creates a widget accumulates comms in the
+  JS registry (+3 per `IntSlider` rerun, e.g. 15→18→21→24 across three
+  reruns) — the DOM stays clean (one view), and "Restart & kjør alle"
+  resets the registry fully; not fixed (would require tracking which
+  widget instance "belongs" to a cell/slot to close the old one on
+  rerun — a real lifecycle decision out of v1 scope). `observe` callbacks
+  run outside any captured cell, so `print(...)` inside a callback lands
+  in the browser console, not the cell's output — documented in the
+  example notebook's intro. Python-side, old `Widget`/comm-manager entries
+  survive session restarts in the persistent interpreter (JS reset never
+  sends `comm_close` into python) — unreachable from a fresh `_g`,
+  memory-only, harmless.
 - **Frontend correction (research 2026-07-15):** `HTMLManager`'s
   `_create_comm`/`_get_comm_info` are no-op stubs — live comms require
   subclassing it with a real comm implementation (a hand-rolled
@@ -202,7 +219,16 @@ runtime because it never touches the runtime: it edits text and reruns.
   facades confirmed as documented API-compatible fallbacks (defaults, no
   render — real cell support pending those runners' notebook support, see
   Scope notes above); see `.superpowers/sdd/task-w2-5-report.md`.
-- **W3 — ipywidgets bridge v1** (per track 2 scope).
+- **W3 — ipywidgets bridge v1** (per track 2 scope). **Done 2026-07-15** —
+  browser-verified end-to-end (widget render + live `observe`-driven
+  updates with no cell rerun, kernel-sync both ways, buffer-and-replay
+  for the one-cell create-mutate-display idiom, clean "Restart & kjør
+  alle" rebuilds with stable registry counts, isolation from W1/W2 `ui`
+  across document switches, zero-footprint for plain scripts/non-ipywidgets
+  notebooks, pinned bundle URLs, both-themes render); v1-scope exactly as
+  documented above (stock controls + observe/traitlets sync + display in
+  slots; `interact()`/`Output` deferred); see
+  `.superpowers/sdd/task-w3-5-report.md`.
 - **W4 — `#@param` forms.**
 
 Each phase gets its own implementation plan; W1 must not start before

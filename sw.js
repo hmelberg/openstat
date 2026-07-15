@@ -3,14 +3,15 @@
 // duplicated across this file (PYODIDE_VERSION below), index.html and
 // export_data*.html — update all together when upgrading Pyodide.
 const PYODIDE_VERSION = 'v314.0.2';
-const CACHE = 'm2py-v15';
+const CACHE = 'm2py-v16';
 const CDN_HOSTS = new Set([
   'cdn.jsdelivr.net',
   'cdn.plot.ly',
   'files.pythonhosted.org',
   'pypi.org',
   'webr.r-wasm.org',    // webR-runtime (jamovi-modus)
-  'repo.r-wasm.org'     // wasm-R-pakker: jmv, scatr m.fl. (~170 MB, cache-first)
+  'repo.r-wasm.org',    // wasm-R-pakker: jmv, scatr m.fl. (~170 MB, cache-first)
+  'cdnjs.cloudflare.com' // require.min.js (ipywidgets-broen, js/ipywidgets-bridge.js — pinned)
 ]);
 const LOCAL_SWR_SUFFIXES = [
   '/m2py.py',
@@ -37,7 +38,13 @@ const PRECACHE_URLS = [
   'https://cdn.plot.ly/plotly-2.32.0.min.js',
   'https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js',
   'https://cdn.jsdelivr.net/npm/brython@3.12.0/brython.min.js',
-  'https://cdn.jsdelivr.net/npm/brython@3.12.0/brython_stdlib.js'
+  'https://cdn.jsdelivr.net/npm/brython@3.12.0/brython_stdlib.js',
+  // ipywidgets-broen (js/ipywidgets-bridge.js) — pinnede versjoner, se dens
+  // PIN-konstantblokk (REQUIRE_JS_URL/EMBED_AMD_URL). Lastes lat (kun når et
+  // kjørt dokument importerer ipywidgets), men precaches likevel her slik at
+  // det første treffet ikke krever nettverk hvis SW-en allerede er installert.
+  'https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js',
+  'https://cdn.jsdelivr.net/npm/@jupyter-widgets/html-manager@1.0.14/dist/embed-amd.js'
 ];
 
 self.addEventListener('install', e => {

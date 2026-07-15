@@ -576,6 +576,7 @@
   <script src="js/dash.js"></script>
   <script src="js/cells.js"></script>
   <script src="js/ui.js"></script>
+  <script src="js/ipywidgets-bridge.js"></script>
   <script src="js/dash-webr.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tabulator-tables@6.3.1/dist/js/tabulator.min.js" defer></script>
@@ -3149,6 +3150,14 @@
           if (/^\s*(?:import|from)\s+ui\b/m.test(script)) {
             try { await __ensureUi(ctx.py); }
             catch (e) { console.warn('pyodide/ui.py:', e); }
+          }
+          // ipywidgets-import (spec 2, W3 Task 2) — se __ensureIpywidgets.
+          // MÅ stå FØR micropip-løkka under (pinnet 8.1.6, ikke upinnet
+          // PyPI-latest). Feiler gracefully (console.warn): cellen får da
+          // en naturlig ModuleNotFoundError i sin egen slot, aldri abort.
+          if (/^\s*(?:import|from)\s+ipywidgets\b/m.test(script)) {
+            try { await __ensureIpywidgets(ctx.py, ctx.rightStatus); }
+            catch (e) { console.warn('ipywidgets-bro:', e); }
           }
           try {
             setStatus(ctx.rightStatus, t('Sjekker pakker…'));
@@ -5797,6 +5806,25 @@ json.dumps(out)
               img.alt = 'matplotlib';
               img.src = 'data:image/png;base64,' + String(p.payload).replace(/\s+/g, '');
               frag.appendChild(img);
+            } else if (p.embedType === 'ipywidget') {
+              // W3 Task 3: _repr_mimebundle_ → embed-markør (Python-siden,
+              // _show_one over) → her: en tom slot montert async via
+              // IpwBridge.renderView. Funker likt i notatbok-celler
+              // (window.mdRenderOutput → renderOutput → denne funksjonen) og
+              // i #outputArea for vanlige skript — ingenting cellespesifikt.
+              const div = document.createElement('div');
+              div.className = 'ipw-view';
+              frag.appendChild(div);
+              try {
+                const payload = JSON.parse(p.payload || '{}');
+                if (window.IpwBridge && typeof window.IpwBridge.renderView === 'function') {
+                  window.IpwBridge.renderView(payload.model_id, div);
+                } else {
+                  div.textContent = t('ipywidgets-broen er ikke lastet') + ' (' + payload.model_id + ')';
+                }
+              } catch (e) {
+                div.textContent = t('ipywidgets: kunne ikke lese widget-data');
+              }
             } else {
               const pre = document.createElement('pre');
               pre.className = 'embed-placeholder';
@@ -6784,6 +6812,26 @@ def _show_one(obj):
     import io
     if obj is None:
         return
+    # ipywidgets (W3 Task 3): _repr_mimebundle_ kan returnere enten en dict
+    # eller et (data, metadata)-tuppel — ipywidgets 8.x gir dict, men vi
+    # håndterer begge per IPython-konvensjonen. Finner vi widget-view-mimen,
+    # embedder vi en markør (samme __micro_transform_start_-konvensjon som
+    # png/figure) og hopper over generisk repr — buildOutputNodes (JS) monterer
+    # selve visningen via IpwBridge.renderView(model_id, el). only_last-policyen
+    # er allerede håndtert av kalleren (_exec_pyodide_block kaller _show_one
+    # KUN for kvalifiserende uttrykk), så ingen ekstra gating trengs her.
+    try:
+        if hasattr(obj, "_repr_mimebundle_"):
+            _mb = obj._repr_mimebundle_()
+            if isinstance(_mb, tuple):
+                _mb = _mb[0] if _mb else None
+            if isinstance(_mb, dict) and "application/vnd.jupyter.widget-view+json" in _mb:
+                import json as _json
+                _payload = _mb["application/vnd.jupyter.widget-view+json"]
+                print(_EMBED_S + "ipywidget__" + chr(10) + _json.dumps(_payload) + chr(10) + _EMBED_E)
+                return
+    except Exception:
+        pass
     try:
         import plotly.graph_objects as go
         if isinstance(obj, go.Figure):
@@ -8106,6 +8154,88 @@ json.dumps(out)
       return __uiP;
     }
 
+    // ── python-modus: ekte ipywidgets-bro (spec 2 W3, Task 2) — lazy ──────
+    // Gated i BEGGE kjøreveiene (btnRun sin preRun ~3170 OG mdRunNotebookCell
+    // sin per-celle-sti ~9250) på /^\s*(?:import|from)\s+ipywidgets\b/m mot
+    // HELE dokumentteksten — W1 sin B1-blocker lærte oss at per-celle-stien
+    // hopper over preRun, så én gate er aldri nok. Isolasjonsgarantien
+    // (spek): et dokument uten ipywidgets-import treffer ALDRI denne stien —
+    // ingen micropip, ingen CDN-bundles, byte-identisk kjøring.
+    //
+    // Fire trinn, i rekkefølge:
+    //   (1) micropip-installasjon av den PINNEDE ipywidgets==8.1.6 (planens
+    //       "Version pins are law" — transitivt følger comm/traitlets/
+    //       widgetsnbextension/jupyterlab_widgets, aksepteres med vilje, se
+    //       planens Global Constraints). MÅ skje FØR preRun sin generiske
+    //       micropip-løkke (som ellers ville installert UPINNET ipywidgets).
+    //       ~10 MB første gang — statusEl (hvis gitt) viser fremdrift.
+    //   (2) hent + exec pyodide/ipw_setup.py som modulen `ipw_setup` (samme
+    //       spec_from_loader-mønster som __ensureUi/__ensurePyDash over) —
+    //       den erstatter comm.create_comm med OpenstatComm (kernel→frontend-
+    //       retningen: publish_msg → window.IpwBridge.fromKernel).
+    //   (3) await window.IpwBridge.ensure() — lazy-last de pinnede AMD-
+    //       bundlene + bygg LiveManager (js/ipywidgets-bridge.js, Task 1).
+    //   (4) koble frontend→kernel-retningen: IpwBridge._toKernel → én varig
+    //       PyProxy av ipw_setup._ipw_dispatch. Proxyen holdes bevisst i
+    //       live hele sidens levetid — oppsettet her er ÉN gang per side
+    //       (persistent pyodide-interpreter: sys.modules/comm.create_comm
+    //       overlever økt-restart; kun widget-INSTANSENE/comm-ene er økt-
+    //       scoped, ryddet av IpwBridge.reset() ved restart/dokumentbytte).
+    //
+    // Feil: kalleren fanger og console.warn-er (aldri abort) — feiler
+    // micropip, gir `import ipywidgets` i cellen en naturlig
+    // ModuleNotFoundError i cellens egen slot (samme in-slot-historie som
+    // __ensureUi sin 404-kommentar); feiler bundle-lastingen (trinn 3/4),
+    // fungerer widgets fortsatt python-side (traitlets), de vises bare ikke.
+    // __ipwP nullstilles i .catch slik at et senere forsøk prøver på nytt.
+    var __ipwP = null;
+    function __ensureIpywidgets(py, statusEl) {
+      if (__ipwP) return __ipwP;
+      var base = window.location.href.replace(/[^/]+$/, '');
+      __ipwP = (async function () {
+        var _needIpw = await py.runPythonAsync(
+          'import importlib.util as _iu\n_iu.find_spec("ipywidgets") is None');
+        if (_needIpw) {
+          if (statusEl) setStatus(statusEl, t('Installerer ipywidgets…'));
+          await py.runPythonAsync(
+            'import micropip as _mp\nawait _mp.install("ipywidgets==8.1.6")');
+        }
+        var r = await fetch(base + 'pyodide/ipw_setup.py?v=' + (window.M2PY_VERSION || '1'));
+        if (!r.ok) throw new Error('pyodide/ipw_setup.py: ' + r.status);
+        var code = await r.text();
+        await py.runPythonAsync(
+          'import sys, importlib.util\n' +
+          'def _reg_ipw_setup(src):\n' +
+          '    spec = importlib.util.spec_from_loader("ipw_setup", loader=None)\n' +
+          '    mod = importlib.util.module_from_spec(spec)\n' +
+          '    sys.modules["ipw_setup"] = mod\n' +
+          '    exec(compile(src, "ipw_setup.py", "exec"), mod.__dict__)\n' +
+          '_reg_ipw_setup(' + JSON.stringify(code) + ')');
+        await window.IpwBridge.ensure();
+        // Én varig PyProxy (se blokk-kommentaren over) — hentet ETTER exec
+        // slik at modulen garantert finnes. runPython (sync) er riktig her:
+        // uttrykket er et rent attributt-oppslag.
+        var _dispatch = py.runPython('__import__("ipw_setup")._ipw_dispatch');
+        window.IpwBridge._toKernel = function (commId, dataJson, buffersArr) {
+          // Shim-send gir (commId, dataJson, buffersArr) — bygg content-
+          // formen _ipw_dispatch/CommManager forventer ({comm_id, data}).
+          // buffersArr droppes bevisst i v1: stock-kontrollenes frontend→
+          // kernel-meldinger (update/custom fra sliders/dropdowns/…) bærer
+          // aldri binærbuffere (planens v1-scope; Output/interact utsatt).
+          try {
+            var _content = JSON.stringify({
+              comm_id: commId,
+              data: JSON.parse(dataJson || '{}')
+            });
+            _dispatch('comm_msg', _content);
+          } catch (e) {
+            console.warn('IpwBridge._toKernel: dispatch til python feilet for ' + commId, e);
+          }
+        };
+      })().catch(function (e) { __ipwP = null; throw e; });
+      return __ipwP;
+    }
+
     async function runStatxScript(script, ctx) {
       var rightStatus = ctx && ctx.rightStatus ? ctx.rightStatus : window.rightStatus;
       try {
@@ -8752,6 +8882,15 @@ options(width = 200)
     // ubetinget når den kalles (kalleren styrer om/når). ctx = { py,
     // activeEditorMode, effectiveScript, duckPreResolved, showCommands }.
     async function bootNotebookSession(ctx) {
+      // ipywidgets (spec 2 W3, Task 2): HVER boot skaper en FRISK e/_g —
+      // alle comm-er/widget-modeller fra forrige kjøring er per definisjon
+      // døde (deres python-motparter er urekkbare i den nye _g). Rydd JS-
+      // siden HER (ikke bare i restart()/invalidate()): btnRun sin "Kjør
+      // alle" kaller bootNotebookSession direkte uten noen av dem, og uten
+      // denne linjen akkumulerte registeret 3 stale comm-er per kjøring
+      // (funnet i browserverifiseringen). Idempotent — restart()-veien
+      // reset'er dermed to ganger, helt ufarlig. Guarded: broen er lazy.
+      if (window.IpwBridge && window.IpwBridge.reset) window.IpwBridge.reset();
       var py = ctx.py;
       var activeEditorMode = ctx.activeEditorMode;
       var effectiveScript = ctx.effectiveScript;
@@ -8948,13 +9087,26 @@ async def _m2py_run_segment(_seg_json):
       ensure: function (force) { return nbEnsureSession(!!force); },
       restart: function () {
         nbSetSessionLive(false);
+        // ipywidgets (spec 2 W3, Task 2): en restart gir fersk e/_g — men
+        // pyodide-interpreteren (og dermed comm.create_comm-oppsettet fra
+        // ipw_setup) er PERSISTENT. Widget-instansene/comm-ene fra den døde
+        // økta er derimot økt-scoped: tøm JS-siden (modeller/views/comm-
+        // register) så stale model_id-er aldri kan route'es/renderes. En ny
+        // kjørings widgets åpner friske comms helt av seg selv (comm_open
+        // via OpenstatComm). Guarded: broen er lazy og finnes kanskje aldri.
+        if (window.IpwBridge && window.IpwBridge.reset) window.IpwBridge.reset();
         return nbEnsureSession(true);
       },
       // Nytt dokument (eksempler, share/GitHub, dyplenker) → gammel sesjon er
       // ugyldig (fase B1 final-review F1): kalt fra Cells.contentLoaded() FØR
       // rendring, slik at en celle kjørt i dokument B aldri kan gjenbruke
       // e/_g/loads booted for dokument A.
-      invalidate: function () { nbSetSessionLive(false); },
+      invalidate: function () {
+        nbSetSessionLive(false);
+        // Samme ipywidgets-opprydding som restart() over (dokumentbytte
+        // gjør comm-ene like døde som en restart gjør).
+        if (window.IpwBridge && window.IpwBridge.reset) window.IpwBridge.reset();
+      },
       isLive: function () { return nbSessionLive; },
       // Klemmer til de fire kjøretidene notatbok-sesjonen faktisk kjenner
       // (status-chips, Task 5) — en ukjent/fremtidig modusverdi gir null
@@ -9188,6 +9340,17 @@ async def _m2py_run_segment(_seg_json):
         if (/^\s*(?:import|from)\s+ui\b/m.test(effectiveScript)) {
           try { await __ensureUi(py); }
           catch (e) { console.warn('ui-modul kunne ikke lastes:', e); }
+        }
+        // ipywidgets likeens (spec 2 W3, Task 2) — samme dokument-brede
+        // regex-vakt som preRun (~3170), av samme B1-grunn som dash/ui over:
+        // per-celle-stien kaller ALDRI preRun, så uten denne gaten ville et
+        // ferskt session-boot + ▶ på en enkelt ipywidgets-celle feilet med
+        // ModuleNotFoundError: ipywidgets. Feiler gracefully (console.warn):
+        // en installasjons-/bundle-feil skal ikke abortere kjøringen —
+        // cellen feiler naturlig i sin egen slot ved `import ipywidgets`.
+        if (/^\s*(?:import|from)\s+ipywidgets\b/m.test(effectiveScript)) {
+          try { await __ensureIpywidgets(py, rightStatus); }
+          catch (e) { console.warn('ipywidgets-bro (per-celle):', e); }
         }
         var _displayAll = String(_scriptOpts.display || '').toLowerCase() === 'all';
         // Segmentoppløsning: samme vei som "Kjør alle" (bootNotebookSession),
