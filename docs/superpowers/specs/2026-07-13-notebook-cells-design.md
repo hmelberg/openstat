@@ -274,11 +274,19 @@ run's output rendered into **that cell's slot**. Design:
 - **Phase B1 — DONE 2026-07-14: sessions, per-cell run (python/duckdb
   incremental, microdata replay-through, R captureR), run buttons +
   Shift/Ctrl+Enter, stale tint, session chip, Restart & kjør alle.**
-- **Phase B2 — remaining:** cell toolbar editing operations, skrittvis cell
-  playback, dashboard render-target completion (R dashboard cells per-cell,
-  dash per-slot cleanup), `#options.display=last` for unmarked scripts, R
-  `# use` cross-runtime per-cell; ekte R-sesjonsreset (rm(list=ls()) +
-  DashWebR.reset) ved Restart.
+- **Phase B2 — remaining:** cell toolbar editing operations, `#options.display=last`
+  for unmarked scripts, R `# use` cross-runtime per-cell. **DONE 2026-07-15
+  (Task 2):** skrittvis cell playback. **DONE 2026-07-15 (Task 3):** ekte
+  R-sesjonsreset (`rm(list=ls(envir=globalenv()))` + `DashWebR.reset()` +
+  `__uiResetR()`) ved "Restart & kjør alle" in r-mode — implemented in
+  `window.mdNotebookSession.restart()`; dash per-slot cleanup (python) —
+  per-cell rerun of a `dash.dashboard(...)` cell now purges `#outputArea`
+  + sweeps the JS-side dash registry before each per-cell run (see Task 3
+  report for the investigation finding that dash renders to the shared,
+  hidden `#outputArea`, not the cell's own `.nb-output` slot — a pre-existing
+  visibility gap left open, noted as a concern, not fixed by this task).
+  R dashboard cells per-cell: see the Task 3 report's decision (kept as a
+  documented limitation — not cheap; see report for reasons).
 
 If phase B stalls, phase A remains a shippable feature.
 

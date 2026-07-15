@@ -472,17 +472,36 @@
     return { node: bar, values: values };
   }
 
-  D.create = function (optsJson) {
-    // Rydd registeret for stale oppforinger fra tidligere kjoringer for samme
-    // rerun-syklus (outputArea.innerHTML = '' fjerner DOM-noder uten a rydde
-    // _dashes/_cards, ellers vokser registeret ubegrenset og gamle Plotly-
-    // instanser lekker).
+  // Rydd registeret for oppforinger hvis DOM-rot er koblet fra (fase B2
+  // Task 3: eksportert som egen D.sweepDisconnected() -- opprinnelig kun
+  // en inline løkke i D.create nedenfor, kalt lazy ved neste dashboard().
+  // Brukt to steder nå: (1) D.create sin egen lazy sweep (uendret, dekker
+  // "vanlig R-/Kjør alle"-scriptet uten dashboard() kjørt etter et med"),
+  // (2) index.html sin per-celle notatbok-kjøring (mdRunNotebookCell)
+  // kaller den EKSPLISITT rett etter å ha tømt #outputArea, FØR cellens
+  // kode kjører -- uten det EKSPLISITTE kallet ville en per-celle-rerun
+  // av en dashboard()-celle som IKKE lager et nytt dashboard denne gangen
+  // (f.eks. redigert bort) latt forrige runs registeroppføring henge igjen
+  // til NESTE gang NOEN celle i dokumentet lager et dashboard (om noen
+  // gang) -- se kommentaren ved kallstedet i index.html for hele analysen
+  // (browser-verifisert: uten purge+sweep vokser #outputArea sine
+  // `.dash`-noder ÉN per per-celle-rerun, siden roten aldri kobles fra).
+  function sweepDisconnected() {
     for (var did in _dashes) {
       if (_dashes[did].root && !_dashes[did].root.isConnected) delete _dashes[did];
     }
     for (var cid in _cards) {
       if (_cards[cid].node && !_cards[cid].node.isConnected) delete _cards[cid];
     }
+  }
+  D.sweepDisconnected = sweepDisconnected;
+
+  D.create = function (optsJson) {
+    // Rydd registeret for stale oppforinger fra tidligere kjoringer for samme
+    // rerun-syklus (outputArea.innerHTML = '' fjerner DOM-noder uten a rydde
+    // _dashes/_cards, ellers vokser registeret ubegrenset og gamle Plotly-
+    // instanser lekker).
+    sweepDisconnected();
     var opts = JSON.parse(optsJson || '{}');
     var container = document.getElementById('outputArea');
     var root = el('div', 'dash');

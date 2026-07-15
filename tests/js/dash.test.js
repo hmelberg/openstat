@@ -2,6 +2,49 @@ const test = require('node:test');
 const assert = require('node:assert');
 const D = require('../../js/dash.js');
 
+// ---------- fase B2 Task 3: D.sweepDisconnected (DOM-halvdel, minimal stub) ----------
+
+test('sweepDisconnected: fjerner registrerte dashboards straks roten er frakoblet DOM, uten å vente på neste create()', () => {
+  function makeNode() {
+    return {
+      isConnected: true,
+      appendChild: function () {},
+      classList: { add: function () {}, remove: function () {}, toggle: function () {} },
+      style: {},
+      querySelector: function () { return null; }
+    };
+  }
+  var created = []; // kun document.createElement-noder (IKKE containeren fra getElementById)
+  var savedDocument = global.document;
+  global.document = {
+    getElementById: function () { return makeNode(); }, // #outputArea-containeren -- separat objekt, aldri i `created`
+    createElement: function () { var n = makeNode(); created.push(n); return n; },
+    body: makeNode()
+  };
+  try {
+    var id1 = D.create('{}');
+    var root1 = created[0]; // el('div', 'dash') er FØRSTE createElement-kall uten tittel/layout
+    assert.strictEqual(D.isAlive(id1), true);
+    // Simuler det index.html sin per-celle-purge nå gjør FØR en rerun (fase
+    // B2 Task 3): #outputArea tømmes (outputArea.innerHTML = '') uten at et
+    // NYTT dashboard nødvendigvis opprettes samme kjøring — roten kobles fra
+    // DOM-treet, men D.create() (som ville sopet den lazy) kalles kanskje
+    // aldri igjen i denne dokumentets levetid.
+    root1.isConnected = false;
+    assert.strictEqual(D.isAlive(id1), false); // isAlive sjekker isConnected direkte, uavhengig av sweep
+    D.sweepDisconnected();
+    // Selve poenget med en EKSPLISITT sweep (ikke bare stole på isAlive over):
+    // registeroppføringen er nå faktisk BORTE, ikke bare "isConnected: false"
+    // — addCard mot en sopet id kaster (dash-objektet finnes ikke), mot en
+    // kun-frakoblet-men-ikke-sopet id ville addCard stille (og virkningsløst,
+    // Plotly-instanser etc. aldri frigjort) ha skrevet videre inn i det døde
+    // objektet.
+    assert.throws(function () { D.addCard(id1, '{}', null, null); });
+  } finally {
+    global.document = savedDocument;
+  }
+});
+
 test('parseMosaic: enkel 2x2', () => {
   const m = D.parseMosaic('a b\nc d');
   assert.strictEqual(m.error, undefined);

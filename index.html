@@ -9498,6 +9498,37 @@ async def _m2py_run_segment(_seg_json):
           return { error: t('Fant ikke cellens segment i dokumentet (planavvik) — prøv Kjør alle.') };
         }
         var targetSeg = segments[_segIdx];
+        // dash v2 (fase B2 Task 3 — browser-investigert): window.Dash.create()
+        // (js/dash.js, kalt fra pyodide/dash.py sin Dash.__init__) skriver DOM
+        // DIREKTE til #outputArea — HELT UTENOM denne cellens egen .nb-output-
+        // slot (samme forbehold som Brython/MicroPython sin runSelf lenger
+        // oppe, og "Kjør alle" sin egen ubetingede purge rett før segment-
+        // løkka, ~9799). Uten dette ville en per-celle-rerun av en
+        // dashboard()-celle STAPLE en ny <div class="dash"> oppå den forrige
+        // for HVER kjøring: forrige rots DOM-node blir ALDRI frakoblet av
+        // per-celle-stien (ingen outputArea.innerHTML=''-tømming skjedde her
+        // før denne fiksen), så D.create() sin egen lazy `!isConnected`-sweep
+        // aldri fanger den opp — både JS-registeret (_dashes/_cards) og
+        // python-sidens `_live`-proxyliste (pyodide/dash.py sin _reap(), som
+        // kun sjekker isAlive() ved NESTE Dash()-konstruksjon) vokser ett
+        // element per rerun, ubegrenset, helt til brukeren klikker "Kjør
+        // alle" (browser-verifisert: 3 per-celle-reruns av en dashboard()-
+        // celle uten denne fiksen ga 3 `.dash`-noder i #outputArea, ikke 1).
+        // Tømmes UBETINGET (samme idiom som "Kjør alle" — outputArea brukes
+        // aldri til vanlig per-celle tekst-/plott-output, kun dash skriver
+        // direkte dit, så en unødvendig tømming her er alltid virkningsløs
+        // for andre celletyper) + eksplisitt sweep (ikke bare vent på neste
+        // create() — en rerun som IKKE lenger kaller dashboard(), f.eks. etter
+        // redigering, skal likevel rydde forrige runs oppføring NÅ, ikke ved
+        // et vilkårlig FREMTIDIG dashboard()-kall et annet sted i dokumentet).
+        // MERK (kjent, ikke fikset her): #outputArea ligger inni `.container`,
+        // som får `.nb-hidden` mens notatbok-cellevisningen er aktiv — en
+        // python-dashboard() bygget per-celle er derfor teknisk ryddig
+        // (bounded), men usynlig for brukeren i Kolonner/Stablet-visning helt
+        // uavhengig av denne fiksen. Se Task 3-rapporten.
+        purgePlots(outputArea);
+        outputArea.innerHTML = '';
+        if (window.Dash && typeof window.Dash.sweepDisconnected === 'function') window.Dash.sweepDisconnected();
         if (isMicrodataReplay) {
           // ── Kjør fra toppen GJENNOM målcellen (spec §4-unntaket) ──────────
           // Alle segmenter 0..target kjøres i dokumentrekkefølge mot den
