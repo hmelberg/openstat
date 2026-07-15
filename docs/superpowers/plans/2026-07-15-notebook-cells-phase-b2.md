@@ -50,7 +50,7 @@
 **Files:** Modify `index.html`, `js/cells.js`, `js/param-forms.js`, `js/ui.js` (key prefix)
 
 - `#options.display = last`: extractScriptOptions already parses; wire it so an UNMARKED script with the option gets `_nb`-style last-only display (echo follows show_commands) — the exec core supports the flags; the gate today requires Cells.active(); add the option-driven path (small, mirrors the display=all escape).
-- Small fixes: (a) `C.exit()` flushes pending edit debounce first; (b) `#@param [1,2,3]` numeric options — parse per-item literals, write back unquoted numerics (tests); (c) `?v=` cache-busting on brython/micropython engine script tags (match the repo's existing versioning param convention); (d) `cellKeyAt` id-prefix `'#'` + adjust consumers/tests.
+- Small fixes: (0) slett død kode `splitMicrodataExplainSections` + `buildForklarFlatWork` i index.html (null kallsteder, bekreftet i B2 T2-review); (a) `C.exit()` flushes pending edit debounce first; (b) `#@param [1,2,3]` numeric options — parse per-item literals, write back unquoted numerics (tests); (c) `?v=` cache-busting on brython/micropython engine script tags (match the repo's existing versioning param convention); (d) `cellKeyAt` id-prefix `'#'` + adjust consumers/tests.
 - [ ] Tests for each; suites green.
 - [ ] Commit `fix: B2-småfikser — display=last for umarkerte, exit-flush, numeriske #@param-options, cache-busting, nøkkelprefiks`.
 
