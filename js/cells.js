@@ -681,6 +681,10 @@
         NB.root.classList.remove('nb-layout-columns', 'nb-layout-stacked', 'nb-layout-output');
         NB.root.classList.add('nb-layout-' + layout);
         if (global.refreshPlotlyAfterLayout) global.refreshPlotlyAfterLayout();
+        // W-issue 1 fiks: kolonne↔stablet endrer bredden .nb-src bryter
+        // teksten mot (to kolonner vs. full bredde), så linjetallet — og
+        // dermed nødvendig høyde — må regnes om for hver celle på nytt.
+        autoSizeAll();
       }
     };
 
@@ -726,6 +730,12 @@
       // løpende synkroniseringen ellers skjer via setRunningUi (runCell) og
       // clearAllStale (beginRun), ikke via en ny poll-løkke.
       setNbButtonsDisabled(!!(global.mdIsScriptRunning && global.mdIsScriptRunning()));
+      // W-issue 1 fiks: samlet autoSize-pass HELT på slutten av render(), når
+      // NB.root garantert er vedlagt DOM-treet og synlig (C.enter setter
+      // NB.root.hidden = false FØR render() kalles, se over) — se
+      // autoSizeAll for hvorfor det tidligere per-celle rAF-kallet i
+      // cellNode ikke var pålitelig ved (re-)inngang.
+      autoSizeAll();
     }
 
     function cellNode(c, idx) {
@@ -784,7 +794,9 @@
       }
       wrap.appendChild(input);
       wrap.appendChild(out);
-      requestAnimationFrame(function () { autoSize(ta); });
+      // (Ingen per-celle rAF-autoSize her lenger — W-issue 1 fiks: se
+      // autoSizeAll, kalt samlet fra render() sin hale i stedet, ETTER at
+      // .nb-root faktisk er synlig/i DOM-treet.)
       // Direkte DOM-referanser for enkelt-celle-kjøring (Task 2): runCell(idx)
       // vet allerede nøyaktig hvilken celle den kjører, så et querySelector-
       // oppslag mot NB.root (som beginRun/sinkForSegment bruker for segment-
@@ -1056,9 +1068,44 @@
       if (NB.activeFlag && NB.root) render();
     };
 
+    // W-issue 1 fiks: klem inline-høyden til samme tak som CSS-en (.nb-src
+    // max-height, app.css) bruker. CSS-en alene ville uansett klemt visningen
+    // (max-height vinner alltid over en inline height-verdi), men vi klemmer
+    // OGSÅ her i JS slik at vi aldri skriver en urimelig stor inline height
+    // (unødvendig reflow-kostnad for en 200-linjers celle vi vet blir klippet
+    // ned igjen av CSS-en likevel). Holdes i sync med .nb-src { max-height }.
+    var NB_SRC_MAX_PX = 420;
+
     function autoSize(ta) {
+      if (!ta) return;
       ta.style.height = 'auto';
-      ta.style.height = (ta.scrollHeight + 2) + 'px';
+      var h = Math.min(ta.scrollHeight + 2, NB_SRC_MAX_PX);
+      ta.style.height = h + 'px';
+    }
+
+    // Kjør autoSize over ALLE celletekstfelt i én omgang (W-issue 1 fiks).
+    // Erstatter en tidligere per-celle rAF-kall ved cellNode-bygging: et
+    // enkelt-celle-kall som fyrer FØR .nb-root faktisk er lagt ut/synlig
+    // (skjult container midt i enter(), fonter ikke ferdig lastet, eller
+    // display:none akkurat idet rAF-en kjører) leser scrollHeight som 0/feil
+    // — resultatet var en for lav tekstboks med indre scroll i stedet for å
+    // vise hele cellens kode. Kalles i stedet FRA HALEN av render()/enter()
+    // (NB.root er da allerede satt synlig og satt inn i DOM-treet, se
+    // C.enter over) og fra setLayout (kolonne↔stablet endrer bredden
+    // teksten brytes mot, så linjetallet — og dermed høyden — må regnes om).
+    // To nøstede rAF-lag: én ekstra frame etter innsetting fanger opp
+    // tilfeller der layout/fonter fortsatt ikke er helt klare i den aller
+    // første (samme forsiktighet som spesifikasjonen ber om).
+    function autoSizeAllNow() {
+      for (var i = 0; i < NB.cells.length; i++) {
+        if (NB.cells[i]._ta) autoSize(NB.cells[i]._ta);
+      }
+    }
+    function autoSizeAll() {
+      requestAnimationFrame(function () {
+        autoSizeAllNow();
+        requestAnimationFrame(autoSizeAllNow);
+      });
     }
 
     // Fase B1 Task 5: Shift+Enter = kjør + hopp til NESTE kode-celle (ingen

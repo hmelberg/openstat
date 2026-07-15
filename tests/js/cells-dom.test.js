@@ -1669,3 +1669,56 @@ test('exit({raw:true}) flusher en ventende redigeringsdebounce synkront FØR byt
     'exit() skal flushe debouncen synkront FØR Rå tekst-bytte — ikke droppe redigeringen');
   assert.strictEqual(C.active(), false);
 });
+
+// ---- autoSize (W-issue 1-fiks: .nb-src skal vise hele cellen opp til et
+// tak, ikke en fastlåst 1.6em-boks) -----------------------------------------
+// autoSize() selv er ikke eksportert (DOM-intern hjelpefunksjon), men den
+// kalles SYNKRONT fra tekstfeltets 'input'-lytter (cellNode, uavhengig av
+// rAF-samlepasset autoSizeAll kaller ved render()/setLayout sin hale) — så
+// den kan observeres her ved å dispatch'e et 'input'-event og lese
+// ta.style.height etterpå. FakeEl har ingen ekte layout, så scrollHeight
+// settes manuelt for å simulere en kort vs. en lang (40+ linjers) celle.
+test('autoSize: under taket vokser tekstfeltet fritt (scrollHeight + 2px), ingen klemming', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 1\n';
+  C.init('python');
+  const { ta } = cellParts(containerEl, 0);
+
+  ta.scrollHeight = 40; // simulerer en kort, veldefinert celle
+  ta.dispatchEvent({ type: 'input' });
+
+  assert.strictEqual(ta.style.height, '42px',
+    'under taket: inline-høyden er uklemt (scrollHeight + 2), ikke fastlåst på en gammel minihøyde');
+});
+
+test('autoSize: over taket klemmes inline-høyden til 420px (holdes i sync med .nb-src max-height i app.css)', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 1\n';
+  C.init('python');
+  const { ta } = cellParts(containerEl, 0);
+
+  // Simulerer en 40+ linjers celle: scrollHeight LANGT over taket.
+  ta.scrollHeight = 5000;
+  ta.dispatchEvent({ type: 'input' });
+
+  assert.strictEqual(ta.style.height, '420px',
+    'over taket: inline-høyden klemmes til 420px (ikke 5002px) — CSS-en (.nb-src ' +
+    'max-height: 420px; overflow-y: auto) tar seg av selve klippingen/indre scroll ' +
+    'i en ekte nettleser, men JS-en skal likevel aldri skrive en urimelig stor verdi');
+});
+
+test('autoSize: klemmingen er ikke fastlåst — en celle som krymper under taket igjen vokser/krymper fritt', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 1\n';
+  C.init('python');
+  const { ta } = cellParts(containerEl, 0);
+
+  ta.scrollHeight = 5000;
+  ta.dispatchEvent({ type: 'input' });
+  assert.strictEqual(ta.style.height, '420px');
+
+  ta.scrollHeight = 100; // brukeren slettet det meste av innholdet igjen
+  ta.dispatchEvent({ type: 'input' });
+  assert.strictEqual(ta.style.height, '102px',
+    'krymper fritt igjen når scrollHeight faller under taket — ingen fastlåst gammel høyde');
+});
