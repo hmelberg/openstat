@@ -139,7 +139,19 @@
         warnings.push('kunne ikke tolke options-array i @param-metadata: ' + arrText);
         return { meta: null, warnings: warnings, fatal: true };
       }
+      // B2 Task 4-fiks: bevar per-element-typen fra selve JSON-literalet
+      // (looseJsonParse gir ekte tall for numeriske elementer, IKKE bare
+      // strenger) — options-arrayet må fortsatt være strenger (dropdown-
+      // <option>/<datalist> DOM-verdier er alltid strenger), men
+      // optionTypes parallellarrayet husker om HVERT element opprinnelig var
+      // et tall. writeValue slår denne opp per commit for å formatere den
+      // VALGTE verdien tilbake unquoted når den var numerisk — et blandet
+      // array som [1, "to", 3] beholder dermed korrekt kvotering PER
+      // element (kun "to" kvoteres), i stedet for at HELE arrayet tvinges
+      // til én global type (meta.type forblir 'string' — det er kun
+      // literal-FORMATERINGEN ved skriving som nå er per-element-bevisst).
       meta.options = arr.map(function (x) { return String(x); });
+      meta.optionTypes = arr.map(function (x) { return typeof x === 'number' ? 'number' : 'string'; });
       meta.type = 'string';
       remainder = remainder.slice(closeArr + 1).trim();
     }
@@ -329,7 +341,23 @@
       console.warn('ParamForms.writeValue: linje ' + entry.lineIdx + ' matcher ikke lenger #@param-mønsteret');
       return cellSource;
     }
-    var formatted = ParamForms.formatLiteral(newValue, entry.meta.type, lang);
+    // B2 Task 4-fiks: bart array-literal (#@param [1, 2, 3]) — bruk den
+    // VALGTE opsjonens EGEN type (meta.optionTypes, satt i parseMetaText),
+    // ikke den globale entry.meta.type ('string', kun der for å velge
+    // dropdown-kontrollen i _BUILDERS). Uten dette ville en numerisk opsjon
+    // som "2" alltid blitt formatert som strengen 'string' → skrevet som
+    // det kvoterte literalet '2' i stedet for det numeriske literalet 2.
+    // Et blandet array ([1, "to", 3]) er dermed korrekt per-element: kun
+    // strengopsjonene kvoteres, tallene skrives unquoted. Uendret
+    // (entry.meta.type brukes som før) når entryen ikke har optionTypes —
+    // dvs. objekt-formen (#@param {type:"...", options:[...]}), der
+    // brukeren allerede har satt en eksplisitt type for HELE feltet.
+    var effType = entry.meta.type;
+    if (entry.meta.options && entry.meta.optionTypes) {
+      var _oi = entry.meta.options.indexOf(String(newValue));
+      if (_oi !== -1) effType = entry.meta.optionTypes[_oi];
+    }
+    var formatted = ParamForms.formatLiteral(newValue, effType, lang);
     lines[entry.lineIdx] = m[1] + m[2] + m[3] + m[4] + m[5] + formatted + m[7] + m[8] + cr;
     return lines.join('\n');
   };

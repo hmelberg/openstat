@@ -650,10 +650,15 @@
     C.exit = function (opts) {
       if (opts && opts.raw) NB.rawOverride = true;
       NB.activeFlag = false;
-      // Kansellér en ventende celle-redigerings-debounce: ellers kan den fyre
-      // etter et contentLoaded()→exit og re-serialisere gamle celler over et
-      // ferskt dokument i #scriptInput.
-      if (NB.editTimer) { clearTimeout(NB.editTimer); NB.editTimer = null; }
+      // Flush en ventende celle-redigerings-debounce FØR vi bytter til Rå
+      // tekst (B2 Task 4-fiks, speiler toolbarGate over): en ren clearTimeout
+      // her ville DROPPET siste <250ms med utaste tekst (skrevet, aldri
+      // serialisert) — brukeren ville sett en gammel #scriptInput-tekst i Rå
+      // tekst-visningen. flushPendingEdit() kansellerer timeren OG kjører den
+      // ventende doFlush-lukningen synkront (samme serializeAndSync-vei som
+      // runCell() allerede stoler på), så #scriptInput alltid speiler akkurat
+      // det brukeren nettopp skrev, uansett når exit() kalles.
+      flushPendingEdit();
       if (NB.root) { purge(NB.root); NB.root.hidden = true; }
       var container = document.querySelector('.container');
       if (container) container.classList.remove('nb-hidden');
@@ -1347,9 +1352,20 @@
     // nøkler på indeksen (ingen stabilitetsgaranti utover det, som før).
     // Samme "levende tilstand"-antakelse som cellIndexById/cellElementAt:
     // leser NB.cells direkte, ingen cache.
+    //
+    // '#'-prefiks (B2 Task 4-fiks): en id-tagget nøkkel returneres som
+    // '#' + id, IKKE den rå id-strengen — uten dette kunne en celle med
+    // f.eks. attrs.id === "0" kollidere med den indeks-baserte nøkkelen til
+    // en helt annen (id-løs) celle på råindeks 0 (begge ville vært strengen
+    // "0" i _values/_controls). '#' er ikke et gyldig ledende tegn i en
+    // #%%-header sin id=…-verdi (samme identifikator-regex som parseCells
+    // bruker), så id-grenen og indeks-grenen kan aldri produsere samme
+    // streng. Alle forbrukere (js/ui.js sin _cellKeyAt/valuesForCell/
+    // controlKey) behandler nøkkelen som en opak streng — ingen strukturell
+    // parsing av innholdet — så prefikset krever ingen endring der.
     C.cellKeyAt = function (idx) {
       var c = NB.cells[idx];
-      return (c && c.attrs && c.attrs.id) ? c.attrs.id : String(idx);
+      return (c && c.attrs && c.attrs.id) ? ('#' + c.attrs.id) : String(idx);
     };
 
     // Visningspolicy per segment (§4 "Display policy" i spec): brukes av

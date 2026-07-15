@@ -571,8 +571,12 @@
   <script src="js/i18n.js"></script>
   <script src="https://cdn.jsdelivr.net/pyodide/v314.0.2/full/pyodide.js"></script>
   <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-  <script src="js/brython-engine.js"></script>
-  <script src="js/micropython-engine.js"></script>
+  <!-- Cache-busting (B2 Task 4-fiks): samme literal versjonsstreng som
+       app.css sin ?v= over (statiske <script>-tagger kan ikke lese
+       window.M2PY_VERSION — det settes av en senere <script>-blokk, lenge
+       etter at nettleseren allerede har startet disse to lastingene). -->
+  <script src="js/brython-engine.js?v=2026-07-13a"></script>
+  <script src="js/micropython-engine.js?v=2026-07-13a"></script>
   <script src="js/dash.js"></script>
   <script src="js/cells.js"></script>
   <script src="js/ui.js"></script>
@@ -6291,92 +6295,6 @@ json.dumps(out)
     }
 
     /**
-     * To typer steg (rekkefølge = linjerekkefølge i kilden):
-     * 1) //widget … — alltid én egen seksjon med tom kode; blandes aldri med tale/kode-blokker.
-     * 2) Vanlig forklar-blokk: sammenhengende //-linjer (tale, //-, osv.) + påfølgende kode til neste //.
-     * Widget-linjer vises ikke i Forklar-editoren (kun block.code, som er tom for widget-steg).
-     */
-    function splitMicrodataExplainSections(text) {
-      const lines = (text || '').split(/\r?\n/);
-      const sections = [];
-      let i = 0;
-      function isCommentLine(line) {
-        return /^\s*\/\//.test(line);
-      }
-      function pushSpeechOnlySection(items, skip) {
-        if (items.length > 0) {
-          sections.push({
-            code: '',
-            commentItems: items.slice(),
-            codeTrim: '',
-            skipCodeSpeech: !!skip
-          });
-        }
-      }
-      while (i < lines.length) {
-        if (isCommentLine(lines[i])) {
-          const head = parseForklarCommentLine(lines[i]);
-          if (head.type === 'widget' || head.type === 'widgetError') {
-            sections.push({
-              code: '',
-              commentItems: [
-                head.type === 'widget'
-                  ? { type: 'widget', name: head.name, payload: head.payload || {} }
-                  : { type: 'widgetError', message: head.message || 'Ugyldig widget' }
-              ],
-              codeTrim: '',
-              skipCodeSpeech: false
-            });
-            i++;
-            continue;
-          }
-        }
-        const commentItems = [];
-        let skipCodeSpeech = false;
-        while (i < lines.length && isCommentLine(lines[i])) {
-          const parsed = parseForklarCommentLine(lines[i]);
-          if (parsed.type === 'widget' || parsed.type === 'widgetError') {
-            pushSpeechOnlySection(commentItems, skipCodeSpeech);
-            commentItems.length = 0;
-            skipCodeSpeech = false;
-            sections.push({
-              code: '',
-              commentItems: [
-                parsed.type === 'widget'
-                  ? { type: 'widget', name: parsed.name, payload: parsed.payload || {} }
-                  : { type: 'widgetError', message: parsed.message || 'Ugyldig widget' }
-              ],
-              codeTrim: '',
-              skipCodeSpeech: false
-            });
-            i++;
-            continue;
-          }
-          if (parsed.type === 'skipCodeSpeech') {
-            skipCodeSpeech = true;
-            if (parsed.text && String(parsed.text).trim()) {
-              commentItems.push({ silent: true, text: String(parsed.text).trim(), kwargs: {} });
-            }
-          } else if (parsed.type === 'speech') {
-            commentItems.push({ silent: false, text: parsed.text || '', kwargs: parsed.kwargs || {} });
-          }
-          i++;
-        }
-        const codeLines = [];
-        while (i < lines.length && !isCommentLine(lines[i])) {
-          codeLines.push(lines[i]);
-          i++;
-        }
-        const code = codeLines.join('\n');
-        const codeTrim = code.trim();
-        if (commentItems.length > 0 || codeTrim) {
-          sections.push({ code: code, commentItems: commentItems, codeTrim: codeTrim, skipCodeSpeech: skipCodeSpeech });
-        }
-      }
-      return sections;
-    }
-
-    /**
      * Finner en inline //-kommentar på en kodelinje (KODE // KOMMENTAR).
      * Returnerer { code, comment, skipCodeSpeech } der comment === null hvis
      * linjen ikke har en brukbar inline-kommentar. Full-linje-kommentarer
@@ -6595,32 +6513,6 @@ json.dumps(out)
       return blocks;
     }
 
-    function buildForklarFlatWork(segments) {
-      const flat = [];
-      for (let si = 0; si < segments.length; si++) {
-        const seg = segments[si];
-        const kind = seg.kind || 'microdata';
-        const segText = (seg.text || '').trim();
-        if (!segText) continue;
-        if (kind === 'microdata') {
-          const sections = splitMicrodataExplainSections(seg.text);
-          for (let bi = 0; bi < sections.length; bi++) {
-            flat.push({ kind: 'microdata', block: sections[bi] });
-          }
-        } else if (kind === 'pyodide') {
-          const pySections = splitMicrodataExplainSections(seg.text);
-          for (let bi = 0; bi < pySections.length; bi++) {
-            flat.push({ kind: 'pyodide', block: pySections[bi] });
-          }
-        } else if (kind === 'r') {
-          const rSections = splitMicrodataExplainSections(seg.text);
-          for (let bi = 0; bi < rSections.length; bi++) {
-            flat.push({ kind: 'r', block: rSections[bi] });
-          }
-        }
-      }
-      return flat;
-    }
     function countForklarCodeBlocksBefore(flatArr, k) {
       let n = 0;
       for (let i = 0; i < k; i++) {
@@ -9828,6 +9720,13 @@ async def _m2py_run_segment(_seg_json):
         // Eskapeluke (spec §4): '#options.display = all' slår av notatbok-
         // visningspolicyen igjen (vis alt, echo følger _showCmds som vanlig).
         var _displayAll = String(_scriptOpts.display || '').toLowerCase() === 'all';
+        // Motsatt vei (Task 4, B2): '#options.display = last' slår PÅ notatbok-
+        // visningspolicyen (kun siste uttrykk, echo følger _showCmds) for et
+        // UMERKET/ikke-notatbok-script — samme _nb-flagg som den eksplisitte
+        // notatbokcellen bruker (~linje under, _nbActive-grenen), men uten
+        // Cells.active()-porten. Uten direktivet: byte-for-byte uendret (feltet
+        // settes aldri, _m2py_run_segment sin _nb-fallback er identisk til før).
+        var _displayLast = String(_scriptOpts.display || '').toLowerCase() === 'last';
         var _mr = currentMode();
         var _ctx = { py: py, rightStatus: rightStatus, showCommands: _showCmds, profile: _scriptOpts.profile };
         if (_mr.runSelf) { await _mr.runSelf(effectiveScript, _ctx); return; }
@@ -9897,6 +9796,14 @@ async def _m2py_run_segment(_seg_json):
           if (segments[i].kind === 'pyodide' && _nbActive && !_displayAll) {
             var _sd = window.Cells.segmentDisplay(i);
             if (_sd && _sd.explicit) segments[i]._nb = { echo: false, last: true };
+          } else if (segments[i].kind === 'pyodide' && !_nbActive && _displayLast) {
+            // Umerket script (Task 4, B2): '#options.display = last' uten
+            // notatbok-kontekst — samme siste-uttrykk-visning, men echo
+            // følger _showCmds som vanlig (ingen "echo"-nøkkel her, så
+            // _m2py_run_segment sin fallback til _showCmds slår inn), i
+            // motsetning til den eksplisitte notatbokcellen over som alltid
+            // tvinger echo av.
+            segments[i]._nb = { last: true };
           }
           // ui-widgets kjørekontekst (Task 2): Kjør alle sin segmentløkke —
           // celleindeksen kommer fra den justerte planen (Cells.cellIdxForSegment,

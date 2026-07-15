@@ -1211,13 +1211,30 @@ test('cellElementAt: notatbok uten rendret rot (aldri aktiv) → null, ingen kra
 
 // ---- cellKeyAt (ui-widgets W2, Task 1): stabil celle-nøkkel for Ui-verdilageret ----
 
-test('cellKeyAt: celle med id returnerer id-en (ikke indeksen)', () => {
+// B2 Task 4-fiks: id-grenen prefikses med '#' (kollisjonssikkert mot den
+// indeks-baserte fallback-grenen under — se testen lenger ned).
+test('cellKeyAt: celle med id returnerer "#" + id-en (ikke den rå id-en, ikke indeksen)', () => {
   const { C, scriptInputEl } = freshEnv();
   scriptInputEl.value = '#%% python id=first\na = 1\n#%% python id=target\na + 1\n';
   C.init('python');
 
-  assert.strictEqual(C.cellKeyAt(0), 'first');
-  assert.strictEqual(C.cellKeyAt(1), 'target');
+  assert.strictEqual(C.cellKeyAt(0), '#first');
+  assert.strictEqual(C.cellKeyAt(1), '#target');
+});
+
+// Kollisjonsfaren fiksen dekker: uten '#'-prefikset ville en celle med
+// id === "0" produsert NØYAKTIG samme streng ("0") som indeks-fallbacken
+// for en HELT ANNEN, id-løs celle som tilfeldigvis står på råindeks 0 —
+// begge ville delt ÉN oppføring i js/ui.js sitt _values/_controls-lager
+// (verdiene ville lekket mellom de to cellene).
+test('cellKeyAt: en celle med id="0" kolliderer IKKE med indeks-fallbacken til en id-løs celle på råindeks 0', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 1\n#%% python id=0\nb = 2\n';
+  C.init('python');
+
+  assert.strictEqual(C.cellKeyAt(0), '0', 'id-løs celle på indeks 0: indeks-fallback, uendret');
+  assert.strictEqual(C.cellKeyAt(1), '#0', 'id="0"-cellen: prefikset, IKKE den rå "0"');
+  assert.notStrictEqual(C.cellKeyAt(0), C.cellKeyAt(1), 'de to nøklene må aldri kollidere');
 });
 
 test('cellKeyAt: celle uten id faller tilbake til indeksen som streng', () => {
@@ -1244,12 +1261,12 @@ test('cellKeyAt: id-tagget celle beholder SAMME nøkkel etter et strukturelt ind
   const { C, scriptInputEl } = freshEnv();
   scriptInputEl.value = '#%% python id=stable\na = 1\n';
   C.init('python');
-  assert.strictEqual(C.cellKeyAt(0), 'stable');
+  assert.strictEqual(C.cellKeyAt(0), '#stable');
 
   // Sett inn en ny celle FORAN 'stable' — den flytter fra indeks 0 til 1.
   scriptInputEl.value = '#%% python\nb = 2\n#%% python id=stable\na = 1\n';
   C.contentLoaded();
-  assert.strictEqual(C.cellKeyAt(1), 'stable', 'samme id-baserte nøkkel på den nye råindeksen');
+  assert.strictEqual(C.cellKeyAt(1), '#stable', 'samme id-baserte nøkkel på den nye råindeksen');
 });
 
 test('contentLoaded(): kaller window.Ui.resetDocument når Ui er lastet', () => {
@@ -1629,4 +1646,26 @@ test('flush-før-op: en armert redigeringsdebounce anvendes FØR den strukturell
   await new Promise((r) => setTimeout(r, 320));
   assert.strictEqual(scriptInputEl.value, '#%% r\n2\n\n#%% python\nx = 99\n',
     'teksten er stabil etter at debounce-vinduet har passert');
+});
+
+// B2 Task 4-fiks: C.exit() må flushe en ventende redigeringsdebounce FØR den
+// bytter til Rå tekst — mirroring av toolbarGate/runCell sin flush-først-
+// disiplin over. Før fiksen kansellerte exit() bare timeren (clearTimeout)
+// uten å kjøre den ventende doFlush-lukningen, så en redigering skrevet
+// <250ms før klikk på "Rå tekst" ble stille DROPPET fra #scriptInput.
+test('exit({raw:true}) flusher en ventende redigeringsdebounce synkront FØR bytte til Rå tekst', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 2\n';
+  C.init('python');
+  const { ta } = cellParts(containerEl, 0);
+  ta.value = 'a = 10\n';
+  ta.dispatchEvent({ type: 'input' }); // starter 250ms-debouncen (ekte timer)
+  assert.strictEqual(scriptInputEl.value, '#%% python\na = 2\n',
+    'debouncen har ikke rukket å fyre ennå — #scriptInput er fortsatt den gamle teksten');
+
+  C.exit({ raw: true });
+
+  assert.strictEqual(scriptInputEl.value, '#%% python\na = 10\n',
+    'exit() skal flushe debouncen synkront FØR Rå tekst-bytte — ikke droppe redigeringen');
+  assert.strictEqual(C.active(), false);
 });
