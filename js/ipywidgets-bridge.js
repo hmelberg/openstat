@@ -228,12 +228,45 @@
         send: function (data, callbacks, metadata, buffers) {
           if (typeof IpwBridge._toKernel !== 'function') {
             console.warn('IpwBridge: send() før Python-siden er koblet til (_toKernel mangler) — meldingen droppes for ' + commId);
-            return;
+          } else {
+            try {
+              IpwBridge._toKernel(commId, JSON.stringify(data || {}), buffers || []);
+            } catch (e) {
+              console.warn('IpwBridge: send() til kernel feilet for ' + commId, e);
+            }
           }
-          try {
-            IpwBridge._toKernel(commId, JSON.stringify(data || {}), buffers || []);
-          } catch (e) {
-            console.warn('IpwBridge: send() til kernel feilet for ' + commId, e);
+          // Task 3-funn (browser-verifisert): WidgetModel.send_sync_message
+          // (i den pinnede html-manager-bundlen) inkrementerer sin egen
+          // _pending_msgs FØRST ETTER at comm.send() (denne funksjonen)
+          // returnerer (`this.comm.send(...); ...; return this._pending_msgs
+          // ++`) — og bufrer (_msg_buffer) ALLE senere endringer helt til
+          // callbacks.iopub.status mottar execution_state:"idle". En ekte
+          // Jupyter-kjerne sender "idle" naturlig over IOPub-kanalen, alltid
+          // ETTER at kjernens (asynkrone, over en ekte sokkel) svar er
+          // mottatt av frontend — dvs. garantert etter increment-linjen der.
+          // Vi har INGEN slik kanal (synkront funksjonskall) — kalte vi
+          // status-callbacken HER (synkront, inni send()), ville den kjøre
+          // FØR increment-linjen over i send_sync_message rekker å kjøre
+          // (siden send() selv kalles FRA MIDT I den linjen), og dekrementere
+          // en verdi som ennå ikke er inkrementert (0 → -1, fanget opp av
+          // bibliotekets egen "Pending messages < 0"-konsoll-feil og
+          // nullstilt — men nettoresultatet blir likevel _pending_msgs low
+          // hengende på 1, PRESIS samme fastlåsing som uten denne fiksen:
+          // kun den aller første endringen av en gitt widget når noensinne
+          // frem, alt senere bufres stille og går tapt). Utsett derfor til
+          // en mikrotask (Promise.resolve().then) — då har increment-linjen
+          // GARANTERT kjørt (den er synkron kode rett etter comm.send() i
+          // samme funksjon), og dekrementeringen treffer riktig verdi.
+          // Uansett utfall over (en feilet send skal ikke blokkere alle
+          // senere forsøk for godt).
+          if (callbacks && callbacks.iopub && typeof callbacks.iopub.status === 'function') {
+            Promise.resolve().then(function () {
+              try {
+                callbacks.iopub.status({ content: { execution_state: 'idle' } });
+              } catch (e) {
+                console.warn('IpwBridge: syntetisk iopub-status feilet for ' + commId, e);
+              }
+            });
           }
         },
         open: function () {

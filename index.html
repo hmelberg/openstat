@@ -5806,6 +5806,25 @@ json.dumps(out)
               img.alt = 'matplotlib';
               img.src = 'data:image/png;base64,' + String(p.payload).replace(/\s+/g, '');
               frag.appendChild(img);
+            } else if (p.embedType === 'ipywidget') {
+              // W3 Task 3: _repr_mimebundle_ → embed-markør (Python-siden,
+              // _show_one over) → her: en tom slot montert async via
+              // IpwBridge.renderView. Funker likt i notatbok-celler
+              // (window.mdRenderOutput → renderOutput → denne funksjonen) og
+              // i #outputArea for vanlige skript — ingenting cellespesifikt.
+              const div = document.createElement('div');
+              div.className = 'ipw-view';
+              frag.appendChild(div);
+              try {
+                const payload = JSON.parse(p.payload || '{}');
+                if (window.IpwBridge && typeof window.IpwBridge.renderView === 'function') {
+                  window.IpwBridge.renderView(payload.model_id, div);
+                } else {
+                  div.textContent = t('ipywidgets-broen er ikke lastet') + ' (' + payload.model_id + ')';
+                }
+              } catch (e) {
+                div.textContent = t('ipywidgets: kunne ikke lese widget-data');
+              }
             } else {
               const pre = document.createElement('pre');
               pre.className = 'embed-placeholder';
@@ -6793,6 +6812,26 @@ def _show_one(obj):
     import io
     if obj is None:
         return
+    # ipywidgets (W3 Task 3): _repr_mimebundle_ kan returnere enten en dict
+    # eller et (data, metadata)-tuppel — ipywidgets 8.x gir dict, men vi
+    # håndterer begge per IPython-konvensjonen. Finner vi widget-view-mimen,
+    # embedder vi en markør (samme __micro_transform_start_-konvensjon som
+    # png/figure) og hopper over generisk repr — buildOutputNodes (JS) monterer
+    # selve visningen via IpwBridge.renderView(model_id, el). only_last-policyen
+    # er allerede håndtert av kalleren (_exec_pyodide_block kaller _show_one
+    # KUN for kvalifiserende uttrykk), så ingen ekstra gating trengs her.
+    try:
+        if hasattr(obj, "_repr_mimebundle_"):
+            _mb = obj._repr_mimebundle_()
+            if isinstance(_mb, tuple):
+                _mb = _mb[0] if _mb else None
+            if isinstance(_mb, dict) and "application/vnd.jupyter.widget-view+json" in _mb:
+                import json as _json
+                _payload = _mb["application/vnd.jupyter.widget-view+json"]
+                print(_EMBED_S + "ipywidget__" + chr(10) + _json.dumps(_payload) + chr(10) + _EMBED_E)
+                return
+    except Exception:
+        pass
     try:
         import plotly.graph_objects as go
         if isinstance(obj, go.Figure):
