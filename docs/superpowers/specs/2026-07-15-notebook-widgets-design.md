@@ -104,6 +104,14 @@ compatibility.
 R facade: `ui_slider(...)`, `ui_dropdown(...)` etc. emitting the same JSON
 via the existing webR→JS channel (DashWebR precedent).
 
+**Parity is a goal, not a straitjacket** (user decision 2026-07-15): small,
+documented differences between the language facades are acceptable where a
+runtime makes exact parity hard. Concretely for W2: brython/micropython
+MODES have no notebook support (spec 1 §3.3), so their `ui` facades ship as
+API-compatible fallbacks (return defaults in scripts; dash v2 remains the
+interactive story there) until those runners gain cell support; full cell
+widgets land in pyodide (W1, done) and R-mode notebooks (W2).
+
 ### Rendering
 
 Native HTML elements + our own CSS on openstat's existing tokens
