@@ -1389,6 +1389,24 @@
       return C.errorHost();
     };
 
+    // Justert plan UTEN beginRun sine sluk-bivirkninger (ui-widgets, plass-
+    // fase Task 2): R-modus sin "Kjør alle" (runHybridR) kaller beginRun(0)
+    // for å BEVISST tvinge all tekst-/plott-output til den samlede trailing-
+    // sloten (dokumentert R2-tilpasning, se runHybridR sin egen kommentar) —
+    // NB.runSinks/NB.runPlan skal derfor IKKE overskrives med den ekte
+    // justerte planen bare fordi vi også trenger celleindekser for ui-verdi-
+    // injeksjon/registeroppdatering per r-segment. Denne funksjonen gjør
+    // NØYAKTIG det alignPlan-kallet inni beginRun gjør (samme NB.plan/
+    // NB.cells/NB.docMode), men returnerer planen i stedet for å lagre den
+    // noe sted — ingen purge, ingen NB.runSinks/NB.runPlan-mutasjon, ingen
+    // clearAllStale(). Returnerer null når notatboken er inaktiv eller
+    // planen ikke kan justeres mot `kinds` (samme fallback-kontrakt som
+    // beginRun/alignPlan for øvrig).
+    C.alignedPlanForKinds = function (kinds) {
+      if (!NB.activeFlag) return null;
+      return C.alignPlan(NB.plan, NB.cells, NB.docMode, kinds);
+    };
+
     // Segment-indeks → celleindeks i den justerte planen (Task 2, ui-widgets
     // W1): index.html sin "Kjør alle"-segmentløkke trenger cellens indeks
     // (ikke bare sinken) for å bygge kjørekonteksten window.mdUiRunCtx()

@@ -113,6 +113,34 @@ API-compatible fallbacks (return defaults in scripts; dash v2 remains the
 interactive story there) until those runners gain cell support; full cell
 widgets land in pyodide (W1, done) and R-mode notebooks (W2).
 
+**Track-1 parity note (placement phase, Task 2, fixed 2026-07-15):** R's
+"Kjør alle" originally shipped as a documented W2 adaptation — no per-cell
+integration, controls never rendered outside per-cell ▶, `.ui_values` wiped
+before every run so widgets always showed defaults. Browser diagnosis during
+placement Task 2 found this created a real user-facing gap (loading the R
+widgets example and pressing "Kjør alle" showed zero controls, matching a
+user report) and, separately, an actual regression risk: the R segment-kind
+default used by "Kjør alle" (`hasMarkers ? 'microdata' : 'r'`, unchanged
+since before the notebook cell model existed) misclassifies a notebook's
+implicit preamble as `'microdata'` whenever any other cell has an explicit
+marker — true for almost every notebook-format R document — which made
+`Cells.alignPlan` unable to align the plan at all. Both are now fixed:
+"Kjør alle" injects `Ui.valuesForCell`/reads the registry per r-segment
+(same declare-and-inject pattern as per-cell ▶, via a new
+`Cells.alignedPlanForKinds` helper that mirrors `beginRun`'s alignment
+without touching output sinks — output stays on the trailing/combined slot,
+untouched), and the segment-kind default is corrected to the notebook's
+docMode whenever `Cells.active() && UI_R_REGEX` (never for ui-free
+documents, preserving byte-identical output there). Values now persist
+across "Kjør alle" and "Restart & kjør alle" exactly like python's
+JS-side store (`Ui._values`, cleared only by `Ui.resetDocument()` on a new
+document) — full parity with track 1's pull-model semantics, not just the
+declare-and-inject mechanics. forklar's R per-block path is intentionally
+untouched (still shows only `ui_*()` defaults) — its block model has no
+notebook cell index to inject/read against; wiring that up is noted as a
+follow-up, not attempted here (see
+`.superpowers/sdd/task-place-2-report.md`).
+
 ### Rendering
 
 Native HTML elements + our own CSS on openstat's existing tokens
@@ -222,6 +250,12 @@ interactions clear the cell textarea's browser undo-stack (programmatic
   facades confirmed as documented API-compatible fallbacks (defaults, no
   render — real cell support pending those runners' notebook support, see
   Scope notes above); see `.superpowers/sdd/task-w2-5-report.md`.
+  **Superseded (placement phase, Task 2, 2026-07-15):** "Run All
+  defaults-only" is no longer the contract — R "Kjør alle" now renders
+  controls per r-segment and uses stored values exactly like python's Run
+  All, closing the gap where a user loading the R widgets example and
+  pressing "Kjør alle" saw no controls at all. See the track-1 parity note
+  above and `.superpowers/sdd/task-place-2-report.md`.
 - **W3 — ipywidgets bridge v1** (per track 2 scope). **Done 2026-07-15** —
   browser-verified end-to-end (widget render + live `observe`-driven
   updates with no cell rerun, kernel-sync both ways, buffer-and-replay
