@@ -1419,6 +1419,30 @@
       }
       if (typeof global.mdRunNotebookCell !== 'function') return Promise.resolve();
       var out = c._out;
+      // dash mount-to-slot (fase B2 Task 4b, se js/dash.js sin mountContainer()):
+      // en enkelt-celle-rerun kjører KUN mot DENNE cellens .nb-output — ulikt
+      // "Kjør alle" (Cells.beginRun purger ALLE sluk FØR segmentløkka, se over)
+      // tømmes ikke denne sloten før hvert runCell-kall i dag. Hvis forrige
+      // kjøring i AKKURAT denne cellen bygde et dashboard, står den <div
+      // class="dash">-roten fortsatt tilkoblet DOM-en ved rerun-start —
+      // D.create() sin egen lazy sweepDisconnected() ser den derfor som "i
+      // live", og en NY dashboard()-celle ville STAPLE en ny rot oppå den
+      // gamle i samme slot i stedet for å erstatte den (browser-verifisert).
+      // Gated på ".dash"-tilstedeværelse (IKKE et ubetinget purge+clear, slik
+      // mdRunNotebookCell sin #outputArea-tømming er) — #outputArea er aldri
+      // synlig for vanlig tekst-/plott-output, så en ubetinget tømming der er
+      // alltid virkningsløs for andre celletyper; .nb-output er derimot den
+      // SYNLIGE sloten for ALLE celletyper, så en ubetinget tømming her ville
+      // flimret/skjult forrige resultat ved hver rerun av en helt vanlig
+      // (ikke-dashboard) celle. Eksplisitt sweepDisconnected()-kall rett
+      // etter, samme par-begrunnelse som mdRunNotebookCell sin #outputArea-
+      // sweep: uten det ville registeroppføringen henge igjen til et
+      // vilkårlig FREMTIDIG dashboard()-kall et annet sted i dokumentet.
+      if (out && out.querySelector && out.querySelector('.dash')) {
+        purge(out);
+        out.innerHTML = '';
+        if (global.Dash && typeof global.Dash.sweepDisconnected === 'function') global.Dash.sweepDisconnected();
+      }
       var payload = {
         kind: kind,
         text: c.source || '',
@@ -1605,6 +1629,19 @@
         }
       }
       if (!out) return;
+      // dash mount-to-slot (fase B2 Task 4b): D.create() (js/dash.js) kan ha
+      // montert et dashboard DIREKTE inn i `out` MENS scriptet nettopp kjørte
+      // (window.mdUiRunCtx() pekte hit under selve kjøringen) — altså FØR
+      // dette kallet. Uten denne sjekken ville grenene under sitt ubetingede
+      // purge(out); out.innerHTML = '' tømme akkurat den DOM-en dashbordet
+      // nettopp satte inn, idet run-resultatet (tekst/notice/feil) rendres
+      // rett etterpå. Mirror av Brython/MicroPython sin runSelf-sjekk
+      // (index.html ~3218: `outputArea.querySelector('.dash') ? appendOutput
+      // : renderOutput`), her mot cellens EGEN slot i stedet for #outputArea.
+      // R-dashbord mounter aldri hit (uendret webr/dash.R-vei til
+      // #outputArea, se Task B2-3-rapporten) — hasDash er derfor alltid
+      // false for R-celler, res.rparts-grenen er dermed urørt.
+      var hasDash = !!(out.querySelector && out.querySelector('.dash'));
       if (res && res.rparts) {
         if (typeof global.renderROutputParts === 'function') {
           global.renderROutputParts(res.rparts, out);
@@ -1613,15 +1650,22 @@
           out.innerHTML = '';
         }
       } else if (res && res.notice) {
-        purge(out);
-        out.innerHTML = '';
+        if (!hasDash) { purge(out); out.innerHTML = ''; }
         out.appendChild(el('pre', 'nb-notice', res.notice));
       } else if (res && res.error) {
-        purge(out);
-        out.innerHTML = '';
+        if (!hasDash) { purge(out); out.innerHTML = ''; }
         out.appendChild(el('pre', 'error', res.error));
       } else if (typeof global.mdRenderOutput === 'function') {
-        global.mdRenderOutput((res && res.text) || '', out);
+        if (hasDash && typeof global.mdAppendOutput === 'function') {
+          global.mdAppendOutput((res && res.text) || '', out);
+        } else {
+          global.mdRenderOutput((res && res.text) || '', out);
+        }
+      } else if (hasDash) {
+        // Node-testfallback uten global.mdRenderOutput: out.textContent = ''
+        // ville uansett fjernet dash-roten (textContent-setteren tømmer ALLE
+        // barn) — legg til som en tekst-node i stedet for å overskrive.
+        if (res && res.text) out.appendChild(document.createTextNode(res.text));
       } else {
         purge(out);
         out.innerHTML = '';

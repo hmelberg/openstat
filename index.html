@@ -9148,6 +9148,20 @@ async def _m2py_run_segment(_seg_json):
       renderOutput(raw, asHtml, suppress, target);
     };
 
+    // Append-variant (fase B2 Task 4b): js/cells.js sin renderCellResult
+    // bruker denne i stedet for mdRenderOutput når cellens .nb-output-slot
+    // allerede har et montert dashboard (js/dash.js sin D.create(), mount-to-
+    // slot) — mdRenderOutput/renderOutput sin innerHTML=''-tømming ville
+    // ellers revet ned dashbordet idet run-resultatets tekst rendres rett
+    // etter kjøring. Samme underliggende appendOutput() som "Kjør alle" sin
+    // segmentløkke og Brython/MicroPython sin runSelf allerede bruker for
+    // akkurat dette formålet (index.html ~3218/~9783).
+    window.mdAppendOutput = function (raw, target) {
+      var asHtml = document.querySelector('input[name="outputMode"]:checked').value === 'html';
+      var suppress = suppressEmbedded.checked;
+      appendOutput(raw, asHtml, suppress, target);
+    };
+
     // ── Notatbok: per-celle-kjøring mot levende sesjon (fase B1 Task 2/3,
     // plan 2026-07-14) ──────────────────────────────────────────────────────
     // window.mdRunNotebookCell(payload) kjører ÉTT segment (python/duckdb/

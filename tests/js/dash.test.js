@@ -45,6 +45,73 @@ test('sweepDisconnected: fjerner registrerte dashboards straks roten er frakoble
   }
 });
 
+// ---------- fase B2 Task 4b: D.create sin mount-rot (notatbok-slot vs #outputArea) ----------
+
+test('D.create: notatbok-kontekst (mdUiRunCtx) → monterer i cellens .nb-output, IKKE #outputArea', () => {
+  function makeNode(name) {
+    var n = {
+      name: name,
+      isConnected: true,
+      children: [],
+      appendChild: function (child) { n.children.push(child); },
+      classList: { add: function () {}, remove: function () {}, toggle: function () {} },
+      style: {},
+      querySelector: function () { return null; }
+    };
+    return n;
+  }
+  var outputAreaNode = makeNode('outputArea');
+  var slotNode = makeNode('nb-output-slot');
+  var cellEl = { querySelector: function (sel) { return sel === '.nb-output' ? slotNode : null; } };
+  var savedDocument = global.document;
+  var savedCtx = global.mdUiRunCtx;
+  global.document = {
+    getElementById: function () { return outputAreaNode; },
+    createElement: function () { return makeNode('created'); },
+    body: makeNode('body')
+  };
+  global.mdUiRunCtx = function () { return { cellIdx: 0, cellEl: cellEl }; };
+  try {
+    D.create('{}');
+    assert.strictEqual(slotNode.children.length, 1, 'dashboardroten skal monteres i cellens .nb-output');
+    assert.strictEqual(outputAreaNode.children.length, 0, '#outputArea skal IKKE motta roten når ctx finnes');
+  } finally {
+    global.document = savedDocument;
+    global.mdUiRunCtx = savedCtx;
+  }
+});
+
+test('D.create: ingen kjørekontekst → faller tilbake til #outputArea (vanlig skript, uendret)', () => {
+  function makeNode(name) {
+    var n = {
+      name: name,
+      isConnected: true,
+      children: [],
+      appendChild: function (child) { n.children.push(child); },
+      classList: { add: function () {}, remove: function () {}, toggle: function () {} },
+      style: {},
+      querySelector: function () { return null; }
+    };
+    return n;
+  }
+  var outputAreaNode = makeNode('outputArea');
+  var savedDocument = global.document;
+  var savedCtx = global.mdUiRunCtx;
+  global.document = {
+    getElementById: function () { return outputAreaNode; },
+    createElement: function () { return makeNode('created'); },
+    body: makeNode('body')
+  };
+  global.mdUiRunCtx = function () { return null; }; // ingen aktiv notatbok-kjøring
+  try {
+    D.create('{}');
+    assert.strictEqual(outputAreaNode.children.length, 1, 'plain-script-dashbord skal fortsatt gå til #outputArea');
+  } finally {
+    global.document = savedDocument;
+    global.mdUiRunCtx = savedCtx;
+  }
+});
+
 test('parseMosaic: enkel 2x2', () => {
   const m = D.parseMosaic('a b\nc d');
   assert.strictEqual(m.error, undefined);

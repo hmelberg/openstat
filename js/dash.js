@@ -496,14 +496,42 @@
   }
   D.sweepDisconnected = sweepDisconnected;
 
+  // Mount-rot (fase B2 Task 4b): dashbord i en notatbok-celle skal rendre
+  // INN i cellens EGEN .nb-output-slot, ikke det skjulte #outputArea (Task 3-
+  // funnet: #outputArea ligger inni `.container`, som får `.nb-hidden` mens
+  // notatbok-cellevisningen er aktiv -- et dashboard bygget der var derfor
+  // teknisk ryddig, men usynlig for brukeren). window.mdUiRunCtx() (samme
+  // kontekst js/ui.js sin Ui.registerControl leser, satt/nullstilt av de
+  // FIRE kjøre-brakettene i index.html: Kjør alle-segmentløkka,
+  // mdRunNotebookCell sin enkelt-celle-sti, og microdata-replay-løkka) er
+  // ikke-null NØYAKTIG mens en celleadressert kjøring pågår -- inkludert
+  // MENS pyodide/dash.py sitt Dash.__init__ kaller window.Dash.create()
+  // synkront, siden pyodide kjører på hovedtråden. cellEl hentes FERSKT fra
+  // ctx (aldri cachet, samme F6-forbehold som resten av notatbok-kjøringen);
+  // .nb-output er cellens direkte barn (se js/cells.js sin cellNode).
+  // Fallback #outputArea UENDRET (samme node/streng som før) når ctx mangler
+  // -- vanlig skript uten notatbok, eller notatboken er inaktiv. R-dashbord
+  // (webr/dash.R → js/dash-webr.js sin mount()) kaller ALDRI D.create() --
+  // R-dash mounter fortsatt ubetinget til #outputArea via sin egen vei
+  // (bevisst urørt, se Task B2-3-rapporten: en per-celle-trygg R-dash krever
+  // en egen webR-registerrestrukturering, utenfor denne oppgavens omfang).
+  function mountContainer() {
+    var ctx = (typeof global.mdUiRunCtx === 'function') ? global.mdUiRunCtx() : null;
+    var slot = (ctx && ctx.cellEl && typeof ctx.cellEl.querySelector === 'function')
+      ? ctx.cellEl.querySelector('.nb-output') : null;
+    return slot || document.getElementById('outputArea');
+  }
+
   D.create = function (optsJson) {
     // Rydd registeret for stale oppforinger fra tidligere kjoringer for samme
     // rerun-syklus (outputArea.innerHTML = '' fjerner DOM-noder uten a rydde
     // _dashes/_cards, ellers vokser registeret ubegrenset og gamle Plotly-
-    // instanser lekker).
+    // instanser lekker). For notatbok-montering (over): js/cells.js sin
+    // C.runCell purger cellens EGEN slot (gated på ".dash"-tilstedeværelse)
+    // FØR rerun, av samme grunn -- se kommentaren der.
     sweepDisconnected();
     var opts = JSON.parse(optsJson || '{}');
-    var container = document.getElementById('outputArea');
+    var container = mountContainer();
     var root = el('div', 'dash');
     if (opts.title) {
       var head = el('header', 'dash-header');
