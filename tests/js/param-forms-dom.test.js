@@ -549,3 +549,124 @@ test('komposisjon: decorate mottaker/bruker lang=\'r\' for #%% r-celle i python-
   assert.deepStrictEqual(updateCellSourceCalls[0], [2, 'show_details <- TRUE #@param {type:"boolean"}'],
     'R-modus skriver TRUE, ikke True');
 });
+
+// ---- Task 3: per-kontroll plassering (placement:"top"|"bottom"|"left") ---
+
+test('decorate: placement:"left" havner i den DELTE .nb-strips-left (ikke direkte .param-form-barn av .nb-output)', () => {
+  const { ParamForms, cellEl, outEl } = freshEnv();
+  const src = 'x = 3  #@param {type:"slider", min:0, max:10, placement:"left"}';
+  ParamForms.decorate(0, cellEl, src, 'python');
+
+  const leftWrap = outEl.children.find((c) => c.classList.contains('nb-strips-left'));
+  assert.ok(leftWrap, '.nb-strips-left opprettet inni .nb-output');
+  assert.ok(!outEl.children.some((c) => c.classList.contains('param-form')),
+    'ingen .param-form direkte i .nb-output — den lever inni sidekolonnen');
+  const strip = leftWrap.children.find((c) => c.classList.contains('param-form'));
+  assert.ok(strip, '.param-form inni .nb-strips-left');
+  assert.strictEqual(strip.getAttribute('data-pos'), 'left');
+  assert.strictEqual(strip.children.length, 1);
+});
+
+test('decorate: placement:"bottom" oppretter en EGEN .param-form[data-pos=bottom], adskilt fra en top-plassert linje', () => {
+  const { ParamForms, cellEl, outEl } = freshEnv();
+  const src = 'a = 1  #@param {type:"number"}\nb = 2  #@param {type:"number", placement:"bottom"}';
+  ParamForms.decorate(0, cellEl, src, 'python');
+
+  const strips = outEl.children.filter((c) => c.classList.contains('param-form'));
+  assert.strictEqual(strips.length, 2, 'to separate .param-form-noder — én per posisjon');
+  const topStrip = strips.find((s) => s.getAttribute('data-pos') === 'top');
+  const bottomStrip = strips.find((s) => s.getAttribute('data-pos') === 'bottom');
+  assert.ok(topStrip && bottomStrip);
+  assert.strictEqual(topStrip.children.length, 1);
+  assert.strictEqual(bottomStrip.children.length, 1);
+});
+
+test('decorate: uten egen placement følger cellens widgets=left-default (nb-widgets-left på .nb-output)', () => {
+  const { ParamForms, cellEl, outEl } = freshEnv();
+  outEl.className = 'nb-output nb-widgets-left';
+  const src = 'x = 3  #@param {type:"number"}';
+  ParamForms.decorate(0, cellEl, src, 'python');
+
+  const leftWrap = outEl.children.find((c) => c.classList.contains('nb-strips-left'));
+  assert.ok(leftWrap, 'cellens default (left) brukt — linja har ingen egen placement');
+  assert.ok(leftWrap.children.find((c) => c.classList.contains('param-form')));
+});
+
+test('decorate: linjens EGEN placement overstyrer cellens widgets=bottom-default', () => {
+  const { ParamForms, cellEl, outEl } = freshEnv();
+  outEl.className = 'nb-output nb-widgets-bottom';
+  const src = 'x = 3  #@param {type:"number", placement:"top"}';
+  ParamForms.decorate(0, cellEl, src, 'python');
+
+  const strips = outEl.children.filter((c) => c.classList.contains('param-form'));
+  assert.strictEqual(strips.length, 1);
+  assert.strictEqual(strips[0].getAttribute('data-pos'), 'top', 'linje-nivå placement vant over cellens bottom-default');
+});
+
+test('refresh: placement ENDRET på samme linje (top → left) → bygges på nytt, verdien overlever, ingen dobling', () => {
+  const { ParamForms, cellEl, outEl } = freshEnv();
+  const src = 'x = 3  #@param {type:"slider", min:0, max:10}';
+  ParamForms.decorate(0, cellEl, src, 'python');
+  const oldStrip = outEl.children.find((c) => c.classList.contains('param-form') && c.getAttribute('data-pos') === 'top');
+  assert.strictEqual(oldStrip.children.length, 1);
+
+  const newSrc = 'x = 7  #@param {type:"slider", min:0, max:10, placement:"left"}';
+  ParamForms.refresh(0, newSrc);
+
+  // Den gamle top-stripa henger igjen som node (samme cellIdx-lagring), men
+  // skal nå være TOM — ingen duplikat kontroll der.
+  const topStripAfter = outEl.children.find((c) => c.classList.contains('param-form') && c.getAttribute('data-pos') === 'top');
+  assert.ok(!topStripAfter || topStripAfter.children.length === 0, 'ingen kontroll igjen i den gamle top-posisjonen');
+
+  const leftWrap = outEl.children.find((c) => c.classList.contains('nb-strips-left'));
+  assert.ok(leftWrap, 'ny .nb-strips-left opprettet');
+  const leftStrip = leftWrap.children.find((c) => c.classList.contains('param-form'));
+  assert.strictEqual(leftStrip.children.length, 1, 'nøyaktig én kontroll i den nye stripa — ingen dobling');
+  const input = leftStrip.children[0].children[1];
+  assert.strictEqual(Number(input.value), 7, 'verdien (7, fra kildeteksten) overlever plassering-byttet');
+});
+
+test('mixed placements i én celle (topp-slider + venstre-dropdown + bunn-checkbox) → tre containere populert riktig', () => {
+  const { ParamForms, cellEl, outEl } = freshEnv();
+  const src = [
+    'n = 3  #@param {type:"slider", min:0, max:10}',
+    'name = \'a\'  #@param ["a", "b"] {placement:"left"}',
+    'flag = True  #@param {type:"boolean", placement:"bottom"}',
+  ].join('\n');
+  ParamForms.decorate(0, cellEl, src, 'python');
+
+  const topStrip = outEl.children.find((c) => c.classList.contains('param-form') && c.getAttribute('data-pos') === 'top');
+  const bottomStrip = outEl.children.find((c) => c.classList.contains('param-form') && c.getAttribute('data-pos') === 'bottom');
+  const leftWrap = outEl.children.find((c) => c.classList.contains('nb-strips-left'));
+  assert.ok(topStrip && bottomStrip && leftWrap, 'alle tre containere finnes');
+
+  assert.strictEqual(topStrip.children.length, 1);
+  assert.strictEqual(topStrip.children[0].children[1].type, 'range');
+
+  const leftStrip = leftWrap.children.find((c) => c.classList.contains('param-form'));
+  assert.strictEqual(leftStrip.children.length, 1);
+  assert.strictEqual(leftStrip.children[0].children[1].tag, 'select');
+
+  assert.strictEqual(bottomStrip.children.length, 1);
+  assert.strictEqual(bottomStrip.children[0].children[1].type, 'checkbox');
+});
+
+test('sweep: fjerner ALLE #@param-linjer (spredt over topp+bunn+venstre samtidig) → alle tre stripe-containere tømmes/fjernes', () => {
+  const { ParamForms, cellEl, outEl } = freshEnv();
+  const src = [
+    'n = 3  #@param {type:"slider", min:0, max:10}',
+    'name = \'a\'  #@param ["a", "b"] {placement:"left"}',
+    'flag = True  #@param {type:"boolean", placement:"bottom"}',
+  ].join('\n');
+  ParamForms.decorate(0, cellEl, src, 'python');
+  assert.ok(outEl.children.some((c) => c.classList.contains('param-form')));
+  assert.ok(outEl.children.some((c) => c.classList.contains('nb-strips-left')));
+
+  ParamForms.refresh(0, 'n = 3\nname = \'a\'\nflag = True');
+
+  assert.ok(!outEl.children.some((c) => c.classList.contains('param-form')),
+    'ingen .param-form igjen direkte i .nb-output (topp+bunn er borte)');
+  const leftWrap = outEl.children.find((c) => c.classList.contains('nb-strips-left'));
+  assert.ok(!leftWrap || !leftWrap.children.some((c) => c.classList.contains('param-form')),
+    'venstre-kolonnen er også tom (ingen restanse)');
+});

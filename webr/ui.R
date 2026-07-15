@@ -83,13 +83,18 @@
 # ---- offentlig API (samme vokabular som pyodide/ui.py) ----
 
 #' Glidebryter. Fallback (ingen notatbok/verdi ikke injisert): value hvis
-#' gitt, ellers min - samme regel som pyodide/ui.py sin slider().
+#' gitt, ellers min - samme regel som pyodide/ui.py sin slider(). `placement`
+#' (Task 3, per-kontroll plassering: "top"/"bottom"/"left") er en ren
+#' gjennomstrøms-kwarg - valideringen skjer på JS-siden (js/ui.js sin
+#' normalizeSpec); NULL droppes av .ui_register som vanlig og kontrollen
+#' faller da tilbake til cellens widgets=-default.
 ui_slider <- function(min = 0, max = 100, value = NULL, step = 1, label = NULL,
-                      name = NULL, rerun = "self") {
+                      name = NULL, rerun = "self", placement = NULL) {
   key <- .ui_next_key(name)
   default <- if (is.null(value)) min else value
   .ui_register(list(type = "slider", name = key, label = label, min = min,
-                    max = max, step = step, value = default, rerun = rerun))
+                    max = max, step = step, value = default, rerun = rerun,
+                    placement = placement))
   raw <- .ui_get_value(key)
   if (is.null(raw)) return(default)
   as.numeric(raw)
@@ -99,7 +104,7 @@ ui_slider <- function(min = 0, max = 100, value = NULL, step = 1, label = NULL,
 #' options-liste er en programmeringsfeil og skal feile HØYT (samme som
 #' pyodide/ui.py sin ValueError), ikke stille falle tilbake til noe.
 ui_dropdown <- function(options, value = NULL, label = NULL, name = NULL,
-                        rerun = "self") {
+                        rerun = "self", placement = NULL) {
   key <- .ui_next_key(name)
   options <- as.character(options)
   if (length(options) == 0) {
@@ -110,29 +115,32 @@ ui_dropdown <- function(options, value = NULL, label = NULL, name = NULL,
   # meny til skalar - js/ui.js sin normalizeSpec venter alltid et array
   # (samme begrunnelse som webr/dash.R sin dropdown()).
   .ui_register(list(type = "dropdown", name = key, label = label,
-                    options = I(options), value = default, rerun = rerun))
+                    options = I(options), value = default, rerun = rerun,
+                    placement = placement))
   raw <- .ui_get_value(key)
   if (is.null(raw)) return(default)
   as.character(raw)
 }
 
 #' Avkrysningsboks. Fallback: value.
-ui_checkbox <- function(label = NULL, value = FALSE, name = NULL, rerun = "self") {
+ui_checkbox <- function(label = NULL, value = FALSE, name = NULL, rerun = "self",
+                        placement = NULL) {
   key <- .ui_next_key(name)
   default <- isTRUE(value)
   .ui_register(list(type = "checkbox", name = key, label = label,
-                    value = default, rerun = rerun))
+                    value = default, rerun = rerun, placement = placement))
   raw <- .ui_get_value(key)
   if (is.null(raw)) return(default)
   isTRUE(raw)
 }
 
 #' Bryter (samme semantikk som ui_checkbox, annen visning). Fallback: value.
-ui_switch <- function(label = NULL, value = FALSE, name = NULL, rerun = "self") {
+ui_switch <- function(label = NULL, value = FALSE, name = NULL, rerun = "self",
+                      placement = NULL) {
   key <- .ui_next_key(name)
   default <- isTRUE(value)
   .ui_register(list(type = "switch", name = key, label = label,
-                    value = default, rerun = rerun))
+                    value = default, rerun = rerun, placement = placement))
   raw <- .ui_get_value(key)
   if (is.null(raw)) return(default)
   isTRUE(raw)
@@ -141,11 +149,12 @@ ui_switch <- function(label = NULL, value = FALSE, name = NULL, rerun = "self") 
 #' Tallfelt. Fallback: value. min/max/step er valgfrie (i motsetning til
 #' ui_slider, som krever dem) - speiler pyodide/ui.py sin number()-signatur.
 ui_number <- function(value = 0, min = NULL, max = NULL, step = NULL,
-                      label = NULL, name = NULL, rerun = "self") {
+                      label = NULL, name = NULL, rerun = "self", placement = NULL) {
   key <- .ui_next_key(name)
   default <- value
   .ui_register(list(type = "number", name = key, label = label, min = min,
-                    max = max, step = step, value = default, rerun = rerun))
+                    max = max, step = step, value = default, rerun = rerun,
+                    placement = placement))
   raw <- .ui_get_value(key)
   if (is.null(raw)) return(default)
   as.numeric(raw)
@@ -153,11 +162,12 @@ ui_number <- function(value = 0, min = NULL, max = NULL, step = NULL,
 
 #' Tekstfelt. Fallback: as.character(value) - returtypen er alltid character
 #' (speiler pyodide/ui.py sin text()).
-ui_text <- function(value = "", label = NULL, name = NULL, rerun = "self") {
+ui_text <- function(value = "", label = NULL, name = NULL, rerun = "self",
+                    placement = NULL) {
   key <- .ui_next_key(name)
   default <- as.character(value)
   .ui_register(list(type = "text", name = key, label = label,
-                    value = default, rerun = rerun))
+                    value = default, rerun = rerun, placement = placement))
   raw <- .ui_get_value(key)
   if (is.null(raw)) return(default)
   as.character(raw)
@@ -166,9 +176,10 @@ ui_text <- function(value = "", label = NULL, name = NULL, rerun = "self") {
 #' Trykknapp. Returnerer alltid usynlig NULL - selve klikket trigger en
 #' rerun av målcellen (js/ui.js), ikke en verdi å lese ut (speiler
 #' pyodide/ui.py sin button()).
-ui_button <- function(label, rerun = "self", name = NULL) {
+ui_button <- function(label, rerun = "self", name = NULL, placement = NULL) {
   key <- .ui_next_key(name)
-  .ui_register(list(type = "button", name = key, label = label, rerun = rerun))
+  .ui_register(list(type = "button", name = key, label = label, rerun = rerun,
+                    placement = placement))
   invisible(NULL)
 }
 

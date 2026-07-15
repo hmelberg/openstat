@@ -81,6 +81,24 @@ One JSON control spec, shared with dash v2 (extend `js/dash.js`'s existing
   machinery — widgets require a notebook and reuse B1's sessions untouched.
 - Sliders throttle (~150 ms) before rerunning; buttons rerun on click.
 
+**Per-control placement (placement phase, Task 3, 2026-07-15):** every
+control accepts an optional `placement: "top"|"bottom"|"left"` keyword
+(`ui.slider(1, 10, placement="left")`, same keyword vocabulary in every
+facade including R's `ui_slider(..., placement = "left")`). Precedence:
+**control placement > the cell's `widgets=top|bottom|left` attribute >
+default `top`** — controls without their own `placement` simply follow the
+cell's attribute (or `top` if that is absent too), so existing notebooks are
+byte-identical in appearance. A single cell may freely mix all three: e.g. a
+slider left at the default top, a dropdown pinned `placement="left"`, and a
+button pinned `placement="bottom"` all coexist. Mechanically, `.nb-output`
+holds up to three physical anchors per system (`.ui-controls`/`.param-form`
+tagged `data-pos="top"`/`"bottom"`, routed by CSS Grid — see `app.css`'s
+`.nb-output` rules) plus one **shared** `.nb-strips-left` side column that
+both `ui.*` and `#@param` controls stack into when placed left. Changing a
+control's placement between runs re-parents it cleanly (old node removed
+from its old anchor, fresh/moved node in the new one) without losing its
+current value or leaving a stale duplicate behind.
+
 ### Language facades (thin, per runtime)
 
 The Python-family facade (one `ui` module served to pyodide, brython and
@@ -234,6 +252,20 @@ form IS the code) and reruns the cell when `run:"auto"`. Works in every
 runtime because it never touches the runtime: it edits text and reruns. Form
 interactions clear the cell textarea's browser undo-stack (programmatic
 `.value` writes), so the undo control remains independent.
+
+**Per-control placement (placement phase, Task 3, 2026-07-15):** the meta
+object accepts the same `placement: "top"|"bottom"|"left"` keyword as
+track 1 (`x = 3 #@param {type:"slider", placement:"left"}`), with identical
+precedence (control meta > cell `widgets=` attribute > default `top`) and
+the identical physical anchors (per-position `.param-form`/`.ui-controls`,
+shared `.nb-strips-left` column) — see track 1's protocol section above for
+the full mechanics, which are system-agnostic. An unrecognized `placement`
+value warns and is ignored (the line falls back to the cell's default),
+matching the grammar's existing "unknown key → warn, don't fail the line"
+convention. Changing `placement` on a line is treated as a structural
+change (like changing its `type`): the form rebuilds so the control lands
+cleanly in its new anchor, reading its current value fresh from the
+(already up to date) source text — no value loss, no duplicate node.
 
 ## Phasing
 

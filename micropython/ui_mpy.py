@@ -112,7 +112,13 @@ def _spec(type_, **kwargs):
     """type + gitte kwargs, None-verdier droppes (matcher js/ui.js sin
     normalizeSpec, som selv fyller inn defaults for det som mangler).
     Numeriske kwargs (min/max/value/step) koerseres via _scalar, slik at
-    f.eks. `max=df['x'].max()` (numpy-skalar) overlever json.dumps."""
+    f.eks. `max=df['x'].max()` (numpy-skalar) overlever json.dumps.
+
+    placement (Task 3, per-kontroll plassering) er en ren gjennomstrøms-
+    kwarg her - selve valideringen ("top"/"bottom"/"left", ellers advarsel +
+    ignorert) skjer på JS-siden (js/ui.js sin normalizeSpec), akkurat som
+    rerun allerede er. None (ikke gitt) droppes av løkka under som vanlig,
+    og kontrollen faller da tilbake til cellens widgets=-default."""
     spec = {"type": type_}
     for k, v in kwargs.items():
         if k in ("min", "max", "value", "step"):
@@ -131,70 +137,70 @@ def _num(value):
     return int(f) if f.is_integer() else f
 
 
-def slider(min=0, max=100, *, value=None, step=1, label=None, name=None, rerun='self'):
+def slider(min=0, max=100, *, value=None, step=1, label=None, name=None, rerun='self', placement=None):
     """Glidebryter. Fallback (ingen notatbok-støtte): value hvis gitt, ellers min."""
     spec = _spec("slider", min=min, max=max, value=value, step=step,
-                 label=label, name=name, rerun=rerun)
+                 label=label, name=name, rerun=rerun, placement=placement)
     result = _register(spec)
     if result is None:
         return _scalar(value) if value is not None else _scalar(min)
     return _num(result)
 
 
-def dropdown(options, *, value=None, label=None, name=None, rerun='self'):
+def dropdown(options, *, value=None, label=None, name=None, rerun='self', placement=None):
     """Nedtrekksmeny. Fallback: value hvis gitt, ellers første valg."""
     options = list(options)
     if not options:
         raise ValueError("ui.dropdown: options kan ikke være en tom liste.")
     spec = _spec("dropdown", options=[str(o) for o in options], value=value,
-                 label=label, name=name, rerun=rerun)
+                 label=label, name=name, rerun=rerun, placement=placement)
     result = _register(spec)
     if result is None:
         return str(value) if value is not None else str(options[0])
     return str(result)
 
 
-def checkbox(label=None, *, value=False, name=None, rerun='self'):
+def checkbox(label=None, *, value=False, name=None, rerun='self', placement=None):
     """Avkrysningsboks. Fallback: value."""
-    spec = _spec("checkbox", value=bool(value), label=label, name=name, rerun=rerun)
+    spec = _spec("checkbox", value=bool(value), label=label, name=name, rerun=rerun, placement=placement)
     result = _register(spec)
     if result is None:
         return bool(value)
     return bool(result)
 
 
-def switch(label=None, *, value=False, name=None, rerun='self'):
+def switch(label=None, *, value=False, name=None, rerun='self', placement=None):
     """Bryter (samme semantikk som checkbox, annen visning). Fallback: value."""
-    spec = _spec("switch", value=bool(value), label=label, name=name, rerun=rerun)
+    spec = _spec("switch", value=bool(value), label=label, name=name, rerun=rerun, placement=placement)
     result = _register(spec)
     if result is None:
         return bool(value)
     return bool(result)
 
 
-def number(value=0, *, min=None, max=None, step=None, label=None, name=None, rerun='self'):
+def number(value=0, *, min=None, max=None, step=None, label=None, name=None, rerun='self', placement=None):
     """Tallfelt. Fallback: value."""
     spec = _spec("number", value=value, min=min, max=max, step=step,
-                 label=label, name=name, rerun=rerun)
+                 label=label, name=name, rerun=rerun, placement=placement)
     result = _register(spec)
     if result is None:
         return _scalar(value)
     return _num(result)
 
 
-def text(value='', *, label=None, name=None, rerun='self'):
+def text(value='', *, label=None, name=None, rerun='self', placement=None):
     """Tekstfelt. Fallback: str(value) - returtypen er alltid str
     (speiler dash.py sin textfield(default=str(default)))."""
-    spec = _spec("text", value=str(value), label=label, name=name, rerun=rerun)
+    spec = _spec("text", value=str(value), label=label, name=name, rerun=rerun, placement=placement)
     result = _register(spec)
     if result is None:
         return str(value)
     return str(result)
 
 
-def button(label, *, rerun='self', name=None):
+def button(label, *, rerun='self', name=None, placement=None):
     """Trykknapp. Returnerer alltid None - selve klikket trigger en rerun
     av målcellen (js/ui.js), ikke en verdi å lese ut."""
-    spec = _spec("button", label=label, name=name, rerun=rerun)
+    spec = _spec("button", label=label, name=name, rerun=rerun, placement=placement)
     _register(spec)
     return None

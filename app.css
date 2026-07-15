@@ -1128,25 +1128,54 @@
   border-radius: 4px; background: var(--bg-code); color: inherit;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px;
   line-height: 1.45; padding: 6px 8px; box-sizing: border-box; }
-/* Widget-plassering-fasen: .nb-output er en WRAPPER (js/cells.js sin
-   cellNode) som kan holde .param-form/.ui-controls-striper FØR selve
-   .nb-output-body (sluket ALL run-output skriver til/purges via). DOM-
-   rekkefølgen på stripene er alltid param-form → ui-controls → body — kun
-   `order`/flex-direction her styrer om de VISUELT havner over (top,
-   default), under (bottom) eller til venstre (left) for resultatet, se
-   widgets=top|bottom|left (js/cells.js KNOWN_KEYS). */
-.nb-output { display: flex; flex-direction: column; min-width: 0; }
-.nb-output-body { min-width: 0; overflow-x: auto; }
-.nb-output.nb-widgets-top > .param-form,
-.nb-output.nb-widgets-top > .ui-controls { order: 1; }
-.nb-output.nb-widgets-top > .nb-output-body { order: 2; }
-.nb-output.nb-widgets-bottom > .nb-output-body { order: 1; }
-.nb-output.nb-widgets-bottom > .param-form,
-.nb-output.nb-widgets-bottom > .ui-controls { order: 2; }
-.nb-output.nb-widgets-left { flex-direction: row; align-items: flex-start; gap: 10px; }
-.nb-output.nb-widgets-left > .param-form,
-.nb-output.nb-widgets-left > .ui-controls { flex: 0 0 auto; max-width: 240px; order: 1; }
-.nb-output.nb-widgets-left > .nb-output-body { flex: 1 1 auto; min-width: 0; order: 2; }
+/* Per-kontroll plassering-fasen (Task 3): .nb-output er en WRAPPER (js/
+   cells.js sin cellNode) som kan holde OPPTIL fem .param-form/.ui-controls-
+   striper + én venstre-sidekolonne, FØR/ETTER/VED SIDEN AV selve
+   .nb-output-body (sluket ALL run-output skriver til/purges via). Plassering
+   er nå PER KONTROLL (js/ui.js sin `placement`-spec-nøkkel, js/param-forms.js
+   sitt #@param `placement`-meta-felt) — cellens widgets=top|bottom|left
+   (js/cells.js KNOWN_KEYS) er kun DEFAULTEN for kontroller som ikke har sitt
+   eget placement. Én celle kan derfor blande alle tre plasseringer samtidig
+   (topp-slider + venstre-dropdown + bunn-knapp), så visuell plassering kan
+   IKKE lenger styres av én enkelt klasse på selve wrapperen (motstykket til
+   den forrige `nb-widgets-<pos>`-baserte `order`/flex-direction-oppskriften)
+   — hver stripe bærer i stedet sin EGEN posisjon som et `data-pos`-attributt
+   (satt av _ensureStrip/_insertStrip, ALDRI en CSS-klasse — se .ui-controls/
+   .param-form sine :empty-regler under, som fortsatt må gjelde uendret
+   uansett posisjon), og CSS Grid ruter hver til riktig navngitt område.
+   `.nb-output` sin egen `nb-widgets-<pos>`-klasse LEVER VIDERE (satt av
+   cellNode akkurat som før) — den brukes nå KUN som JS-lesbar signal for
+   "cellens default" (js/ui.js _cellDefaultPlacement, js/param-forms.js
+   _cellDefaultPlacement), ikke lenger av CSS-en her.
+   Grid-arealene: "left ptop"/"left utop"/"left body"/"left pbot"/"left ubot"
+   — param-form kommer FØR ui-controls i samme sone (ptop over utop, pbot over
+   ubot), body alltid i midten, venstrekolonnen strekker seg over alle fem
+   radene via at "left" gjentas i alle rad-strengene (CSS Grid sin egen
+   implisitte row-span-regel for et navngitt areal). En rad uten noe
+   tilordnet innhold (f.eks. ingen bunn-plasserte kontroller) auto-krymper
+   til 0 høyde helt som før (ingen wasted space for det vanlige, u-blandede
+   tilfellet). */
+.nb-output {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas: "left ptop" "left utop" "left body" "left pbot" "left ubot";
+  column-gap: 10px; align-items: start; min-width: 0;
+}
+.nb-output-body { grid-area: body; min-width: 0; overflow-x: auto; }
+.param-form[data-pos="top"] { grid-area: ptop; }
+.ui-controls[data-pos="top"] { grid-area: utop; }
+.param-form[data-pos="bottom"] { grid-area: pbot; }
+.ui-controls[data-pos="bottom"] { grid-area: ubot; }
+/* Venstre-sidekolonne (delt mellom BEGGE systemer, T3-designet): én enkelt
+   .nb-strips-left-node okkuperer HELE "left"-arealet (unngår at to
+   samtidige venstre-plasserte striper — param-form OG ui-controls — ville
+   overlappet i samme grid-celle) og stabler sine EGNE param-form/ui-controls-
+   barn internt med vanlig flex-kolonne (DOM-rekkefølgen bestemmer der, ikke
+   grid-area — param-form settes alltid inn FØR ui-controls, se
+   js/param-forms.js/js/ui.js). */
+.nb-strips-left { grid-area: left; display: flex; flex-direction: column;
+  gap: 8px; max-width: 240px; }
+.nb-strips-left:empty { display: none; }
 .nb-output-body.nb-trailing { border-top: 1px dashed var(--border); padding-top: 8px; }
 /* Dokumenterte begrensningsmeldinger (R-celle utenfor R-modus, microdata i
    R-modus, dashboard krever Kjør alle — fase B1 Task 4): rolig info-boks,

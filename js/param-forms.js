@@ -40,6 +40,13 @@
 
   var VALID_TYPES = { string: 1, boolean: 1, number: 1, integer: 1, slider: 1, date: 1, raw: 1 };
 
+  // Gyldige placement-verdier (Task 3, per-kontroll plassering) — samme
+  // vokabular som ui.* sin egen VALID_PLACEMENTS (js/ui.js) og cellens
+  // widgets=top|bottom|left-attributt (js/cells.js sin WIDGETS_POS), men en
+  // EGEN, uavhengig konstant her (denne fila er en fristående, node-testbar
+  // modul uten avhengighet til de to andre).
+  var VALID_PLACEMENTS = { top: 1, bottom: 1, left: 1 };
+
   // ---- tolerant mini-parser for Colabs løse "JSON" ----------------------
 
   // Finn indeksen til den lukkende parentesen som balanserer text[startIdx]
@@ -186,6 +193,16 @@
         else if (key === 'min' || key === 'max' || key === 'step') numKey(key, val);
         else if (key === 'allow-input') meta.allowInput = Boolean(val);
         else if (key === 'run') { if (val === 'auto') meta.runAuto = true; }
+        else if (key === 'placement') {
+          // Per-kontroll plassering (Task 3): gyldig verdi OVERSTYRER
+          // cellens widgets=top|bottom|left-default for DENNE ene
+          // #@param-linja. Ugyldig verdi → advar + IGNORER (meta.placement
+          // forblir udefinert, linja faller da tilbake til cellens
+          // default) — aldri fatalt for hele linja/metadata-objektet.
+          var placementVal = String(val);
+          if (VALID_PLACEMENTS[placementVal]) meta.placement = placementVal;
+          else warnings.push('ugyldig placement i @param-metadata: ' + placementVal);
+        }
         else if (key === 'options') {
           meta.options = Array.isArray(val) ? val.map(String) : meta.options;
         } else {
@@ -419,13 +436,16 @@
     module.exports = ParamForms;
   }
 
-  // ---------- DOM-halvdel (Task 2) ----------
-  // Skjema-stripe-rendring i celler: én `.param-form`-node per celle, satt
-  // inn av Cells sin cellNode (post-build-sømmen, js/cells.js) INNI cellens
-  // `.nb-output`-wrapper (widget-plassering-fasen) — FAST plassering FØR en
-  // evt. `.ui-controls`-stripe (js/ui.js) og alltid FØR `.nb-output-body`,
-  // se _insertStrip under (ParamForms.reorder-hacken fra spec 2 W4 er borte:
-  // rekkefølgen er nå strukturell, ikke noe som reasserteres etter kjøring).
+  // ---------- DOM-halvdel (Task 2; per-kontroll plassering Task 3) ----------
+  // Skjema-stripe-rendring i celler: satt inn av Cells sin cellNode (post-
+  // build-sømmen, js/cells.js) INNI cellens `.nb-output`-wrapper (widget-
+  // plassering-fasen). Fra og med Task 3 er dette OPPTIL TRE `.param-form`-
+  // noder per celle, ikke én — hver #@param-linje sin EFFEKTIVE plassering
+  // (linjens egen `placement`-meta, ellers cellens widgets=-default, se
+  // _entryPlacement/_cellDefaultPlacement) avgjør hvilken av top/bottom/left
+  // den havner i; se _insertStrip under (ParamForms.reorder-hacken fra spec 2
+  // W4 er borte: rekkefølgen er strukturell/CSS-Grid-styrt, ikke noe som
+  // reasserteres etter kjøring).
   // Byggerne her er EGNE, minimale kontroller
   // (planens "B2 dedup: felles builder-modul" — bevisst IKKE gjenbrukt fra
   // js/ui.js/js/dash.js i W4, samme avgrensning som js/ui.js selv dokumenterer
@@ -677,58 +697,140 @@
       return null;
     }
 
-    // Sett `strip` inn i cellens `.nb-output`-wrapper (widget-plassering-
-    // fasen — IKKE lenger `cellEl` selv/dens firstChild) — rett FØR en evt.
-    // allerede tilstedeværende `.ui-controls`-stripe (js/ui.js), ellers rett
-    // FØR `.nb-output-body` (alltid til stede, se js/cells.js sin cellNode).
-    // Dette garanterer DOM-rekkefølgen param-form → ui-controls → body helt
-    // uavhengig av hvilken av de to stripene som oppstår først — ingen
-    // reorder-reassert trengs lenger (ParamForms.reorder er fjernet).
+    // Cellens DEFAULT-plassering (Task 3): lest av widgets=top|bottom|left
+    // sin nb-widgets-<pos>-klasse på .nb-output (satt av js/cells.js sin
+    // cellNode) — brukes KUN når en #@param-linjes EGEN meta.placement
+    // mangler/er ugyldig (parseMetaText har allerede validert den, se
+    // VALID_PLACEMENTS over). 'top' er defaulten når klassen selv mangler.
+    function _cellDefaultPlacement(cellEl) {
+      var outEl = _findChild(cellEl, 'nb-output');
+      if (outEl && outEl.classList) {
+        if (outEl.classList.contains('nb-widgets-left')) return 'left';
+        if (outEl.classList.contains('nb-widgets-bottom')) return 'bottom';
+      }
+      return 'top';
+    }
+
+    // Linja sin EGEN placement OVERSTYRER cellens default (Task 3-designet:
+    // "control-level placement OVERRIDES the cell attr").
+    function _entryPlacement(entry, cellDefault) {
+      var p = entry.meta.placement;
+      return (p === 'top' || p === 'bottom' || p === 'left') ? p : cellDefault;
+    }
+
+    // Venstre-sidekolonnen er DELT mellom param-forms og ui.js (Task 3-
+    // designet: én .nb-strips-left-node per celle, ikke én per system) —
+    // js/ui.js sin egen _ensureStrip finner/oppretter SAMME node via samme
+    // klassenavn, så begge systemers venstre-plasserte kontroller stables i
+    // den ene delte kolonnen.
+    function _ensureLeftWrapper(outEl) {
+      if (!outEl) return null;
+      var wrap = _findChild(outEl, 'nb-strips-left');
+      if (!wrap) {
+        wrap = _el('div', 'nb-strips-left');
+        outEl.appendChild(wrap);
+      }
+      return wrap;
+    }
+
+    // Er `strip` fortsatt en LEVENDE node under DENNE cellEl sin `.nb-output`
+    // (enten direkte, top/bottom, eller inni den delte venstre-kolonnen)?
+    // Brukt av _build for å avgjøre om en TIDLIGERE bygget stripe faktisk
+    // skal fjernes eksplisitt (samme forsiktighets-filosofi som før Task 3 —
+    // en stripe hengende på en allerede orphanet/stale cellEl trenger ingen
+    // eksplisitt opprydding, den forsvinner med resten av det gamle treet).
+    function _stripIsLive(strip, outEl) {
+      if (!strip || !outEl) return false;
+      var p = strip.parentNode;
+      if (p === outEl) return true;
+      if (p && p.classList && p.classList.contains('nb-strips-left') && p.parentNode === outEl) return true;
+      return false;
+    }
+
+    // Sett `strip` (en .param-form-node FOR EN GITT POSISJON `pos`) inn i
+    // cellens `.nb-output`-wrapper. top/bottom: direkte barn av outEl, rett
+    // FØR en evt. allerede tilstedeværende `.ui-controls`-stripe (js/ui.js),
+    // ellers rett FØR `.nb-output-body` (alltid til stede, se js/cells.js
+    // sin cellNode) — samme DOM-rekkefølge-oppskrift for BEGGE posisjoner,
+    // bevisst uendret fra tidligere: visuell plassering er nå CSS Grid sin
+    // jobb (data-pos-attributtet → grid-area, se app.css), ikke DOM-
+    // rekkefølgen, så gjenbruk av «rett FØR body»-oppskriften for en
+    // bunn-stripe også er ufarlig. left: inni den DELTE
+    // `.nb-strips-left`-kolonnen (delt med js/ui.js, se _ensureLeftWrapper).
     // outEl mangler (cellEl har ingen `.nb-output`-barn, f.eks. en avvikende
     // test-stub) → no-op, ingen krasj: stripa forblir da bare en løsrevet
     // node ingen ser, samme «stille forkastet»-filosofi som resten av fila.
-    function _insertStrip(cellEl, strip) {
+    function _insertStrip(cellEl, strip, pos) {
       var outEl = _findChild(cellEl, 'nb-output');
       if (!outEl) return;
+      strip.setAttribute('data-pos', pos);
+      if (pos === 'left') {
+        var wrap = _ensureLeftWrapper(outEl);
+        if (wrap) wrap.appendChild(strip);
+        return;
+      }
       var before = _findChild(outEl, 'ui-controls') || _findChild(outEl, 'nb-output-body');
       if (before) outEl.insertBefore(strip, before);
       else outEl.appendChild(strip);
     }
 
-    // Bygg (eller gjenbygg) skjema-stripa for cellIdx fra bunnen av — kalt av
-    // BÅDE decorate (alltid) og refresh (kun ved strukturell endring, se
-    // under). En eldre stripe (fra en TIDLIGERE _build for SAMME cellIdx,
-    // fortsatt festet til SAMME .nb-output-wrapper) fjernes eksplisitt først
-    // — i den vanlige "cellNode bygde en helt ny cellEl"-flyten er dette en
-    // no-op (den forrige stripa henger på en allerede orphanet cellEl og
-    // trengs ikke ryddes), men gjør funksjonen trygg å kalle to ganger på
-    // rad for samme, fortsatt-tilkoblede cellEl også.
+    // Bygg (eller gjenbygg) skjema-stripene for cellIdx fra bunnen av — kalt
+    // av BÅDE decorate (alltid) og refresh (kun ved strukturell endring, se
+    // under — Task 3: en placement-endring på EN linje er nå også
+    // strukturell, se _sameStructure). Task 3: entries fordeles på OPPTIL TRE
+    // fysiske .param-form-noder (én per posisjon som faktisk brukes) i
+    // stedet for én delt stripe — hver #@param-linjes EFFEKTIVE plassering
+    // (linjens egen meta.placement, ellers cellens widgets=-default)
+    // avgjør hvilken. Eldre striper (fra en TIDLIGERE _build for SAMME
+    // cellIdx, fortsatt festet til SAMME .nb-output-wrapper) fjernes
+    // eksplisitt først — i den vanlige "cellNode bygde en helt ny
+    // cellEl"-flyten er dette en no-op (de forrige stripene henger på en
+    // allerede orphanet cellEl og trengs ikke ryddes), men gjør funksjonen
+    // trygg å kalle to ganger på rad for samme, fortsatt-tilkoblede cellEl
+    // også — inkludert et rent placement-bytte, som ALLTID går via denne
+    // fulle ombyggingen (aldri en DOM-node-flytting i place): currentValue
+    // leses friskt fra kildeteksten uansett, så "no value loss" er
+    // automatisk, og de gamle stripe-nodene fjernes eksplisitt her, så
+    // "no duplicate" er det også.
     function _build(cellIdx, cellEl, source, lang) {
       var outEl = _findChild(cellEl, 'nb-output');
       var prev = _forms[cellIdx];
-      if (prev && prev.strip && outEl && prev.strip.parentNode === outEl) prev.strip.remove();
+      if (prev && prev.strips && outEl) {
+        ['top', 'bottom', 'left'].forEach(function (pos) {
+          var s = prev.strips[pos];
+          if (_stripIsLive(s, outEl)) s.remove();
+        });
+      }
       var entries = ParamForms.parse(source, lang);
       if (!entries.length) {
         _forms[cellIdx] = { cellEl: cellEl, lang: lang, source: source,
-                            entries: [], builtEntries: [], strip: null, controls: [] };
+                            entries: [], builtEntries: [], strips: { top: null, bottom: null, left: null }, controls: [] };
         return;
       }
-      var strip = _el('div', 'param-form');
+      var cellDefault = _cellDefaultPlacement(cellEl);
+      var stripNodes = {};
       var controls = [];
       for (var i = 0; i < entries.length; i++) {
         var entry = entries[i];
+        var pos = _entryPlacement(entry, cellDefault);
+        if (!stripNodes[pos]) stripNodes[pos] = _el('div', 'param-form');
         var value = ParamForms.currentValue(entry, lang);
         var ctrl = _buildEntryControl(cellIdx, entry, value, lang);
-        strip.appendChild(ctrl.row);
+        stripNodes[pos].appendChild(ctrl.row);
+        ctrl.placement = pos;
         controls.push(ctrl);
       }
-      _insertStrip(cellEl, strip);
+      ['top', 'bottom', 'left'].forEach(function (pos) {
+        if (stripNodes[pos]) _insertStrip(cellEl, stripNodes[pos], pos);
+      });
       // entries og builtEntries starter som SAMME liste (bygget nettopp nå);
       // de divergerer først når syncSource oppdaterer entries per tastetrykk
       // mens stripa fortsatt står — refresh sammenlikner alltid mot
       // builtEntries (det kontrollene faktisk ble bygget fra).
       _forms[cellIdx] = { cellEl: cellEl, lang: lang, source: source,
-                          entries: entries, builtEntries: entries, strip: strip, controls: controls };
+                          entries: entries, builtEntries: entries,
+                          strips: { top: stripNodes.top || null, bottom: stripNodes.bottom || null, left: stripNodes.left || null },
+                          controls: controls };
     }
 
     // To entry-lister har "samme struktur" (→ oppdater kontroller i place)
@@ -749,6 +851,13 @@
       for (var i = 0; i < oldEntries.length; i++) {
         var a = oldEntries[i], b = newEntries[i];
         if (a.lineIdx !== b.lineIdx || a.varName !== b.varName || a.meta.type !== b.meta.type) return false;
+        // Task 3: en placement-endring (meta.placement) er STRUKTURELL —
+        // kontrollen må havne i en ANNEN fysisk stripe (evt. den delte
+        // .nb-strips-left-kolonnen), noe kun en full _build (som bygger
+        // hver posisjons-stripe på nytt fra bunnen av) kan garantere skjer
+        // rent (ingen duplikat, ingen verdi-tap — currentValue leses uansett
+        // friskt fra kildeteksten, se _build).
+        if (a.meta.placement !== b.meta.placement) return false;
         if (a.meta.type === 'slider' || a.meta.type === 'number') {
           if (a.meta.min !== b.meta.min || a.meta.max !== b.meta.max || a.meta.step !== b.meta.step) return false;
         }

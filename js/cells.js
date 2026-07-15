@@ -778,19 +778,23 @@
       input.appendChild(ta);
       c._ta = ta;
 
-      // Widget-plassering-fasen: .nb-output er nå en WRAPPER, ikke selve
-      // sluket. Den inneholder (i FAST DOM-rekkefølge, uansett plassering):
-      // .param-form? (ParamForms.decorate, under), .ui-controls? (js/ui.js
-      // sin _ensureStrip, satt inn ved kjøring), og til slutt
+      // Widget-plassering-fasen (Task 3: PER KONTROLL plassering): .nb-output
+      // er en WRAPPER, ikke selve sluket. Den kan holde opptil fem
+      // .param-form/.ui-controls-striper (topp/bunn-par + en delt
+      // .nb-strips-left-sidekolonne, satt inn av js/param-forms.js sin
+      // ParamForms.decorate og js/ui.js sin _ensureStrip — hver stripe
+      // bærer sin EGEN plassering som et `data-pos`-attributt, CSS Grid
+      // (app.css) ruter den til riktig navngitt areal), og til slutt
       // .nb-output-body — SLUKET all kjøre-output/purge/rendring skjer mot
       // (renderCellResult, beginRun, sinkForSegment/errorHost, dash sin
       // mountContainer). Stripene lever DERMED strukturelt utenfor
       // .nb-output-body og overlever enhver output-purge helt uten egen
       // preserve-logikk. widgets=top|bottom|left (default top, se
-      // WIDGETS_POS) er REN CSS: DOM-rekkefølgen over er alltid den samme,
-      // kun `order`/flex-direction (app.css) styrer om stripene havner over,
-      // under eller til venstre for kroppen — js/cells.js, js/ui.js og
-      // js/param-forms.js forblir alle plasserings-agnostiske.
+      // WIDGETS_POS) er nå KUN DEFAULTEN for kontroller uten sin egen
+      // placement — js/ui.js/js/param-forms.js leser denne
+      // nb-widgets-<pos>-klassen av .nb-output for å avgjøre "cellens
+      // default", mens selve visuelle plasseringen styres av data-pos +
+      // CSS Grid (app.css), ikke lenger av en enkelt klasse på wrapperen.
       var out = el('div', 'nb-output');
       var widgetsPos = WIDGETS_POS[c.attrs.widgets] ? c.attrs.widgets : 'top';
       out.classList.add('nb-widgets-' + widgetsPos);

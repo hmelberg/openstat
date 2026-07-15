@@ -253,6 +253,34 @@ test('normalizeSpec: rerun array of ids passthrough', () => {
   assert.deepStrictEqual(res.spec.rerun, ['plot', 'table']);
 });
 
+// ===== placement (Task 3, per-kontroll plassering) =====
+
+test('normalizeSpec: placement absent → spec.placement undefined (kontrollen faller tilbake til cellens default)', () => {
+  const res = Ui.normalizeSpec({ type: 'text' });
+  assert.strictEqual(res.spec.placement, undefined);
+  assert.deepStrictEqual(res.warnings, []);
+});
+
+test('normalizeSpec: placement "top"/"bottom"/"left" passthrough uendret', () => {
+  ['top', 'bottom', 'left'].forEach((pos) => {
+    const res = Ui.normalizeSpec({ type: 'text', placement: pos });
+    assert.strictEqual(res.spec.placement, pos);
+    assert.deepStrictEqual(res.warnings, []);
+  });
+});
+
+test('normalizeSpec: ugyldig placement → advarsel + IGNORERES (spec.placement forblir udefinert, spec ikke nullet)', () => {
+  const res = Ui.normalizeSpec({ type: 'text', placement: 'middle' });
+  assert.ok(res.spec, 'spec skal ikke nulles av en ugyldig placement');
+  assert.strictEqual(res.spec.placement, undefined);
+  assert.ok(res.warnings.some((w) => /ukjent placement/.test(w)));
+});
+
+test('normalizeSpec: placement er en KJENT nøkkel — varsler ikke som "ukjent nøkkel"', () => {
+  const res = Ui.normalizeSpec({ type: 'slider', placement: 'left' });
+  assert.ok(!res.warnings.some((w) => /ukjent nøkkel/.test(w)));
+});
+
 test('normalizeSpec: preserves name and label', () => {
   const res = Ui.normalizeSpec({ type: 'text', name: 'myvar', label: 'Enter text' });
   assert.strictEqual(res.spec.name, 'myvar');

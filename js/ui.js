@@ -31,8 +31,16 @@
     max: 1,
     step: 1,
     options: 1,
-    rerun: 1
+    rerun: 1,
+    placement: 1
   };
+
+  // Gyldige placement-verdier (per-kontroll plassering, Task 3) — samme
+  // vokabular som cellens widgets=top|bottom|left-attributt (js/cells.js sin
+  // WIDGETS_POS), men her en EGEN, uavhengig konstant: js/ui.js er en fri-
+  // stående, node-testbar modul uten avhengighet til js/cells.js sin pure
+  // halvdel (samme duplisering som resten av fila allerede dokumenterer).
+  var VALID_PLACEMENTS = { top: 1, bottom: 1, left: 1 };
 
   /**
    * Ui.normalizeSpec(raw) → {spec, warnings}
@@ -74,6 +82,21 @@
       spec.rerun = raw.rerun;
     } else {
       spec.rerun = 'self';
+    }
+
+    // Håndter placement (Task 3, per-kontroll plassering): gyldig verdi →
+    // OVERSTYRER cellens widgets=top|bottom|left-default for DENNE
+    // kontrollen alene (DOM-halvdelen, _effectivePlacement, løser den
+    // faktiske plasseringen — denne funksjonen validerer bare). Ugyldig
+    // verdi → advar + IGNORER (spec.placement forblir udefinert, kontrollen
+    // faller da tilbake til cellens default), aldri fatalt for hele specen.
+    if (raw.placement !== undefined) {
+      var placementVal = String(raw.placement);
+      if (VALID_PLACEMENTS[placementVal]) {
+        spec.placement = placementVal;
+      } else {
+        warnings.push('ukjent placement: ' + placementVal);
+      }
     }
 
     // Type-spesifikk normalisering
@@ -228,7 +251,9 @@
     // DOM-referansene for gjeldende, LEVENDE kontroller (oppdateres i
     // registerControl, fjernes i endCellRun/resetDocument).
     var _controls = {};
-    // cellIdx → cellens .ui-controls-node (for lazy gjenbruk mellom kall).
+    // cellIdx → { top?, bottom?, left? } — cellens .ui-controls-noder PER
+    // POSISJON (Task 3, per-kontroll plassering; tidligere én enkelt node
+    // per celle) for lazy gjenbruk mellom kall.
     var _strips = {};
     // cellIdx → { ordinal, registered: {controlKey: true}, closed }.
     // Nullstilles EKSPLISITT av Ui.beginCellRun (kalt fra de samme
@@ -490,36 +515,97 @@
       return null;
     }
 
-    // Lag (lazy) eller gjenbruk cellens .ui-controls-stripe. Widget-
-    // plassering-fasen: settes inn INNI cellens `.nb-output`-wrapper (IKKE
-    // lenger `cellEl` sin egen firstChild) — rett FØR `.nb-output-body`,
-    // ellers rett etter en evt. `.param-form` (js/param-forms.js), som
-    // uansett alltid står FØR body. Dette gir DOM-rekkefølgen
-    // param-form → ui-controls → body strukturelt, uten behov for noen
-    // reorder-reassert i ettertid (se js/cells.js sin cellNode og app.css
-    // sin widgets=top|bottom|left `order`-styring — CSS alene avgjør om
-    // stripa VISUELT havner over, under eller til venstre for resultatet).
+    // Cellens DEFAULT-plassering (Task 3): lest av widgets=top|bottom|left
+    // sin nb-widgets-<pos>-klasse på .nb-output (satt av js/cells.js sin
+    // cellNode, uendret av dette tasket) — brukes KUN når en kontrolls EGEN
+    // spec.placement mangler/er ugyldig (normalizeSpec har allerede validert
+    // den, se VALID_PLACEMENTS over). 'top' er defaulten når klassen selv
+    // mangler (cellEl uten .nb-output-barn, f.eks. en avvikende test-stub).
+    function _cellDefaultPlacement(cellEl) {
+      var outEl = _findChild(cellEl, 'nb-output');
+      if (outEl && outEl.classList) {
+        if (outEl.classList.contains('nb-widgets-left')) return 'left';
+        if (outEl.classList.contains('nb-widgets-bottom')) return 'bottom';
+      }
+      return 'top';
+    }
+
+    // Kontroll-nivå OVERSTYRER cellens default (Task 3-designet: "control-
+    // level placement OVERRIDES the cell attr").
+    function _effectivePlacement(spec, cellEl) {
+      if (spec.placement === 'top' || spec.placement === 'bottom' || spec.placement === 'left') {
+        return spec.placement;
+      }
+      return _cellDefaultPlacement(cellEl);
+    }
+
+    // Venstre-sidekolonnen er DELT mellom param-forms og ui.js (Task 3-
+    // designet: én .nb-strips-left-node per celle, ikke én per system) —
+    // js/param-forms.js sin egen _build/_insertStrip finner/oppretter SAMME
+    // node via samme klassenavn, så begge systemers venstre-plasserte
+    // kontroller stables i den ene delte kolonnen.
+    function _ensureLeftWrapper(outEl) {
+      if (!outEl) return null;
+      var wrap = _findChild(outEl, 'nb-strips-left');
+      if (!wrap) {
+        wrap = document.createElement('div');
+        wrap.className = 'nb-strips-left';
+        outEl.appendChild(wrap);
+      }
+      return wrap;
+    }
+
+    // Lag (lazy) eller gjenbruk cellens .ui-controls-stripe FOR EN GITT
+    // POSISJON (Task 3: opptil tre samtidige .ui-controls-noder per celle —
+    // top/bottom/left — i stedet for én). Et data-pos-attributt (satt her)
+    // er det CSS-en (app.css) faktisk ruter visuell plassering på via
+    // grid-area — DOM-rekkefølgen under er derfor bevisst UENDRET fra
+    // tidligere (alltid "rett FØR .nb-output-body" når stripa lever direkte
+    // i .nb-output) for BÅDE top- og bottom-plasserte striper: visuell
+    // plassering er nå CSS Grid sin jobb (data-pos → grid-area), ikke
+    // DOM-rekkefølgen, så å bruke samme insertBefore-oppskrift for en
+    // bunn-stripe også er ufarlig og holder funksjonen enkel og ensartet.
     // Ved en strukturell re-rendring bytter cellEl identitet (F6-mønsteret)
     // — da bygges stripa på nytt (gamle DOM-referanser i _controls for
     // cellen glemmes), men _values (selve verdiene) er dokument-scoped,
-    // ikke DOM-node-scoped, og overlever. outEl mangler (cellEl har ingen
-    // `.nb-output`-barn) → stripa opprettes men forblir en løsrevet node,
-    // samme stille-forkastet-filosofi som resten av modulen.
-    function _ensureStrip(cellEl, cellIdx) {
+    // ikke DOM-node-scoped, og overlever. outEl/container mangler → stripa
+    // opprettes men forblir en løsrevet node, samme stille-forkastet-
+    // filosofi som resten av modulen.
+    function _ensureStrip(cellEl, cellIdx, pos) {
       var outEl = _findChild(cellEl, 'nb-output');
-      var strip = _strips[cellIdx];
-      if (strip && strip.parentNode === outEl) return strip;
-      Object.keys(_controls).forEach(function (key) {
-        if (_controls[key].cellIdx === cellIdx) delete _controls[key];
-      });
+      var container = pos === 'left' ? _ensureLeftWrapper(outEl) : outEl;
+      var byPos = _strips[cellIdx] || (_strips[cellIdx] = {});
+      var strip = byPos[pos];
+      if (strip && strip.parentNode === container) return strip;
+      // Task 3-fiks: sveip-ALT-for-cellIdx-en er kun en STALENESS-signal
+      // (F6 strukturell re-rendring — cellEl byttet identitet, DENNE
+      // posisjonens strip henger fortsatt på det GAMLE, nå frakoblede
+      // outEl) — IKKE "denne posisjonen brukes for aller første gang i
+      // cellens levetid" (byPos[pos] === undefined er det NORMALE, hyppige
+      // tilfellet når en celle blander plasseringer: f.eks. en kontroll
+      // flyttes fra 'top' til 'left', og 'left' sin strip opprettes her for
+      // FØRSTE gang — det er IKKE bevis på at 'top' sine allerede levende
+      // kontroller (en helt annen, fortsatt gyldig stripe) er foreldede).
+      // Sveipes derfor KUN når byPos[pos] FANTES men var stale, aldri når
+      // den bare var fraværende.
+      if (strip) {
+        Object.keys(_controls).forEach(function (key) {
+          if (_controls[key].cellIdx === cellIdx) delete _controls[key];
+        });
+      }
       strip = document.createElement('div');
       strip.className = 'ui-controls';
-      if (outEl) {
-        var body = _findChild(outEl, 'nb-output-body');
-        if (body) outEl.insertBefore(strip, body);
-        else outEl.appendChild(strip);
+      strip.setAttribute('data-pos', pos);
+      if (container) {
+        if (container === outEl) {
+          var body = _findChild(outEl, 'nb-output-body');
+          if (body) outEl.insertBefore(strip, body);
+          else outEl.appendChild(strip);
+        } else {
+          container.appendChild(strip);
+        }
       }
-      _strips[cellIdx] = strip;
+      byPos[pos] = strip;
       return strip;
     }
 
@@ -553,7 +639,11 @@
       var key = Ui.controlKey(cellKey, spec, ordinal);
       run.registered[key] = true;
 
-      var strip = _ensureStrip(cellEl, cellIdx);
+      // Task 3: effektiv plassering FØR stripa hentes — _ensureStrip må vite
+      // hvilken av de (opptil tre) posisjons-stripene denne kontrollen skal
+      // bygges/oppdateres i.
+      var pos = _effectivePlacement(spec, cellEl);
+      var strip = _ensureStrip(cellEl, cellIdx, pos);
       var existing = _controls[key];
 
       // W2-carryover (d): en id-tagget celle kan ha flyttet RÅINDEKS siden
@@ -581,6 +671,16 @@
       // kontroll- og verdi-oppføringen — resten av funksjonen ser da
       // nøyaktig ut som en helt fersk registrering.
       //
+      // Task 3: et PLASSERING-bytte under samme nøkkel (samme kontrolltype,
+      // men effektiv posisjon endret — cellens attributt eller kontrollens
+      // egen placement=) må RE-PARENTES like rent: fjern den gamle wrap-noden
+      // fra sin gamle stripe og bygg fersk i den NYE (strip peker allerede på
+      // riktig posisjon over). Til forskjell fra et type-bytte beholdes
+      // _values[key] HER (samme kontrolltype — verdien er fortsatt gyldig,
+      // kun stedet den vises endret seg; "no value loss" per Task 3-kravet).
+      var typeChanged = existing && existing.type !== spec.type;
+      var placementChanged = existing && !typeChanged && existing.placement !== pos;
+      //
       // W1-carryover (a): FØR fjerning, fang nextSibling — den gamle nodens
       // posisjon i stripa. Den nye kontrollen settes inn PRESIS der (insertBefore
       // i stedet for appendChild lenger ned), slik at et type-bytte midt i en
@@ -588,13 +688,19 @@
       // reinsertBefore er null i det vanlige tilfellet (ingen type-bytte) —
       // insertBefore(node, null) legger til på slutten, akkurat som
       // appendChild ville gjort, så denne ene insertBefore-kallet dekker
-      // begge situasjonene ensartet.
+      // begge situasjonene ensartet. Ved et RENT plassering-bytte er
+      // reinsertBefore alltid null (den nye stripa er en ANNEN node enn den
+      // gamle — "sett inn presis der" gir ingen mening på tvers av striper).
       var reinsertBefore = null;
-      if (existing && existing.type !== spec.type) {
+      if (typeChanged) {
         reinsertBefore = existing.wrap ? existing.wrap.nextSibling : null;
         if (existing.wrap && typeof existing.wrap.remove === 'function') existing.wrap.remove();
         delete _controls[key];
         delete _values[key];
+        existing = undefined;
+      } else if (placementChanged) {
+        if (existing.wrap && typeof existing.wrap.remove === 'function') existing.wrap.remove();
+        delete _controls[key];
         existing = undefined;
       }
 
@@ -602,7 +708,7 @@
         if (!existing) {
           var builtBtn = _buildButton(key, cellIdx, spec);
           strip.insertBefore(builtBtn.wrap, reinsertBefore);
-          _controls[key] = { key: key, cellIdx: cellIdx, spec: spec, wrap: builtBtn.wrap, input: builtBtn.input, type: 'button' };
+          _controls[key] = { key: key, cellIdx: cellIdx, spec: spec, wrap: builtBtn.wrap, input: builtBtn.input, type: 'button', placement: pos };
         } else {
           existing.spec = spec;
           existing.wrap.textContent = spec.label || (typeof t === 'function' ? t('Kjør') : 'Kjør');
@@ -620,7 +726,7 @@
         strip.insertBefore(built.wrap, reinsertBefore);
         _controls[key] = {
           key: key, cellIdx: cellIdx, spec: spec, wrap: built.wrap, input: built.input,
-          labelEl: built.labelEl, readout: built.readout, type: spec.type
+          labelEl: built.labelEl, readout: built.readout, type: spec.type, placement: pos
         };
         value = stored;
       }
@@ -770,9 +876,15 @@
      * guardet fra js/cells.js sin contentLoaded().
      */
     Ui.resetDocument = function () {
+      // Task 3: _strips[cellIdx] er nå { top?, bottom?, left? } — fjern
+      // hver posisjons-node som finnes (i stedet for én enkelt node per
+      // cellIdx som før).
       Object.keys(_strips).forEach(function (cellIdx) {
-        var strip = _strips[cellIdx];
-        if (strip && typeof strip.remove === 'function') strip.remove();
+        var byPos = _strips[cellIdx] || {};
+        Object.keys(byPos).forEach(function (pos) {
+          var strip = byPos[pos];
+          if (strip && typeof strip.remove === 'function') strip.remove();
+        });
       });
       _values = {};
       _controls = {};

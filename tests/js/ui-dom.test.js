@@ -804,3 +804,128 @@ test('_rerunFor: reduce-kjeden har en avsluttende .catch — et rerun-mål som k
   assert.ok(warned.length >= 1, 'console.warn kalt via reduce-kjedens avsluttende .catch');
   assert.strictEqual(unhandled, null, 'ingen unhandled rejection skal boble ut av _rerunFor');
 });
+
+// ---- Task 3: per-kontroll plassering (placement=top|bottom|left) ---------
+
+test('registerControl: placement:"left" havner i den DELTE .nb-strips-left (ikke direkte .ui-controls-barn av .nb-output)', () => {
+  const { Ui, outEl } = freshEnv();
+  Ui.registerControl(JSON.stringify({ type: 'slider', name: 'x', min: 0, max: 10, value: 3, placement: 'left' }));
+  const leftWrap = outEl.children.find((c) => c.classList.contains('nb-strips-left'));
+  assert.ok(leftWrap, '.nb-strips-left opprettet inni .nb-output');
+  assert.ok(!outEl.children.some((c) => c.classList.contains('ui-controls')),
+    'ingen .ui-controls direkte i .nb-output — den lever inni sidekolonnen');
+  const strip = leftWrap.children.find((c) => c.classList.contains('ui-controls'));
+  assert.ok(strip, '.ui-controls inni .nb-strips-left');
+  assert.strictEqual(strip.getAttribute('data-pos'), 'left');
+  assert.strictEqual(strip.children.length, 1);
+});
+
+test('registerControl: placement:"bottom" oppretter en EGEN .ui-controls[data-pos=bottom], adskilt fra en top-stripe', () => {
+  const { Ui, outEl } = freshEnv();
+  Ui.registerControl(JSON.stringify({ type: 'text', name: 'a', value: '1' }));
+  Ui.registerControl(JSON.stringify({ type: 'text', name: 'b', value: '2', placement: 'bottom' }));
+  const strips = outEl.children.filter((c) => c.classList.contains('ui-controls'));
+  assert.strictEqual(strips.length, 2, 'to separate .ui-controls-noder — én per posisjon');
+  const topStrip = strips.find((s) => s.getAttribute('data-pos') === 'top');
+  const bottomStrip = strips.find((s) => s.getAttribute('data-pos') === 'bottom');
+  assert.ok(topStrip && bottomStrip);
+  assert.strictEqual(topStrip.children.length, 1);
+  assert.strictEqual(bottomStrip.children.length, 1);
+});
+
+test('registerControl: uten egen placement følger cellens widgets=left-default (nb-widgets-left på .nb-output)', () => {
+  const { Ui, outEl } = freshEnv();
+  outEl.className = 'nb-output nb-widgets-left';
+  Ui.registerControl(JSON.stringify({ type: 'text', name: 'a', value: '1' }));
+  const leftWrap = outEl.children.find((c) => c.classList.contains('nb-strips-left'));
+  assert.ok(leftWrap, 'cellens default (left) brukt — ingen egen placement på kontrollen');
+  const strip = leftWrap.children.find((c) => c.classList.contains('ui-controls'));
+  assert.ok(strip);
+});
+
+test('registerControl: kontrollens EGEN placement overstyrer cellens widgets=bottom-default', () => {
+  const { Ui, outEl } = freshEnv();
+  outEl.className = 'nb-output nb-widgets-bottom';
+  Ui.registerControl(JSON.stringify({ type: 'text', name: 'a', value: '1', placement: 'top' }));
+  const strips = outEl.children.filter((c) => c.classList.contains('ui-controls'));
+  assert.strictEqual(strips.length, 1);
+  assert.strictEqual(strips[0].getAttribute('data-pos'), 'top', 'kontroll-nivå placement vant over cellens bottom-default');
+});
+
+test('registerControl: placement-bytte under SAMME nøkkel flytter kontrollen til ny stripe, BEHOLDER lagret verdi, ingen dobling', () => {
+  const { Ui, outEl } = freshEnv();
+  Ui.registerControl(JSON.stringify({ type: 'slider', name: 'x', min: 0, max: 10, value: 3 }));
+  // Endre lagret verdi (simulerer et brukerdrag) FØR plassering byttes —
+  // no-verdi-tap-kravet testes best når verdien IKKE lenger er spec-defaulten.
+  let strip = outEl.children.find((c) => c.classList.contains('ui-controls') && c.getAttribute('data-pos') === 'top');
+  const oldInput = strip.children[0].children[1];
+  oldInput.value = '7';
+  oldInput.dispatchEvent({ type: 'input' });
+
+  const res = Ui.registerControl(JSON.stringify({ type: 'slider', name: 'x', min: 0, max: 10, value: 3, placement: 'left' }));
+  assert.strictEqual(JSON.parse(res), 7, 'verdien overlever plassering-byttet (samme kontrolltype)');
+
+  const topStrips = outEl.children.filter((c) => c.classList.contains('ui-controls') && c.getAttribute('data-pos') === 'top');
+  assert.strictEqual(topStrips.length, 1, 'den gamle top-stripa henger igjen (tom nå), men er IKKE fjernet av seg selv');
+  assert.strictEqual(topStrips[0].children.length, 0, 'den gamle wrap-noden er fjernet fra top-stripa — ingen duplikat der');
+
+  const leftWrap = outEl.children.find((c) => c.classList.contains('nb-strips-left'));
+  assert.ok(leftWrap, 'ny .nb-strips-left opprettet');
+  const leftStrip = leftWrap.children.find((c) => c.classList.contains('ui-controls'));
+  assert.ok(leftStrip);
+  assert.strictEqual(leftStrip.children.length, 1, 'nøyaktig én kontroll i den nye stripa — ingen dobling');
+  const newInput = leftStrip.children[0].children[1];
+  assert.strictEqual(Number(newInput.value), 7, 'ny node seedet fra den LAGREDE verdien, ikke spec sin value:3');
+});
+
+test('mixed placements i én celle (topp-slider + venstre-dropdown + bunn-knapp) → tre containere populert riktig', async () => {
+  const { Ui, outEl, runCellCalls } = freshEnv({ cellIdx: 2 });
+  Ui.registerControl(JSON.stringify({ type: 'slider', name: 's', min: 0, max: 10, value: 4 }));
+  Ui.registerControl(JSON.stringify({ type: 'dropdown', name: 'd', options: ['a', 'b'], placement: 'left' }));
+  Ui.registerControl(JSON.stringify({ type: 'button', name: 'btn', label: 'Kjør', placement: 'bottom' }));
+
+  const topStrip = outEl.children.find((c) => c.classList.contains('ui-controls') && c.getAttribute('data-pos') === 'top');
+  const bottomStrip = outEl.children.find((c) => c.classList.contains('ui-controls') && c.getAttribute('data-pos') === 'bottom');
+  const leftWrap = outEl.children.find((c) => c.classList.contains('nb-strips-left'));
+  assert.ok(topStrip && bottomStrip && leftWrap, 'alle tre containere finnes');
+
+  assert.strictEqual(topStrip.children.length, 1, 'sliderens topp-stripe har ett element');
+  assert.strictEqual(topStrip.children[0].children[1].type, 'range');
+
+  const leftStrip = leftWrap.children.find((c) => c.classList.contains('ui-controls'));
+  assert.strictEqual(leftStrip.children.length, 1, 'dropdownen sin venstre-stripe har ett element');
+  assert.strictEqual(leftStrip.children[0].children[1].tag, 'select');
+
+  assert.strictEqual(bottomStrip.children.length, 1, 'knappens bunn-stripe har ett element');
+  const btn = bottomStrip.children[0];
+  assert.strictEqual(btn.tag, 'button');
+  btn.dispatchEvent({ type: 'click' });
+  await Promise.resolve();
+  assert.deepStrictEqual(runCellCalls, [2]);
+});
+
+test('endCellRun: sopper stale kontroller fra ALLE posisjons-containere samtidig (topp + bunn + venstre)', () => {
+  const { Ui, outEl } = freshEnv({ cellIdx: 3 });
+  Ui.beginCellRun(3);
+  Ui.registerControl(JSON.stringify({ type: 'text', name: 'a', value: '1' }));
+  Ui.registerControl(JSON.stringify({ type: 'text', name: 'b', value: '2', placement: 'bottom' }));
+  Ui.registerControl(JSON.stringify({ type: 'text', name: 'c', value: '3', placement: 'left' }));
+  Ui.endCellRun(3);
+
+  const topStrip = outEl.children.find((c) => c.classList.contains('ui-controls') && c.getAttribute('data-pos') === 'top');
+  const bottomStrip = outEl.children.find((c) => c.classList.contains('ui-controls') && c.getAttribute('data-pos') === 'bottom');
+  const leftWrap = outEl.children.find((c) => c.classList.contains('nb-strips-left'));
+  assert.strictEqual(topStrip.children.length, 1);
+  assert.strictEqual(bottomStrip.children.length, 1);
+  assert.strictEqual(leftWrap.children.find((c) => c.classList.contains('ui-controls')).children.length, 1);
+
+  // Neste kjøring registrerer KUN "a" (top) — b og c sin kilde forsvant.
+  Ui.beginCellRun(3);
+  Ui.registerControl(JSON.stringify({ type: 'text', name: 'a', value: '1' }));
+  Ui.endCellRun(3);
+
+  assert.strictEqual(topStrip.children.length, 1, 'a står fortsatt');
+  assert.strictEqual(bottomStrip.children.length, 0, 'b sopet fra BUNN-stripa');
+  assert.strictEqual(leftWrap.children.find((c) => c.classList.contains('ui-controls')).children.length, 0,
+    'c sopet fra VENSTRE-stripa');
+});
