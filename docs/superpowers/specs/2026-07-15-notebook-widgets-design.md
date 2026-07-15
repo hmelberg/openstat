@@ -325,6 +325,43 @@ cleanly in its new anchor, reading its current value fresh from the
 Each phase gets its own implementation plan; W1 must not start before
 phase B1's session machinery is merged (done — merged to main 2026-07-14).
 
+- **W5 — PLANNED (user request 2026-07-16): widget events
+  (`on_click`/`on_change`), two-step delivery.**
+  - **Step 1 — cell-name targets (all widget runtimes, cheap):**
+    `on_click="cellname"` / `on_change="cellname"` (string or list) as
+    the canonical names for what `rerun=` does today — same JS path,
+    same debounce, same serialized run queue. `rerun=` stays as an
+    alias for backward compatibility with shipped examples. `on_change`
+    applies to value controls, `on_click` to buttons. Output goes to
+    the target cell's own slot, exactly as rerun does — no redirection
+    for the cell-name variant.
+  - **Step 2 — function callbacks (pyodide first, own mini-spec/plan):**
+    `on_click=my_function` introduces push into the pull model. Design
+    decisions already taken in discussion (2026-07-16):
+    - Functions cannot cross the bridge — a per-cell callback registry
+      on the Python side (`ui._callbacks["cellKey::name"]`); only the
+      name crosses; JS dispatches `ui._dispatch(name, event_payload)`.
+    - **Output targeting:** optional `target="dom-id"` names the DOM
+      element (typically a `<div id=…>` in an `#%% html` cell) that
+      receives the function's rendered return value — replace
+      semantics by default. Omitted `target` → the widget cell's own
+      output slot. Missing/misspelled id → fall back to the widget
+      cell's slot with a visible notice, never silently dropped.
+      Rendering uses the ordinary output builders (DataFrame → table,
+      figure → chart, string → escaped text), so the `htmlTrusted`
+      invariant is untouched.
+    - Lifecycle note: editing the html cell re-renders it and clears
+      the target div's injected content — accepted, documented. A
+      `ui.output("name")` placeholder widget is the future-proof
+      alternative if raw ids prove fragile; not in v1.
+    - Parity: pyodide first. brython/micropython get it with spec 1
+      Phase C (main-thread closures make it trivial there). R/webR is
+      feasible via the declare-then-inject channel (inject fresh
+      values, then call the named function in the worker) but ships
+      later under the parity-is-a-goal rule.
+    - Open at planning time: re-entrancy (event firing during a run),
+      error surfacing, and forklar/skrittvis semantics for callbacks.
+
 ## Testing
 
 Pure-half tests for the control-spec builder and `#@param` parser (node);
