@@ -729,6 +729,11 @@
       "group": null
     },
     {
+      "file": "python/py_param_forms.txt",
+      "label": "#@param-skjemaer (Colab-kompatible)",
+      "group": null
+    },
+    {
       "file": "python/py_widgets_ui.txt",
       "label": "Widgets — ui.slider/dropdown (notatbok)",
       "group": null

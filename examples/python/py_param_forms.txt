@@ -1,0 +1,51 @@
+# label: #@param-skjemaer (Colab-kompatible)
+#options.mode = python
+#options.title = "#@param-skjemaer (Colab-kompatible)"
+#options.description = "Colab-stil kommentar-skjemaer: #@param bygger en kontroll over cellen og skriver verdien rett inn i kildeteksten"
+# load https://raw.githubusercontent.com/hmelberg/openstat/main/data/iris.csv as iris
+
+#%% md
+# #@param-skjemaer
+
+Notatbøker fra Google Colab som bruker `#@param`-kommentaren, virker
+**direkte** her — ingen konvertering nødvendig. En linje som
+
+```python
+n = 5  #@param {type:"slider", min:0, max:20}
+```
+
+får en kontroll tegnet over cellen; endrer du kontrollen, skrives den nye
+verdien rett inn i **selve kildeteksten** (sjekk «Rå tekst» — det er
+alltid teksten, ikke en skjult tilstand, som er sannheten).
+
+**`run:"auto"` vs. manuell:** legger du til `run:"auto"` i
+metadata-objektet, kjøres cellen på nytt automatisk hver gang kontrollen
+endres. Uten `run:"auto"` skrives kun teksten inn, og cellen får den
+vanlige "endret, ikke kjørt"-markeringen (stale-tint) inntil du trykker
+▶ selv.
+
+`#@title` og `#@markdown` (Colabs celle-tittel/tekst-kommentarer) er
+**ikke støttet ennå** — kommer i en senere runde.
+
+**R støttes også:** `x <- 3  #@param {type:"slider", min:0, max:10}` —
+parseren kjenner igjen både `=` og R sin `<-` som tildelingsoperator.
+
+#%% python
+n = 5  #@param {type:"slider", min:0, max:20, step:1, run:"auto"}
+iris.head(n)
+
+#%% python
+art = 'setosa'  #@param ["setosa", "versicolor", "virginica"]
+iris[iris["species"] == art]
+
+#%% python
+alle_kolonner = True  #@param {type:"boolean"}
+iris if alle_kolonner else iris[["sepal_length", "petal_length", "species"]]
+
+#%% python
+farge = 'blå'  #@param ["blå", "rød", "grønn"] {allow-input:true}
+f"Favorittfarge: {farge}"
+
+#%% python
+dato = '2026-07-15'  #@param {type:"date"}
+f"Valgt dato: {dato}"

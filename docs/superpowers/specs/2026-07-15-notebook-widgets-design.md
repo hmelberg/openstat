@@ -1,6 +1,7 @@
 # Notebook widgets — design (spec 2 of 3)
 
-**Status:** approved direction, pending user review of this document
+**Status:** all three tracks delivered (W1–W4) — see Phasing below for
+per-phase browser-verification evidence.
 **Date:** 2026-07-15
 **Builds on:** spec 1 (`2026-07-13-notebook-cells-design.md`) — the `#%%` cell
 format, notebook rendering, and the phase-B1 per-cell run machinery
@@ -194,7 +195,7 @@ individually behind the protocol later.
 - **Isolation guarantee:** no shared code with track 1; brython/micropython/
   R/microdata are untouched; if the bridge breaks, `ui` is unaffected.
 
-## Track 3 — `#@param` forms (bonus, all runtimes)
+## Track 3 — `#@param` forms (bonus, all runtimes) — done
 
 Colab's comment syntax, parsed per the open reverse-engineered grammar
 (`ipyform` as reference): `x = 3 #@param {type:"slider", min:0, max:10}`,
@@ -229,7 +230,21 @@ runtime because it never touches the runtime: it edits text and reruns.
   documented above (stock controls + observe/traitlets sync + display in
   slots; `interact()`/`Output` deferred); see
   `.superpowers/sdd/task-w3-5-report.md`.
-- **W4 — `#@param` forms.**
+- **W4 — `#@param` forms.** **Done 2026-07-15** — browser-verified
+  end-to-end (example notebook `examples/python/py_param_forms.txt`:
+  slider/dropdown/boolean/allow-input-string/date forms render; a
+  `run:"auto"` slider rewrites the source line AND reruns the cell live;
+  a non-`run:"auto"` dropdown rewrites the text and stale-tints until a
+  manual ▶; the same document round-trips through a share-link with
+  forms rebuilding from the canonical text; an r-mode cell
+  (`x <- 3 #@param {type:"slider", ..., run:"auto"}`) works end-to-end
+  in a genuine R-mode document; a plain (non-notebook) script containing
+  `#@param` runs completely inert/unchanged; a coexistence cell with both
+  `ui.slider` and `#@param` renders both strips with `.param-form` always
+  first; both themes screenshot-checked); see
+  `.superpowers/sdd/task-w4-3-report.md`. This was the last W-phase —
+  **track 3 (Colab `#@param` forms) is now delivered**, alongside tracks
+  1 and 2 above: all three widget tracks in this spec are complete.
 
 Each phase gets its own implementation plan; W1 must not start before
 phase B1's session machinery is merged (done — merged to main 2026-07-14).
