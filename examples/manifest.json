@@ -801,6 +801,11 @@
       "group": null
     },
     {
+      "file": "r/rex_param_forms.txt",
+      "label": "#@param-skjemaer i R (Colab-kompatible)",
+      "group": null
+    },
+    {
       "file": "r/rex_widgets_ui.txt",
       "label": "Widgets — ui_slider/ui_dropdown (R-notatbok)",
       "group": null

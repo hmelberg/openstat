@@ -1,0 +1,37 @@
+# label: #@param-skjemaer i R (Colab-kompatible)
+#options.mode = r
+#options.title = "#@param-skjemaer (R)"
+#options.description = "Colab-stil #@param-kommentarer i R-celler: skjemaet skriver verdien inn i kildelinjen og kjører cellen på nytt"
+# load https://raw.githubusercontent.com/hmelberg/openstat/main/data/iris.csv as iris
+
+#%% md
+# `#@param`-skjemaer i R
+
+En `#@param`-kommentar bak en tilordning gjør linjen til et skjemafelt:
+skjemaet **skriver den nye verdien rett inn i kildelinjen** (sjekk gjerne
+via «Rå tekst») og kjører cellen på nytt når metaen har `run:"auto"` — uten
+`run:"auto"` markeres cellen som endret (stale), og du kjører den selv med ▶.
+Begge tilordningsoperatorene virker (`<-` og `=`), og R-litteraler skrives
+riktig (`TRUE`/`FALSE`, tall uten anførselstegn). Notebooks laget i Google
+Colab med `#@param` virker dermed også her.
+
+#%% r
+antall <- 50 #@param {type:"slider", min:10, max:150, step:10, run:"auto"}
+utvalg <- iris[seq_len(antall), ]
+paste("Utvalg:", nrow(utvalg), "rader — snitt sepal_length:",
+      round(mean(utvalg$sepal_length), 2))
+
+#%% r
+# Uten run:"auto": endringen skrives i teksten og cellen blir stale — kjør selv.
+farge <- 'steelblue' #@param ["steelblue", "firebrick", "seagreen"]
+vis_rutenett <- TRUE #@param {type:"boolean"}
+plot(utvalg$sepal_length, utvalg$petal_length,
+     col = farge, pch = 19,
+     main = paste("Iris — første", antall, "rader"),
+     xlab = "sepal_length", ylab = "petal_length")
+if (vis_rutenett) grid()
+
+#%% md
+Tips: `placement:"left"` i metaen legger akkurat det feltet i en kolonne til
+venstre for resultatet — f.eks.
+`terskel <- 5 #@param {type:"number", placement:"left"}`.
