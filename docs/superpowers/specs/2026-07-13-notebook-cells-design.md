@@ -1,6 +1,6 @@
 # Notebook cells — design (spec 1 of 3: core cells)
 
-**Status:** approved design, pending user review of this document
+**Status:** all phases complete (Phase A, B1, B2 — see §6)
 **Date:** 2026-07-13
 **Repo:** openstat leads; port to safestat later; **no** microdata port.
 **Series:** spec 1 of 3 — core cells. Spec 2 (widgets/`ui` module) and spec 3
@@ -274,21 +274,70 @@ run's output rendered into **that cell's slot**. Design:
 - **Phase B1 — DONE 2026-07-14: sessions, per-cell run (python/duckdb
   incremental, microdata replay-through, R captureR), run buttons +
   Shift/Ctrl+Enter, stale tint, session chip, Restart & kjør alle.**
-- **Phase B2 — remaining:** cell toolbar editing operations, `#options.display=last`
-  for unmarked scripts, R `# use` cross-runtime per-cell. **DONE 2026-07-15
-  (Task 2):** skrittvis cell playback. **DONE 2026-07-15 (Task 3):** ekte
-  R-sesjonsreset (`rm(list=ls(envir=globalenv()))` + `DashWebR.reset()` +
-  `__uiResetR()`) ved "Restart & kjør alle" in r-mode — implemented in
-  `window.mdNotebookSession.restart()`; dash per-slot cleanup (python) —
-  per-cell rerun of a `dash.dashboard(...)` cell now purges `#outputArea`
-  + sweeps the JS-side dash registry before each per-cell run (see Task 3
-  report for the investigation finding that dash renders to the shared,
-  hidden `#outputArea`, not the cell's own `.nb-output` slot — a pre-existing
-  visibility gap left open, noted as a concern, not fixed by this task).
-  R dashboard cells per-cell: see the Task 3 report's decision (kept as a
-  documented limitation — not cheap; see report for reasons).
+- **Phase B2 — DONE 2026-07-15 (exit gate, Task 5).** All five tasks
+  shipped:
+  - **Task 1 — cell hover-toolbar:** the spec §1 text-transform table as a
+    real UI: add cell (above/below), delete (2s "Angre" toast instead of a
+    confirm dialog), move up/down, split-at-cursor, merge-with-previous,
+    change type — each op is a pure `cells.js` transform → serialize →
+    full `render()`, so the result is always visible byte-for-byte in Rå
+    tekst (no hidden state). Gated against mid-run edits (silent refusal,
+    mirrors `C.runCell`'s own guard) and flushes the pending edit debounce
+    first.
+  - **Task 2 — skrittvis cell playback:** in an active notebook view,
+    "Kjør skrittvis" steps cell-by-cell instead of blank-line-grouped
+    (plain scripts unchanged): one code cell = one step, md cells narrated
+    (TTS) with no code/execution, skip cells excluded. Exits to Rå tekst
+    for the run (output needs the classic editor/output panes) and
+    auto-re-enters cell view afterward, on both natural completion and
+    abort.
+  - **Task 3 — true R session reset + dash per-slot cleanup:** "Restart &
+    kjør alle" in r-mode now genuinely wipes `.GlobalEnv`
+    (`rm(list=ls(envir=globalenv()))`) instead of leaving a persistent
+    webR interpreter untouched; python `dash.dashboard(...)` per-cell
+    rerun purges the stale registry entry first (no unbounded growth
+    across reruns). R dashboard cells per-cell run: investigated and
+    **consciously not done** — `webr/dash.R`'s registry is positional/
+    append-only with no per-cell-safe remount path; a real fix needs a
+    `dash-webr.js`/`webr/dash.R` restructure, out of this phase's cheap-fix
+    scope (documented, not silently dropped).
+  - **Task 4 + 4b — display=last, small-fix queue, dash-to-slot:**
+    `#options.display = last` gives unmarked scripts the notebook's
+    last-expression-only display without requiring `#%%`; numeric
+    `#@param [1, 2, 3]` dropdowns now write back unquoted numeric
+    literals; `C.exit()` flushes the pending edit debounce; cache-busting
+    `?v=` on the brython/micropython engine tags; `cellKeyAt` id-prefix
+    hardening against id/index key collisions; dead code
+    (`splitMicrodataExplainSections`/`buildForklarFlatWork`) removed.
+    Dashboards in a notebook now mount into the running cell's own
+    `.nb-output` slot (read via the same `mdUiRunCtx()` the `ui` module
+    uses) instead of the shared hidden `#outputArea` — closing the
+    visibility gap Task 3 had flagged; plain scripts and R dashboards are
+    unaffected (still `#outputArea`, still Kjør-alle-only for R).
+  - **Task 5 — exit gate:** full suites green (node 429/4 pre-existing,
+    pytest 679, brython+micropython facades 478); browser sweep across
+    toolbar round-trips, skrittvis, R-reset, dash-to-slot, display=last,
+    `#@param`, and regression (plain scripts, ipywidgets bridge,
+    share-link, both themes). The sweep surfaced and fixed two bugs
+    orthogonal to the toolbar/skrittvis/reset work itself but blocking
+    the very scenarios this gate exists to check: (1) Forklar's own
+    python execution path never ran the `ui`/`dash`/`ipywidgets`
+    ensure-hooks or package installer that every other run path uses, so
+    skrittvis hard-failed on any script using them, or using `# load` at
+    all (a pre-existing gap, not introduced by B2, now fixed by routing
+    through the same `modeRegistry.python.preRun` + load-fetch dance the
+    normal run path already used); (2) the Task 3 R-reset's
+    `rm(list=ls(envir=globalenv()))` also wiped the `ui_slider()`/
+    `dashboard()` etc. function definitions that `webr/ui.R`/`webr/dash.R`
+    source into the SAME global environment, and the JS-side memoized
+    "already sourced" flags didn't know to forget — so R widgets broke
+    after every restart. Both are fixed (see the exit-gate report for
+    detail); both were caught specifically because the gate combines
+    B2 with the W-phase (widgets) deliverables in the same browser
+    session, which no single task's own review had done.
 
-If phase B stalls, phase A remains a shippable feature.
+Phase A and B1 remain independently shippable if a future phase stalls;
+with B2 done, all three phases of spec 1 are complete.
 
 ## 7. Compatibility, sync, risks
 
