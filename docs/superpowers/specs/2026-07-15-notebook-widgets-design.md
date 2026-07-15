@@ -123,6 +123,12 @@ individually behind the protocol later.
   renderer is refactored, not the dash API.
 - Microdata cells: `ui` is not available (replay-through semantics make
   widget reruns pathological); a notice explains.
+- **Known W1 limitation (fix in W2):** when a microdata cell is per-cell
+  run (replay-through), NON-target python segments replay with `ui.*`
+  returning spec DEFAULTS (their run context is null by design), so the
+  rebuilt session state can diverge from the values the visible widgets
+  show. W2 direction: bracket all replayed segments with their aligned
+  cell idx so replays consume stored widget values.
 
 ## Track 2 — ipywidgets bridge (pyodide-only, isolated)
 
