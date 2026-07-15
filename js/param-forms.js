@@ -393,14 +393,21 @@
   // js/ui.js/js/dash.js i W4, samme avgrensning som js/ui.js selv dokumenterer
   // for SIN egen duplisering mot js/dash.js).
   //
-  // Arkitektur: `_forms[cellIdx]` er dokument-scoped tilstand (cellEl, lang,
-  // gjeldende `entries` fra siste parse, `strip`-noden, og `controls`-listen
-  // parallell med `entries`) — akkurat nok til at ParamForms.refresh kan
-  // avgjøre "samme struktur, bare ny verdi" (oppdater kontroller i place)
-  // kontra "strukturen endret seg" (bygg stripa på nytt) uten å måtte
-  // re-diffe hele DOM-treet.
+  // Arkitektur: `_forms[cellIdx]` er dokument-scoped tilstand med TO
+  // entry-lister (review-fiks 1, krysskanal-race):
+  //  - `entries`: den FERSKESTE parsen av cellens kilde — holdes synkron med
+  //    HVERT tastetrykk via ParamForms.syncSource (kalt synkront fra
+  //    js/cells.js sin onEdit, FØR 250ms-debouncen) og med hver _commit.
+  //    Dette er splice-grunnlaget: _commit slår ALLTID opp sin entry her
+  //    (fersk lineIdx), aldri i den closure-fangede entryen fra byggetid.
+  //  - `builtEntries`: entry-øyeblikksbildet stripa/`controls` faktisk ble
+  //    BYGGET fra — refresh sin struktur-sammenlikning går mot DENNE (ikke
+  //    mot `entries`, som syncSource kan ha oppdatert i mellomtiden), slik
+  //    at "controls[i] hører til builtEntries[i]"-parallelliteten aldri
+  //    brytes av en mellomliggende tastetrykk-synk.
+  // I tillegg cellEl/lang/source (gjeldende kilde), strip-noden og controls.
   if (typeof document !== 'undefined') {
-    var _forms = {};      // cellIdx -> { cellEl, lang, source, entries, strip, controls }
+    var _forms = {};      // cellIdx -> { cellEl, lang, source, entries, builtEntries, strip, controls }
     var _runTimers = {};  // "cellIdx:lineIdx" -> debounce-timer-håndtak (run:auto slider)
 
     function _el(tag, cls, text) {
@@ -557,15 +564,53 @@
       }, 150);
     }
 
+    // Slå opp den FERSKESTE entryen (fra st.entries, holdt synkron per
+    // tastetrykk via syncSource) som svarer til en closure-fanget entry fra
+    // byggetid (review-fiks 1): identitet først (ingen synk har skjedd),
+    // deretter eksakt (varName, type, lineIdx), til slutt (varName, type)
+    // alene — linja kan ha FLYTTET seg (bruker skrev en linje over) uten at
+    // kontrollen er ombygd ennå. Duplicate varName+type på ulike linjer er
+    // patologisk (samme variabel tilordnet to ganger med hver sin #@param);
+    // første match vinner da — dokumentert begrensning, aldri korrupsjon av
+    // en IKKE-#@param-linje (writeValue re-matcher linja uansett).
+    function _freshEntryFor(st, captured) {
+      var list = st.entries || [];
+      var i;
+      for (i = 0; i < list.length; i++) if (list[i] === captured) return captured;
+      for (i = 0; i < list.length; i++) {
+        if (list[i].varName === captured.varName && list[i].meta.type === captured.meta.type &&
+            list[i].lineIdx === captured.lineIdx) return list[i];
+      }
+      for (i = 0; i < list.length; i++) {
+        if (list[i].varName === captured.varName && list[i].meta.type === captured.meta.type) return list[i];
+      }
+      return null;
+    }
+
     // Kontroll endret → writeValue → Cells.updateCellSource → evt. run:auto.
-    // st.source (cellens NÅVÆRENDE kildetekst, holdt i _forms) er
-    // writeValue sitt cellSource-argument — IKKE hele dokumentet (entry.lineIdx
-    // er celle-relativ, se js/param-forms.js sin rene halvdel).
-    function _commit(cellIdx, entry, newValue, lang) {
+    // st.source (cellens NÅVÆRENDE kildetekst, holdt i _forms og synkron med
+    // hvert tastetrykk via syncSource — review-fiks 1) er writeValue sitt
+    // cellSource-argument — IKKE hele dokumentet (entry.lineIdx er
+    // celle-relativ, se den rene halvdelen over). Den closure-fangede entryen
+    // brukes KUN som oppslagsnøkkel (_freshEntryFor) — splicingen skjer alltid
+    // mot den ferskeste entryen/kilden, så en manuelt skrevet linje i samme
+    // debounce-vindu aldri mistes og lineIdx aldri er foreldet.
+    function _commit(cellIdx, capturedEntry, newValue, lang) {
       var st = _forms[cellIdx];
       if (!st) return;
+      var entry = _freshEntryFor(st, capturedEntry);
+      if (!entry) {
+        console.warn('ParamForms: fant ikke #@param-oppføringen for "' + capturedEntry.varName +
+          '" i gjeldende kilde (linja fjernet/endret under hånden?) — endringen droppes');
+        return;
+      }
       var newSource = ParamForms.writeValue(st.source, entry, newValue, lang);
       st.source = newSource;
+      // Hold st.entries selv-konsistent med den nye kilden (fersk valueRaw)
+      // uavhengig av om Cells.updateCellSource → refresh-tilbakekallet under
+      // faktisk finnes (guardet) — billig (cellen er liten), og gjør _commit
+      // korrekt også i isolasjon.
+      st.entries = ParamForms.parse(newSource, st.lang);
       if (global.Cells && typeof global.Cells.updateCellSource === 'function') {
         global.Cells.updateCellSource(cellIdx, newSource);
       }
@@ -616,7 +661,8 @@
       if (prev && prev.strip && prev.strip.parentNode === cellEl) prev.strip.remove();
       var entries = ParamForms.parse(source, lang);
       if (!entries.length) {
-        _forms[cellIdx] = { cellEl: cellEl, lang: lang, source: source, entries: [], strip: null, controls: [] };
+        _forms[cellIdx] = { cellEl: cellEl, lang: lang, source: source,
+                            entries: [], builtEntries: [], strip: null, controls: [] };
         return;
       }
       var strip = _el('div', 'param-form');
@@ -629,7 +675,12 @@
         controls.push(ctrl);
       }
       _insertStrip(cellEl, strip);
-      _forms[cellIdx] = { cellEl: cellEl, lang: lang, source: source, entries: entries, strip: strip, controls: controls };
+      // entries og builtEntries starter som SAMME liste (bygget nettopp nå);
+      // de divergerer først når syncSource oppdaterer entries per tastetrykk
+      // mens stripa fortsatt står — refresh sammenlikner alltid mot
+      // builtEntries (det kontrollene faktisk ble bygget fra).
+      _forms[cellIdx] = { cellEl: cellEl, lang: lang, source: source,
+                          entries: entries, builtEntries: entries, strip: strip, controls: controls };
     }
 
     // To entry-lister har "samme struktur" (→ oppdater kontroller i place)
@@ -722,7 +773,12 @@
       var st = _forms[cellIdx];
       if (!st) return;
       var newEntries = ParamForms.parse(source, st.lang);
-      if (!_sameStructure(st.entries, newEntries)) {
+      // Struktur-sammenlikningen går mot builtEntries — det kontrollene
+      // faktisk ble BYGGET fra — ikke mot st.entries, som syncSource kan ha
+      // oppdatert per tastetrykk siden (review-fiks 1): controls[i] er
+      // parallell med builtEntries[i], og det er DEN parallelliteten som
+      // avgjør om en oppdatering i place er trygg.
+      if (!_sameStructure(st.builtEntries, newEntries)) {
         _build(cellIdx, st.cellEl, source, st.lang);
         return;
       }
@@ -730,20 +786,51 @@
         _updateControlValue(st.controls[i], newEntries[i], st.lang);
       }
       st.entries = newEntries;
+      st.builtEntries = newEntries;
       st.source = source;
     };
 
     /**
-     * ParamForms.reorder(cellEl) — reassert at `.param-form` (om den finnes)
-     * står FØR `.ui-controls` (om DEN finnes) blant cellEl sine direkte barn.
-     * Nødvendig fordi js/ui.js sin _ensureStrip ikke vet noe om .param-form
-     * og alltid setter .ui-controls inn som cellEl.firstChild — hvis
-     * .ui-controls dukker opp FØRSTE gang EN cellekjøring (den eneste
-     * anledningen den kan oppstå), etter at .param-form allerede var
-     * cellEl.firstChild, må rekkefølgen rettes opp her. No-op når en av de
-     * to (eller begge) mangler, eller når rekkefølgen allerede stemmer.
+     * ParamForms.syncSource(cellIdx, source) — SYNKRON, DOM-fri kildesynk
+     * (review-fiks 1, krysskanal-race): kalles fra js/cells.js sin onEdit
+     * for HVERT tastetrykk (FØR 250ms-debouncen), slik at _commit sitt
+     * splice-grunnlag (st.source) og entry-oppslag (st.entries, fersk
+     * lineIdx) aldri er eldre enn det brukeren faktisk ser i cellens
+     * textarea. Uten dette kunne en kontroll-endring innen debounce-vinduet
+     * splice inn i en FORELDET kilde og stille miste nettopp-skrevet tekst
+     * (reviewer-repro: skriv `y = 1` på linja over, dra slideren < 250ms
+     * etter → `y = 1` forsvant). Rører ALDRI DOM-en — den visuelle
+     * oppdateringen (_updateControlValue/ombygging) hører fortsatt til den
+     * debouncede ParamForms.refresh.
      */
-    ParamForms.reorder = function (cellEl) {
+    ParamForms.syncSource = function (cellIdx, source) {
+      var st = _forms[cellIdx];
+      if (!st) return;
+      st.source = source;
+      st.entries = ParamForms.parse(source, st.lang);
+    };
+
+    /**
+     * ParamForms.reorder(cellElOrIdx) — reassert at `.param-form` (om den
+     * finnes) står FØR `.ui-controls` (om DEN finnes) blant cellens direkte
+     * barn. Nødvendig fordi js/ui.js sin _ensureStrip ikke vet noe om
+     * .param-form og alltid setter .ui-controls inn som cellEl.firstChild —
+     * .ui-controls kan dukke opp FØRSTE gang under en cellekjøring (den
+     * eneste anledningen den kan oppstå): enkelt-celle-stien (js/cells.js
+     * sin runCell kaller hit med cellens _wrap-node) OG "Kjør alle"/replay-
+     * segmentløkkene i index.html (review-fiks 2 — de kaller hit med
+     * CELLEINDEKSEN, ved samme brakettpunkter som Ui.endCellRun). Et tall
+     * løses derfor til cellens gjeldende DOM-node via Cells.cellElementAt
+     * (friskt oppslag — noden byttes ved strukturell re-rendring, F6-
+     * mønsteret). No-op når en av de to stripene (eller begge) mangler,
+     * eller når rekkefølgen allerede stemmer.
+     */
+    ParamForms.reorder = function (cellElOrIdx) {
+      var cellEl = cellElOrIdx;
+      if (typeof cellElOrIdx === 'number') {
+        cellEl = (global.Cells && typeof global.Cells.cellElementAt === 'function')
+          ? global.Cells.cellElementAt(cellElOrIdx) : null;
+      }
       if (!cellEl || !cellEl.children) return;
       var kids = cellEl.children;
       var form = null, controls = null, formIdx = -1, controlsIdx = -1;

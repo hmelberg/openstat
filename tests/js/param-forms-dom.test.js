@@ -293,6 +293,98 @@ test('no-løkke: kontrollens egen writeValue→updateCellSource→refresh-sykel 
   assert.strictEqual(Number(sliderBefore.value), 7);
 });
 
+// ---- krysskanal-race (review-fiks 1): manuell skriving + kontroll-endring
+// innen samme debounce-vindu — INGEN av delene skal gå tapt -----------------
+
+test('krysskanal-race: linje skrevet manuelt + slider dratt FØR debouncen → BÅDE den nye linja og den nye verdien overlever (reviewer-repro)', () => {
+  const { ParamForms, cellEl, updateCellSourceCalls } = freshEnv();
+  const src = 'x = 3  #@param {type:"slider", min:0, max:10}';
+  ParamForms.decorate(0, cellEl, src, 'python');
+  const slider = cellEl.children[0].children[0].children[1];
+
+  // Brukeren skriver `y = 1` på linja OVER #@param-linja — js/cells.js sin
+  // onEdit kaller syncSource SYNKront per tastetrykk (review-fiks 1a), FØR
+  // 250ms-debouncen har fyrt refresh:
+  ParamForms.syncSource(0, 'y = 1\nx = 3  #@param {type:"slider", min:0, max:10}');
+
+  // ... og drar så slideren INNENFOR debounce-vinduet. Splicingen må skje
+  // mot den FERSKE kilden (og #@param-linjas NYE lineIdx 1), ikke mot den
+  // closure-fangede entryen fra byggetid (lineIdx 0):
+  slider.value = '7';
+  slider.dispatchEvent({ type: 'input' });
+
+  assert.strictEqual(updateCellSourceCalls.length, 1);
+  assert.deepStrictEqual(updateCellSourceCalls[0],
+    [0, 'y = 1\nx = 7  #@param {type:"slider", min:0, max:10}'],
+    'BÅDE den manuelt skrevne linja OG den nye slider-verdien er i resultatet');
+});
+
+test('krysskanal-race: etter ombyggingen (refresh så strukturell lineIdx-endring) virker den NYE kontrollen mot riktig linje', () => {
+  const { ParamForms, cellEl, updateCellSourceCalls } = freshEnv();
+  ParamForms.decorate(0, cellEl, 'x = 3  #@param {type:"slider", min:0, max:10}', 'python');
+  const oldSlider = cellEl.children[0].children[0].children[1];
+
+  ParamForms.syncSource(0, 'y = 1\nx = 3  #@param {type:"slider", min:0, max:10}');
+  oldSlider.value = '7';
+  oldSlider.dispatchEvent({ type: 'input' });
+  // updateCellSource-stubben kalte refresh → lineIdx endret (0→1) er
+  // strukturelt → stripa er ombygd med en NY slider bundet til linje 1.
+  const newSlider = cellEl.children[0].children[0].children[1];
+  assert.notStrictEqual(newSlider, oldSlider, 'strukturell endring → fersk kontroll-node');
+  assert.strictEqual(Number(newSlider.value), 7, 'ny kontroll seedet fra gjeldende kilde');
+
+  newSlider.value = '5';
+  newSlider.dispatchEvent({ type: 'input' });
+  assert.deepStrictEqual(updateCellSourceCalls[updateCellSourceCalls.length - 1],
+    [0, 'y = 1\nx = 5  #@param {type:"slider", min:0, max:10}'],
+    'den ombygde kontrollen splicer korrekt inn i linje 1');
+});
+
+test('syncSource: verdi-endring uten strukturskifte → splice-grunnlaget følger med, kontrollen ombygges IKKE av en senere commit', () => {
+  const { ParamForms, cellEl, updateCellSourceCalls } = freshEnv();
+  ParamForms.decorate(0, cellEl, 'x = 3  #@param {type:"slider", min:0, max:10}', 'python');
+  const slider = cellEl.children[0].children[0].children[1];
+
+  // Bruker redigerer selve verdien manuelt (samme struktur): syncSource per
+  // tastetrykk — st.source er nå 'x = 9', men kontrollen viser fortsatt 3
+  // (den visuelle oppdateringen er debouncet, med vilje).
+  ParamForms.syncSource(0, 'x = 9  #@param {type:"slider", min:0, max:10}');
+
+  slider.value = '4';
+  slider.dispatchEvent({ type: 'input' });
+  assert.deepStrictEqual(updateCellSourceCalls[0],
+    [0, 'x = 4  #@param {type:"slider", min:0, max:10}'],
+    'splicet mot den ferske kilden (9 → 4), ikke den gamle (3)');
+  assert.strictEqual(cellEl.children[0].children[0].children[1], slider,
+    'samme struktur hele veien — kontroll-noden er aldri ombygd');
+});
+
+test('syncSource: cellIdx uten decorate-tilstand → no-op, ingen krasj', () => {
+  const { ParamForms } = freshEnv();
+  assert.doesNotThrow(() => ParamForms.syncSource(3, 'x = 1  #@param {type:"number"}'));
+});
+
+test('_commit etter at linja er FJERNET under hånden (syncSource tømte entries) → warn + drop, ingen korrupt skriving', () => {
+  const { ParamForms, cellEl, updateCellSourceCalls } = freshEnv();
+  ParamForms.decorate(0, cellEl, 'x = 3  #@param {type:"slider", min:0, max:10}', 'python');
+  const slider = cellEl.children[0].children[0].children[1];
+
+  // Brukeren slettet hele #@param-linja; debouncen har ikke fyrt ennå.
+  ParamForms.syncSource(0, 'print(1)');
+
+  const origWarn = console.warn;
+  let warned = 0;
+  console.warn = () => { warned++; };
+  try {
+    slider.value = '8';
+    slider.dispatchEvent({ type: 'input' });
+  } finally {
+    console.warn = origWarn;
+  }
+  assert.deepStrictEqual(updateCellSourceCalls, [], 'ingen skriving mot en kilde uten oppføringen');
+  assert.ok(warned >= 1, 'console.warn om droppet endring');
+});
+
 // ---- manuell tekst-redigering: refresh oppdaterer i place / bygger om -----
 
 test('refresh: samme struktur (kun ny verdi) → kontrollverdi oppdateres I PLACE, SAMME DOM-node', () => {
@@ -415,6 +507,25 @@ test('reorder: kun én av de to (eller ingen) finnes → no-op', () => {
   const { ParamForms, cellEl } = freshEnv();
   assert.doesNotThrow(() => ParamForms.reorder(cellEl));
   assert.doesNotThrow(() => ParamForms.reorder(null));
+});
+
+test('reorder(cellIdx): et TALL løses via Cells.cellElementAt (review-fiks 2 — Kjør alle-brakettene i index.html sender indeksen)', () => {
+  const { ParamForms, cellEl } = freshEnv();
+  ParamForms.decorate(0, cellEl, 'x = 3  #@param {type:"number"}', 'python');
+  const form = cellEl.children[0];
+  const uiControls = new FakeEl('div');
+  uiControls.className = 'ui-controls';
+  cellEl.insertBefore(uiControls, cellEl.firstChild); // ui.js sin _ensureStrip-oppførsel
+
+  global.Cells.cellElementAt = (idx) => (idx === 4 ? cellEl : null);
+  ParamForms.reorder(4);
+  assert.strictEqual(cellEl.children[0], form, 'indeks løst til cellens node, param-form først igjen');
+  assert.strictEqual(cellEl.children[1], uiControls);
+
+  // Ukjent indeks / manglende cellElementAt → no-op, ingen krasj.
+  assert.doesNotThrow(() => ParamForms.reorder(99));
+  delete global.Cells.cellElementAt;
+  assert.doesNotThrow(() => ParamForms.reorder(4));
 });
 
 // ---- resetDocument: glemmer skjema-tilstand + kansellerer ventende run:auto-timere ----

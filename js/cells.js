@@ -624,6 +624,18 @@
       var c = NB.cells[idx];
       c.source = value;
       c.hasBody = true;
+      // SYNKRON kildesynk mot skjema-tilstanden (W4 review-fiks 1a,
+      // krysskanal-race): ParamForms sitt splice-grunnlag (st.source +
+      // st.entries med ferske lineIdx-er) må følge HVERT tastetrykk, ikke
+      // 250ms-debouncen under — ellers ville en skjema-kontroll avfyrt
+      // INNENFOR debounce-vinduet splice inn i en foreldet kilde og stille
+      // miste nettopp-skrevet tekst (repro: skriv `y = 1` på linja over en
+      // #@param-slider, dra slideren < 250ms etter). syncSource er DOM-fri
+      // og billig (ren re-parse av én celles tekst); den VISUELLE
+      // oppdateringen av kontrollene hører fortsatt til refresh i doFlush.
+      if (global.ParamForms && typeof global.ParamForms.syncSource === 'function') {
+        global.ParamForms.syncSource(idx, value);
+      }
       markStaleIfRan(idx);
       if (NB.editTimer) { clearTimeout(NB.editTimer); NB.editTimer = null; }
       // Selve flush-kroppen holdes i en navngitt lukning (NB.pendingFlush) i
@@ -634,6 +646,15 @@
         NB.editTimer = null;
         NB.pendingFlush = null;
         serializeAndSync();
+        // GJELDENDE kilde, ikke den closure-fangede `value` (W4 review-fiks
+        // 1b): en skjema-kontroll kan ha kalt Cells.updateCellSource (og
+        // dermed endret c.source) ETTER tastetrykket som armerte denne
+        // debouncen men FØR den fyrte — å flushe med den fangede verdien
+        // ville da rulle skjemaets tilstand tilbake til før kontroll-
+        // endringen og desynke videre. serializeAndSync() over serialiserte
+        // allerede nettopp c.source; refresh/markør-skanningen under må se
+        // NØYAKTIG samme tekst.
+        var cur = NB.cells[idx] ? NB.cells[idx].source : value;
         // Manuell tekst-redigering (Task 2): re-parse cellens #@param-linjer
         // og oppdater skjema-kontrollene i place — IKKE synkront per
         // tastetrykk (ville vært distraherende midt i skriving), men her,
@@ -642,11 +663,11 @@
         // type endret) bygger stripa på nytt inni ParamForms.refresh selv —
         // cells.js trenger ikke vite forskjellen.
         if (global.ParamForms && typeof global.ParamForms.refresh === 'function') {
-          global.ParamForms.refresh(idx, value);
+          global.ParamForms.refresh(idx, cur);
         }
         // Skrev brukeren en ny #%%-markør inni cellen? Da har strukturen
         // endret seg — full re-rendring (bevisst handling, fokus-hopp ok).
-        var lines = String(value).split('\n');
+        var lines = String(cur).split('\n');
         for (var i = 0; i < lines.length; i++) {
           if (C.isMarkerLine(lines[i])) { render(); return; }
         }

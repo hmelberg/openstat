@@ -1277,3 +1277,76 @@ test('Restart & kjør alle: nekter mens mdIsScriptRunning() er true (kaller ikke
 
   delete global.mdNotebookSession;
 });
+
+// ============================================================================
+// W4 Task 2 review-fiks 1 (krysskanal-race): onEdit synker skjema-tilstanden
+// SYNKront per tastetrykk (syncSource), og doFlush leser GJELDENDE c.source
+// (ikke den closure-fangede verdien fra tastetrykket som armerte debouncen).
+// ============================================================================
+
+test('onEdit: ParamForms.syncSource kalles SYNKRONT per tastetrykk — FØR 250ms-debouncens refresh (W4 review-fiks 1a)', async () => {
+  const { C, scriptInputEl } = freshEnv();
+  const syncCalls = [];
+  const refreshCalls = [];
+  global.ParamForms = {
+    decorate: () => {},
+    syncSource: (idx, src) => syncCalls.push([idx, src]),
+    refresh: (idx, src) => refreshCalls.push([idx, src]),
+    resetDocument: () => {},
+    reorder: () => {},
+  };
+  try {
+    scriptInputEl.value = '#%% python\nx = 3  #@param {type:"number"}';
+    C.init('python');
+    const ta = C.cellElementAt(0).querySelector('.nb-src');
+    ta.value = 'y = 1\nx = 3  #@param {type:"number"}';
+    ta.dispatchEvent({ type: 'input' });
+
+    assert.deepStrictEqual(syncCalls, [[0, 'y = 1\nx = 3  #@param {type:"number"}']],
+      'syncSource fyrte umiddelbart i onEdit, i samme synkrone tikk som tastetrykket');
+    assert.deepStrictEqual(refreshCalls, [], 'refresh er fortsatt debouncet — kun kilde-SYNKEN er synkron');
+
+    await new Promise((r) => setTimeout(r, 320)); // la debouncen fyre ferdig
+    assert.strictEqual(refreshCalls.length, 1, 'flushens refresh kom etter debouncen');
+  } finally {
+    delete global.ParamForms;
+  }
+});
+
+test('doFlush: refresh/markørskann bruker GJELDENDE c.source — en updateCellSource INNI debounce-vinduet rulles ikke tilbake (W4 review-fiks 1b)', async () => {
+  const { C, scriptInputEl } = freshEnv();
+  const refreshCalls = [];
+  global.ParamForms = {
+    decorate: () => {},
+    syncSource: () => {},
+    refresh: (idx, src) => refreshCalls.push([idx, src]),
+    resetDocument: () => {},
+    reorder: () => {},
+  };
+  try {
+    scriptInputEl.value = '#%% python\nx = 3  #@param {type:"number"}';
+    C.init('python');
+    const ta = C.cellElementAt(0).querySelector('.nb-src');
+
+    // Tastetrykk armerer debouncen — den fangede verdien har x = 3:
+    ta.value = 'y = 1\nx = 3  #@param {type:"number"}';
+    ta.dispatchEvent({ type: 'input' });
+
+    // Innen vinduet: en skjema-kontroll committer en NY kilde (x = 7):
+    C.updateCellSource(0, 'y = 1\nx = 7  #@param {type:"number"}');
+    assert.strictEqual(ta.value, 'y = 1\nx = 7  #@param {type:"number"}',
+      'updateCellSource synket cellens synlige textarea i place');
+
+    await new Promise((r) => setTimeout(r, 320)); // la den armerte debouncen fyre
+
+    const last = refreshCalls[refreshCalls.length - 1];
+    assert.deepStrictEqual(last, [0, 'y = 1\nx = 7  #@param {type:"number"}'],
+      'flushens refresh ser den GJELDENDE kilden (x = 7), ikke den fangede (x = 3)');
+    assert.ok(scriptInputEl.value.indexOf('x = 7') !== -1,
+      '#scriptInput serialisert fra gjeldende kilde — kontroll-endringen overlevde flushen');
+    assert.ok(scriptInputEl.value.indexOf('y = 1') !== -1,
+      'den manuelt skrevne linja overlevde også');
+  } finally {
+    delete global.ParamForms;
+  }
+});
