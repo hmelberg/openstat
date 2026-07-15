@@ -155,10 +155,20 @@ individually behind the protocol later.
   `_repr_mimebundle_` containing
   `application/vnd.jupyter.widget-view+json` and hands the model id to the
   manager instead of printing.
-- **v1 scope:** stock controls, `observe`, `interact`, display in slots.
-  **Deferred:** `Output` widget (`with out:` capture), `jslink`,
-  third-party widgets (enable embed-amd CDN loading "best effort", no
-  promises), widget state in share links (renders as dead snapshot).
+- **v1 scope:** stock controls, `observe`/traitlets sync both ways,
+  display in slots (last-expression + widget mimebundle detection).
+  **Deferred:** `interact()` — research (2026-07-15) showed it HARD-depends
+  on the `Output` widget (`interactive.__init__` unconditionally wraps in
+  `with self.out:`), so it ships together with Output-widget support later;
+  `Output`/`with out:` capture (needs a display-publisher seam we don't
+  have without an IPython shell); `jslink`; third-party widgets (embed-amd
+  CDN loading "best effort", no promises); widget state in share links.
+- **Frontend correction (research 2026-07-15):** `HTMLManager`'s
+  `_create_comm`/`_get_comm_info` are no-op stubs — live comms require
+  subclassing it with a real comm implementation (a hand-rolled
+  `IClassicComm`-shaped shim; `ManagerBase.handle_comm_open` does the
+  rest). The `jupyterlab_widgets` KernelWidgetManager path (full
+  `@jupyterlab/services` kernel shim) is NOT needed.
 - **Version discipline:** pin ipywidgets 8.1.x ↔ html-manager 1.0.14 (the
   8.1.x counterpart); mismatches are the ecosystem's top failure mode.
   Colab compatibility is source-level (Colab runs ipywidgets 7.7.1, but the
