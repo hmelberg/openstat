@@ -22,9 +22,12 @@ endringer i dem trigger nye kjøringer bak kulissene.
 n <- ui_slider(1, 10, value = 3, label = "Multiplikator")
 n * 100
 
+#%% r
+farge <- ui_dropdown(c("blå", "rød", "grønn"), label = "Farge")
+
 #%% r id=plot
 plot(iris$sepal_length, iris$petal_length,
-     col = factor(iris$species), pch = 19,
+     col = farge, pch = 19,
      main = paste("Iris — kronblad mot begerblad (n =", n, ")"),
      xlab = "sepal_length", ylab = "petal_length")
 

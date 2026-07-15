@@ -3643,11 +3643,11 @@
     let scriptRunInProgress = false;
     // ── ui-widgets (spec 2, W1): kjørekontekst per celle ────────────────────
     // Settes/nullstilles ved de FIRE kjøre-brakettene (Kjør alle-segmentløkka,
-    // mdRunNotebookCell sin enkelt-celle-sti, microdata-replay-løkka — kun
-    // for målsegmentet). window.Ui.registerControl (Task 3) leser denne
-    // synkront (pyodide kjører på hovedtråden) for å vite hvilken celle en
-    // `ui.*`-kontroll registreres mot. null utenfor en kjøring, eller når
-    // notatboken er inaktiv/kjøringen ikke er celle-adressert — da faller
+    // mdRunNotebookCell sin enkelt-celle-sti, microdata-replay-løkka som
+    // brackets alle segmenter — N1-fiksen). window.Ui.registerControl (Task 3)
+    // leser denne synkront (pyodide kjører på hovedtråden) for å vite hvilken
+    // celle en `ui.*`-kontroll registreres mot. null utenfor en kjøring, eller
+    // når notatboken er inaktiv/kjøringen ikke er celle-adressert — da faller
     // Ui-siden tilbake til "plain script"-oppførsel (spec §krav).
     let nbUiRunCtx = null;
     window.mdUiRunCtx = function () { return nbUiRunCtx; };
@@ -9901,6 +9901,15 @@ async def _m2py_run_segment(_seg_json):
           if (forklarJumpToNextBlock) { forklarJumpToNextBlock = false; skipRest = true; }
           await forklarCheckpoint(myAbort);
           if (forklarGotoBlockIdx !== null || myAbort.aborted) return;
+          // ui-widgets: før kjøring av R-blokk, sikr at ui.R er initialisert
+          // og null stilles (samme pattern som runHybridR, se W2-review-fiks).
+          // UI_R_REGEX gater ALT arbeidet — et ui-fritt dokument kjører
+          // identisk som før, ingen ekstra overhead.
+          if (UI_R_REGEX.test(block.codeTrim)) {
+            try { await __ensureUiR(); }
+            catch (e) { outputArea.innerHTML = '<pre class="error">ui: ' + escapeHtml(String((e && e.message) || e)) + '</pre>'; return; }
+            await __uiResetR();
+          }
           try {
             if (!webRShelter) webRShelter = await new webR.Shelter();
             const captured = await webRShelter.captureR(block.codeTrim, { withAutoprint: true });

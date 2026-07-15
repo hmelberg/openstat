@@ -704,6 +704,35 @@ test('registerFromRegistry: id-stabil nøkkel overlever indeksskift (register ce
   assert.deepStrictEqual(JSON.parse(Ui.valuesForCell(2)), { n: 1 });
 });
 
+test('idx-mismatch + type-bytte: slettet verdi når type endres over indeksskift (slider val 7 ved idx 2 → dropdown ved idx 5)', async () => {
+  const { Ui, cellEl: cellEl2, setCtx } = freshEnv({ cellIdx: 2 });
+  const cellEl5 = cellEl2;
+  global.Cells.cellKeyAt = () => 'x';
+  global.Cells.cellElementAt = (idx) => (idx === 2 || idx === 5 ? cellEl5 : null);
+
+  // Registrer slider ved idx 2, bruker endrer til verdi 7
+  Ui.registerControl(JSON.stringify({ type: 'slider', name: 'x', min: 0, max: 100, value: 5 }));
+  let strip = cellEl2.children[0];
+  const sliderInput = strip.children[0].children[1];
+  sliderInput.value = '7';
+  sliderInput.dispatchEvent({ type: 'input' });
+  await wait(200);
+
+  // "Cellen flytter" fra idx 2 til idx 5 (strukturelt indeksskift) OG type endrer fra slider til dropdown
+  setCtx({ cellIdx: 5, cellEl: cellEl5 });
+  const res = Ui.registerControl(JSON.stringify({ type: 'dropdown', name: 'x', options: ['a', 'b', 'c'] }));
+
+  // Verdien skal være dropdown-defaulten ('a'), IKKE den gamle slider-verdien 7
+  assert.strictEqual(JSON.parse(res), 'a', 'dropdown default, ikke stale slider-verdi 7 fra idx-mismatch-scenarioet');
+
+  // Hent den OPPDATERTE stripa (idx 5 sin stripe er nå første barn)
+  strip = cellEl2.children[0];
+  assert.strictEqual(strip.children.length, 1, 'stripa har kun den nye dropdown-kontrollen');
+  const newWidget = strip.children[0];
+  const select = newWidget.children[1];
+  assert.strictEqual(select.tag, 'select', 'ny dropdown-kontroll opprettet');
+});
+
 // ---- W1-carryover (a): type-bytte beholder ORIGINAL stripe-posisjon ------
 
 test('type-bytte (B2) beholder ORIGINAL stripe-posisjon — insertBefore på gammel plass, ikke append til slutt (W1-carryover a)', () => {

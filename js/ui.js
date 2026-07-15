@@ -549,6 +549,7 @@
       // _controls-oppføringen slippes, slik at grenene under bygger en fersk
       // node i riktig stripe, seedet med den overlevende lagrede verdien.
       if (existing && existing.cellIdx !== cellIdx) {
+        if (existing.type !== spec.type) delete _values[key];
         existing = undefined;
       }
 
