@@ -1192,6 +1192,49 @@ test('cellElementAt: notatbok uten rendret rot (aldri aktiv) → null, ingen kra
   assert.strictEqual(C.cellElementAt(0), null);
 });
 
+// ---- cellKeyAt (ui-widgets W2, Task 1): stabil celle-nøkkel for Ui-verdilageret ----
+
+test('cellKeyAt: celle med id returnerer id-en (ikke indeksen)', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python id=first\na = 1\n#%% python id=target\na + 1\n';
+  C.init('python');
+
+  assert.strictEqual(C.cellKeyAt(0), 'first');
+  assert.strictEqual(C.cellKeyAt(1), 'target');
+});
+
+test('cellKeyAt: celle uten id faller tilbake til indeksen som streng', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 1\n#%% python\na + 1\n';
+  C.init('python');
+
+  assert.strictEqual(C.cellKeyAt(0), '0');
+  assert.strictEqual(C.cellKeyAt(1), '1');
+});
+
+test('cellKeyAt: ugyldig/manglende indeks → råindeksen som streng (ingen krasj)', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 1\n';
+  C.init('python');
+
+  assert.strictEqual(C.cellKeyAt(99), '99');
+});
+
+// Kjernen av W2-carryover (d): en id-tagget celles nøkkel overlever et
+// strukturelt indeksskift — samme id gir samme cellKey uansett hvilken
+// råindeks cellen for øyeblikket står på (ny celle satt inn foran den).
+test('cellKeyAt: id-tagget celle beholder SAMME nøkkel etter et strukturelt indeksskift', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python id=stable\na = 1\n';
+  C.init('python');
+  assert.strictEqual(C.cellKeyAt(0), 'stable');
+
+  // Sett inn en ny celle FORAN 'stable' — den flytter fra indeks 0 til 1.
+  scriptInputEl.value = '#%% python\nb = 2\n#%% python id=stable\na = 1\n';
+  C.contentLoaded();
+  assert.strictEqual(C.cellKeyAt(1), 'stable', 'samme id-baserte nøkkel på den nye råindeksen');
+});
+
 test('contentLoaded(): kaller window.Ui.resetDocument når Ui er lastet', () => {
   const { C, scriptInputEl } = freshEnv();
   let resetCalls = 0;

@@ -730,6 +730,20 @@
       return NB.root.querySelector('.nb-cell[data-idx="' + idx + '"]') || null;
     };
 
+    // Celleindeks → STABIL nøkkel (ui-widgets W2, Task 1): attrs.id når
+    // cellen har én, ellers råindeksen konvertert til streng. Brukes av
+    // js/ui.js sitt verdilager (Ui._values/_controls nøkler nå på DENNE i
+    // stedet for den rå celleindeksen) — en id-tagget celle beholder dermed
+    // sine ui.*-kontrollverdier på tvers av strukturelle indeksskift
+    // (en celle satt inn/fjernet over den), mens en id-løs celle fortsatt
+    // nøkler på indeksen (ingen stabilitetsgaranti utover det, som før).
+    // Samme "levende tilstand"-antakelse som cellIndexById/cellElementAt:
+    // leser NB.cells direkte, ingen cache.
+    C.cellKeyAt = function (idx) {
+      var c = NB.cells[idx];
+      return (c && c.attrs && c.attrs.id) ? c.attrs.id : String(idx);
+    };
+
     // Visningspolicy per segment (§4 "Display policy" i spec): brukes av
     // JS-segmentløkken i index.html til å avgjøre om et pyodide-segment skal
     // kjøre med echo av + kun siste uttrykk vist (eksplisitt celle) eller

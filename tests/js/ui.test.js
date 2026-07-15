@@ -102,6 +102,18 @@ test('normalizeSpec: dropdown with explicit value not in options snaps to first 
   assert.ok(res.warnings.some(w => /value ikke i options/.test(w)), 'advarsel om snap');
 });
 
+// W1-carryover (c, final-review-ledger): advarselsteksten skal navngi
+// verdien vi FAKTISK snappet TIL (options[0], her "a") — ikke den avviste
+// verdien ("c"). Før fiksen sto den avviste verdien i meldingen, som er
+// misvisende å lese ("snappet til første: c" mens "c" aldri ble brukt).
+test('normalizeSpec: dropdown snap-advarsel navngir den SNAPPEDE verdien, ikke den avviste', () => {
+  const res = Ui.normalizeSpec({ type: 'dropdown', options: ['a', 'b'], value: 'c' });
+  assert.ok(res.warnings.some(w => /snappet til første: a/.test(w)),
+    'advarselen skal si "snappet til første: a" (den snappede verdien), ikke nevne "c"');
+  assert.ok(!res.warnings.some(w => /snappet til første: c/.test(w)),
+    'advarselen skal IKKE navngi den avviste verdien "c"');
+});
+
 test('normalizeSpec: dropdown with numeric value coerced to string', () => {
   const res = Ui.normalizeSpec({ type: 'dropdown', options: ['1', '2', '3'], value: 2 });
   assert.strictEqual(res.spec.value, '2');
@@ -253,6 +265,14 @@ test('normalizeSpec: no warnings with valid spec', () => {
 });
 
 // ===== controlKey tests =====
+// W2-carryover (d): controlKey sitt første argument het tidligere "cellIdx"
+// og var alltid en råindeks (tall). Det er nå en STABIL "cellKey" — enten
+// Cells.cellKeyAt sin attrs.id-streng, eller (id-løs celle / fallback) samme
+// råindeks konvertert til streng. Funksjonen selv er fortsatt en ren
+// streng-sammenslåing og bryr seg ikke om hvilken av de to den får inn —
+// testene under er derfor omdøpt (cellIdx → cellKey) og har fått ett par som
+// dekker streng-varianten eksplisitt, men selve påstandene om format er
+// uendret.
 
 test('controlKey: with name', () => {
   const spec = { name: 'myvar', type: 'text' };
@@ -266,7 +286,7 @@ test('controlKey: without name uses ordinal', () => {
   assert.strictEqual(key, '3::w2');
 });
 
-test('controlKey: different cellIdx and ordinal', () => {
+test('controlKey: different cellKey and ordinal', () => {
   const spec = { type: 'slider' };
   assert.strictEqual(Ui.controlKey(0, spec, 0), '0::w0');
   assert.strictEqual(Ui.controlKey(10, spec, 5), '10::w5');
@@ -278,4 +298,10 @@ test('controlKey: name takes precedence over ordinal', () => {
   const spec2 = { type: 'text' };
   assert.strictEqual(Ui.controlKey(1, spec1, 0), '1::a');
   assert.strictEqual(Ui.controlKey(1, spec2, 0), '1::w0');
+});
+
+test('controlKey: cellKey som en id-streng (Cells.cellKeyAt sin attrs.id-gren) fungerer identisk med en tallnøkkel', () => {
+  const spec = { name: 'x', type: 'slider' };
+  assert.strictEqual(Ui.controlKey('mycell', spec, 0), 'mycell::x');
+  assert.strictEqual(Ui.controlKey('mycell', { type: 'slider' }, 3), 'mycell::w3');
 });

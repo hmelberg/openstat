@@ -123,7 +123,11 @@
       if (raw.value !== undefined) {
         var strValue = String(raw.value);
         if (spec.options.indexOf(strValue) === -1) {
-          warnings.push('dropdown: value ikke i options — snappet til første: ' + strValue);
+          // W1-carryover (c): meldingen skal navngi verdien vi SNAPPET TIL
+          // (spec.options[0]) — tidligere sto her den AVVISTE verdien
+          // (strValue), som er misvisende ("snappet til første: c" mens den
+          // faktiske snappede verdien var "a").
+          warnings.push('dropdown: value ikke i options — snappet til første: ' + spec.options[0]);
           spec.value = spec.options[0];
         } else {
           spec.value = strValue;
@@ -174,12 +178,18 @@
   };
 
   /**
-   * Ui.controlKey(cellIdx, spec, ordinal) → string
-   * Returner identiteten for denne kontrollen: cellIdx + '::' + (spec.name || 'w' + ordinal)
+   * Ui.controlKey(cellKey, spec, ordinal) → string
+   * Returner identiteten for denne kontrollen: cellKey + '::' + (spec.name || 'w' + ordinal)
+   * cellKey er notatbokens STABILE celle-nøkkel (W2-carryover: Cells.cellKeyAt
+   * — attrs.id når cellen har én, ellers råindeksen konvertert til streng) —
+   * IKKE nødvendigvis selve celleindeksen lenger. Denne funksjonen forblir en
+   * ren streng-sammenslåing og gjør ingen oppslag selv; DOM-halvdelen under
+   * står for å utlede riktig cellKey via Cells.cellKeyAt (guardet) FØR den
+   * kalles.
    */
-  Ui.controlKey = function (cellIdx, spec, ordinal) {
+  Ui.controlKey = function (cellKey, spec, ordinal) {
     var name = spec.name || ('w' + ordinal);
-    return cellIdx + '::' + name;
+    return cellKey + '::' + name;
   };
 
   // Eksporter til global og CommonJS
@@ -299,11 +309,17 @@
       // ~770, både tidlig-retur-grenene og hovedløpet), så neste mål
       // venter til forrige er HELT ferdig (inkludert dens egen
       // scriptRunInProgress=false) før den i det hele tatt starter.
+      // W1-carryover (b): en avsluttende .catch på HELE kjeden — uten den
+      // ville et mål som kaster synkront (eller returnerer et avvist promise)
+      // latt rejectionen boble ut som en unhandled rejection (ingen .then-
+      // gren over fanger den, og _rerunFor sitt kall-sted bryr seg ikke om
+      // returverdien). console.warn i stedet: kjøringen fortsetter å fungere
+      // for brukeren, feilen blir synlig i konsollen fremfor å krasje stille.
       targets.reduce(function (p, idx) {
         return p.then(function () {
           if (global.Cells && typeof global.Cells.runCell === 'function') return global.Cells.runCell(idx);
         });
-      }, Promise.resolve());
+      }, Promise.resolve()).catch(console.warn);
     }
 
     // Felles endrings-håndterer: lagrer verdien UMIDDELBART (getValue()),
@@ -491,39 +507,50 @@
       return strip;
     }
 
-    /**
-     * Ui.registerControl(specJson) → JSON-streng med gjeldende verdi, eller
-     * null (ingen aktiv kjørekontekst — "plain script"-fallback, spec §krav).
-     */
-    Ui.registerControl = function (specJson) {
-      var ctx = (typeof global.mdUiRunCtx === 'function') ? global.mdUiRunCtx() : null;
-      // cellEl kan være null i en kant-case (Task 2-rapporten) — dette
-      // guardes eksplisitt, ikke bare "ctx finnes".
-      if (!ctx || !ctx.cellEl) return null;
+    // Utleder den STABILE celle-nøkkelen for en råindeks (W2-carryover d):
+    // Cells.cellKeyAt (js/cells.js) når tilgjengelig, ellers råindeksen selv
+    // konvertert til streng (samme fallback som Cells.cellKeyAt sin egen
+    // id-løse gren — holdt i sync eksplisitt her fordi Cells kan mangle helt
+    // i node:test-stubbene og i "plain script"-kjøretid uten notatbok).
+    function _cellKeyAt(cellIdx) {
+      return (global.Cells && typeof global.Cells.cellKeyAt === 'function')
+        ? global.Cells.cellKeyAt(cellIdx) : String(cellIdx);
+    }
 
-      var cellIdx = ctx.cellIdx;
-      var raw;
-      try {
-        raw = JSON.parse(specJson);
-      } catch (e) {
-        console.warn('Ui.registerControl: ugyldig JSON-spec: ' + (e && e.message));
-        return null;
-      }
-      var result = Ui.normalizeSpec(raw);
-      for (var i = 0; i < result.warnings.length; i++) console.warn('Ui: ' + result.warnings[i]);
-      var spec = result.spec;
-      if (!spec) return null;
+    /**
+     * _registerInto(cellIdx, cellEl, spec) → gjeldende verdi (rå JS-verdi,
+     * ikke JSON-streng), eller null for button. Delt kjerne mellom
+     * Ui.registerControl (ctx-drevet, ett spec om gangen) og
+     * Ui.registerFromRegistry (eksplisitt cellIdx, et helt array om gangen) —
+     * begge kaller inn HIT for selve registrerings-/ombyggingslogikken; de er
+     * bare to ulike måter å komme frem til (cellIdx, cellEl, ferdig normalisert
+     * spec) på.
+     */
+    function _registerInto(cellIdx, cellEl, spec) {
+      var cellKey = _cellKeyAt(cellIdx);
 
       var run = _cellRuns[cellIdx];
       if (!run || run.closed) {
         run = _cellRuns[cellIdx] = { ordinal: 0, registered: {} };
       }
       var ordinal = run.ordinal++;
-      var key = Ui.controlKey(cellIdx, spec, ordinal);
+      var key = Ui.controlKey(cellKey, spec, ordinal);
       run.registered[key] = true;
 
-      var strip = _ensureStrip(ctx.cellEl, cellIdx);
+      var strip = _ensureStrip(cellEl, cellIdx);
       var existing = _controls[key];
+
+      // W2-carryover (d): en id-tagget celle kan ha flyttet RÅINDEKS siden
+      // forrige registrering (strukturell re-rendring satte den inn et annet
+      // sted) mens den STABILE nøkkelen (cellKey) er uendret — eksisterende
+      // her peker da på en kontroll-node bundet til en ANNEN (trolig allerede
+      // fjernet) stripe, og kan ikke gjenbrukes i place i DENNE stripa.
+      // _values[key] (selve verdien) er IKKE rørt her — kun denne stale
+      // _controls-oppføringen slippes, slik at grenene under bygger en fersk
+      // node i riktig stripe, seedet med den overlevende lagrede verdien.
+      if (existing && existing.cellIdx !== cellIdx) {
+        existing = undefined;
+      }
 
       // B2-fiksen (final-review): et type-bytte under SAMME nøkkel (kilden
       // endret f.eks. ui.slider(...) til ui.dropdown(...) uten å endre
@@ -536,7 +563,18 @@
       // sin egen struktur). Fjern den gamle DOM-noden og glem både
       // kontroll- og verdi-oppføringen — resten av funksjonen ser da
       // nøyaktig ut som en helt fersk registrering.
+      //
+      // W1-carryover (a): FØR fjerning, fang nextSibling — den gamle nodens
+      // posisjon i stripa. Den nye kontrollen settes inn PRESIS der (insertBefore
+      // i stedet for appendChild lenger ned), slik at et type-bytte midt i en
+      // strek med flere kontroller ikke lenger hopper til slutten av stripa.
+      // reinsertBefore er null i det vanlige tilfellet (ingen type-bytte) —
+      // insertBefore(node, null) legger til på slutten, akkurat som
+      // appendChild ville gjort, så denne ene insertBefore-kallet dekker
+      // begge situasjonene ensartet.
+      var reinsertBefore = null;
       if (existing && existing.type !== spec.type) {
+        reinsertBefore = existing.wrap ? existing.wrap.nextSibling : null;
         if (existing.wrap && typeof existing.wrap.remove === 'function') existing.wrap.remove();
         delete _controls[key];
         delete _values[key];
@@ -546,13 +584,13 @@
       if (spec.type === 'button') {
         if (!existing) {
           var builtBtn = _buildButton(key, cellIdx, spec);
-          strip.appendChild(builtBtn.wrap);
+          strip.insertBefore(builtBtn.wrap, reinsertBefore);
           _controls[key] = { key: key, cellIdx: cellIdx, spec: spec, wrap: builtBtn.wrap, input: builtBtn.input, type: 'button' };
         } else {
           existing.spec = spec;
           existing.wrap.textContent = spec.label || (typeof t === 'function' ? t('Kjør') : 'Kjør');
         }
-        return JSON.stringify(null);
+        return null;
       }
 
       var value;
@@ -562,7 +600,7 @@
         var stored = _values.hasOwnProperty(key) ? _values[key] : spec.value;
         var builder = _BUILDERS[spec.type];
         var built = builder(key, cellIdx, spec, stored);
-        strip.appendChild(built.wrap);
+        strip.insertBefore(built.wrap, reinsertBefore);
         _controls[key] = {
           key: key, cellIdx: cellIdx, spec: spec, wrap: built.wrap, input: built.input,
           labelEl: built.labelEl, readout: built.readout, type: spec.type
@@ -570,7 +608,105 @@
         value = stored;
       }
       _values[key] = value;
+      return value;
+    }
+
+    /**
+     * Ui.registerControl(specJson) → JSON-streng med gjeldende verdi, eller
+     * null (ingen aktiv kjørekontekst — "plain script"-fallback, spec §krav).
+     * Ctx-drevet tynn wrapper rundt _registerInto: løser (cellIdx, cellEl) via
+     * window.mdUiRunCtx() og parser/normaliserer ÉN spec, deretter delegerer.
+     */
+    Ui.registerControl = function (specJson) {
+      var ctx = (typeof global.mdUiRunCtx === 'function') ? global.mdUiRunCtx() : null;
+      // cellEl kan være null i en kant-case (Task 2-rapporten) — dette
+      // guardes eksplisitt, ikke bare "ctx finnes".
+      if (!ctx || !ctx.cellEl) return null;
+
+      var raw;
+      try {
+        raw = JSON.parse(specJson);
+      } catch (e) {
+        console.warn('Ui.registerControl: ugyldig JSON-spec: ' + (e && e.message));
+        return null;
+      }
+      var result = Ui.normalizeSpec(raw);
+      for (var i = 0; i < result.warnings.length; i++) console.warn('Ui: ' + result.warnings[i]);
+      var spec = result.spec;
+      if (!spec) return null;
+
+      var value = _registerInto(ctx.cellIdx, ctx.cellEl, spec);
       return JSON.stringify(value);
+    };
+
+    /**
+     * Ui.registerFromRegistry(cellIdx, specsJson) → void
+     * Bulk-registrering for cellen med EKSPLISITT cellIdx (i stedet for
+     * window.mdUiRunCtx()) — R-fasadens declare-og-injiser-modell (Task 2):
+     * etter at en R-celle har kjørt, leser index.html hele dens ui_*-registry
+     * (ett JSON-array av rå specs) og sender det hit i ETT kall, i stedet for
+     * ett registerControl-kall per kontroll slik pyodide (pull-modell, synkron
+     * ui.*-kall inni selve kjøringen) gjør.
+     *
+     * specsJson MÅ være et JSON-array. Hvert element normaliseres via
+     * Ui.normalizeSpec — ugyldige/nullede specs varsles (console.warn) og
+     * hoppes over, resten registreres. Kallet brakettes internt av
+     * beginCellRun/endCellRun (samme par som index.html sine kjørebraketter
+     * bruker for pyodide) slik at kontroller som IKKE lenger finnes i
+     * registryet (kilden sluttet å kalle ui_* for dem) sopes bort ved
+     * funksjonens slutt — helt symmetrisk med pyodide-veiens mark-og-sopp.
+     */
+    Ui.registerFromRegistry = function (cellIdx, specsJson) {
+      var list;
+      try {
+        list = JSON.parse(specsJson);
+      } catch (e) {
+        console.warn('Ui.registerFromRegistry: ugyldig JSON: ' + (e && e.message));
+        return;
+      }
+      if (!Array.isArray(list)) {
+        console.warn('Ui.registerFromRegistry: forventet et JSON-array av specs');
+        return;
+      }
+      var cellEl = (global.Cells && typeof global.Cells.cellElementAt === 'function')
+        ? global.Cells.cellElementAt(cellIdx) : null;
+      if (!cellEl) {
+        console.warn('Ui.registerFromRegistry: fant ingen celle-node for cellIdx ' + cellIdx);
+        return;
+      }
+
+      Ui.beginCellRun(cellIdx);
+      for (var i = 0; i < list.length; i++) {
+        var result = Ui.normalizeSpec(list[i]);
+        for (var w = 0; w < result.warnings.length; w++) console.warn('Ui: ' + result.warnings[w]);
+        if (!result.spec) {
+          console.warn('Ui.registerFromRegistry: spec #' + i + ' forkastet (ugyldig), hoppet over');
+          continue;
+        }
+        _registerInto(cellIdx, cellEl, result.spec);
+      }
+      Ui.endCellRun(cellIdx);
+    };
+
+    /**
+     * Ui.valuesForCell(cellIdx) → JSON-streng, {navn → verdi} for cellens
+     * kontroller — nøklene er kontrollnavnet ALENE (uten celle-prefikset
+     * controlKey ellers legger på), f.eks. {"n": 7, "w0": "a"}. Dette er
+     * formatet R-fasaden (Task 2) injiserer som `.ui_values` før en R-celle
+     * kjøres på nytt. Slår opp via den STABILE cellKey (samme utledning som
+     * _registerInto bruker) — IKKE via ctrl.cellIdx — slik at et strukturelt
+     * indeksskift på en id-tagget celle ikke mister verdiene idet neste
+     * verdi-eksport gjøres (samme robusthet som selve verdilageret, W2-carryover d).
+     * Button-kontroller har ingen lagret verdi (_values får aldri en
+     * oppføring for dem, se _registerInto) og er derfor naturlig fraværende.
+     */
+    Ui.valuesForCell = function (cellIdx) {
+      var prefix = _cellKeyAt(cellIdx) + '::';
+      var out = {};
+      Object.keys(_values).forEach(function (key) {
+        if (key.indexOf(prefix) === 0) out[key.slice(prefix.length)] = _values[key];
+      });
+      return JSON.stringify(out);
     };
 
     /**
