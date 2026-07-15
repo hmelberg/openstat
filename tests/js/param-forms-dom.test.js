@@ -709,3 +709,158 @@ test('sweep: fjerner ALLE #@param-linjer (spredt over topp+bunn+venstre samtidig
   assert.ok(!leftWrap || !leftWrap.children.some((c) => c.classList.contains('param-form')),
     'venstre-kolonnen er også tom (ingen restanse)');
 });
+
+// ---- Kjør-chip (run-chip): ikke-auto endring venter på å bli kjørt -------
+// Spec: se prosjekt-briefen for param-run-chip-grenen. Chippen er ÉN PER
+// CELLE, bygget inn i den TOPP-MESTE eksisterende .param-form-stripa (top >
+// bottom > left) som SISTE barn (etter feltradene) — se _build/_showRunChip
+// i js/param-forms.js.
+
+test('Kjør-chip: ikke-auto commit → chip vises som SISTE barn i stripa, med "Kjør"/▶ i teksten', () => {
+  const { ParamForms, cellEl, outEl } = freshEnv();
+  const src = 'name = \'a\'  #@param ["a", "b", "c"]';
+  ParamForms.decorate(0, cellEl, src, 'python');
+  const strip = outEl.children[0];
+  assert.strictEqual(strip.children.length, 1, 'ingen chip før noen endring');
+
+  const select = strip.children[0].children[1];
+  select.value = 'b';
+  select.dispatchEvent({ type: 'change' });
+
+  assert.strictEqual(strip.children.length, 2, 'chip lagt til som SISTE barn');
+  const chip = strip.children[1];
+  assert.ok(chip.classList.contains('param-form-runchip'));
+  assert.ok(!chip.classList.contains('param-form-row'), 'chippen er ikke en kontroll-rad');
+  assert.ok(chip.textContent.indexOf('Kjør') !== -1, 'teksten inneholder "Kjør"');
+  assert.ok(chip.textContent.indexOf('▶') !== -1, 'teksten inneholder ▶');
+});
+
+test('Kjør-chip: mixed-plassering (topp-slider run:auto + venstre-dropdown ikke-auto) → chippen havner i den TOPP-MESTE stripa (top), ikke i venstre-kolonnen', () => {
+  const { ParamForms, cellEl, outEl } = freshEnv();
+  const src = [
+    'n = 3  #@param {type:"slider", min:0, max:10, run:"auto"}',
+    'name = \'a\'  #@param ["a", "b"] {placement:"left"}',
+  ].join('\n');
+  ParamForms.decorate(0, cellEl, src, 'python');
+
+  const leftWrap = outEl.children.find((c) => c.classList.contains('nb-strips-left'));
+  const leftStrip = leftWrap.children.find((c) => c.classList.contains('param-form'));
+  const select = leftStrip.children[0].children[1];
+  select.value = 'b';
+  select.dispatchEvent({ type: 'change' });
+
+  const topStrip = outEl.children.find((c) => c.classList.contains('param-form') && c.getAttribute('data-pos') === 'top');
+  assert.strictEqual(topStrip.children.length, 2, 'chip lagt til i TOPP-stripa (1 rad + chip)');
+  assert.ok(topStrip.children[1].classList.contains('param-form-runchip'));
+  assert.strictEqual(leftStrip.children.length, 1, 'venstre-stripa fikk INGEN chip (kun sin egen rad)');
+});
+
+test('Kjør-chip: celle med KUN en run:auto-kontroll → chip vises ALDRI', async () => {
+  const { ParamForms, cellEl, outEl } = freshEnv();
+  const src = 'x = 3  #@param {type:"slider", min:0, max:10, run:"auto"}';
+  ParamForms.decorate(0, cellEl, src, 'python');
+  const strip = outEl.children[0];
+  const slider = strip.children[0].children[1];
+  slider.value = '9';
+  slider.dispatchEvent({ type: 'input' });
+  await wait(220);
+  assert.strictEqual(strip.children.length, 1, 'ingen chip lagt til for en run:auto-endring');
+});
+
+test('Kjør-chip: klikk kaller Cells.runCell(idx)', () => {
+  const { ParamForms, cellEl, outEl, runCellCalls } = freshEnv();
+  const src = 'name = \'a\'  #@param ["a", "b"]';
+  ParamForms.decorate(5, cellEl, src, 'python');
+  const strip = outEl.children[0];
+  const select = strip.children[0].children[1];
+  select.value = 'b';
+  select.dispatchEvent({ type: 'change' });
+
+  const chip = strip.children[strip.children.length - 1];
+  chip.dispatchEvent({ type: 'click' });
+  assert.deepStrictEqual(runCellCalls, [5], 'klikk kjørte riktig celle');
+});
+
+test('Kjør-chip: klikk nektes stille mens mdIsScriptRunning() er true (samme guard-mønster som resten av fila)', () => {
+  const { ParamForms, cellEl, outEl, runCellCalls } = freshEnv({ scriptRunning: true });
+  const src = 'name = \'a\'  #@param ["a", "b"]';
+  ParamForms.decorate(0, cellEl, src, 'python');
+  const strip = outEl.children[0];
+  const select = strip.children[0].children[1];
+  select.value = 'b';
+  select.dispatchEvent({ type: 'change' });
+
+  const chip = strip.children[strip.children.length - 1];
+  chip.dispatchEvent({ type: 'click' });
+  assert.deepStrictEqual(runCellCalls, [], 'nektet — scriptet kjører allerede');
+});
+
+test('Kjør-chip: ParamForms.onCellRan(idx) skjuler en synlig chip (speiler js/cells.js sin C._afterCellRun/clearAllStale)', () => {
+  const { ParamForms, cellEl, outEl } = freshEnv();
+  const src = 'name = \'a\'  #@param ["a", "b"]';
+  ParamForms.decorate(2, cellEl, src, 'python');
+  const strip = outEl.children[0];
+  const select = strip.children[0].children[1];
+  select.value = 'b';
+  select.dispatchEvent({ type: 'change' });
+  assert.strictEqual(strip.children.length, 2, 'chip synlig FØR kjøring');
+
+  ParamForms.onCellRan(2);
+  assert.strictEqual(strip.children.length, 1, 'chip fjernet fra DOM-en etter kjøring');
+
+  // Idempotent — flere kall (f.eks. både enkelt-celle-suksess OG en
+  // etterfølgende "Kjør alle" i samme tikk) skal ikke krasje.
+  assert.doesNotThrow(() => ParamForms.onCellRan(2));
+});
+
+test('Kjør-chip: ParamForms.onCellRan for en cellIdx uten (eller uten synlig) chip → no-op, ingen krasj', () => {
+  const { ParamForms } = freshEnv();
+  assert.doesNotThrow(() => ParamForms.onCellRan(99));
+});
+
+test('Kjør-chip: strukturell ombygging (ParamForms.refresh → full _build) resetter en synlig chip', () => {
+  const { ParamForms, cellEl, outEl } = freshEnv();
+  const src = 'name = \'a\'  #@param ["a", "b"]';
+  ParamForms.decorate(0, cellEl, src, 'python');
+  const strip = outEl.children[0];
+  const select = strip.children[0].children[1];
+  select.value = 'b';
+  select.dispatchEvent({ type: 'change' });
+  assert.strictEqual(strip.children.length, 2, 'chip synlig');
+
+  // Strukturell endring (en ny #@param-linje lagt til) → full _build, IKKE
+  // in-place-oppdatering — chippen skal IKKE overleve inn i den ferske stripa.
+  const newSrc = src + '\ny = 1  #@param {type:"number"}';
+  ParamForms.refresh(0, newSrc);
+  const newStrip = outEl.children[0];
+  assert.notStrictEqual(newStrip, strip, 'stripa er ombygd (ny node)');
+  assert.strictEqual(newStrip.children.length, 2, 'to kontroll-rader, INGEN chip i den ferske stripa');
+});
+
+test('Kjør-chip: resetDocument glemmer chip-tilstanden — en fersk decorate for samme cellIdx starter uten synlig chip', () => {
+  const { ParamForms, cellEl, outEl } = freshEnv();
+  const src = 'name = \'a\'  #@param ["a", "b"]';
+  ParamForms.decorate(0, cellEl, src, 'python');
+  const strip = outEl.children[0];
+  const select = strip.children[0].children[1];
+  select.value = 'b';
+  select.dispatchEvent({ type: 'change' });
+  assert.strictEqual(strip.children.length, 2, 'chip synlig FØR reset');
+
+  ParamForms.resetDocument();
+
+  // Speiler en fersk cellNode-bygging etter et nytt dokument lastes (se
+  // js/cells.js sin C.contentLoaded → full render() → nye .nb-cell-noder).
+  const cellEl2 = new FakeEl('div');
+  cellEl2.className = 'nb-cell';
+  const inputEl2 = new FakeEl('div'); inputEl2.className = 'nb-input';
+  const outEl2 = new FakeEl('div'); outEl2.className = 'nb-output';
+  const bodyEl2 = new FakeEl('div'); bodyEl2.className = 'nb-output-body';
+  outEl2.appendChild(bodyEl2);
+  cellEl2.appendChild(inputEl2);
+  cellEl2.appendChild(outEl2);
+
+  ParamForms.decorate(0, cellEl2, src, 'python');
+  const strip2 = outEl2.children[0];
+  assert.strictEqual(strip2.children.length, 1, 'ingen chip i den ferske stripa etter resetDocument');
+});

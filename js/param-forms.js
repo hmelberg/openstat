@@ -622,6 +622,80 @@
       }, 150);
     }
 
+    // ---- Kjør-chip (run-chip): ikke-auto endring venter på å bli kjørt ----
+    // En #@param-kontroll UTEN run:"auto" skriver stille inn i kildeteksten
+    // (samme splice som run:auto), men trigger ALDRI en kjøring selv — inntil
+    // nå var eneste tilbakemelding cellens egen .nb-stale-tint (js/cells.js).
+    // Denne chippen gjør handlingen synlig DER brukeren nettopp så endringen
+    // skje (skjema-stripa), i tillegg til — ikke i stedet for — celle-hodets
+    // ▶ (Colab har ingen tilsvarende knapp; dette er en bevisst, liten
+    // forbedring, se prosjekt-briefen).
+    //
+    // ÉN chip PER CELLE (ikke én per kontroll): en celle kan ha OPPTIL TRE
+    // fysiske .param-form-striper (top/bottom/left, se _build), men chippen
+    // lever i kun ÉN av dem — den TOPP-MESTE eksisterende (top > bottom >
+    // left). Dette er en bevisst forenkling fremfor "stripa til kontrollen
+    // som sist endret seg": en fast, forutsigbar plassering er enklere å
+    // forstå og teste, og cellen har uansett bare ÉN "kjør denne cellen"-
+    // handling uansett hvor mange #@param-felt som er endret.
+    //
+    // Synlighet er en EGEN DOM-tilstedeværelse (chip-noden er enten et barn
+    // av vertsstripa eller ikke — IKKE en CSS display:none-veksling): dette
+    // gjør "chip present"/"NO chip" trivielt å teste uten en ekte
+    // getComputedStyle, samme filosofi som resten av denne fila (ingen
+    // querySelector-avhengighet i DOM-halvdelen, se _findChild).
+    //
+    // Vist: fra _commit, ved en committed endring UTEN run:auto (se under).
+    // Skjult: ParamForms.onCellRan(cellIdx) — kalt fra js/cells.js sin
+    // C._afterCellRun (enkelt-celle-kjøring, EGEN eller via celle-hodets ▶ —
+    // begge går via Cells.runCell) OG fra clearAllStale (kalt av
+    // Cells.beginRun — "Kjør alle"/"Restart & kjør alle"/Forklar). Dette
+    // speiler BEVISST nøyaktig samme to kanaler/samme "klarert på forhånd"-
+    // semantikk som .nb-stale allerede bruker (se cells.js sine kommentarer
+    // ved clearAllStale/_afterCellRun) — chippen er dermed alltid borte
+    // nøyaktig når stale-tinten ville vært det, UTEN å være AVHENGIG av
+    // .nb-stale selv (se hvorfor under). Reset ved resetDocument (hele
+    // _forms glemmes, se ParamForms.resetDocument) og ved enhver strip-
+    // ombygging (_build, se der) — en helt fersk chip-node bygges da, ALDRI
+    // forhåndsvist (chipVisible starter alltid false), samme "struktur-
+    // endring = ærlig reset" som NB.stale/NB.ranOk selv nullstilles ved full
+    // re-rendring (js/cells.js sin render()).
+    //
+    // HVORFOR ikke bare observere .nb-stale sin fjerning (f.eks. via en
+    // MutationObserver på .nb-input)? .nb-stale settes KUN på en celle som
+    // allerede har kjørt OK én gang (markStaleIfRan sjekker NB.ranOk[idx] —
+    // se js/cells.js) — en celle som ALDRI har kjørt får derfor ALDRI
+    // .nb-stale i utgangspunktet, og _afterCellRun sin class-fjerning er da
+    // også et no-op (ingen DOM-mutasjon å observere). Den aller vanligste
+    // chip-situasjonen (bruker endrer et #@param FØR cellen noensinne er
+    // kjørt) ville dermed ALDRI fått chippen sin skjult av en slik
+    // observatør. Et eksplisitt, guardet tilbakekall (ParamForms.onCellRan,
+    // samme "cells.js kaller INN i ParamForms"-mønster som allerede finnes
+    // for resetDocument/decorate/refresh/syncSource) er derfor den korrekte
+    // — ikke bare den enkleste — mekanismen her.
+    function _makeRunChip(cellIdx) {
+      var label = (typeof t === 'function' ? t('Kjør') : 'Kjør') + ' ▶';
+      var chip = _el('button', 'param-form-runchip', label);
+      chip.type = 'button';
+      chip.title = typeof t === 'function' ? t('Kjør denne cellen') : 'Kjør denne cellen';
+      chip.addEventListener('click', function () { _runNow(cellIdx); });
+      return chip;
+    }
+
+    function _showRunChip(cellIdx) {
+      var st = _forms[cellIdx];
+      if (!st || !st.chip || !st.chipHost || st.chipVisible) return;
+      st.chipVisible = true;
+      st.chipHost.appendChild(st.chip);
+    }
+
+    function _hideRunChip(cellIdx) {
+      var st = _forms[cellIdx];
+      if (!st || !st.chipVisible) return;
+      st.chipVisible = false;
+      if (st.chip && st.chip.parentNode) st.chip.parentNode.removeChild(st.chip);
+    }
+
     // Slå opp den FERSKESTE entryen (fra st.entries, holdt synkron per
     // tastetrykk via syncSource) som svarer til en closure-fanget entry fra
     // byggetid (review-fiks 1): identitet først (ingen synk har skjedd),
@@ -672,7 +746,18 @@
       if (global.Cells && typeof global.Cells.updateCellSource === 'function') {
         global.Cells.updateCellSource(cellIdx, newSource);
       }
-      if (entry.meta.runAuto) _scheduleRun(cellIdx, entry, entry.meta.type === 'slider');
+      if (entry.meta.runAuto) {
+        _scheduleRun(cellIdx, entry, entry.meta.type === 'slider');
+      } else {
+        // Kjør-chip: denne endringen kjører ALDRI seg selv (ingen run:auto) —
+        // vis chippen slik at brukeren har et sted å klikke, rett ved siden
+        // av feltet hen nettopp endret. _showRunChip slår opp _forms[cellIdx]
+        // FERSKT (ikke via denne funksjonens `st`-variabel, som i sjeldne
+        // tilfeller kan være en FORELDET referanse hvis
+        // Cells.updateCellSource over trigget en strukturell _build) — trygt
+        // uansett.
+        _showRunChip(cellIdx);
+      }
     }
 
     function _buildEntryControl(cellIdx, entry, value, lang) {
@@ -814,7 +899,8 @@
       var entries = ParamForms.parse(source, lang);
       if (!entries.length) {
         _forms[cellIdx] = { cellEl: cellEl, lang: lang, source: source,
-                            entries: [], builtEntries: [], strips: { top: null, bottom: null, left: null }, controls: [] };
+                            entries: [], builtEntries: [], strips: { top: null, bottom: null, left: null }, controls: [],
+                            chip: null, chipHost: null, chipVisible: false };
         return;
       }
       var cellDefault = _cellDefaultPlacement(cellEl);
@@ -833,6 +919,13 @@
       ['top', 'bottom', 'left'].forEach(function (pos) {
         if (stripNodes[pos]) _insertStrip(cellEl, stripNodes[pos], pos);
       });
+      // Kjør-chip: ÉN chip for HELE cellen, bygget fersk her (samme "aldri
+      // gjenbrukt på tvers av _build" som resten av stripa) men IKKE lagt inn
+      // i DOM-en ennå (chipVisible starter alltid false — en strip-ombygging
+      // resetter chippen, se _showRunChip/_hideRunChip sin kommentar over).
+      // Verten er den TOPP-MESTE eksisterende stripa (top > bottom > left).
+      var chipHost = stripNodes.top || stripNodes.bottom || stripNodes.left || null;
+      var chip = chipHost ? _makeRunChip(cellIdx) : null;
       // entries og builtEntries starter som SAMME liste (bygget nettopp nå);
       // de divergerer først når syncSource oppdaterer entries per tastetrykk
       // mens stripa fortsatt står — refresh sammenlikner alltid mot
@@ -840,7 +933,8 @@
       _forms[cellIdx] = { cellEl: cellEl, lang: lang, source: source,
                           entries: entries, builtEntries: entries,
                           strips: { top: stripNodes.top || null, bottom: stripNodes.bottom || null, left: stripNodes.left || null },
-                          controls: controls };
+                          controls: controls,
+                          chip: chip, chipHost: chipHost, chipVisible: false };
     }
 
     // To entry-lister har "samme struktur" (→ oppdater kontroller i place)
@@ -975,6 +1069,22 @@
       if (!st) return;
       st.source = source;
       st.entries = ParamForms.parse(source, st.lang);
+    };
+
+    /**
+     * ParamForms.onCellRan(cellIdx) — Kjør-chip: cellen har (nettopp)
+     * kjørt — skjul chippen for denne cellen hvis den var synlig (no-op
+     * ellers). Kalt fra js/cells.js sine to "en celle er ferdig kjørt"-
+     * kanaler: C._afterCellRun (enkelt-celle-suksess — dekker BÅDE celle-
+     * hodets ▶ og chippen sitt eget klikk, begge går via Cells.runCell) og
+     * clearAllStale (kalt av Cells.beginRun FØR selve "Kjør alle"-løkka,
+     * samme preemptive "regn hele kjøringen som frisk"-forenkling som
+     * .nb-stale allerede bruker der — se cells.js sine kommentarer). Se
+     * _hideRunChip over for hvorfor dette IKKE er implementert som en
+     * .nb-stale-observatør.
+     */
+    ParamForms.onCellRan = function (cellIdx) {
+      _hideRunChip(cellIdx);
     };
 
     // ParamForms.reorder er fjernet (widget-plassering-fasen): rekkefølgen

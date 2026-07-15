@@ -1594,6 +1594,16 @@
         var c = NB.cells[idx];
         if (c && c._input) c._input.classList.remove('nb-stale');
       }
+      // Kjør-chip (param-forms.js): denne kanalen dekker BÅDE celle-hodets
+      // ▶ og chippen sitt eget klikk (begge kaller Cells.runCell → hit ved
+      // suksess) — ubetinget på `ok`, IKKE inni "if (NB.stale[idx])" over:
+      // en celle som ALDRI har kjørt før (NB.ranOk var false) får aldri
+      // .nb-stale i utgangspunktet, men #@param-kontrollen kan likevel ha
+      // vist en chip (se ParamForms._commit) — den skal skjules her akkurat
+      // som for enhver annen celle. Guardet — ParamForms er valgfri.
+      if (global.ParamForms && typeof global.ParamForms.onCellRan === 'function') {
+        global.ParamForms.onCellRan(idx);
+      }
     };
 
     function markStaleIfRan(idx) {
@@ -1609,6 +1619,15 @@
         ranOk[i] = true;
         var c = NB.cells[i];
         if (c && c._input) c._input.classList.remove('nb-stale');
+        // Kjør-chip: "Kjør alle"/"Restart & kjør alle"/Forklar (Cells.beginRun,
+        // eneste kaller av denne funksjonen) regner — akkurat som for
+        // .nb-stale over — HELE kjøringen som frisk FØR selve løkka starter
+        // (bevisst forenkling, se beginRun sin kommentar) — chippen for
+        // enhver celle som måtte ha en, skjules derfor her, samtidig med
+        // .nb-stale, ikke separat per fullført segment.
+        if (global.ParamForms && typeof global.ParamForms.onCellRan === 'function') {
+          global.ParamForms.onCellRan(i);
+        }
       }
       NB.stale = {};
       NB.ranOk = ranOk;
