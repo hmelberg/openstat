@@ -160,12 +160,18 @@
         warnings.push('kunne ikke tolke @param-metadata-objekt: ' + objText);
         return { meta: null, warnings: warnings, fatal: true };
       }
+      // min/max/step: NaN-vakt (review-fiks 3, samme filosofi som js/ui.js
+      // sin normalizeSpec) — et ikke-numerisk tall gir advarsel og nøkkelen
+      // DROPPES (entryen beholdes; kontrollen får da sin default senere).
+      function numKey(key, val) {
+        var n = Number(val);
+        if (isNaN(n)) { warnings.push('ugyldig ' + key + ' i @param-metadata: ' + val); return; }
+        meta[key] = n;
+      }
       Object.keys(obj).forEach(function (key) {
         var val = obj[key];
         if (key === 'type') meta.type = String(val);
-        else if (key === 'min') meta.min = Number(val);
-        else if (key === 'max') meta.max = Number(val);
-        else if (key === 'step') meta.step = Number(val);
+        else if (key === 'min' || key === 'max' || key === 'step') numKey(key, val);
         else if (key === 'allow-input') meta.allowInput = Boolean(val);
         else if (key === 'run') { if (val === 'auto') meta.runAuto = true; }
         else if (key === 'options') {
@@ -194,11 +200,21 @@
    * i et ellers gyldig metadata-objekt er ikke-fatale og havner i den
    * returnerte entryens warnings-liste i stedet).
    */
+  // Stripp en eventuell avsluttende '\r' (CRLF-dokumenter, review-fiks 2) —
+  // LINE_RE sin `$` ville ellers aldri matche (\r er ikke \s i regex-forstand
+  // FØR $-ankeret her, og selv om det var, ville \r havnet inni en fanget
+  // gruppe og korrumpert reassemblering). Split på '\n' + stripp per linje
+  // (i stedet for split på /\r?\n/) holder linje-indeksene identiske mellom
+  // parse og writeValue OG lar writeValue re-attache \r-en byte-nøyaktig.
+  function stripCR(line) {
+    return line.charAt(line.length - 1) === '\r' ? line.slice(0, -1) : line;
+  }
+
   ParamForms.parse = function (cellSource, lang) {
     var lines = String(cellSource == null ? '' : cellSource).split('\n');
     var entries = [];
     for (var i = 0; i < lines.length; i++) {
-      var m = LINE_RE.exec(lines[i]);
+      var m = LINE_RE.exec(stripCR(lines[i]));
       if (!m || m[8] === undefined) continue; // ingen #@param på denne linja
 
       var varName = m[2];
@@ -230,12 +246,19 @@
     return entries;
   };
 
-  // Kvoter og escape en streng for python/r-literal-bruk: escape backslash
-  // FØRST, deretter enkle anførselstegn (ellers ville quote-escapingen sin
-  // egen innsatte backslash blitt escapet på nytt av backslash-steget).
+  // Kvoter og escape en streng for python/r-literal-bruk. Review-fiks 1:
+  // en backslash dobles KUN der den ellers ville skapt tvetydighet — rett
+  // foran et anførselstegn (ellers ville quote-escapingens innsatte \ smelte
+  // sammen med den) eller helt sist i strengen (ellers ville den escape det
+  // lukkende anførselstegnet). En "ensom" backslash midt i teksten (f.eks.
+  // verdien \t — to tegn) skrives UENDRET, slik at kilde-literalet '\t'
+  // round-tripper byte-nøyaktig gjennom currentValue→writeValue (motstykket
+  // i unquoteString under unescaper tilsvarende kun \\ og anførselstegnet).
   // Aldri eval — dette er ren tekstbehandling av brukerens NYE, typede verdi.
   function quoteAndEscape(s) {
-    var escaped = String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    var escaped = String(s)
+      .replace(/(\\*)'/g, function (m, bs) { return bs + bs + "\\'"; })
+      .replace(/(\\*)$/, function (m, bs) { return bs + bs; });
     return "'" + escaped + "'";
   }
 
@@ -285,30 +308,46 @@
    */
   ParamForms.writeValue = function (cellSource, entry, newValue, lang) {
     var lines = String(cellSource == null ? '' : cellSource).split('\n');
-    var line = lines[entry.lineIdx];
-    if (line === undefined) {
+    var rawLine = lines[entry.lineIdx];
+    if (rawLine === undefined) {
       console.warn('ParamForms.writeValue: ingen linje ' + entry.lineIdx + ' i cellSource');
       return cellSource;
     }
+    // CRLF (review-fiks 2): \r holdes UTENFOR det matchede spennet og
+    // re-attaches verbatim — dokumentets linjeender bevares byte-nøyaktig.
+    var line = stripCR(rawLine);
+    var cr = line === rawLine ? '' : '\r';
     var m = LINE_RE.exec(line);
     if (!m || m[8] === undefined) {
       console.warn('ParamForms.writeValue: linje ' + entry.lineIdx + ' matcher ikke lenger #@param-mønsteret');
       return cellSource;
     }
     var formatted = ParamForms.formatLiteral(newValue, entry.meta.type, lang);
-    var newLine = m[1] + m[2] + m[3] + m[4] + m[5] + formatted + m[7] + m[8];
-    lines[entry.lineIdx] = newLine;
+    lines[entry.lineIdx] = m[1] + m[2] + m[3] + m[4] + m[5] + formatted + m[7] + m[8] + cr;
     return lines.join('\n');
   };
 
-  // Fjern kvoter fra en python/r-streng-literal og reverser backslash-
-  // escaping (\<tegn> → <tegn>) — motstykket til quoteAndEscape.
+  // Fjern kvoter fra en python/r-streng-literal — motstykket til
+  // quoteAndEscape. Review-fiks 1: unescape KUN \\ og selve anførsels-
+  // tegnet; alle andre backslash-sekvenser (\t, \n, \x41, …) forblir
+  // byte-intakte (verdien for '\t' er den TO-tegns strengen backslash-t,
+  // ikke en tab) — parseren behandler gjeldende verdi som en opak streng
+  // (spec §Global Constraints), aldri som noe som skal "tolkes".
   function unquoteString(raw) {
     var s = String(raw).trim();
     var q = s.charAt(0);
     if ((q === "'" || q === '"') && s.length >= 2 && s.charAt(s.length - 1) === q) {
       var inner = s.slice(1, -1);
-      return inner.replace(/\\(.)/g, function (m, c) { return c; });
+      var out = '';
+      for (var i = 0; i < inner.length; i++) {
+        var ch = inner.charAt(i);
+        if (ch === '\\' && i + 1 < inner.length) {
+          var next = inner.charAt(i + 1);
+          if (next === '\\' || next === q) { out += next; i++; continue; }
+        }
+        out += ch;
+      }
+      return out;
     }
     return s;
   }

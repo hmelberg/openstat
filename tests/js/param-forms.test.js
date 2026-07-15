@@ -312,11 +312,128 @@ test('currentValue: date returned as unquoted string', () => {
   assert.strictEqual(PF.currentValue(e, 'python'), '2024-01-01');
 });
 
+// ===== escape-bevaring: \t/\n/skråstrek-sekvenser må overleve round-trip =====
+// (review-fiks 1: unquoteString strippet tidligere backslash av ALLE escapede
+// tegn — 'sep = \'\\t\'' round-trippet til 'sep = \'t\''. Nå unescapes KUN
+// \\ og anførselstegnet; alle andre backslash-sekvenser er byte-intakte.)
+
+test("currentValue: '\\t' → two-char string backslash-t (not unescaped)", () => {
+  const e = PF.parse("sep = '\\t'  #@param", 'python')[0];
+  assert.strictEqual(PF.currentValue(e, 'python'), '\\t');
+});
+
+test("round-trip byte-exact: '\\t'", () => {
+  const src = "sep = '\\t'  #@param";
+  const e = PF.parse(src, 'python')[0];
+  const out = PF.writeValue(src, e, PF.currentValue(e, 'python'), 'python');
+  assert.strictEqual(out, src);
+});
+
+test("round-trip byte-exact: '\\n'", () => {
+  const src = "sep = '\\n'  #@param {type:\"string\"}";
+  const e = PF.parse(src, 'python')[0];
+  const out = PF.writeValue(src, e, PF.currentValue(e, 'python'), 'python');
+  assert.strictEqual(out, src);
+});
+
+test("round-trip byte-exact: 'a\\'b' (escaped quote)", () => {
+  const src = "s = 'a\\'b'  #@param";
+  const e = PF.parse(src, 'python')[0];
+  assert.strictEqual(PF.currentValue(e, 'python'), "a'b");
+  const out = PF.writeValue(src, e, PF.currentValue(e, 'python'), 'python');
+  assert.strictEqual(out, src);
+});
+
+test("round-trip byte-exact: 'a\\\\' (escaped trailing backslash)", () => {
+  const src = "s = 'a\\\\'  #@param";
+  const e = PF.parse(src, 'python')[0];
+  assert.strictEqual(PF.currentValue(e, 'python'), 'a\\');
+  const out = PF.writeValue(src, e, PF.currentValue(e, 'python'), 'python');
+  assert.strictEqual(out, src);
+});
+
+// ===== CRLF documents (review-fiks 2) =====
+
+test('parse: CRLF document → entries found (\\r not part of the match)', () => {
+  const src = 'a = 1  #@param\r\nb = 2  #@param {type:"integer"}\r\n';
+  const entries = PF.parse(src, 'python');
+  assert.strictEqual(entries.length, 2);
+  assert.deepStrictEqual(entries.map((e) => e.varName), ['a', 'b']);
+  assert.strictEqual(entries[0].valueRaw, '1');
+});
+
+test('writeValue: CRLF document → line endings preserved byte-exact', () => {
+  const src = 'a = 1  #@param\r\nb = 2  #@param {type:"integer"}\r\nprint(a)\r\n';
+  const entries = PF.parse(src, 'python');
+  const out = PF.writeValue(src, entries[0], 9, 'python');
+  assert.strictEqual(out, 'a = 9  #@param\r\nb = 2  #@param {type:"integer"}\r\nprint(a)\r\n');
+});
+
+test('writeValue: CRLF round-trip with unchanged value is a byte-exact no-op', () => {
+  const src = 'x = 3  #@param {type:"slider", min:0, max:10}\r\n';
+  const e = PF.parse(src, 'python')[0];
+  assert.strictEqual(PF.writeValue(src, e, PF.currentValue(e, 'python'), 'python'), src);
+});
+
+// ===== NaN-validering av min/max/step (review-fiks 3) =====
+
+test('parse: non-numeric min/max/step → warning, key dropped, entry kept', () => {
+  const entries = PF.parse('x = 3  #@param {type:"slider", min:0, max:10, step:big}', 'python');
+  assert.strictEqual(entries.length, 1);
+  assert.strictEqual(entries[0].meta.step, undefined);
+  assert.strictEqual(entries[0].meta.min, 0);
+  assert.strictEqual(entries[0].meta.max, 10);
+  assert.ok(entries[0].warnings.some((w) => /step/.test(w)));
+});
+
+// ===== pinning-tester: farlige linjeformer feiler TRYGT (review-punkt 4) =====
+
+test('pin: "#@param" inside a string value → skipped + warned, never corrupted', () => {
+  const spy = warnSpy();
+  const src = 'x = "text with #@param inside" #@param {type:"string"}';
+  const entries = PF.parse(src, 'python');
+  spy.restore();
+  // Regexen (planens grammatikk) matcher det FØRSTE #@param — som her står
+  // inni streng-literalen. Metadata-teksten blir da 'inside" #@param {...}',
+  // som verken er [ eller { → fatal advarsel + hele linja hoppes over.
+  // TRYGT: ingen entry betyr at writeValue aldri kan nå (og korruptere) linja.
+  assert.strictEqual(entries.length, 0);
+  assert.ok(spy.calls.length >= 1);
+});
+
+test('pin: expression value (x = x + 1 #@param) → raw entry, splice-safe', () => {
+  const src = 'x = x + 1 #@param';
+  const entries = PF.parse(src, 'python');
+  assert.strictEqual(entries.length, 1);
+  assert.strictEqual(entries[0].meta.type, 'raw');
+  assert.strictEqual(entries[0].valueRaw, 'x + 1');
+  // Round-trip med uendret verdi er en byte-nøyaktig no-op.
+  assert.strictEqual(PF.writeValue(src, entries[0], PF.currentValue(entries[0], 'python'), 'python'), src);
+});
+
+test('pin: multiple #@param on one line → skipped + warned', () => {
+  const spy = warnSpy();
+  const entries = PF.parse('x = 1 #@param #@param {type:"integer"}', 'python');
+  spy.restore();
+  // Første #@param matches; resten (' #@param {...}') er ugyldig metadata
+  // (starter ikke med [ eller {) → fatal advarsel + linja hoppes over.
+  assert.strictEqual(entries.length, 0);
+  assert.ok(spy.calls.length >= 1);
+});
+
 // ===== formatLiteral (exposed for direct testing per plan's writeValue doc) =====
 
-test('formatLiteral: string escapes both backslash and quote', () => {
+test('formatLiteral: quote escaped; lone inner backslash left intact', () => {
+  // Review-fiks 1: en backslash som IKKE står foran anførselstegn eller på
+  // slutten av strengen skal IKKE dobles — ellers ville '\t'-round-trippen
+  // over vært umulig. Kun anførselstegn (og backslasher som ellers ville
+  // skapt tvetydighet: rett foran et anførselstegn eller helt sist) escapes.
   assert.strictEqual(PF.formatLiteral("back\\slash and 'quote'", 'string', 'python'),
-    "'back\\\\slash and \\'quote\\''");
+    "'back\\slash and \\'quote\\''");
+});
+
+test('formatLiteral: trailing backslash doubled (would otherwise escape the closing quote)', () => {
+  assert.strictEqual(PF.formatLiteral('a\\', 'string', 'python'), "'a\\\\'");
 });
 
 test('formatLiteral: integer rounds to nearest', () => {
