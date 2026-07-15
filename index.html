@@ -9132,8 +9132,12 @@ async def _m2py_run_segment(_seg_json):
       // R-modus (final-review F4, minimal variant): denne sesjonen er en
       // Pyodide-sesjon (e/_g) — R-kjøringer bruker webR direkte og skal ALDRI
       // få "Restart & kjør alle" til å boote Pyodide. Ekte R-sesjonsreset
-      // (rm(list=ls()) + DashWebR.reset) ved Restart er fase B2 (se spec §6).
-      // MERK: sjekker activeEditorMode === 'r' direkte, IKKE
+      // (rm(list=ls()) + DashWebR.reset + __uiResetR) ved Restart er
+      // implementert i window.mdNotebookSession.restart() rett over dette
+      // objektet (fase B2 Task 3) — IKKE her, siden denne r-modus-grenen
+      // også nås idempotent uten noen aktiv restart (ingen annen kjent
+      // kallsti i dag, men rm() hører hjemme i restart-viljen, ikke i
+      // ensure()-kontrakten). MERK: sjekker activeEditorMode === 'r' direkte, IKKE
       // runtimeForMode(...) !== 'pyodide' — duckdb-modusens notatbok-sesjon
       // (bootNotebookSession) kaller py.runPythonAsync(setupCode) ubetinget
       // for duckdb også (loads/#duckdb-bro), så den TRENGER Pyodide selv om
@@ -9189,6 +9193,33 @@ async def _m2py_run_segment(_seg_json):
         // kjørings widgets åpner friske comms helt av seg selv (comm_open
         // via OpenstatComm). Guarded: broen er lazy og finnes kanskje aldri.
         if (window.IpwBridge && window.IpwBridge.reset) window.IpwBridge.reset();
+        // Ekte R-sesjonsreset (fase B2 Task 3 — F4-kommentaren over
+        // nbEnsureSession dokumenterte dette som en gjenstående oppgave):
+        // webR-interpreteren er PERSISTENT for hele sidens levetid (ingen
+        // reboot, i motsetning til Pyodide-siden over) — uten dette rm()-
+        // kallet beholder "Restart & kjør alle" i r-modus ALLE variabler
+        // fra forrige kjøring i .GlobalEnv, og en etterfølgende "Kjør alle"
+        // ville sett en R-økt som IKKE er restartet i det hele tatt (kun
+        // Pyodide-siden, som r-modus uansett aldri booter, se F4). Speiler
+        // EKSAKT runHybridR sin egen dash/ui-opprydding (~8065-8092): reset()
+        // og __uiResetR() er allerede idempotente/no-op når defs aldri er
+        // lastet denne økten. Guardet på webRReady: Restart-knappen kan i
+        // prinsippet klikkes før webR er lastet (ingen disabled-vakt der i
+        // dag) — uten guarden ville et umodent `webR`-objekt kastet her.
+        if (activeEditorMode === 'r' && webRReady) {
+          return (async function () {
+            try {
+              await webR.evalRVoid('rm(list = ls(envir = globalenv()), envir = globalenv())');
+            } catch (e) { console.warn('R restart: rm(list=ls()) feilet', e); }
+            if (window.DashWebR && window.DashWebR.reset) {
+              try { await window.DashWebR.reset(); }
+              catch (e) { console.warn('R restart: DashWebR.reset() feilet', e); }
+            }
+            try { await __uiResetR(); }
+            catch (e) { console.warn('R restart: __uiResetR() feilet', e); }
+            return nbEnsureSession(true);
+          })();
+        }
         return nbEnsureSession(true);
       },
       // Nytt dokument (eksempler, share/GitHub, dyplenker) → gammel sesjon er
