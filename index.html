@@ -10240,13 +10240,39 @@ async def _m2py_run_segment(_seg_json):
         const asHtml = document.querySelector('input[name="outputMode"]:checked').value === 'html';
         const suppress = suppressEmbedded.checked;
         let explainInit = null;
+        // B2 exit-gate fiks: Forklar bygde sitt EGET e/_g uten NOENGANG å hente/
+        // skrive "# load … as X"-direktivets data — bootNotebookSession ("Kjør
+        // alle"/per-celle-kjøring, linje ~8885) gjør dette rutinemessig, Forklar
+        // gjorde det aldri. Funnet ved sveip: ETHVERT python-script med en
+        // # load-linje (inkl. selve standard-oppstartseksempelet, notatbok eller
+        // ikke) feilet i Kjør skrittvis med NameError på aliaset, siden filen
+        // aldri ble bundet i _g. Pre-eksisterende, uavhengig av notatbok-celler.
+        // Speiler bootNotebookSession sin henting+FS-skriving nøyaktig; selve
+        // bindingen (_g[alias] = …) limes inn i explainInit rett under via
+        // buildWebDataLoaderPreamble (samme presedens som bootNotebookSession,
+        // linje ~8930). Tom for microdata-modus (ingen # load å hente) → uendret
+        // no-op der (buildWebDataLoaderPreamble([]) returnerer '').
+        let _forklarPyLoads = [];
+        if (activeEditorMode === 'python' && py) {
+          try {
+            const _fdl = await window.DataLoader.resolveAndFetchLoads(snapshotScript,
+              { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey });
+            const _fRawLoads = _fdl.loads || [];
+            if (_fRawLoads.some(function (l) { return l.bytes; })) py.FS.mkdirTree('/home/pyodide/_webdata');
+            _forklarPyLoads = _fRawLoads.map(function (l) {
+              const _path = '/home/pyodide/_webdata/' + l.alias + '.' + l.format;
+              py.FS.writeFile(_path, l.bytes);
+              return { alias: l.alias, format: l.format, path: _path };
+            });
+          } catch (e) { console.warn('forklar # load:', e); }
+        }
         if (activeEditorMode !== 'r') {
           const catalogJson = microdataCatalog && microdataCatalog.variables
             ? JSON.stringify(microdataCatalog.variables)
             : null;
           const catalogArg = catalogJson !== null ? JSON.stringify(catalogJson) : 'None';
           const pageBase = window.location.href.replace(/[^/]+$/, '');
-          explainInit = getInterpreterCorePython(catalogArg, pageBase, null) + `
+          explainInit = getInterpreterCorePython(catalogArg, pageBase, null) + buildWebDataLoaderPreamble(_forklarPyLoads) + `
 _forklar_last_chunk_out = ""
 def _run_microdata_chunk(_code):
     global result, _forklar_last_chunk_out
@@ -10265,10 +10291,28 @@ def _run_microdata_chunk(_code):
     _g["to_microdata"] = to_microdata
 `;
           await py.runPythonAsync(explainInit);
-          // Forklar bygger sitt EGET e/_g her (uten loads) — notatbok-sesjonen
-          // (fase B1) er død etterpå, ellers ville en per-celle-kjøring etter
-          // en Forklar-økt gjenbrukt Forklars e/_g uten de innlastede datasettene.
+          // Forklar bygger sitt EGET e/_g her (nå MED # load-dataene bundet inn,
+          // se _forklarPyLoads over) — notatbok-sesjonen (fase B1) er død
+          // etterpå, ellers ville en per-celle-kjøring etter en Forklar-økt
+          // gjenbrukt Forklars e/_g uten en fersk innlasting.
           nbSetSessionLive(false);
+        }
+        // B2 exit-gate fiks: Forklar har sin EGEN kjøresløyfe (forklarRunOnePyodideBlock
+        // under) og kalte ALDRI modeRegistry.python.preRun — i motsetning til hoved-
+        // kjøringen (linje ~9747: `_mr.preRun(effectiveScript, _ctx)`), som sikrer
+        // ui/dash/ipywidgets-fasadene og micropip-installerer manglende pakker FØR
+        // kjøring. Funnet ved sveip: Kjør skrittvis på en `import ui`-notatbok (fx.
+        // py_widgets_ui-eksempelet) feilet med ModuleNotFoundError: No module named
+        // 'ui', selv om nøyaktig samme celle kjører fint via ▶/Kjør alle. Ett kall,
+        // FØR blokk-løkken, på HELE dokumentteksten (samme presedens som hoved-
+        // kjøringens ett-kall-for-hele-scriptet — se linje ~9747) — ikke per blokk,
+        // siden `import ui`/`import dash`/`import ipywidgets` kan stå i en HVILKEN
+        // SOM HELST celle, og pyodide-sesjonen (og dermed sys.modules) er felles for
+        // hele Forklar-kjøringen uansett. R-siden har sitt eget, allerede fungerende
+        // motstykke (__ensureUiR, linje ~10184) — uendret.
+        if (activeEditorMode === 'python' && modeRegistry.python.preRun) {
+          try { await modeRegistry.python.preRun(snapshotScript, { py: py, rightStatus: rightStatus }); }
+          catch (e) { console.warn('forklar preRun:', e); }
         }
         // Fase B2 Task 2: notatbok → celle-baserte steg (se forklarNbActive
         // over) i stedet for blank-linje-seksjonering; vanlig skript (og
