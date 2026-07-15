@@ -47,7 +47,7 @@ test('sweepDisconnected: fjerner registrerte dashboards straks roten er frakoble
 
 // ---------- fase B2 Task 4b: D.create sin mount-rot (notatbok-slot vs #outputArea) ----------
 
-test('D.create: notatbok-kontekst (mdUiRunCtx) → monterer i cellens .nb-output, IKKE #outputArea', () => {
+test('D.create: notatbok-kontekst (mdUiRunCtx) → monterer i cellens .nb-output-body, IKKE #outputArea (widget-plassering-fasen)', () => {
   function makeNode(name) {
     var n = {
       name: name,
@@ -61,8 +61,8 @@ test('D.create: notatbok-kontekst (mdUiRunCtx) → monterer i cellens .nb-output
     return n;
   }
   var outputAreaNode = makeNode('outputArea');
-  var slotNode = makeNode('nb-output-slot');
-  var cellEl = { querySelector: function (sel) { return sel === '.nb-output' ? slotNode : null; } };
+  var slotNode = makeNode('nb-output-body-slot');
+  var cellEl = { querySelector: function (sel) { return sel === '.nb-output-body' ? slotNode : null; } };
   var savedDocument = global.document;
   var savedCtx = global.mdUiRunCtx;
   global.document = {
@@ -73,7 +73,7 @@ test('D.create: notatbok-kontekst (mdUiRunCtx) → monterer i cellens .nb-output
   global.mdUiRunCtx = function () { return { cellIdx: 0, cellEl: cellEl }; };
   try {
     D.create('{}');
-    assert.strictEqual(slotNode.children.length, 1, 'dashboardroten skal monteres i cellens .nb-output');
+    assert.strictEqual(slotNode.children.length, 1, 'dashboardroten skal monteres i cellens .nb-output-body');
     assert.strictEqual(outputAreaNode.children.length, 0, '#outputArea skal IKKE motta roten når ctx finnes');
   } finally {
     global.document = savedDocument;

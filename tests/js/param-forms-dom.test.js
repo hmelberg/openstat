@@ -92,6 +92,13 @@ function freshEnv(opts) {
   inputEl.className = 'nb-input';
   const outEl = new FakeEl('div');
   outEl.className = 'nb-output';
+  // Widget-plassering-fasen: .nb-output er en WRAPPER — js/cells.js sin
+  // cellNode setter alltid inn .nb-output-body som barn FØR noen striper
+  // finnes. ParamForms sin _insertStrip setter .param-form inn INNI outEl,
+  // FØR en evt. .ui-controls, ellers FØR bodyEl — speiler ekte DOM-struktur.
+  const bodyEl = new FakeEl('div');
+  bodyEl.className = 'nb-output-body';
+  outEl.appendChild(bodyEl);
   cellEl.appendChild(inputEl);
   cellEl.appendChild(outEl);
 
@@ -113,28 +120,31 @@ function freshEnv(opts) {
 
   const ParamForms = require(PF_PATH);
 
-  return { ParamForms, cellEl, inputEl, outEl, updateCellSourceCalls, runCellCalls };
+  return { ParamForms, cellEl, inputEl, outEl, bodyEl, updateCellSourceCalls, runCellCalls };
 }
 
 // ---- decorate: strip-bygging, seeding, no-param-celle --------------------
 
 test('decorate: celle UTEN #@param → ingen .param-form-stripe opprettes', () => {
-  const { ParamForms, cellEl } = freshEnv();
+  const { ParamForms, cellEl, outEl } = freshEnv();
   ParamForms.decorate(0, cellEl, 'x = 3\nprint(x)', 'python');
   assert.strictEqual(cellEl.children.length, 2, 'kun de to opprinnelige barna (.nb-input/.nb-output)');
-  assert.ok(!cellEl.children.some((c) => c.classList.contains('param-form')));
+  assert.strictEqual(outEl.children.length, 1, 'kun .nb-output-body i outputen, ingen stripe');
+  assert.ok(!outEl.children.some((c) => c.classList.contains('param-form')));
 });
 
-test('decorate: bygger .param-form som FØRSTE barn, ett kontrollelement per entry, seedet fra currentValue', () => {
-  const { ParamForms, cellEl, inputEl, outEl } = freshEnv();
+test('decorate: bygger .param-form som FØRSTE barn i .nb-output (FØR .nb-output-body), ett kontrollelement per entry, seedet fra currentValue', () => {
+  const { ParamForms, cellEl, inputEl, outEl, bodyEl } = freshEnv();
   const src = 'x = 3  #@param {type:"slider", min:0, max:10}\nname = \'a\'  #@param ["a", "b", "c"]';
   ParamForms.decorate(0, cellEl, src, 'python');
 
-  assert.strictEqual(cellEl.children.length, 3, 'stripe + de to opprinnelige barna');
-  const strip = cellEl.children[0];
-  assert.ok(strip.classList.contains('param-form'), 'stripa er FØRSTE barn');
-  assert.strictEqual(cellEl.children[1], inputEl);
-  assert.strictEqual(cellEl.children[2], outEl);
+  assert.strictEqual(cellEl.children.length, 2, '.nb-cell selv er urørt — stripa lever inni .nb-output');
+  assert.strictEqual(cellEl.children[0], inputEl);
+  assert.strictEqual(cellEl.children[1], outEl);
+  assert.strictEqual(outEl.children.length, 2, 'stripe + .nb-output-body');
+  const strip = outEl.children[0];
+  assert.ok(strip.classList.contains('param-form'), 'stripa er FØRSTE barn i .nb-output, FØR body');
+  assert.strictEqual(outEl.children[1], bodyEl, '.nb-output-body uendret, nå etter stripa');
   assert.strictEqual(strip.children.length, 2, 'to kontroll-rader');
 
   const sliderRow = strip.children[0];
@@ -156,10 +166,10 @@ test('decorate: bygger .param-form som FØRSTE barn, ett kontrollelement per ent
 });
 
 test('decorate: dropdown med allow-input:true → tekstfelt + datalist (ikke select)', () => {
-  const { ParamForms, cellEl } = freshEnv();
+  const { ParamForms, cellEl, outEl } = freshEnv();
   const src = 'name = \'a\'  #@param ["a", "b"] {allow-input:true}';
   ParamForms.decorate(0, cellEl, src, 'python');
-  const strip = cellEl.children[0];
+  const strip = outEl.children[0];
   const row = strip.children[0];
   const input = row.children[1];
   assert.strictEqual(input.tag, 'input');
@@ -171,10 +181,10 @@ test('decorate: dropdown med allow-input:true → tekstfelt + datalist (ikke sel
 });
 
 test('decorate: boolean → checkbox seedet riktig; raw → vanlig tekstfelt seedet VERBATIM', () => {
-  const { ParamForms, cellEl } = freshEnv();
+  const { ParamForms, cellEl, outEl } = freshEnv();
   const src = 'flag = True  #@param {type:"boolean"}\nexpr = x + 1  #@param {type:"raw"}';
   ParamForms.decorate(0, cellEl, src, 'python');
-  const strip = cellEl.children[0];
+  const strip = outEl.children[0];
 
   const checkboxRow = strip.children[0];
   const checkbox = checkboxRow.children[1];
@@ -189,10 +199,10 @@ test('decorate: boolean → checkbox seedet riktig; raw → vanlig tekstfelt see
 });
 
 test('decorate: number og date bygges med riktig input-type', () => {
-  const { ParamForms, cellEl } = freshEnv();
+  const { ParamForms, cellEl, outEl } = freshEnv();
   const src = 'n = 5  #@param {type:"number", min:0, max:9}\nd = \'2024-01-01\'  #@param {type:"date"}';
   ParamForms.decorate(0, cellEl, src, 'python');
-  const strip = cellEl.children[0];
+  const strip = outEl.children[0];
   const numInput = strip.children[0].children[1];
   assert.strictEqual(numInput.type, 'number');
   assert.strictEqual(Number(numInput.value), 5);
@@ -206,10 +216,10 @@ test('decorate: number og date bygges med riktig input-type', () => {
 // ---- endring → writeValue → Cells.updateCellSource → evt. run:auto -------
 
 test('slider-endring (run:auto): updateCellSource kalles med KORREKT spliset tekst; runCell debounces 150ms', async () => {
-  const { ParamForms, cellEl, updateCellSourceCalls, runCellCalls } = freshEnv();
+  const { ParamForms, cellEl, outEl, updateCellSourceCalls, runCellCalls } = freshEnv();
   const src = 'x = 3  #@param {type:"slider", min:0, max:10, run:"auto"}';
   ParamForms.decorate(2, cellEl, src, 'python');
-  const strip = cellEl.children[0];
+  const strip = outEl.children[0];
   const slider = strip.children[0].children[1];
 
   slider.value = '7';
@@ -224,10 +234,10 @@ test('slider-endring (run:auto): updateCellSource kalles med KORREKT spliset tek
 });
 
 test('dropdown-endring UTEN run:auto: updateCellSource kalles, runCell ALDRI (kun stale-tint kommuniserer, se cells.js)', async () => {
-  const { ParamForms, cellEl, updateCellSourceCalls, runCellCalls } = freshEnv();
+  const { ParamForms, cellEl, outEl, updateCellSourceCalls, runCellCalls } = freshEnv();
   const src = 'name = \'a\'  #@param ["a", "b", "c"]';
   ParamForms.decorate(1, cellEl, src, 'python');
-  const strip = cellEl.children[0];
+  const strip = outEl.children[0];
   const select = strip.children[0].children[1];
 
   select.value = 'b';
@@ -239,10 +249,10 @@ test('dropdown-endring UTEN run:auto: updateCellSource kalles, runCell ALDRI (ku
 });
 
 test('checkbox-endring (run:auto, IKKE slider) → UMIDDELBAR runCell, ingen debounce-ventetid', async () => {
-  const { ParamForms, cellEl, runCellCalls } = freshEnv();
+  const { ParamForms, cellEl, outEl, runCellCalls } = freshEnv();
   const src = 'flag = True  #@param {type:"boolean", run:"auto"}';
   ParamForms.decorate(4, cellEl, src, 'python');
-  const strip = cellEl.children[0];
+  const strip = outEl.children[0];
   const checkbox = strip.children[0].children[1];
 
   checkbox.checked = false;
@@ -251,10 +261,10 @@ test('checkbox-endring (run:auto, IKKE slider) → UMIDDELBAR runCell, ingen deb
 });
 
 test('mdIsScriptRunning() true: verdien lagres/skrives fortsatt, men run:auto-reruns nektes (samme mønster som js/ui.js)', async () => {
-  const { ParamForms, cellEl, updateCellSourceCalls, runCellCalls } = freshEnv({ scriptRunning: true });
+  const { ParamForms, cellEl, outEl, updateCellSourceCalls, runCellCalls } = freshEnv({ scriptRunning: true });
   const src = 'x = 3  #@param {type:"slider", min:0, max:10, run:"auto"}';
   ParamForms.decorate(0, cellEl, src, 'python');
-  const strip = cellEl.children[0];
+  const strip = outEl.children[0];
   const slider = strip.children[0].children[1];
 
   slider.value = '9';
@@ -268,10 +278,10 @@ test('mdIsScriptRunning() true: verdien lagres/skrives fortsatt, men run:auto-re
 // ---- no-løkke-egenskapen: kontrollens EGEN endring bygger ALDRI om --------
 
 test('no-løkke: kontrollens egen writeValue→updateCellSource→refresh-sykel ombygger ALDRI noden (samme range-input, samme readout) midt i en "drag"', () => {
-  const { ParamForms, cellEl, updateCellSourceCalls } = freshEnv();
+  const { ParamForms, cellEl, outEl, updateCellSourceCalls } = freshEnv();
   const src = 'x = 3  #@param {type:"slider", min:0, max:10}';
   ParamForms.decorate(0, cellEl, src, 'python');
-  const strip = cellEl.children[0];
+  const strip = outEl.children[0];
   const row = strip.children[0];
   const sliderBefore = row.children[1];
   const readoutBefore = row.children[2];
@@ -285,7 +295,7 @@ test('no-løkke: kontrollens egen writeValue→updateCellSource→refresh-sykel 
   });
 
   assert.strictEqual(updateCellSourceCalls.length, 4, 'ett updateCellSource-kall per tikk');
-  assert.strictEqual(cellEl.children[0], strip, 'SAMME stripe-node — ingen ombygging');
+  assert.strictEqual(outEl.children[0], strip, 'SAMME stripe-node — ingen ombygging');
   assert.strictEqual(strip.children[0], row, 'SAMME rad-node');
   assert.strictEqual(strip.children[0].children[1], sliderBefore, 'SAMME range-input-node — draget ble ikke revet ned');
   assert.strictEqual(strip.children[0].children[2], readoutBefore, 'SAMME readout-node');
@@ -297,10 +307,10 @@ test('no-løkke: kontrollens egen writeValue→updateCellSource→refresh-sykel 
 // innen samme debounce-vindu — INGEN av delene skal gå tapt -----------------
 
 test('krysskanal-race: linje skrevet manuelt + slider dratt FØR debouncen → BÅDE den nye linja og den nye verdien overlever (reviewer-repro)', () => {
-  const { ParamForms, cellEl, updateCellSourceCalls } = freshEnv();
+  const { ParamForms, cellEl, outEl, updateCellSourceCalls } = freshEnv();
   const src = 'x = 3  #@param {type:"slider", min:0, max:10}';
   ParamForms.decorate(0, cellEl, src, 'python');
-  const slider = cellEl.children[0].children[0].children[1];
+  const slider = outEl.children[0].children[0].children[1];
 
   // Brukeren skriver `y = 1` på linja OVER #@param-linja — js/cells.js sin
   // onEdit kaller syncSource SYNKront per tastetrykk (review-fiks 1a), FØR
@@ -320,16 +330,16 @@ test('krysskanal-race: linje skrevet manuelt + slider dratt FØR debouncen → B
 });
 
 test('krysskanal-race: etter ombyggingen (refresh så strukturell lineIdx-endring) virker den NYE kontrollen mot riktig linje', () => {
-  const { ParamForms, cellEl, updateCellSourceCalls } = freshEnv();
+  const { ParamForms, cellEl, outEl, updateCellSourceCalls } = freshEnv();
   ParamForms.decorate(0, cellEl, 'x = 3  #@param {type:"slider", min:0, max:10}', 'python');
-  const oldSlider = cellEl.children[0].children[0].children[1];
+  const oldSlider = outEl.children[0].children[0].children[1];
 
   ParamForms.syncSource(0, 'y = 1\nx = 3  #@param {type:"slider", min:0, max:10}');
   oldSlider.value = '7';
   oldSlider.dispatchEvent({ type: 'input' });
   // updateCellSource-stubben kalte refresh → lineIdx endret (0→1) er
   // strukturelt → stripa er ombygd med en NY slider bundet til linje 1.
-  const newSlider = cellEl.children[0].children[0].children[1];
+  const newSlider = outEl.children[0].children[0].children[1];
   assert.notStrictEqual(newSlider, oldSlider, 'strukturell endring → fersk kontroll-node');
   assert.strictEqual(Number(newSlider.value), 7, 'ny kontroll seedet fra gjeldende kilde');
 
@@ -341,9 +351,9 @@ test('krysskanal-race: etter ombyggingen (refresh så strukturell lineIdx-endrin
 });
 
 test('syncSource: verdi-endring uten strukturskifte → splice-grunnlaget følger med, kontrollen ombygges IKKE av en senere commit', () => {
-  const { ParamForms, cellEl, updateCellSourceCalls } = freshEnv();
+  const { ParamForms, cellEl, outEl, updateCellSourceCalls } = freshEnv();
   ParamForms.decorate(0, cellEl, 'x = 3  #@param {type:"slider", min:0, max:10}', 'python');
-  const slider = cellEl.children[0].children[0].children[1];
+  const slider = outEl.children[0].children[0].children[1];
 
   // Bruker redigerer selve verdien manuelt (samme struktur): syncSource per
   // tastetrykk — st.source er nå 'x = 9', men kontrollen viser fortsatt 3
@@ -355,7 +365,7 @@ test('syncSource: verdi-endring uten strukturskifte → splice-grunnlaget følge
   assert.deepStrictEqual(updateCellSourceCalls[0],
     [0, 'x = 4  #@param {type:"slider", min:0, max:10}'],
     'splicet mot den ferske kilden (9 → 4), ikke den gamle (3)');
-  assert.strictEqual(cellEl.children[0].children[0].children[1], slider,
+  assert.strictEqual(outEl.children[0].children[0].children[1], slider,
     'samme struktur hele veien — kontroll-noden er aldri ombygd');
 });
 
@@ -365,9 +375,9 @@ test('syncSource: cellIdx uten decorate-tilstand → no-op, ingen krasj', () => 
 });
 
 test('_commit etter at linja er FJERNET under hånden (syncSource tømte entries) → warn + drop, ingen korrupt skriving', () => {
-  const { ParamForms, cellEl, updateCellSourceCalls } = freshEnv();
+  const { ParamForms, cellEl, outEl, updateCellSourceCalls } = freshEnv();
   ParamForms.decorate(0, cellEl, 'x = 3  #@param {type:"slider", min:0, max:10}', 'python');
-  const slider = cellEl.children[0].children[0].children[1];
+  const slider = outEl.children[0].children[0].children[1];
 
   // Brukeren slettet hele #@param-linja; debouncen har ikke fyrt ennå.
   ParamForms.syncSource(0, 'print(1)');
@@ -388,25 +398,25 @@ test('_commit etter at linja er FJERNET under hånden (syncSource tømte entries
 // ---- manuell tekst-redigering: refresh oppdaterer i place / bygger om -----
 
 test('refresh: samme struktur (kun ny verdi) → kontrollverdi oppdateres I PLACE, SAMME DOM-node', () => {
-  const { ParamForms, cellEl } = freshEnv();
+  const { ParamForms, cellEl, outEl } = freshEnv();
   const src = 'x = 3  #@param {type:"slider", min:0, max:10}';
   ParamForms.decorate(0, cellEl, src, 'python');
-  const strip = cellEl.children[0];
+  const strip = outEl.children[0];
   const sliderBefore = strip.children[0].children[1];
 
   ParamForms.refresh(0, 'x = 8  #@param {type:"slider", min:0, max:10}');
 
-  assert.strictEqual(cellEl.children[0], strip, 'ingen ombygging av stripa');
+  assert.strictEqual(outEl.children[0], strip, 'ingen ombygging av stripa');
   assert.strictEqual(strip.children[0].children[1], sliderBefore, 'samme input-node, kun .value endret');
   assert.strictEqual(Number(sliderBefore.value), 8);
   assert.strictEqual(strip.children[0].children[2].textContent, '8', 'readout fulgte med');
 });
 
 test('refresh: verdi UENDRET → ren no-op (input.value ikke rørt i det hele tatt)', () => {
-  const { ParamForms, cellEl } = freshEnv();
+  const { ParamForms, cellEl, outEl } = freshEnv();
   const src = 'n = 5  #@param {type:"number"}';
   ParamForms.decorate(0, cellEl, src, 'python');
-  const strip = cellEl.children[0];
+  const strip = outEl.children[0];
   const numInput = strip.children[0].children[1];
   numInput.value = '5'; // simuler at DOM-en allerede viser 5 (som seedet)
 
@@ -415,126 +425,74 @@ test('refresh: verdi UENDRET → ren no-op (input.value ikke rørt i det hele ta
 });
 
 test('refresh: strukturell endring (en ny #@param-linje lagt til) → stripa bygges HELT PÅ NYTT (ny node)', () => {
-  const { ParamForms, cellEl } = freshEnv();
+  const { ParamForms, cellEl, outEl } = freshEnv();
   const src = 'x = 3  #@param {type:"slider", min:0, max:10}';
   ParamForms.decorate(0, cellEl, src, 'python');
-  const oldStrip = cellEl.children[0];
+  const oldStrip = outEl.children[0];
 
   const newSrc = 'x = 3  #@param {type:"slider", min:0, max:10}\ny = \'a\'  #@param ["a", "b"]';
   ParamForms.refresh(0, newSrc);
 
-  const newStrip = cellEl.children[0];
+  const newStrip = outEl.children[0];
   assert.notStrictEqual(newStrip, oldStrip, 'HELT NY stripe-node');
   assert.strictEqual(newStrip.children.length, 2, 'to kontroller nå');
 });
 
 test('refresh: strukturell endring (type byttet på SAMME linje) → bygges på nytt', () => {
-  const { ParamForms, cellEl } = freshEnv();
+  const { ParamForms, cellEl, outEl } = freshEnv();
   const src = 'x = 3  #@param {type:"slider", min:0, max:10}';
   ParamForms.decorate(0, cellEl, src, 'python');
-  const oldStrip = cellEl.children[0];
+  const oldStrip = outEl.children[0];
   const oldInput = oldStrip.children[0].children[1];
   assert.strictEqual(oldInput.type, 'range');
 
   ParamForms.refresh(0, 'x = \'a\'  #@param ["a", "b"]');
 
-  const newStrip = cellEl.children[0];
+  const newStrip = outEl.children[0];
   assert.notStrictEqual(newStrip, oldStrip);
   const newInput = newStrip.children[0].children[1];
   assert.strictEqual(newInput.tag, 'select', 'slider → dropdown krever en helt ny select-node');
 });
 
 test('refresh: ALLE #@param-linjer fjernet → stripa fjernes (tilbake til "ingen skjema")', () => {
-  const { ParamForms, cellEl } = freshEnv();
+  const { ParamForms, cellEl, outEl } = freshEnv();
   const src = 'x = 3  #@param {type:"slider", min:0, max:10}';
   ParamForms.decorate(0, cellEl, src, 'python');
-  assert.strictEqual(cellEl.children.length, 3);
+  assert.strictEqual(outEl.children.length, 2, 'stripe + body');
 
   ParamForms.refresh(0, 'x = 3');
-  assert.strictEqual(cellEl.children.length, 2, 'stripa fjernet, kun de opprinnelige to barna igjen');
+  assert.strictEqual(outEl.children.length, 1, 'stripa fjernet, kun .nb-output-body igjen');
 });
 
 test('refresh: bruker SKRIVER en fersk #@param-linje inn i en tidligere param-fri celle → strukturell endring, stripa bygges (dukker opp)', () => {
-  const { ParamForms, cellEl } = freshEnv();
+  const { ParamForms, cellEl, outEl } = freshEnv();
   ParamForms.decorate(0, cellEl, 'x = 3', 'python'); // ingen entries → ingen strip ennå, men state (cellEl/lang) lagres
-  assert.strictEqual(cellEl.children.length, 2, 'ingen stripe før den første #@param-linja skrives');
+  assert.strictEqual(outEl.children.length, 1, 'ingen stripe før den første #@param-linja skrives');
 
   assert.doesNotThrow(() => ParamForms.refresh(0, 'x = 3  #@param {type:"number"}'));
-  assert.strictEqual(cellEl.children.length, 3, 'lagt-til-linje er en strukturell endring → stripa bygges nå');
-  assert.ok(cellEl.children[0].classList.contains('param-form'));
+  assert.strictEqual(outEl.children.length, 2, 'lagt-til-linje er en strukturell endring → stripa bygges nå');
+  assert.ok(outEl.children[0].classList.contains('param-form'));
 });
 
 test('refresh: cellIdx uten NOEN forutgående decorate-kall → no-op (ingen krasj) — refresh alene kan aldri initialisere en celle', () => {
-  const { ParamForms, cellEl } = freshEnv();
+  const { ParamForms, cellEl, outEl } = freshEnv();
   assert.doesNotThrow(() => ParamForms.refresh(0, 'x = 3  #@param {type:"number"}'));
-  assert.strictEqual(cellEl.children.length, 2, 'ingen decorate-tilstand for idx 0 ennå → refresh er en total no-op');
+  assert.strictEqual(outEl.children.length, 1, 'ingen decorate-tilstand for idx 0 ennå → refresh er en total no-op');
 });
 
-// ---- reorder: .param-form ALLTID før .ui-controls -------------------------
-
-test('reorder: flytter .param-form FØR en .ui-controls som dukket opp ETTER (samme celle, en kjøring registrerte ui.slider)', () => {
-  const { ParamForms, cellEl } = freshEnv();
-  ParamForms.decorate(0, cellEl, 'x = 3  #@param {type:"number"}', 'python');
-  const form = cellEl.children[0];
-  assert.ok(form.classList.contains('param-form'));
-
-  // Simuler js/ui.js sin _ensureStrip: insertBefore(strip, cellEl.firstChild)
-  // — som per planens naive oppførsel havner FØR .param-form.
-  const uiControls = new FakeEl('div');
-  uiControls.className = 'ui-controls';
-  cellEl.insertBefore(uiControls, cellEl.firstChild);
-  assert.strictEqual(cellEl.children[0], uiControls, 'ui-controls havnet feilaktig først (reprodusert)');
-
-  ParamForms.reorder(cellEl);
-  assert.strictEqual(cellEl.children[0], form, 'param-form er FØRST igjen etter reorder');
-  assert.strictEqual(cellEl.children[1], uiControls, 'ui-controls er nå etter param-form');
-});
-
-test('reorder: rekkefølgen ALLEREDE riktig → no-op (ingen kaste, ingen endring)', () => {
-  const { ParamForms, cellEl } = freshEnv();
-  ParamForms.decorate(0, cellEl, 'x = 3  #@param {type:"number"}', 'python');
-  const form = cellEl.children[0];
-  const uiControls = new FakeEl('div');
-  uiControls.className = 'ui-controls';
-  cellEl.appendChild(uiControls); // etter param-form (og etter .nb-input/.nb-output) allerede
-  const before = cellEl.children.slice();
-  assert.doesNotThrow(() => ParamForms.reorder(cellEl));
-  assert.deepStrictEqual(cellEl.children, before, 'ingen endring — rekkefølgen var allerede korrekt');
-  assert.ok(cellEl.children.indexOf(form) < cellEl.children.indexOf(uiControls));
-});
-
-test('reorder: kun én av de to (eller ingen) finnes → no-op', () => {
-  const { ParamForms, cellEl } = freshEnv();
-  assert.doesNotThrow(() => ParamForms.reorder(cellEl));
-  assert.doesNotThrow(() => ParamForms.reorder(null));
-});
-
-test('reorder(cellIdx): et TALL løses via Cells.cellElementAt (review-fiks 2 — Kjør alle-brakettene i index.html sender indeksen)', () => {
-  const { ParamForms, cellEl } = freshEnv();
-  ParamForms.decorate(0, cellEl, 'x = 3  #@param {type:"number"}', 'python');
-  const form = cellEl.children[0];
-  const uiControls = new FakeEl('div');
-  uiControls.className = 'ui-controls';
-  cellEl.insertBefore(uiControls, cellEl.firstChild); // ui.js sin _ensureStrip-oppførsel
-
-  global.Cells.cellElementAt = (idx) => (idx === 4 ? cellEl : null);
-  ParamForms.reorder(4);
-  assert.strictEqual(cellEl.children[0], form, 'indeks løst til cellens node, param-form først igjen');
-  assert.strictEqual(cellEl.children[1], uiControls);
-
-  // Ukjent indeks / manglende cellElementAt → no-op, ingen krasj.
-  assert.doesNotThrow(() => ParamForms.reorder(99));
-  delete global.Cells.cellElementAt;
-  assert.doesNotThrow(() => ParamForms.reorder(4));
-});
+// ParamForms.reorder er fjernet (widget-plassering-fasen): _insertStrip
+// setter nå .param-form inn INNI .nb-output på riktig plass ved
+// KONSTRUKSJON (FØR en evt. .ui-controls, alltid FØR .nb-output-body) — se
+// ny test under "widget-plassering-fasen: strip-plassering" for dekning av
+// dette. Ingen reassert-i-ettertid-funksjon å teste lenger.
 
 // ---- resetDocument: glemmer skjema-tilstand + kansellerer ventende run:auto-timere ----
 
 test('resetDocument: kansellerer en ventende run:auto-slider-debounce (nytt dokument skal ikke kunne kjøre en gammel celle)', async () => {
-  const { ParamForms, cellEl, runCellCalls } = freshEnv();
+  const { ParamForms, cellEl, outEl, runCellCalls } = freshEnv();
   const src = 'x = 3  #@param {type:"slider", min:0, max:10, run:"auto"}';
   ParamForms.decorate(0, cellEl, src, 'python');
-  const slider = cellEl.children[0].children[0].children[1];
+  const slider = outEl.children[0].children[0].children[1];
   slider.value = '9';
   slider.dispatchEvent({ type: 'input' }); // starter en 150ms-timer
 
@@ -544,7 +502,7 @@ test('resetDocument: kansellerer en ventende run:auto-slider-debounce (nytt doku
 });
 
 test('resetDocument: glemmer skjema-tilstand — en senere refresh for samme cellIdx er en no-op (ingen decorate-tilstand igjen)', () => {
-  const { ParamForms, cellEl } = freshEnv();
+  const { ParamForms, cellEl, outEl } = freshEnv();
   ParamForms.decorate(0, cellEl, 'x = 3  #@param {type:"number"}', 'python');
   ParamForms.resetDocument();
   assert.doesNotThrow(() => ParamForms.refresh(0, 'x = 4  #@param {type:"number"}'));
@@ -556,10 +514,10 @@ test('resetDocument: glemmer skjema-tilstand — en senere refresh for samme cel
 // ---- R-språk: boolean skrives som TRUE/FALSE, ikke True/False -------------
 
 test('R-modus: boolean-kontroll skriver TRUE/FALSE (ikke Python sin True/False)', () => {
-  const { ParamForms, cellEl, updateCellSourceCalls } = freshEnv();
+  const { ParamForms, cellEl, outEl, updateCellSourceCalls } = freshEnv();
   const src = 'flag <- TRUE  #@param {type:"boolean"}';
   ParamForms.decorate(0, cellEl, src, 'r');
-  const checkbox = cellEl.children[0].children[0].children[1];
+  const checkbox = outEl.children[0].children[0].children[1];
   checkbox.checked = false;
   checkbox.dispatchEvent({ type: 'change' });
   assert.deepStrictEqual(updateCellSourceCalls[0], [0, 'flag <- FALSE  #@param {type:"boolean"}']);
@@ -568,14 +526,14 @@ test('R-modus: boolean-kontroll skriver TRUE/FALSE (ikke Python sin True/False)'
 test('komposisjon: decorate mottaker/bruker lang=\'r\' for #%% r-celle i python-dokument → boolean skriver TRUE/FALSE', () => {
   // Simuler en python-modus notebook som inkluderer en r-celle.
   // Cells.paramLangForType ville gitt 'r' basert på cellen sin type/deklarasjon.
-  const { ParamForms, cellEl, updateCellSourceCalls } = freshEnv();
+  const { ParamForms, cellEl, outEl, updateCellSourceCalls } = freshEnv();
 
   // Decorate kalles med lang='r' — stemmer med at cellen er #%% r.
   const src = 'show_details <- FALSE #@param {type:"boolean"}';
   ParamForms.decorate(2, cellEl, src, 'r');
 
-  assert.strictEqual(cellEl.children.length, 3, 'stripa bygd');
-  const strip = cellEl.children[0];
+  assert.strictEqual(outEl.children.length, 2, 'stripa bygd');
+  const strip = outEl.children[0];
   assert.ok(strip.classList.contains('param-form'));
 
   const checkboxRow = strip.children[0];
@@ -590,4 +548,164 @@ test('komposisjon: decorate mottaker/bruker lang=\'r\' for #%% r-celle i python-
   assert.strictEqual(updateCellSourceCalls.length, 1);
   assert.deepStrictEqual(updateCellSourceCalls[0], [2, 'show_details <- TRUE #@param {type:"boolean"}'],
     'R-modus skriver TRUE, ikke True');
+});
+
+// ---- Task 3: per-kontroll plassering (placement:"top"|"bottom"|"left") ---
+
+test('decorate: placement:"left" havner i den DELTE .nb-strips-left (ikke direkte .param-form-barn av .nb-output)', () => {
+  const { ParamForms, cellEl, outEl } = freshEnv();
+  const src = 'x = 3  #@param {type:"slider", min:0, max:10, placement:"left"}';
+  ParamForms.decorate(0, cellEl, src, 'python');
+
+  const leftWrap = outEl.children.find((c) => c.classList.contains('nb-strips-left'));
+  assert.ok(leftWrap, '.nb-strips-left opprettet inni .nb-output');
+  assert.ok(!outEl.children.some((c) => c.classList.contains('param-form')),
+    'ingen .param-form direkte i .nb-output — den lever inni sidekolonnen');
+  const strip = leftWrap.children.find((c) => c.classList.contains('param-form'));
+  assert.ok(strip, '.param-form inni .nb-strips-left');
+  assert.strictEqual(strip.getAttribute('data-pos'), 'left');
+  assert.strictEqual(strip.children.length, 1);
+});
+
+test('decorate: placement:"bottom" oppretter en EGEN .param-form[data-pos=bottom], adskilt fra en top-plassert linje', () => {
+  const { ParamForms, cellEl, outEl } = freshEnv();
+  const src = 'a = 1  #@param {type:"number"}\nb = 2  #@param {type:"number", placement:"bottom"}';
+  ParamForms.decorate(0, cellEl, src, 'python');
+
+  const strips = outEl.children.filter((c) => c.classList.contains('param-form'));
+  assert.strictEqual(strips.length, 2, 'to separate .param-form-noder — én per posisjon');
+  const topStrip = strips.find((s) => s.getAttribute('data-pos') === 'top');
+  const bottomStrip = strips.find((s) => s.getAttribute('data-pos') === 'bottom');
+  assert.ok(topStrip && bottomStrip);
+  assert.strictEqual(topStrip.children.length, 1);
+  assert.strictEqual(bottomStrip.children.length, 1);
+});
+
+test('decorate: uten egen placement følger cellens widgets=left-default (nb-widgets-left på .nb-output)', () => {
+  const { ParamForms, cellEl, outEl } = freshEnv();
+  outEl.className = 'nb-output nb-widgets-left';
+  const src = 'x = 3  #@param {type:"number"}';
+  ParamForms.decorate(0, cellEl, src, 'python');
+
+  const leftWrap = outEl.children.find((c) => c.classList.contains('nb-strips-left'));
+  assert.ok(leftWrap, 'cellens default (left) brukt — linja har ingen egen placement');
+  assert.ok(leftWrap.children.find((c) => c.classList.contains('param-form')));
+});
+
+test('decorate: linjens EGEN placement overstyrer cellens widgets=bottom-default', () => {
+  const { ParamForms, cellEl, outEl } = freshEnv();
+  outEl.className = 'nb-output nb-widgets-bottom';
+  const src = 'x = 3  #@param {type:"number", placement:"top"}';
+  ParamForms.decorate(0, cellEl, src, 'python');
+
+  const strips = outEl.children.filter((c) => c.classList.contains('param-form'));
+  assert.strictEqual(strips.length, 1);
+  assert.strictEqual(strips[0].getAttribute('data-pos'), 'top', 'linje-nivå placement vant over cellens bottom-default');
+});
+
+test('refresh: placement ENDRET på samme linje (top → left) → bygges på nytt, verdien overlever, ingen dobling', () => {
+  const { ParamForms, cellEl, outEl } = freshEnv();
+  const src = 'x = 3  #@param {type:"slider", min:0, max:10}';
+  ParamForms.decorate(0, cellEl, src, 'python');
+  const oldStrip = outEl.children.find((c) => c.classList.contains('param-form') && c.getAttribute('data-pos') === 'top');
+  assert.strictEqual(oldStrip.children.length, 1);
+
+  const newSrc = 'x = 7  #@param {type:"slider", min:0, max:10, placement:"left"}';
+  ParamForms.refresh(0, newSrc);
+
+  // Den gamle top-stripa henger igjen som node (samme cellIdx-lagring), men
+  // skal nå være TOM — ingen duplikat kontroll der.
+  const topStripAfter = outEl.children.find((c) => c.classList.contains('param-form') && c.getAttribute('data-pos') === 'top');
+  assert.ok(!topStripAfter || topStripAfter.children.length === 0, 'ingen kontroll igjen i den gamle top-posisjonen');
+
+  const leftWrap = outEl.children.find((c) => c.classList.contains('nb-strips-left'));
+  assert.ok(leftWrap, 'ny .nb-strips-left opprettet');
+  const leftStrip = leftWrap.children.find((c) => c.classList.contains('param-form'));
+  assert.strictEqual(leftStrip.children.length, 1, 'nøyaktig én kontroll i den nye stripa — ingen dobling');
+  const input = leftStrip.children[0].children[1];
+  assert.strictEqual(Number(input.value), 7, 'verdien (7, fra kildeteksten) overlever plassering-byttet');
+});
+
+// Final-review-fiks (Low): param-før-ui-invarianten i den DELTE venstre-
+// kolonnen ("param-form skal alltid stå FØR ui-controls", se app.css sin
+// .nb-output-kommentar og js/ui.js sin _ensureStrip-kommentar) må overleve en
+// STRUKTURELL ombygging av #@param-skjemaet, ikke bare gjelde ved første
+// _insertStrip-kall. Feilen (før fiksen): _insertStrip sin left-gren brukte
+// wrap.appendChild(strip) — det setter alltid den FERSKE param-form-noden
+// BAKERST i wrap, selv når en .ui-controls-node (satt inn av js/ui.js under
+// en TIDLIGERE kjøring, og fortsatt liggende i samme delte wrap) allerede
+// bor der. Fiksen bruker insertBefore(strip, _findChild(wrap, 'ui-controls'))
+// (null-safe — ingen ui-controls-node ennå → insertBefore(strip, null)
+// oppfører seg som appendChild).
+test('_insertStrip (left): param-form settes inn FØR en allerede tilstedeværende .ui-controls i den delte venstre-kolonnen, OGSÅ etter en strukturell rebuild', () => {
+  const { ParamForms, cellEl, outEl } = freshEnv();
+  const src = 'x = 3  #@param {type:"slider", min:0, max:10, placement:"left"}';
+  ParamForms.decorate(0, cellEl, src, 'python');
+  const wrap = outEl.children.find((c) => c.classList.contains('nb-strips-left'));
+  assert.ok(wrap, '.nb-strips-left opprettet');
+
+  // Simuler js/ui.js sin _ensureStrip: en .ui-controls-node for 'left' legges
+  // inn i den DELTE wrap-en (slik en samtidig venstre-plassert ui.slider(...)
+  // ville gjort under en kjøring).
+  const uiStrip = new FakeEl('div');
+  uiStrip.className = 'ui-controls';
+  uiStrip.setAttribute('data-pos', 'left');
+  wrap.appendChild(uiStrip);
+  assert.deepStrictEqual(wrap.children.map((c) => c.className), ['param-form', 'ui-controls'],
+    'param-form FØR ui-controls rett etter decorate');
+
+  // Strukturell endring i kildeteksten (en ny #@param-linje lagt til) →
+  // ParamForms._build fjerner den gamle param-form-noden og bygger en FERSK
+  // — uten fiksen endte den ferske noden BAKERST i wrap, altså ETTER
+  // ui-controls-noden fra js/ui.js (brutt rekkefølge).
+  const newSrc = src + '\ny = 1  #@param {type:"number", placement:"left"}';
+  ParamForms.refresh(0, newSrc);
+
+  assert.deepStrictEqual(wrap.children.map((c) => c.className), ['param-form', 'ui-controls'],
+    'param-form fortsatt FØR ui-controls etter strukturell rebuild — invarianten overlever');
+});
+
+test('mixed placements i én celle (topp-slider + venstre-dropdown + bunn-checkbox) → tre containere populert riktig', () => {
+  const { ParamForms, cellEl, outEl } = freshEnv();
+  const src = [
+    'n = 3  #@param {type:"slider", min:0, max:10}',
+    'name = \'a\'  #@param ["a", "b"] {placement:"left"}',
+    'flag = True  #@param {type:"boolean", placement:"bottom"}',
+  ].join('\n');
+  ParamForms.decorate(0, cellEl, src, 'python');
+
+  const topStrip = outEl.children.find((c) => c.classList.contains('param-form') && c.getAttribute('data-pos') === 'top');
+  const bottomStrip = outEl.children.find((c) => c.classList.contains('param-form') && c.getAttribute('data-pos') === 'bottom');
+  const leftWrap = outEl.children.find((c) => c.classList.contains('nb-strips-left'));
+  assert.ok(topStrip && bottomStrip && leftWrap, 'alle tre containere finnes');
+
+  assert.strictEqual(topStrip.children.length, 1);
+  assert.strictEqual(topStrip.children[0].children[1].type, 'range');
+
+  const leftStrip = leftWrap.children.find((c) => c.classList.contains('param-form'));
+  assert.strictEqual(leftStrip.children.length, 1);
+  assert.strictEqual(leftStrip.children[0].children[1].tag, 'select');
+
+  assert.strictEqual(bottomStrip.children.length, 1);
+  assert.strictEqual(bottomStrip.children[0].children[1].type, 'checkbox');
+});
+
+test('sweep: fjerner ALLE #@param-linjer (spredt over topp+bunn+venstre samtidig) → alle tre stripe-containere tømmes/fjernes', () => {
+  const { ParamForms, cellEl, outEl } = freshEnv();
+  const src = [
+    'n = 3  #@param {type:"slider", min:0, max:10}',
+    'name = \'a\'  #@param ["a", "b"] {placement:"left"}',
+    'flag = True  #@param {type:"boolean", placement:"bottom"}',
+  ].join('\n');
+  ParamForms.decorate(0, cellEl, src, 'python');
+  assert.ok(outEl.children.some((c) => c.classList.contains('param-form')));
+  assert.ok(outEl.children.some((c) => c.classList.contains('nb-strips-left')));
+
+  ParamForms.refresh(0, 'n = 3\nname = \'a\'\nflag = True');
+
+  assert.ok(!outEl.children.some((c) => c.classList.contains('param-form')),
+    'ingen .param-form igjen direkte i .nb-output (topp+bunn er borte)');
+  const leftWrap = outEl.children.find((c) => c.classList.contains('nb-strips-left'));
+  assert.ok(!leftWrap || !leftWrap.children.some((c) => c.classList.contains('param-form')),
+    'venstre-kolonnen er også tom (ingen restanse)');
 });

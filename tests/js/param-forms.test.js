@@ -132,6 +132,39 @@ test('parse: no run key → runAuto not set', () => {
   assert.ok(!entries[0].meta.runAuto);
 });
 
+// ===== parse: placement (Task 3, per-kontroll plassering) =====
+
+test('parse: placement absent → meta.placement undefined (linja følger cellens default)', () => {
+  const entries = PF.parse('x = 3  #@param {type:"slider", min:0, max:10}', 'python');
+  assert.strictEqual(entries[0].meta.placement, undefined);
+});
+
+test('parse: placement "top"/"bottom"/"left" passthrough uendret', () => {
+  ['top', 'bottom', 'left'].forEach((pos) => {
+    const entries = PF.parse('x = 3  #@param {type:"slider", placement:"' + pos + '"}', 'python');
+    assert.strictEqual(entries[0].meta.placement, pos);
+    assert.deepStrictEqual(entries[0].warnings, []);
+  });
+});
+
+test('parse: ugyldig placement → advarsel + IGNORERT (linja beholdes, meta.placement udefinert)', () => {
+  const entries = PF.parse('x = 3  #@param {type:"slider", placement:"middle"}', 'python');
+  assert.strictEqual(entries.length, 1, 'ikke-fatalt — linja beholdes');
+  assert.strictEqual(entries[0].meta.placement, undefined);
+  assert.ok(entries[0].warnings.some((w) => /ugyldig placement/.test(w)));
+});
+
+test('parse: placement er en KJENT nøkkel — varsler ikke som "ukjent nøkkel"', () => {
+  const entries = PF.parse('x = 3  #@param {type:"slider", placement:"left"}', 'python');
+  assert.ok(!entries[0].warnings.some((w) => /ukjent nøkkel/.test(w)));
+});
+
+test('parse: bart array-literal + eksplisitt placement object ([...] {placement:"left"})', () => {
+  const entries = PF.parse('name = \'a\'  #@param ["a", "b"] {placement:"left"}', 'python');
+  assert.strictEqual(entries[0].meta.placement, 'left');
+  assert.deepStrictEqual(entries[0].meta.options, ['a', 'b']);
+});
+
 test('parse: boolean type explicit', () => {
   const entries = PF.parse('x = True  #@param {type:"boolean"}', 'python');
   assert.strictEqual(entries[0].meta.type, 'boolean');

@@ -8,11 +8,14 @@
 # Widgets med `ui`
 
 `ui`-modulen gir kontroller (glidebryter, nedtrekksmeny, knapp m.fl.) som
-lever i en stripe over cellens output. Dette er en **pull-modell**: verdien
-kontrollen har akkurat nå ligger lagret i nettleseren (ikke i Python), og
-hvert `ui.*`-kall i cellen leser den ut igjen. Endrer du en kontroll, kjøres
-cellen (eller en annen navngitt celle via `rerun=`) på nytt automatisk —
-scriptet leser da ut den nye verdien neste gang det kaller `ui.*`.
+lever i cellens output-slot, sammen med resultatet under. Dette er en
+**pull-modell**: verdien kontrollen har akkurat nå ligger lagret i
+nettleseren (ikke i Python), og hvert `ui.*`-kall i cellen leser den ut
+igjen. Endrer du en kontroll, kjøres cellen (eller en annen navngitt celle
+via `rerun=`) på nytt automatisk — scriptet leser da ut den nye verdien
+neste gang det kaller `ui.*`. Legg til `placement="left"` (eller
+`"top"`/`"bottom"`) på et enkelt `ui.*`-kall for å plassere akkurat den
+kontrollen i en annen stripe enn cellens standard.
 
 #%% python
 import ui

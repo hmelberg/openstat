@@ -1128,8 +1128,73 @@
   border-radius: 4px; background: var(--bg-code); color: inherit;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px;
   line-height: 1.45; padding: 6px 8px; box-sizing: border-box; }
-.nb-output { min-width: 0; overflow-x: auto; }
-.nb-output.nb-trailing { border-top: 1px dashed var(--border); padding-top: 8px; }
+/* Per-kontroll plassering-fasen (Task 3): .nb-output er en WRAPPER (js/
+   cells.js sin cellNode) som kan holde OPPTIL fem .param-form/.ui-controls-
+   striper + én venstre-sidekolonne, FØR/ETTER/VED SIDEN AV selve
+   .nb-output-body (sluket ALL run-output skriver til/purges via). Plassering
+   er nå PER KONTROLL (js/ui.js sin `placement`-spec-nøkkel, js/param-forms.js
+   sitt #@param `placement`-meta-felt) — cellens widgets=top|bottom|left
+   (js/cells.js KNOWN_KEYS) er kun DEFAULTEN for kontroller som ikke har sitt
+   eget placement. Én celle kan derfor blande alle tre plasseringer samtidig
+   (topp-slider + venstre-dropdown + bunn-knapp), så visuell plassering kan
+   IKKE lenger styres av én enkelt klasse på selve wrapperen (motstykket til
+   den forrige `nb-widgets-<pos>`-baserte `order`/flex-direction-oppskriften)
+   — hver stripe bærer i stedet sin EGEN posisjon som et `data-pos`-attributt
+   (satt av _ensureStrip/_insertStrip, ALDRI en CSS-klasse — se .ui-controls/
+   .param-form sine :empty-regler under, som fortsatt må gjelde uendret
+   uansett posisjon), og CSS Grid ruter hver til riktig navngitt område.
+   `.nb-output` sin egen `nb-widgets-<pos>`-klasse LEVER VIDERE (satt av
+   cellNode akkurat som før) — den brukes nå KUN som JS-lesbar signal for
+   "cellens default" (js/ui.js _cellDefaultPlacement, js/param-forms.js
+   _cellDefaultPlacement), ikke lenger av CSS-en her.
+   Grid-arealene: "left ptop"/"left utop"/"left body"/"left pbot"/"left ubot"
+   — param-form kommer FØR ui-controls i samme sone (ptop over utop, pbot over
+   ubot), body alltid i midten, venstrekolonnen strekker seg over alle fem
+   radene via at "left" gjentas i alle rad-strengene (CSS Grid sin egen
+   implisitte row-span-regel for et navngitt areal). En rad uten noe
+   tilordnet innhold (f.eks. ingen bunn-plasserte kontroller) auto-krymper
+   til 0 høyde helt som før (ingen wasted space for det vanlige, u-blandede
+   tilfellet). */
+.nb-output {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas: "left ptop" "left utop" "left body" "left pbot" "left ubot";
+  column-gap: 0; align-items: start; min-width: 0;
+}
+/* Final-review-fiks (Low): column-gap: 10px gjaldt UBETINGET før, altså også
+   når "left"-arealet er tomt (ingen venstre-plasserte kontroller i det hele
+   tatt — det vanlige tilfellet for en celle uten widgets) — da fikk
+   .nb-output-body et 10px venstre-innrykk den ikke trengte, siden den auto-
+   krympede (0-bredde) "left"-grid-kolonnen uansett ikke okkuperer synlig
+   plass. Gapet skal bare finnes NÅR det faktisk er noe å skille FRA i venstre-
+   kolonnen. :has() er baseline (bredt støttet i alle store nettlesere siden
+   2023) og det finnes ingen eksisterende :has-avoidance/JS-klasse-veksling
+   for tilsvarende betingede stilvalg andre steder i denne fila eller i
+   js/cells.js å følge presedens for — derfor :has() fremfor en ekstra
+   JS-satt klasse. :not(:empty) i tillegg: en .nb-strips-left-node kan bli
+   stående igjen TOM (og dermed display:none via regelen rett under) etter at
+   ALLE venstre-plasserte kontroller er fjernet fra kilden — noden finnes da
+   fortsatt i DOM-en, så et bart :has(.nb-strips-left) ville feilaktig slått
+   gapet på igjen for en usynlig, tom kolonne (nøyaktig samme klasse feil som
+   selve denne fiksen adresserer, bare i et fjernings- fremfor et
+   aldri-opprettet-tilfelle). */
+.nb-output:has(.nb-strips-left:not(:empty)) { column-gap: 10px; }
+.nb-output-body { grid-area: body; min-width: 0; overflow-x: auto; }
+.param-form[data-pos="top"] { grid-area: ptop; }
+.ui-controls[data-pos="top"] { grid-area: utop; }
+.param-form[data-pos="bottom"] { grid-area: pbot; }
+.ui-controls[data-pos="bottom"] { grid-area: ubot; }
+/* Venstre-sidekolonne (delt mellom BEGGE systemer, T3-designet): én enkelt
+   .nb-strips-left-node okkuperer HELE "left"-arealet (unngår at to
+   samtidige venstre-plasserte striper — param-form OG ui-controls — ville
+   overlappet i samme grid-celle) og stabler sine EGNE param-form/ui-controls-
+   barn internt med vanlig flex-kolonne (DOM-rekkefølgen bestemmer der, ikke
+   grid-area — param-form settes alltid inn FØR ui-controls, se
+   js/param-forms.js/js/ui.js). */
+.nb-strips-left { grid-area: left; display: flex; flex-direction: column;
+  gap: 8px; max-width: 240px; }
+.nb-strips-left:empty { display: none; }
+.nb-output-body.nb-trailing { border-top: 1px dashed var(--border); padding-top: 8px; }
 /* Dokumenterte begrensningsmeldinger (R-celle utenfor R-modus, microdata i
    R-modus, dashboard krever Kjør alle — fase B1 Task 4): rolig info-boks,
    ikke en rød feilmelding (pre.error) — brukeren har ikke gjort noe galt. */
@@ -1220,16 +1285,16 @@
 .nb-undo-btn:hover { background: var(--accent); color: #fff; }
 body[data-theme="dark"] .nb-undo-btn:hover { color: #1a1b26; }
 
-/* ── ui-widgets (spec 2026-07-15, W1): kontrollstripe per celle, js/ui.js ──
-   .ui-controls settes inn av Ui.registerControl som cellens FØRSTE barn —
-   FØR .nb-input/.nb-output — slik at den overlever output-tømming
-   (beginRun/renderCellResult rører kun .nb-output). grid-column: 1/-1 er
-   nødvendig fordi .nb-cell er et grid: i .nb-layout-columns er det to
-   kolonner (input | output) — uten dette ville stripa falt inn i kun første
-   kolonne. Med full bredde ligger den i stedet som en kompakt, radbrytende
-   header-rad over begge soner, i alle layout-varianter. */
+/* ── ui-widgets (spec 2026-07-15, W1; flyttet inn i .nb-output i widget-
+   plassering-fasen): kontrollstripe per celle, js/ui.js. .ui-controls
+   settes inn av Ui.registerControl INNI cellens .nb-output-wrapper (se
+   js/ui.js sin _ensureStrip) — FØR .nb-output-body, ALDRI direkte tømt av
+   output-tømming (beginRun/renderCellResult rører kun .nb-output-body).
+   Bor nå i OUTPUT-kolonnen/-sonen (ikke lenger et fullbredde-bånd over
+   input+output) — se .nb-output sin egen widgets=top|bottom|left-styring
+   over for den faktiske plasseringen. */
 .ui-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px;
-  grid-column: 1 / -1; padding: 6px 10px;
+  padding: 6px 10px;
   background: var(--bg-code); border: 1px solid var(--border); border-radius: 6px; }
 .ui-controls:empty { display: none; }
 .ui-widget { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text); }
@@ -1289,20 +1354,21 @@ body[data-theme="dark"] .nb-undo-btn:hover { color: #1a1b26; }
    dropdown/knapp) — samme oppskrift-familie som Pico bruker for fokusringen. */
 .ui-controls :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-/* ── #@param-skjemaer (spec 2 W4, Task 2): js/param-forms.js DOM-halvdel ──
-   .param-form settes inn av ParamForms.decorate som cellens FØRSTE barn —
-   FØR en evt. .ui-controls-stripe over (se ParamForms.reorder/js/cells.js sin
-   runCell) — samme grid-column: 1/-1-triks og samme "barn nummer én"-plass i
-   .nb-cell sitt grid. Bevisst visuelt distinkt fra .ui-controls (Colab-stil
-   skjema: én rad PER kontroll, etikett venstre/kontroll høyre — se W-issue 3
-   over for hvorfor den tidligere venstre aksentkanten er borte) — de to
-   stripene skal kunne sameksistere i samme celle uten å se ut som duplikater. */
+/* ── #@param-skjemaer (spec 2 W4, Task 2; flyttet inn i .nb-output i widget-
+   plassering-fasen): js/param-forms.js DOM-halvdel. .param-form settes inn
+   av ParamForms.decorate INNI cellens .nb-output-wrapper, FØR en evt.
+   .ui-controls-stripe og alltid FØR .nb-output-body (se _insertStrip,
+   js/param-forms.js — strukturell rekkefølge, ingen reorder-reassert
+   lenger). Bevisst visuelt distinkt fra .ui-controls (Colab-stil skjema: én
+   rad PER kontroll, etikett venstre/kontroll høyre — se W-issue 3 under for
+   hvorfor den tidligere venstre aksentkanten er borte) — de to stripene skal
+   kunne sameksistere i samme celle uten å se ut som duplikater. */
 /* W-issue 3: den tidligere venstre aksentstripen (border-left: 3px solid
    var(--accent)) er fjernet — skjemaets Colab-stil (rad per kontroll,
    etikett venstre/kontroll høyre) og den lett distinkte bakgrunnen holder
    den fortsatt visuelt atskilt fra .ui-controls uten en ekstra farget kant. */
 .param-form { display: flex; flex-direction: column; gap: 6px;
-  grid-column: 1 / -1; padding: 8px 10px;
+  padding: 8px 10px;
   background: var(--bg-panel); border: 1px solid var(--border); border-radius: 6px; }
 .param-form:empty { display: none; }
 /* W-issue 2: justify-content:space-between spredte label/kontroll/lesevisning

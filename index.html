@@ -7730,20 +7730,38 @@ json.dumps(out)
 
     // Nullstill R-side ordinal/register FØR en kjøring (samme idiom som
     // DashWebR.reset() - no-op hvis defs aldri er lastet denne økten,
-    // gjettet via __uiRP i stedet for en egen loaded-flagg). Fjerner OGSÅ
-    // `.ui_values` fra .GlobalEnv (review-fiks, Important): per-celle-
-    // injeksjonen skriver den inn i det PERSISTENTE globale miljøet og
-    // ingenting annet rydder den — uten rm her ville "Restart & kjør alle"
-    // etter en per-celle slider-justering lese den justerte verdien i
-    // stedet for de dokumenterte defaultene (Run All-kontrakten: defaults,
-    // ingen kontroller). rm(list=..., envir=globalenv()) er den robuste
-    // formen (verifisert med Rscript); exists-vakten gjør kallet idempotent
-    // når `.ui_values` aldri ble injisert.
-    async function __uiResetR() {
+    // gjettet via __uiRP i stedet for en egen loaded-flagg).
+    //
+    // Verdisemantikk (plassfase Task 2 — review-fiksen dette erstatter var
+    // MIDLERTIDIG, fra W2 sin dokumenterte "Kjør alle rendrer ingen
+    // kontroller"-tilpasning): R "Kjør alle" injiserer nå LAGREDE JS-verdier
+    // per r-segment (samme window.Ui.valuesForCell-kilde som per-celle-
+    // stien, se runHybridR sin egen segmentløkke) i stedet for å alltid vise
+    // defaults — parity med python, der Ui._values ALDRI tømmes av en
+    // kjøring, kun av Ui.resetDocument() (nytt dokument).
+    //
+    // `keepValues` (nytt parameter, default false): når true (kalt fra
+    // runHybridR/Kjør alle) rm-es IKKE `.ui_values` — segmentløkkas egen
+    // per-celle-injeksjon overskriver den uskadelig FØR hvert r-segment
+    // kjører (eller lar den stå urørt hvis planen ikke justerer, se
+    // Cells.alignedPlanForKinds-kommentaren i js/cells.js). Restart & kjør
+    // alle bruker DERMED òg lagrede verdier (samme runHybridR-kall, ingen
+    // egen gren) — bevisst valg for å speile pythons Restart-oppførsel (kun
+    // R-miljøet nullstilles av restart(), ikke JS-verdilageret), dokumentert
+    // i spec 2 sin track-1 parity-note. Default (false, forklar sin
+    // per-blokk-sti, uendret) beholder DEN GAMLE rm-oppførselen: forklar
+    // injiserer ingen per-celle-verdier (utenfor scope her, se
+    // forklarRunOneRBlock sin kommentar) og skal derfor fortsatt alltid vise
+    // ui_*()-defaults, ikke en tilfeldig gjenliggende verdi fra en tidligere
+    // Kjør alle/per-celle-kjøring i samme økt.
+    async function __uiResetR(keepValues) {
       if (!__uiRP) return;
       try {
         await __uiRP;
-        await webR.evalRVoid('.ui_begin(); if (exists(".ui_values", envir = globalenv(), inherits = FALSE)) rm(list = ".ui_values", envir = globalenv())');
+        var _code = keepValues
+          ? '.ui_begin()'
+          : '.ui_begin(); if (exists(".ui_values", envir = globalenv(), inherits = FALSE)) rm(list = ".ui_values", envir = globalenv())';
+        await webR.evalRVoid(_code);
       }
       catch (e) { console.warn('ui: reset (R)', e); }
     }
@@ -7827,7 +7845,35 @@ json.dumps(out)
 
       const normalized = normalizeBlockMarkers(src, 'r');
       var hasMarkers = /^##\s*(r|microdata|micro|pyodide|python)\s*$/im.test(normalized);
-      const segments = parseHybridScript(normalized, hasMarkers ? 'microdata' : 'r');
+      // Notatbok aktiv (browser-diagnostisert, plassfase Task 2): legacy-
+      // heuristikken "hasMarkers ? 'microdata' : 'r'" er fra FØR notatbok-
+      // cellemodellen (f46c169, opprinnelig fork) — designet for håndskrevne
+      // flate R+microdata-hybridscript der UMARKERT tekst FØR første eksplisitt
+      // ##-markør konvensjonelt var microdata-oppsett. I en notatbok er `src`
+      // ALLTID Cells.executableSource()-output: HVER kodecelle får sin egen
+      // '## <kind>'-markør UNNTATT den underforståtte preambelen (celle 0,
+      // headerRaw null) — Cells.alignPlan sin egen expectedKind() forventer
+      // DERFOR at preambelen kjører som docMode ('r'), ALDRI 'microdata'.
+      // Uten dette unntaket klassifiseres preambelen (typisk kun # label:/
+      // #options.*/# load-direktiv-linjer) som 'microdata' så snart NOEN
+      // annen celle har en eksplisitt markør (så godt som alltid sant for
+      // notatbøker) — _rUiPlan under blir da ALLTID null (segmentKinds sin
+      // lengde OG element 0 stemmer ikke med alignPlan sine forventninger),
+      // og ui-verdi-injeksjonen lenger ned kan aldri finne en celleindeks.
+      // Verifisert i nettleser: dette var ROTÅRSAKEN til at rex_widgets_ui.txt
+      // sin Kjør alle ikke rendret kontroller under selve implementeringen.
+      //
+      // Gates på Cells.active() OG UI_R_REGEX (ikke bare Cells.active()):
+      // et ui-fritt notatbok-dokument skal fortsatt kjøre BYTE-IDENTISK med
+      // før (verifiseringskravet i planen) — inkludert den (i teorien mulige,
+      // om enn ingen dagens eksempel gjør det) legitime bruken av en
+      // FAKTISK microdata-DSL-preambel i et R-modus-notatbok. Denne
+      // omklassifiseringen trengs KUN for at ui-verdi-injeksjonen (under)
+      // skal finne en celleindeks — uten ui_*() i scriptet er det uansett
+      // ingenting å injisere/lese, så det er tryggest å la den gamle
+      // heuristikken stå urørt der.
+      var _rNbActiveForDefault = !!(window.Cells && window.Cells.active()) && UI_R_REGEX.test(src);
+      const segments = parseHybridScript(normalized, _rNbActiveForDefault ? 'r' : (hasMarkers ? 'microdata' : 'r'));
 
       // Segmentnivå-use (plan 2026-07-11 i safestat): parse/strip use-linjene
       // per blokk. I R-modus er kjøringen faseinndelt (alle #micro først, så
@@ -7847,7 +7893,19 @@ json.dumps(out)
       _rSegsAll.forEach(function (s) { if (s.kind === 'r') _rUses.push.apply(_rUses, s.uses || []); });
 
       var microdataSegs = _rSegsAll.filter(function(s) { return s.kind === 'microdata' && (s.text || '').trim(); });
-      var rSegs        = _rSegsAll.filter(function(s) { return s.kind !== 'microdata' && (s.text || '').trim(); });
+      // rSegOrigIdx (plassfase Task 2): rSegs er et FILTER av _rSegsAll (dropper
+      // microdata + blanke tekster) — parallell indeks rSegOrigIdx[ri] peker
+      // tilbake til rSegs[ri] sin posisjon i _rSegsAll, som er ARRAYET
+      // _rUiPlan (under) er justert mot (samme dokument-rekkefølge som
+      // segmentKinds-argumentet til Cells.alignedPlanForKinds). Uten denne
+      // ville en ui-verdi-injeksjon for r-segment ri feilaktig brukt
+      // _rUiPlan[ri] — riktig KUN når ingen microdata-/blanke segmenter kom
+      // før det i dokumentet.
+      var rSegs = [];
+      var rSegOrigIdx = [];
+      _rSegsAll.forEach(function (s, _origI) {
+        if (s.kind !== 'microdata' && (s.text || '').trim()) { rSegs.push(s); rSegOrigIdx.push(_origI); }
+      });
       var outputParts  = [];
 
       // Notatbok aktiv (Task 7): tøm forrige kjørings per-celle-output FØR
@@ -7963,25 +8021,35 @@ json.dumps(out)
         }
       }
 
-      // ui-widgets (declare-og-injiser-modellen, spec 2 W2): "Kjør alle" har
-      // INGEN per-celle-integrasjon (dokumentert tilpasning, se spec) —
-      // ui_*() skal likevel være DEFINERT (ellers "kunne ikke finne
-      // funksjonen ui_slider" — en ekte feil scriptet ellers ikke ville
-      // fått) og returnere sine defaults (ingen `.ui_values` injiseres her;
-      // __uiResetR fjerner også en evt. gjenliggende `.ui_values` fra
-      // tidligere per-celle-kjøringer, så defaults faktisk gjelder).
-      // BEGGE kallene er gatet på UI_R_REGEX (review-fiks, Minor): et
+      // ui-widgets (declare-og-injiser-modellen, spec 2 W2 → plassfase Task 2):
+      // "Kjør alle" RENDRER nå kontroller per r-segment (W2 sin "ingen
+      // per-celle-integrasjon" er innhentet — se segmentløkka under) —
+      // ui_*() må uansett alltid være DEFINERT her (ellers "kunne ikke finne
+      // funksjonen ui_slider" for et ui-fritt-i-praksis script som likevel
+      // matcher UI_R_REGEX literal-teksten, f.eks. i en streng). BEGGE
+      // kallene er gatet på UI_R_REGEX (review-fiks, Minor, uendret): et
       // ui-fritt dokument skal kjøre strengt identisk med før — også når
-      // ui.R alt er lastet i økten. Ingen kontroll rendres, registeret
-      // leses aldri her (samme "NO control rendering" som DashWebR-blokken
-      // over, men uten et mount()-motstykke: ui-widgets har ingen Kjør
-      // alle-visning); et ui-fritt dokument leser heller aldri registeret
-      // eller kaller ui_*, så en hoppet-over reset kan ikke observeres der.
+      // ui.R alt er lastet i økten.
       if (UI_R_REGEX.test(src)) {
         try { await __ensureUiR(); }
         catch (e) { outputParts.push({ type: 'error', text: 'ui: ' + ((e && e.message) || e) }); }
-        await __uiResetR();
+        await __uiResetR(true); // keepValues: Kjør alle bruker lagrede JS-verdier (plassfase Task 2)
       }
+
+      // Justert plan for ui-verdi-injeksjon/registeroppdatering per r-segment
+      // (plassfase Task 2) — HELT ADSKILT fra Cells.beginRun(0) over: den
+      // planen forblir bevisst null (trailing-slot for ALL tekst-/plott-
+      // output, uendret W2-tilpasning). Cells.alignedPlanForKinds gjør SAMME
+      // alignPlan-oppslag som beginRun ville gjort, men uten å røre
+      // NB.runSinks/NB.runPlan (se kommentaren i js/cells.js). Kinds-arrayet
+      // er HELE dokumentets segment-rekkefølge (_rSegsAll, ikke det filtrerte
+      // rSegs) — samme grunnlag som python-sidens _segmentKinds. null når
+      // notatboken er inaktiv eller planen ikke justerer (håndskrevne
+      // ##-markører m.m.) — per-segment-injeksjonen hopper da over, se under.
+      var _rUiActive = UI_R_REGEX.test(src) && !!(window.Cells && window.Cells.active());
+      var _rUiPlan = _rUiActive
+        ? window.Cells.alignedPlanForKinds(_rSegsAll.map(function (s) { return s.kind; }))
+        : null;
 
       // ── Phase 2: run R segments via captureR — interleaved code/output/plot
       // For hver R-blokk: splitt i top-level statements via R-parser, kjor hver
@@ -7991,6 +8059,27 @@ json.dumps(out)
       for (var ri = 0; ri < rSegs.length; ri++) {
         var segText = rSegs[ri].text.trim();
         if (!segText) continue;
+
+        // ui-widgets (plassfase Task 2): celleindeks for DETTE r-segmentet i
+        // den justerte planen (rSegOrigIdx[ri] — IKKE ri, se dens kommentar
+        // over rSegs). null hvis planen ikke justerte, eller notatboken er
+        // inaktiv/ui-fri — injeksjon/registerlesing hoppes da over (samme
+        // fallback-kontrakt som Cells.cellIdxForSegment andre steder).
+        var _rCellIdx = (_rUiPlan && _rUiPlan[rSegOrigIdx[ri]] !== undefined)
+          ? _rUiPlan[rSegOrigIdx[ri]] : null;
+
+        // (1) injiser lagrede verdier for DENNE cellen FØR segmentet kjører —
+        // speiler runNotebookRCell sitt steg (2) (samme .ui_begin()+
+        // .ui_values-i-ett-evalRVoid-mønster, samme begrunnelse der: en
+        // fromJSON-feil skal likevel ha nullstilt ordinal-telleren).
+        if (_rCellIdx !== null) {
+          try {
+            var _rUiValuesJson = (window.Ui && typeof window.Ui.valuesForCell === 'function')
+              ? window.Ui.valuesForCell(_rCellIdx) : '{}';
+            await webR.evalRVoid('.ui_begin(); .ui_values <- jsonlite::fromJSON(' + JSON.stringify(_rUiValuesJson) + ')');
+          } catch (e) { console.warn('ui: injeksjon (R, Kjør alle):', e); }
+        }
+
         var statements = null;
         try {
           var splitRes = await webR.evalR(
@@ -8042,6 +8131,20 @@ json.dumps(out)
           } catch(e) {
             outputParts.push({ type: 'error', text: 'R-feil: ' + (e.message || e) });
           }
+        }
+
+        // (2) post-run: les registeret (.ui_registry_json() returnerer OG
+        // TØMMER det, se webr/ui.R) og bygg/oppdater cellens kontrollstripe —
+        // speiler runNotebookRCell sitt steg (4). Kalles også når registeret
+        // er tomt ("[]"): Ui.registerFromRegistry sin mark-og-sopp skal da
+        // fjerne kontroller kilden ikke lenger deklarerer for DENNE cellen.
+        if (_rCellIdx !== null) {
+          try {
+            var _rSpecsJson = await __uiEvalRString('.ui_registry_json()');
+            if (_rSpecsJson && window.Ui && typeof window.Ui.registerFromRegistry === 'function') {
+              window.Ui.registerFromRegistry(_rCellIdx, _rSpecsJson);
+            }
+          } catch (e) { console.warn('ui: registeroppdatering (R, Kjør alle):', e); }
         }
       }
 
@@ -9546,13 +9649,6 @@ async def _m2py_run_segment(_seg_json):
             // segment i replayen, ikke bare målsegmentet (se kommentaren over
             // ctx-settingen).
             if (_rCellIdx !== null && _rCellIdx !== undefined && window.Ui && window.Ui.endCellRun) window.Ui.endCellRun(_rCellIdx);
-            // #@param-skjemaer (W4 Task 2, review-fiks 2): replay-segmentene
-            // kan opprette .ui-controls for IKKE-mål-celler (registerControl
-            // kjører for hvert replayet segment, se ctx-settingen over) —
-            // js/cells.js sin runCell reorder-er kun MÅLcellens node etterpå,
-            // så rekkefølgen for de replayede cellene reassertes her, ved
-            // samme brakettpunkt som endCellRun.
-            if (_rCellIdx !== null && _rCellIdx !== undefined && window.ParamForms && window.ParamForms.reorder) window.ParamForms.reorder(_rCellIdx);
             if (py && typeof py.setStdout === 'function') py.setStdout();
             if (py && typeof py.setStderr === 'function') py.setStderr();
             if (_capErr) console.warn('[stderr]', _capErr.trim());
@@ -9850,12 +9946,6 @@ async def _m2py_run_segment(_seg_json):
           // _uiIdx over; null når notatboken er inaktiv/planen ikke er
           // justert, samme betingelse som satte nbUiRunCtx i utgangspunktet).
           if (_uiIdx !== null && _uiIdx !== undefined && window.Ui && window.Ui.endCellRun) window.Ui.endCellRun(_uiIdx);
-          // #@param-skjemaer (W4 Task 2, review-fiks 2): en .ui-controls-
-          // stripe kan dukke opp for FØRSTE gang i akkurat denne kjøringen
-          // (Ui sin _ensureStrip setter den inn som cellens firstChild, FORAN
-          // en eventuell .param-form) — reassert rekkefølgen ved samme
-          // brakettpunkt som endCellRun over, samme guardede mønster.
-          if (_uiIdx !== null && _uiIdx !== undefined && window.ParamForms && window.ParamForms.reorder) window.ParamForms.reorder(_uiIdx);
           appendOutput(stdout.slice(renderedLen), asHtml, suppress, _sink);
           renderedLen = stdout.length;
           if (rc === 'stop') break;
@@ -9903,11 +9993,6 @@ async def _m2py_run_segment(_seg_json):
         // løkka-blokken. endCellRun er idempotent, så dette er trygt også
         // i det vanlige tilfellet der løkka allerede sopte ferdig selv.
         if (typeof _uiIdx !== 'undefined' && _uiIdx !== null && window.Ui && window.Ui.endCellRun) window.Ui.endCellRun(_uiIdx);
-        // #@param-skjemaer (W4 Task 2, review-fiks 2): samme sikkerhetsnett-
-        // speiling for stripe-rekkefølgen som endCellRun-linja over —
-        // idempotent, dekker et unntak kastet før løkkas egen reorder rakk å
-        // kjøre.
-        if (typeof _uiIdx !== 'undefined' && _uiIdx !== null && window.ParamForms && window.ParamForms.reorder) window.ParamForms.reorder(_uiIdx);
         setRunButtonsUi('idle');
         // duckdb-modus: sidepanelet mates fra wasm-katalogen — fire-and-forget.
         if (activeEditorMode === 'duckdb') { refreshDatasetSidebarFromDuck(); }
@@ -10192,6 +10277,20 @@ async def _m2py_run_segment(_seg_json):
           // og null stilles (samme pattern som runHybridR, se W2-review-fiks).
           // UI_R_REGEX gater ALT arbeidet — et ui-fritt dokument kjører
           // identisk som før, ingen ekstra overhead.
+          //
+          // Verdi-/kontrollintegrasjon (plassfase Task 2): forklar sin
+          // blokk-modell har INGEN cellIdx å injisere/lese kontroller mot
+          // (buildForklarBlocksForNotebook/Cells.forklarCellSteps bygger en
+          // ren avspillingsliste, ikke en Cells.beginRun-justert segmentplan)
+          // og bruker sin EGEN outputArea-visning i stedet for notatbokens
+          // per-celle-sluk der widget-stripene bor (Task 1) — å koble dette
+          // sammen er MER enn en triviell tilføyelse her (>30 linjer,
+          // krever cellIdx-plumbing gjennom hele blokk-byggingen pluss en
+          // avklaring av om/hvor en kontrollstripe skal vises under
+          // avspilling). Bevisst utsatt (task-brief: "note as follow-up
+          // instead") — forklar viser derfor fortsatt KUN ui_*()-defaults,
+          // aldri lagrede verdier: __uiResetR() kalles UTEN keepValues
+          // (default false → gammel rm-oppførsel, uendret).
           if (UI_R_REGEX.test(block.codeTrim)) {
             try { await __ensureUiR(); }
             catch (e) { outputArea.innerHTML = '<pre class="error">ui: ' + escapeHtml(String((e && e.message) || e)) + '</pre>'; return; }

@@ -102,6 +102,57 @@ def test_slider_spec_default_rerun_er_self(monkeypatch):
     assert fake.calls[-1]["rerun"] == "self"
 
 
+# ---- placement (Task 3, per-kontroll plassering) — ren gjennomstrøms-kwarg,
+# validering skjer på JS-siden (js/ui.js sin normalizeSpec) ----
+
+def test_slider_placement_passthrough_i_spec(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=None)
+    mod.slider(0, 10, placement="left")
+    assert fake.calls[-1]["placement"] == "left"
+
+
+def test_slider_uten_placement_utelates_fra_spec(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=None)
+    mod.slider(0, 10)
+    assert "placement" not in fake.calls[-1]
+
+
+def test_dropdown_placement_passthrough(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=None)
+    mod.dropdown(["a", "b"], placement="bottom")
+    assert fake.calls[-1]["placement"] == "bottom"
+
+
+def test_checkbox_placement_passthrough(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=None)
+    mod.checkbox("Vis", placement="top")
+    assert fake.calls[-1]["placement"] == "top"
+
+
+def test_switch_placement_passthrough(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=None)
+    mod.switch("Aktiv", placement="left")
+    assert fake.calls[-1]["placement"] == "left"
+
+
+def test_number_placement_passthrough(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=None)
+    mod.number(3, placement="bottom")
+    assert fake.calls[-1]["placement"] == "bottom"
+
+
+def test_text_placement_passthrough(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=None)
+    mod.text("hei", placement="left")
+    assert fake.calls[-1]["placement"] == "left"
+
+
+def test_button_placement_passthrough(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=None)
+    mod.button("Kjør", placement="top")
+    assert fake.calls[-1]["placement"] == "top"
+
+
 # ---- (c) live-sti: registerControl returnerer en verdi ----
 
 def test_slider_live_returnerer_int(monkeypatch):

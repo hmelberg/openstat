@@ -1,7 +1,10 @@
 # Notebook widgets — design (spec 2 of 3)
 
 **Status:** all three tracks delivered (W1–W4) — see Phasing below for
-per-phase browser-verification evidence.
+per-phase browser-verification evidence. **Placement extension shipped
+2026-07-15** (Tasks 1–4: strips-to-output-slot + `widgets=` attr, R Run-All
+parity, per-control `placement` keyword, exit-gate cleanup/examples/sweep —
+see `.superpowers/sdd/task-place-4-report.md`).
 **Date:** 2026-07-15
 **Builds on:** spec 1 (`2026-07-13-notebook-cells-design.md`) — the `#%%` cell
 format, notebook rendering, and the phase-B1 per-cell run machinery
@@ -81,6 +84,24 @@ One JSON control spec, shared with dash v2 (extend `js/dash.js`'s existing
   machinery — widgets require a notebook and reuse B1's sessions untouched.
 - Sliders throttle (~150 ms) before rerunning; buttons rerun on click.
 
+**Per-control placement (placement phase, Task 3, 2026-07-15):** every
+control accepts an optional `placement: "top"|"bottom"|"left"` keyword
+(`ui.slider(1, 10, placement="left")`, same keyword vocabulary in every
+facade including R's `ui_slider(..., placement = "left")`). Precedence:
+**control placement > the cell's `widgets=top|bottom|left` attribute >
+default `top`** — controls without their own `placement` simply follow the
+cell's attribute (or `top` if that is absent too), so existing notebooks are
+byte-identical in appearance. A single cell may freely mix all three: e.g. a
+slider left at the default top, a dropdown pinned `placement="left"`, and a
+button pinned `placement="bottom"` all coexist. Mechanically, `.nb-output`
+holds up to three physical anchors per system (`.ui-controls`/`.param-form`
+tagged `data-pos="top"`/`"bottom"`, routed by CSS Grid — see `app.css`'s
+`.nb-output` rules) plus one **shared** `.nb-strips-left` side column that
+both `ui.*` and `#@param` controls stack into when placed left. Changing a
+control's placement between runs re-parents it cleanly (old node removed
+from its old anchor, fresh/moved node in the new one) without losing its
+current value or leaving a stale duplicate behind.
+
 ### Language facades (thin, per runtime)
 
 The Python-family facade (one `ui` module served to pyodide, brython and
@@ -112,6 +133,34 @@ MODES have no notebook support (spec 1 §3.3), so their `ui` facades ship as
 API-compatible fallbacks (return defaults in scripts; dash v2 remains the
 interactive story there) until those runners gain cell support; full cell
 widgets land in pyodide (W1, done) and R-mode notebooks (W2).
+
+**Track-1 parity note (placement phase, Task 2, fixed 2026-07-15):** R's
+"Kjør alle" originally shipped as a documented W2 adaptation — no per-cell
+integration, controls never rendered outside per-cell ▶, `.ui_values` wiped
+before every run so widgets always showed defaults. Browser diagnosis during
+placement Task 2 found this created a real user-facing gap (loading the R
+widgets example and pressing "Kjør alle" showed zero controls, matching a
+user report) and, separately, an actual regression risk: the R segment-kind
+default used by "Kjør alle" (`hasMarkers ? 'microdata' : 'r'`, unchanged
+since before the notebook cell model existed) misclassifies a notebook's
+implicit preamble as `'microdata'` whenever any other cell has an explicit
+marker — true for almost every notebook-format R document — which made
+`Cells.alignPlan` unable to align the plan at all. Both are now fixed:
+"Kjør alle" injects `Ui.valuesForCell`/reads the registry per r-segment
+(same declare-and-inject pattern as per-cell ▶, via a new
+`Cells.alignedPlanForKinds` helper that mirrors `beginRun`'s alignment
+without touching output sinks — output stays on the trailing/combined slot,
+untouched), and the segment-kind default is corrected to the notebook's
+docMode whenever `Cells.active() && UI_R_REGEX` (never for ui-free
+documents, preserving byte-identical output there). Values now persist
+across "Kjør alle" and "Restart & kjør alle" exactly like python's
+JS-side store (`Ui._values`, cleared only by `Ui.resetDocument()` on a new
+document) — full parity with track 1's pull-model semantics, not just the
+declare-and-inject mechanics. forklar's R per-block path is intentionally
+untouched (still shows only `ui_*()` defaults) — its block model has no
+notebook cell index to inject/read against; wiring that up is noted as a
+follow-up, not attempted here (see
+`.superpowers/sdd/task-place-2-report.md`).
 
 ### Rendering
 
@@ -207,6 +256,20 @@ runtime because it never touches the runtime: it edits text and reruns. Form
 interactions clear the cell textarea's browser undo-stack (programmatic
 `.value` writes), so the undo control remains independent.
 
+**Per-control placement (placement phase, Task 3, 2026-07-15):** the meta
+object accepts the same `placement: "top"|"bottom"|"left"` keyword as
+track 1 (`x = 3 #@param {type:"slider", placement:"left"}`), with identical
+precedence (control meta > cell `widgets=` attribute > default `top`) and
+the identical physical anchors (per-position `.param-form`/`.ui-controls`,
+shared `.nb-strips-left` column) — see track 1's protocol section above for
+the full mechanics, which are system-agnostic. An unrecognized `placement`
+value warns and is ignored (the line falls back to the cell's default),
+matching the grammar's existing "unknown key → warn, don't fail the line"
+convention. Changing `placement` on a line is treated as a structural
+change (like changing its `type`): the form rebuilds so the control lands
+cleanly in its new anchor, reading its current value fresh from the
+(already up to date) source text — no value loss, no duplicate node.
+
 ## Phasing
 
 - **W1 — `ui` core (pyodide):** protocol + renderer + python facade +
@@ -222,6 +285,12 @@ interactions clear the cell textarea's browser undo-stack (programmatic
   facades confirmed as documented API-compatible fallbacks (defaults, no
   render — real cell support pending those runners' notebook support, see
   Scope notes above); see `.superpowers/sdd/task-w2-5-report.md`.
+  **Superseded (placement phase, Task 2, 2026-07-15):** "Run All
+  defaults-only" is no longer the contract — R "Kjør alle" now renders
+  controls per r-segment and uses stored values exactly like python's Run
+  All, closing the gap where a user loading the R widgets example and
+  pressing "Kjør alle" saw no controls at all. See the track-1 parity note
+  above and `.superpowers/sdd/task-place-2-report.md`.
 - **W3 — ipywidgets bridge v1** (per track 2 scope). **Done 2026-07-15** —
   browser-verified end-to-end (widget render + live `observe`-driven
   updates with no cell rerun, kernel-sync both ways, buffer-and-replay

@@ -496,31 +496,36 @@
   }
   D.sweepDisconnected = sweepDisconnected;
 
-  // Mount-rot (fase B2 Task 4b): dashbord i en notatbok-celle skal rendre
-  // INN i cellens EGEN .nb-output-slot, ikke det skjulte #outputArea (Task 3-
-  // funnet: #outputArea ligger inni `.container`, som får `.nb-hidden` mens
+  // Mount-rot (fase B2 Task 4b, oppdatert i widget-plassering-fasen):
+  // dashbord i en notatbok-celle skal rendre INN i cellens EGEN
+  // .nb-output-body (sluket ALL run-output skriver til, se js/cells.js sin
+  // cellNode/renderCellResult), ikke det skjulte #outputArea (Task 3-funnet:
+  // #outputArea ligger inni `.container`, som får `.nb-hidden` mens
   // notatbok-cellevisningen er aktiv -- et dashboard bygget der var derfor
-  // teknisk ryddig, men usynlig for brukeren). window.mdUiRunCtx() (samme
-  // kontekst js/ui.js sin Ui.registerControl leser, satt/nullstilt av de
-  // FIRE kjøre-brakettene i index.html: Kjør alle-segmentløkka,
-  // mdRunNotebookCell sin enkelt-celle-sti, og microdata-replay-løkka) er
-  // ikke-null NØYAKTIG mens en celleadressert kjøring pågår -- inkludert
-  // MENS pyodide/dash.py sitt Dash.__init__ kaller window.Dash.create()
-  // synkront, siden pyodide kjører på hovedtråden. cellEl hentes FERSKT fra
-  // ctx (aldri cachet, samme F6-forbehold som resten av notatbok-kjøringen);
-  // .nb-output er cellens direkte barn (se js/cells.js sin cellNode).
-  // Fallback #outputArea UENDRET (samme node/streng som før) når ctx mangler
-  // -- vanlig skript uten notatbok, eller notatboken er inaktiv. MERK: R-
-  // (dash-webr.js:131) og brython/micropython-veiene kaller OGSÅ D.create(),
-  // men deres kjørestier setter aldri nbUiRunCtx — DET er invarianten som
-  // holder dem på #outputArea, ikke hvem som kaller create. En fremtidig
-  // per-celle-R-sti som setter ctx ville derfor omdirigere R-dash hit
-  // (bevisst urørt, se Task B2-3-rapporten: en per-celle-trygg R-dash krever
-  // en egen webR-registerrestrukturering, utenfor denne oppgavens omfang).
+  // teknisk ryddig, men usynlig for brukeren). Merk: `.nb-output` er nå en
+  // WRAPPER som også kan holde .param-form/.ui-controls-striper -- å montere
+  // rett i `.nb-output` (som før) ville lagt dashboardroten som en tredje
+  // stripe der, IKKE i sluket, og latt den forstyrres av widgets=left sin
+  // rad-layout. window.mdUiRunCtx() (samme kontekst js/ui.js sin
+  // Ui.registerControl leser, satt/nullstilt av de FIRE kjøre-brakettene i
+  // index.html: Kjør alle-segmentløkka, mdRunNotebookCell sin enkelt-celle-
+  // sti, og microdata-replay-løkka) er ikke-null NØYAKTIG mens en
+  // celleadressert kjøring pågår -- inkludert MENS pyodide/dash.py sitt
+  // Dash.__init__ kaller window.Dash.create() synkront, siden pyodide kjører
+  // på hovedtråden. cellEl hentes FERSKT fra ctx (aldri cachet, samme F6-
+  // forbehold som resten av notatbok-kjøringen). Fallback #outputArea
+  // UENDRET (samme node/streng som før) når ctx mangler -- vanlig skript
+  // uten notatbok, eller notatboken er inaktiv. MERK: R- (dash-webr.js:131)
+  // og brython/micropython-veiene kaller OGSÅ D.create(), men deres
+  // kjørestier setter aldri nbUiRunCtx — DET er invarianten som holder dem
+  // på #outputArea, ikke hvem som kaller create. En fremtidig per-celle-
+  // R-sti som setter ctx ville derfor omdirigere R-dash hit (bevisst urørt,
+  // se Task B2-3-rapporten: en per-celle-trygg R-dash krever en egen
+  // webR-registerrestrukturering, utenfor denne oppgavens omfang).
   function mountContainer() {
     var ctx = (typeof global.mdUiRunCtx === 'function') ? global.mdUiRunCtx() : null;
     var slot = (ctx && ctx.cellEl && typeof ctx.cellEl.querySelector === 'function')
-      ? ctx.cellEl.querySelector('.nb-output') : null;
+      ? ctx.cellEl.querySelector('.nb-output-body') : null;
     return slot || document.getElementById('outputArea');
   }
 
