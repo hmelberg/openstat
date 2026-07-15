@@ -169,6 +169,45 @@ test('registerControl: endret min klamper lagret verdi til nytt intervall', () =
   assert.strictEqual(Number(rangeInput.value), 50, 'DOM-noden reflekterer den klampede verdien');
 });
 
+// ---- B2 (final-review): type-bytte under samme nøkkel bygger på nytt -----
+
+test('registerControl: type-bytte slider→dropdown under SAMME nøkkel bygger en fersk select-node (ikke option-noder inni range-input)', () => {
+  const { Ui, cellEl } = freshEnv();
+  Ui.registerControl(JSON.stringify({ type: 'slider', name: 'x', min: 0, max: 100, value: 5 }));
+  const strip = cellEl.children[0];
+  const oldWidget = strip.children[0];
+  const oldInput = oldWidget.children[1];
+  assert.strictEqual(oldInput.type, 'range');
+
+  const res = Ui.registerControl(JSON.stringify({ type: 'dropdown', name: 'x', options: ['a', 'b'] }));
+  assert.strictEqual(JSON.parse(res), 'a', 'fersk dropdown-default, ikke noe restet fra slideren');
+  assert.strictEqual(strip.children.length, 1, 'gammel node fjernet OG ny lagt til — ingen dobling');
+
+  const newWidget = strip.children[0];
+  assert.notStrictEqual(newWidget, oldWidget, 'helt ny wrap-node, ikke den gamle mutert');
+  const select = newWidget.children[1];
+  assert.strictEqual(select.tag, 'select', 'select-node — ikke range-input gjenbrukt med <option>-barn presset inn');
+  assert.strictEqual(select.children.length, 2, 'select har options-listen, ren');
+});
+
+test('registerControl: type-bytte slider→button under SAMME nøkkel gir en fungerende knapp (klikk fyrer rerun)', async () => {
+  const { Ui, cellEl, runCellCalls } = freshEnv({ cellIdx: 9 });
+  Ui.registerControl(JSON.stringify({ type: 'slider', name: 'x', min: 0, max: 100, value: 5 }));
+  Ui.registerControl(JSON.stringify({ type: 'button', name: 'x', label: 'Kjør' }));
+
+  const strip = cellEl.children[0];
+  assert.strictEqual(strip.children.length, 1, 'slider-wrapen er fjernet, kun knappen står igjen');
+  const btn = strip.children[0];
+  assert.strictEqual(btn.tag, 'button');
+  assert.strictEqual(btn.textContent, 'Kjør');
+
+  btn.dispatchEvent({ type: 'click' });
+  // B3-fiksen gjør selve Cells.runCell-kallet ett mikrotask unna (se
+  // kommentaren i "button: klikk → UMIDDELBAR rerun"-testen over).
+  await Promise.resolve();
+  assert.deepStrictEqual(runCellCalls, [9], 'knappen virker etter type-byttet — ingen gutta slider-wrap igjen i veien');
+});
+
 // ---- endring → debounce → rerun -------------------------------------------
 
 test("change → lagrer umiddelbart, kjører Cells.runCell('self'-cellIdx) etter 150ms debounce", async () => {
@@ -246,6 +285,44 @@ test('rerun: duplikat-id-er i array dedupes — én kjøring per unik målcelle'
   assert.deepStrictEqual(runCellCalls.slice().sort(), [3, 4], "['a','a','b'] → nøyaktig én kjøring for 'a'");
 });
 
+// B3-fiksen (final-review): mdRunNotebookCell (index.html) setter
+// scriptRunInProgress SYNKRONT ved oppstart, akkurat som denne fake
+// runCell simulerer med `busy` under — før fiksen fyrte _rerunFor et
+// synkront forEach av global.Cells.runCell(idx) for HVERT mål i
+// rerun:['a','b',…], så mål nr. 2 startet mens mål nr. 1 fortsatt "kjørte"
+// og ville i den ekte koden ha blitt refuse-droppet av nøyaktig denne typen
+// vakt. Nå kjøres målene i SERIE (Cells.runCell returnerer alltid et
+// promise) — testen bekrefter at mål 4 ikke starter før mål 3 er HELT
+// ferdig.
+test('rerun: flermåls-array kjøres SERIELT — mål 2 venter til mål 1 er helt ferdig (B3, final-review)', async () => {
+  const { Ui, cellEl } = freshEnv({ idMap: { a: 3, b: 4 } });
+  const order = [];
+  let busy = false;
+  global.Cells.runCell = (idx) => {
+    assert.strictEqual(busy, false, 'mål ' + idx + ' startet mens et tidligere mål fortsatt kjørte — ikke serielt');
+    busy = true;
+    order.push('start:' + idx);
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        order.push('end:' + idx);
+        busy = false;
+        resolve();
+      }, 20);
+    });
+  };
+
+  Ui.registerControl(JSON.stringify({ type: 'text', name: 'x', value: 'v', rerun: ['a', 'b'] }));
+  const strip = cellEl.children[0];
+  const textInput = strip.children[0].children[1];
+
+  textInput.value = 'w';
+  textInput.dispatchEvent({ type: 'change' });
+  await wait(250);
+
+  assert.deepStrictEqual(order, ['start:3', 'end:3', 'start:4', 'end:4'],
+    'mål 4 (id b) venter til mål 3 (id a) er helt ferdig FØR det starter');
+});
+
 test('refuse-drop: mens mdIsScriptRunning() er true, forkastes den debouncede reruen (kjøres ikke i ettertid)', async () => {
   const { Ui, cellEl, runCellCalls, setScriptRunning } = freshEnv({ cellIdx: 1, scriptRunning: true });
   Ui.registerControl(JSON.stringify({ type: 'text', name: 'x', value: 'a' }));
@@ -265,7 +342,7 @@ test('refuse-drop: mens mdIsScriptRunning() er true, forkastes den debouncede re
 
 // ---- button: umiddelbar, ingen debounce -----------------------------------
 
-test('button: klikk → UMIDDELBAR rerun (ingen debounce-ventetid), returnerer null-verdi', () => {
+test('button: klikk → UMIDDELBAR rerun (ingen debounce-ventetid), returnerer null-verdi', async () => {
   const { Ui, cellEl, runCellCalls } = freshEnv({ cellIdx: 5 });
   const res = Ui.registerControl(JSON.stringify({ type: 'button', label: 'Kjør nå' }));
   assert.strictEqual(JSON.parse(res), null);
@@ -275,7 +352,14 @@ test('button: klikk → UMIDDELBAR rerun (ingen debounce-ventetid), returnerer n
   assert.strictEqual(btn.textContent, 'Kjør nå');
 
   btn.dispatchEvent({ type: 'click' });
-  assert.deepStrictEqual(runCellCalls, [5], 'ingen ventetid — knapp-klikk kjører umiddelbart');
+  // B3-fiksen (final-review): _rerunFor kjører nå targets via
+  // Promise.resolve().then(...) (serialisering, se B3-kommentaren i
+  // js/ui.js) i stedet for et synkront forEach — INGEN 150ms-debounce
+  // fortsatt (det er poenget testnavnet dekker), men selve Cells.runCell-
+  // kallet skjer nå ett mikrotask unna, ikke i samme synkrone tikk som
+  // dispatchEvent. En tom `await` flusher akkurat den ene mikrotasken.
+  await Promise.resolve();
+  assert.deepStrictEqual(runCellCalls, [5], 'ingen debounce-ventetid — knapp-klikk kjører uten 150ms-forsinkelse');
 });
 
 // ---- endCellRun: mark-og-sopp for kontroller som ikke re-registreres -----

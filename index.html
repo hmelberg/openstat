@@ -9021,6 +9021,30 @@ async def _m2py_run_segment(_seg_json):
           : scriptInput.value;
         var _scriptOpts = extractScriptOptions(rawScript);
         var effectiveScript = rawScript.replace(/^[ \t]*(?:#|\/\/)[ \t]*options\.[A-Za-z_]\w*[ \t]*=.*$\n?/gm, '');
+        // B1-fiksen (final-review): python-modusens preRun (~3138) registrerer
+        // pyodide/dash.py og pyodide/ui.py som modulene `dash`/`ui` FØR
+        // kjøring — men preRun kalles KUN fra btnRun sin fulle "Kjør alle"-
+        // sløyfe (~9328), ALDRI herfra. Denne per-celle-stien hoppet derfor
+        // historisk over BEGGE registreringene: et kaldt/ferskt Pyodide-
+        // session-boot (ingen tidligere "Kjør alle" i denne fanen) fulgt av
+        // ▶ på en enkelt widget-celle feilet med ModuleNotFoundError: ui
+        // (og, samme rot-årsak, tilsvarende for `import dash`). Samme
+        // regex-vakt som preRun bruker, men kjørt mot effectiveScript — HELE
+        // dokumentteksten (se kommentaren ved buildDocumentSegments rett
+        // under: cellens egen payload.text er ALDRI autoritativ for
+        // dokument-brede fakta) — fordi importen kan stå i en tidligere
+        // celle enn den som faktisk kjøres nå, i samme levende sesjon.
+        // Feiler gracefully (console.warn), akkurat som preRun: en 404 skal
+        // ikke abortere kjøringen — scriptet feiler naturlig lenger nede
+        // når `import ui`/`import dash` ikke finner modulen.
+        if (/^\s*(?:import|from)\s+dash\b/m.test(effectiveScript)) {
+          try { await __ensurePyDash(py); }
+          catch (e) { console.warn('pyodide/dash.py (per-celle):', e); }
+        }
+        if (/^\s*(?:import|from)\s+ui\b/m.test(effectiveScript)) {
+          try { await __ensureUi(py); }
+          catch (e) { console.warn('ui-modul kunne ikke lastes:', e); }
+        }
         var _displayAll = String(_scriptOpts.display || '').toLowerCase() === 'all';
         // Segmentoppløsning: samme vei som "Kjør alle" (bootNotebookSession),
         // så cellens "# use" og #options.* leses fra HELE dokumentet, aldri

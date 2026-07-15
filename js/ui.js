@@ -273,9 +273,23 @@
       if (!ctrl) return;
       if (global.mdIsScriptRunning && global.mdIsScriptRunning()) return;
       var targets = _resolveTargets(ctrl.spec, ctrl.cellIdx);
-      targets.forEach(function (idx) {
-        if (global.Cells && typeof global.Cells.runCell === 'function') global.Cells.runCell(idx);
-      });
+      // B3-fiksen (final-review): mdRunNotebookCell (index.html) setter
+      // scriptRunInProgress SYNKRONT idet kjøringen starter — å fyre
+      // global.Cells.runCell(idx) for alle mål i samme synkrone forEach
+      // (som før) betydde at mål nr. 2..n traff den vakta (samme
+      // mdIsScriptRunning()-sjekk som over dette blokk) mens mål nr. 1
+      // fortsatt kjørte, og ble refuse-droppet — kun det FØRSTE
+      // rerun-målet i en `rerun:['a','b',…]`-liste kjørte noensinne i
+      // praksis. Kjør target-listen i SERIE i stedet:
+      // Cells.runCell(idx) returnerer ALLTID et promise (js/cells.js
+      // ~770, både tidlig-retur-grenene og hovedløpet), så neste mål
+      // venter til forrige er HELT ferdig (inkludert dens egen
+      // scriptRunInProgress=false) før den i det hele tatt starter.
+      targets.reduce(function (p, idx) {
+        return p.then(function () {
+          if (global.Cells && typeof global.Cells.runCell === 'function') return global.Cells.runCell(idx);
+        });
+      }, Promise.resolve());
     }
 
     // Felles endrings-håndterer: lagrer verdien UMIDDELBART (getValue()),
@@ -486,6 +500,24 @@
 
       var strip = _ensureStrip(ctx.cellEl, cellIdx);
       var existing = _controls[key];
+
+      // B2-fiksen (final-review): et type-bytte under SAMME nøkkel (kilden
+      // endret f.eks. ui.slider(...) til ui.dropdown(...) uten å endre
+      // name/rekkefølge — samme controlKey) må bygge kontrollen HELT PÅ
+      // NYTT. Grenene under (existing ? _updateControlSpec : bygg fersk)
+      // antar at `existing`, når den finnes, er SAMME kontrolltype — de
+      // muterer input-noden i place (f.eks. dropdown-grenen i
+      // _updateControlSpec legger <option>-noder RETT INN i det som var et
+      // <input type="range">, og en slider→button hadde tømt button-wrappen
+      // sin egen struktur). Fjern den gamle DOM-noden og glem både
+      // kontroll- og verdi-oppføringen — resten av funksjonen ser da
+      // nøyaktig ut som en helt fersk registrering.
+      if (existing && existing.type !== spec.type) {
+        if (existing.wrap && typeof existing.wrap.remove === 'function') existing.wrap.remove();
+        delete _controls[key];
+        delete _values[key];
+        existing = undefined;
+      }
 
       if (spec.type === 'button') {
         if (!existing) {
