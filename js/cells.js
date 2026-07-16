@@ -222,6 +222,44 @@
     return 'md';
   }
 
+  // Kjørbar cellekropp (spec §4): tag-linjene blankes PÅ PLASS (linjetall
+  // bevares — executableSource-konvensjonen). Nødvendig, ikke kosmetisk:
+  // '#' er ikke kommentar i duckdb-SQL og er direktiv-prefiks i microdata —
+  // tag-linjer må aldri nå motorene.
+  C.execCellSource = function (cell) {
+    if (!cell) return '';
+    if (!cell.tagLines || !cell.tagLines.length) return cell.source;
+    var lines = cell.source.split('\n');
+    for (var i = 0; i < cell.tagLines.length; i++) lines[cell.tagLines[i]] = '';
+    return lines.join('\n');
+  };
+
+  // Render-innhold (spec §4): kropp minus tag-linjer; sniffet md-celle →
+  // teksten MELLOM '"""'-delimiterne (én ledende/avsluttende blank linje
+  // trimmes). Kildenivå (ikke cellenivå) med vilje: blur-forhåndsvisningen
+  // i cellNode rendrer den LEVENDE textarea-verdien, ikke cellens kilde.
+  // Faller tilbake til den tag-strippede kroppen hvis lone-string-mønsteret
+  // ikke lenger holder etter redigering (typen er låst til re-parse uansett).
+  C.renderContent = function (source, type, sniffed) {
+    var scan = C.scanTagBlock(source, false);
+    var kept = linesWithoutTags(source, scan.tagLines);
+    var out = kept.join('\n');
+    if (type === 'md' && sniffed === 'md') {
+      var first = -1;
+      for (var i = 0; i < kept.length; i++) {
+        if (kept[i].trim() !== '') { first = i; break; }
+      }
+      if (first !== -1 && kept[first].slice(0, 3) === '"""') {
+        var rest = kept.slice(first).join('\n').slice(3);
+        var close = rest.indexOf('"""');
+        if (close !== -1 && rest.slice(close + 3).trim() === '') {
+          out = rest.slice(0, close).replace(/^\n/, '').replace(/\n$/, '');
+        }
+      }
+    }
+    return out;
+  };
+
   // Parse hele dokumentet → { cells, warnings }.
   // Celle: { type, attrs, tags, tagLines, sniffed, headerRaw, headerLine, startLine, endLine, source, hasBody }
   //  - headerRaw === null: implisitt preambel (tekst før første markør)
@@ -351,19 +389,20 @@
 
   // Dokument → kjørbar tekst (spec §4 "Document → runnable text"):
   // kode-cellers header → '## lang', ikke-kode (md/html/skip) og språk uten
-  // segmentstøtte blankes. Linjetall bevares eksakt.
+  // segmentstøtte blankes. Linjetall bevares eksakt. Tag-linjer blankes PÅ
+  // PLASS i både preambel og kodeceller (execCellSource).
   C.executableSource = function (text, docMode) {
     if (!C.hasMarkers(text)) return String(text == null ? '' : text);
     var parsed = C.parseCells(text);
     var out = [];
     for (var i = 0; i < parsed.cells.length; i++) {
       var c = parsed.cells[i];
-      if (c.headerRaw === null) { out.push(c.source); continue; }   // preambel kjører som den er
+      if (c.headerRaw === null) { out.push(C.execCellSource(c)); continue; }   // preambel kjører med tags blanket
       var type = C.resolveType(c, docMode);
       var runnable = C.isCodeType(type) && !!SEG_MARKER[type];
       if (!runnable) { out.push(blankLike(C.cellBlock(c))); continue; }
       if (!c.hasBody && c.source === '') { out.push(SEG_MARKER[type]); continue; }
-      out.push(SEG_MARKER[type] + '\n' + c.source);
+      out.push(SEG_MARKER[type] + '\n' + C.execCellSource(c));
     }
     return out.join('\n');
   };
@@ -457,6 +496,8 @@
   // preambel-betingelse. index.html vet ingenting om cellemodellen her:
   // den bygger bare selve tale/kode-blokkene (kommentar-konvensjonen,
   // markdown-narrasjon) ut fra {kind, source} denne funksjonen returnerer.
+  // Sniffede md-celler blir narrasjon-steg automatisk og deres delimitere/tags
+  // nå renderContent og når aldri TTS.
   C.forklarCellSteps = function (text, docMode) {
     var parsed = C.parseCells(text);
     var cells = parsed.cells;
@@ -466,13 +507,13 @@
     var steps = [];
     for (var idx = 0; idx < cells.length; idx++) {
       if (codeSet[idx]) {
-        steps.push({ kind: 'code', cellIdx: idx, source: cells[idx].source });
+        steps.push({ kind: 'code', cellIdx: idx, source: C.execCellSource(cells[idx]) });
         continue;
       }
       var c = cells[idx];
       if (c.headerRaw === null) continue; // ikke-kjørbar preambel — intet steg
       if (C.resolveType(c, docMode) === 'md') {
-        steps.push({ kind: 'md', cellIdx: idx, source: c.source });
+        steps.push({ kind: 'md', cellIdx: idx, source: C.renderContent(c.source, 'md', c.sniffed) });
       }
       // skip / html / ikke-kjørbare kodetyper: verken kjørt eller lest opp
     }

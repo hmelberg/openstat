@@ -797,3 +797,64 @@ test('parseCells: ingen #%% → ingen tag-maskineri påvirker dokumentet (paramo
   const p = C.parseCells(src);
   assert.strictEqual(p.cells[0].type, null);
 });
+
+test('execCellSource: tag-linjer blankes PÅ PLASS — linjetall bevares', () => {
+  const p = C.parseCells('#%% duckdb\n#tag.id = tab\n#tag.slide = 2\nselect 1');
+  const out = C.execCellSource(p.cells[0]);
+  assert.strictEqual(out, '\n\nselect 1');
+  assert.strictEqual(out.split('\n').length, p.cells[0].source.split('\n').length);
+});
+
+test('execCellSource: celle uten tags returnerer kilden uendret; null-celle → tom streng', () => {
+  const p = C.parseCells('#%% python\nx = 1');
+  assert.strictEqual(C.execCellSource(p.cells[0]), 'x = 1');
+  assert.strictEqual(C.execCellSource(null), '');
+});
+
+test('renderContent: tag-linjer fjernes; sniffet md → indre tekst uten delimitere', () => {
+  assert.strictEqual(C.renderContent('#tag.slide = 1\n"""\n# Hei\n"""', 'md', 'md'), '# Hei');
+  assert.strictEqual(C.renderContent('"""enlinjes **fet**"""', 'md', 'md'), 'enlinjes **fet**');
+});
+
+test('renderContent: eksplisitt md-celle beholder """ (kun sniffede strippes); html får tags fjernet', () => {
+  assert.strictEqual(C.renderContent('"""x"""', 'md', null), '"""x"""');
+  assert.strictEqual(C.renderContent('#tag.slide = 1\n<div>x</div>', 'html', 'html'), '<div>x</div>');
+});
+
+test('renderContent: fallback når lone-string-mønsteret ikke lenger holder etter redigering', () => {
+  assert.strictEqual(C.renderContent('"""x"""\nkode()', 'md', 'md'), '"""x"""\nkode()');
+});
+
+test('executableSource: tag-blokken blankes i kodeceller OG preambel — linjetall eksakt bevart', () => {
+  const src = '#tag.type = python\n# load x\n\n#%%\n#tag.slide = 1\nx = 1\n#%% duckdb\n#tag.id = t\nselect 1';
+  const exec = C.executableSource(src, 'python');
+  const lines = exec.split('\n');
+  assert.strictEqual(lines.length, src.split('\n').length);
+  assert.strictEqual(lines[0], '');            // preambel-tag blanket
+  assert.strictEqual(lines[1], '# load x');    // direktivlinje urørt
+  assert.strictEqual(lines[3], '## python');   // #tag.type-default → python-segment
+  assert.strictEqual(lines[4], '');            // celle-tag blanket
+  assert.strictEqual(lines[5], 'x = 1');
+  assert.strictEqual(lines[7], '');            // duckdb-cellens tag blanket ('#' er ikke SQL)
+  assert.strictEqual(lines[8], 'select 1');
+});
+
+test('executableSource: celle med KUN tag-blokk ≙ tom celle (kjent godartet plan/kjøretids-asymmetri)', () => {
+  // Samme oppførsel som '#%% python' uten kropp: segmentPlan tar cellen med,
+  // flush() dropper det tomme segmentet — alignPlan-fallbacken håndterer det
+  // (ledger Task 9). Pinnes her: blankingen skal IKKE endre denne likheten.
+  const tagOnly = '#%% python\n#tag.slide = 1\n#%% python\nx = 1';
+  const empty = '#%% python\n\n#%% python\nx = 1';
+  assert.strictEqual(C.executableSource(tagOnly, 'python'), C.executableSource(empty, 'python'));
+  assert.deepStrictEqual(C.segmentPlan(tagOnly, 'python'), [0, 1]);
+});
+
+test('forklarCellSteps: md-steg bruker renderContent (sniffede celler taler uten delimitere), kode-steg blankes', () => {
+  const src = '#%%\n"""\n# Hei\n"""\n#%% python\n#tag.slide = 1\nx = 1';
+  const steps = C.forklarCellSteps(src, 'python');
+  assert.strictEqual(steps.length, 2);
+  const mdStep = steps.find((s) => s.kind === 'md');
+  assert.strictEqual(mdStep.source, '# Hei');
+  const codeStep = steps.find((s) => s.kind === 'code');
+  assert.strictEqual(codeStep.source, '\nx = 1');
+});
