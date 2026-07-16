@@ -7769,6 +7769,10 @@ json.dumps(out)
     // runHybridR) - vanlige R-kjøringer uten ui_*-kall betaler ingenting.
     var UI_R_REGEX = /\bui_(slider|dropdown|checkbox|switch|number|text|button)\s*\(/;
 
+    // fase 3-fiks: husker at forrige rene R-kjøring rendret doc-kontroller,
+    // så en kjøring UTEN ui_-tekst fortsatt får én opprydningssweep.
+    var _rDocUiHadControls = false;
+
     // __ensureUiR: nøyaktig samme leveringsmønster som DashWebR.ensureDefs
     // (js/dash-webr.js) - fetch + evalRVoid av kildeteksten, memoisert i et
     // modulnivå-promise som nullstilles ved feil (neste kall prøver på nytt).
@@ -8252,8 +8256,21 @@ json.dumps(out)
           var _rDocSpecsJson = await __uiEvalRString('.ui_registry_json()');
           if (_rDocSpecsJson && window.Ui && typeof window.Ui.registerFromRegistry === 'function') {
             window.Ui.registerFromRegistry(null, _rDocSpecsJson);
+            _rDocUiHadControls = true;
           }
         } catch (e) { console.warn('ui: registeroppdatering (R, dokument):', e); }
+      } else if (_rDocUiHadControls && !_rUiActive) {
+        // Review-funn: brukeren slettet alle ui_*-kall siden forrige kjøring
+        // (_rDocUi er nå false, UI_R_REGEX-gaten hopper over hele blokken
+        // over) — uten denne grenen ville de gamle doc-kontrollene bli
+        // hengende interaktive i #outputArea for alltid. Én engangs-sweep
+        // med et tomt register fjerner dem (samme mark-og-sopp-mekanisme som
+        // over), og flagget nullstilles slik at rene ui-frie kjøringer
+        // deretter er like billige som før.
+        if (window.Ui && typeof window.Ui.registerFromRegistry === 'function') {
+          window.Ui.registerFromRegistry(null, '[]');
+        }
+        _rDocUiHadControls = false;
       }
 
       // Trailing-slot fallback (Task 7, 2b): samlet R-output havner i
