@@ -94,6 +94,99 @@
     return res;
   };
 
+  // ---------- #tag-celledirektiver (spec 2026-07-16-tag-directives-design.md) ----------
+
+  var TAG_PREFIX_RE = /^\s*#\s*tag\./;
+  var TAG_LINE_RE = /^\s*#\s*tag\.([A-Za-z_][\w-]*)\s*=\s*(.+?)\s*$/;
+
+  // Verdi-koersjon (spec §1): '"x"'/"'x'" → x; usitert true/false → boolean
+  // (så '#tag.hide-code = true' gir samme attrs-form som header-flagget);
+  // alt annet forblir streng (header-attrs er strenger — slide=3 er '3').
+  function coerceTagValue(raw) {
+    var q = raw.charAt(0);
+    if (raw.length >= 2 && (q === '"' || q === "'") && raw.charAt(raw.length - 1) === q) {
+      return raw.slice(1, -1);
+    }
+    if (raw === 'true') return true;
+    if (raw === 'false') return false;
+    return raw;
+  }
+
+  // Skann en cellekropps tag-blokk (spec §1/§2). Ren funksjon, kropps-
+  // relative 0-baserte linjenumre (parseCells absoluttiserer til 'linje N').
+  // Celle-modus: ledende blanklinjer hoppes over, deretter sammenhengende
+  // tag-linjer; første andre linje (også blank) avslutter blokken. En linje
+  // som LIGNER en tag (prefikset) men ikke matcher full syntaks konsumeres
+  // med varsel — én skrivefeil skal ikke stille demotere resten av blokken.
+  // Preambel-modus: tag-linjer plukkes fra den LEDENDE blank/#-kommentar-
+  // kjeden (ekte preambler begynner med # label:/#options./# load — de
+  // linjene røres ikke); første ikke-blanke ikke-#-linje avslutter skannet.
+  // Tag-aktige linjer ETTER blokken er inerte kommentarer og varsles (kjent
+  // forbehold i spec: strengliteral-innhold kan gi falskt positivt varsel).
+  C.scanTagBlock = function (source, isPreamble) {
+    var lines = String(source == null ? '' : source).split('\n');
+    var res = { tags: {}, entries: [], tagLines: [], warnings: [] };
+    var open = true;      // skannet (blokken/preambel-kjeden) er fortsatt åpent
+    var started = false;  // (celle-modus) blokken har fått sin første tag-linje
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      var blank = line.trim() === '';
+      var tagish = TAG_PREFIX_RE.test(line);
+      if (open) {
+        if (isPreamble) {
+          if (blank) continue;
+          if (line.replace(/^\s+/, '').charAt(0) !== '#') { open = false; }
+          else if (!tagish) continue;           // # label:/# load/#options. — urørt
+        } else if (!started) {
+          if (blank) continue;                  // ledende blanklinjer tillatt
+          if (!tagish) open = false;            // første innholdslinje — ingen blokk
+          else started = true;
+        } else if (!tagish) {
+          open = false;                         // blank eller innhold avslutter blokken
+        }
+      }
+      if (!tagish) continue;
+      if (!open) {                              // inert sen tag-linje — kun varsel
+        res.warnings.push({ line: i, msg: '#tag utenfor tagg-blokken — ignorert' });
+        continue;
+      }
+      res.tagLines.push(i);
+      var m = TAG_LINE_RE.exec(line);
+      if (!m) { res.warnings.push({ line: i, msg: 'ugyldig #tag-linje' }); continue; }
+      var key = m[1].toLowerCase();
+      var val = coerceTagValue(m[2]);
+      if (key === 'type') {
+        var tv = String(val).toLowerCase();
+        if (ALIASES[tv]) tv = ALIASES[tv];
+        if (TYPES.indexOf(tv) === -1) {
+          res.warnings.push({ line: i, msg: 'ukjent type: ' + val });
+          continue;                             // ugyldig type lagres ikke
+        }
+        val = tv;
+      } else if (!KNOWN_KEYS[key] && !KNOWN_FLAGS[key]) {
+        res.warnings.push({ line: i, msg: 'ukjent attributt: ' + key });
+      }
+      if (key === 'id') {
+        if (isPreamble) {
+          res.warnings.push({ line: i, msg: 'id kan ikke være dokument-default' });
+          continue;
+        }
+        if (!ID_RE.test(String(val))) {
+          res.warnings.push({ line: i, msg: 'ugyldig id: ' + val });
+          continue;                             // speiler parseHeader: ugyldig id droppes
+        }
+      }
+      if (key === 'style' && !STYLES[val]) res.warnings.push({ line: i, msg: 'ukjent style: ' + val });
+      if (key === 'widgets' && !WIDGETS_POS[val]) res.warnings.push({ line: i, msg: 'ukjent widgets-plassering: ' + val });
+      if (Object.prototype.hasOwnProperty.call(res.tags, key)) {
+        res.warnings.push({ line: i, msg: 'duplisert #tag-nøkkel: ' + key });
+      }
+      res.tags[key] = val;
+      res.entries.push({ key: key, value: val, line: i });
+    }
+    return res;
+  };
+
   // Parse hele dokumentet → { cells, warnings }.
   // Celle: { type, attrs, headerRaw, headerLine, startLine, endLine, source, hasBody }
   //  - headerRaw === null: implisitt preambel (tekst før første markør)

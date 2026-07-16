@@ -580,3 +580,90 @@ test('fase C: executableSource blanker fortsatt brython-celler (invariant)', fun
   assert.ok(out.indexOf('print(1)') === -1);
   assert.equal(out.split('\n').length, doc.split('\n').length);  // linjetall bevart
 });
+
+// ---------- #tag-celledirektiver (spec 2026-07-16-tag-directives-design.md) ----------
+
+test('scanTagBlock: enkel blokk — nøkler lowercases, verdier koerseres', () => {
+  const s = C.scanTagBlock('#tag.ID = plot\n#tag.slide = 3\n#tag.hide-code = true\nx = 1', false);
+  assert.deepStrictEqual(s.tags, { id: 'plot', slide: '3', 'hide-code': true });
+  assert.deepStrictEqual(s.tagLines, [0, 1, 2]);
+  assert.deepStrictEqual(s.warnings, []);
+});
+
+test('scanTagBlock: siterte verdier strippes, false koerseres, verdi-case bevares', () => {
+  const s = C.scanTagBlock('#tag.speak = "Hei Du"\n#tag.style = \'note\'\n#tag.hide-output = false', false);
+  assert.deepStrictEqual(s.tags, { speak: 'Hei Du', style: 'note', 'hide-output': false });
+});
+
+test('scanTagBlock: ledende blanklinjer tillatt; blank/innhold avslutter blokken', () => {
+  const s = C.scanTagBlock('\n\n#tag.slide = 1\n\n#tag.slide = 2\nkode', false);
+  assert.deepStrictEqual(s.tags, { slide: '1' });
+  assert.deepStrictEqual(s.tagLines, [2]);
+});
+
+test('scanTagBlock: første innholdslinje → ingen blokk; senere tag-linje varsles og er inert', () => {
+  const s = C.scanTagBlock('x = 1\n#tag.slide = 2', false);
+  assert.deepStrictEqual(s.tags, {});
+  assert.deepStrictEqual(s.tagLines, []);
+  assert.strictEqual(s.warnings.length, 1);
+  assert.strictEqual(s.warnings[0].line, 1);
+  assert.ok(/utenfor tagg-blokken/.test(s.warnings[0].msg));
+});
+
+test('scanTagBlock: ugyldig tag-linje konsumeres inn i blokken med varsel — demoterer ikke resten', () => {
+  const s = C.scanTagBlock('#tag.slide = 1\n#tag.oops\n#tag.speak = hei\nx', false);
+  assert.deepStrictEqual(s.tags, { slide: '1', speak: 'hei' });
+  assert.deepStrictEqual(s.tagLines, [0, 1, 2]);
+  assert.strictEqual(s.warnings.length, 1);
+  assert.ok(/ugyldig #tag-linje/.test(s.warnings[0].msg));
+});
+
+test('scanTagBlock: validering — ukjent nøkkel lagres med varsel (header-leniens); type normaliseres via alias', () => {
+  const s = C.scanTagBlock('#tag.foo = bar\n#tag.type = py', false);
+  assert.strictEqual(s.tags.foo, 'bar');
+  assert.strictEqual(s.tags.type, 'python');
+  assert.strictEqual(s.warnings.length, 1);
+  assert.ok(/ukjent attributt: foo/.test(s.warnings[0].msg));
+});
+
+test('scanTagBlock: ugyldig type/id droppes med varsel; ukjent style lagres med varsel', () => {
+  const s = C.scanTagBlock('#tag.type = klingon\n#tag.id = "a b"\n#tag.style = fancy', false);
+  assert.strictEqual(s.tags.type, undefined);
+  assert.strictEqual(s.tags.id, undefined);
+  assert.strictEqual(s.tags.style, 'fancy');
+  assert.strictEqual(s.warnings.length, 3);
+});
+
+test('scanTagBlock: duplisert nøkkel — siste vinner, varsel', () => {
+  const s = C.scanTagBlock('#tag.slide = 1\n#tag.slide = 2', false);
+  assert.strictEqual(s.tags.slide, '2');
+  assert.strictEqual(s.warnings.length, 1);
+  assert.ok(/duplisert/.test(s.warnings[0].msg));
+});
+
+test('scanTagBlock: fleksibel whitespace og "# tag."-variant', () => {
+  const s = C.scanTagBlock('  # tag.slide=3\n#tag.speak =  hei du ', false);
+  assert.deepStrictEqual(s.tags, { slide: '3', speak: 'hei du' });
+});
+
+test('scanTagBlock preambel: tags plukkes fra ledende #-kommentar-kjede, direktivlinjer urørt', () => {
+  const src = '# label: Demo\n#options.mode = python\n#tag.type = r\n# load x.csv as x\n#tag.slide = 1\nx = 1\n#tag.speak = nei';
+  const s = C.scanTagBlock(src, true);
+  assert.deepStrictEqual(s.tags, { type: 'r', slide: '1' });
+  assert.deepStrictEqual(s.tagLines, [2, 4]);
+  // #tag etter første kodelinje: utenfor — varsles
+  assert.strictEqual(s.warnings.length, 1);
+  assert.strictEqual(s.warnings[0].line, 6);
+});
+
+test('scanTagBlock preambel: id kan ikke være dokument-default', () => {
+  const s = C.scanTagBlock('#tag.id = plot', true);
+  assert.strictEqual(s.tags.id, undefined);
+  assert.strictEqual(s.warnings.length, 1);
+  assert.ok(/dokument-default/.test(s.warnings[0].msg));
+});
+
+test('scanTagBlock: tom kropp og kropp uten tags → tomt resultat', () => {
+  assert.deepStrictEqual(C.scanTagBlock('', false).tagLines, []);
+  assert.deepStrictEqual(C.scanTagBlock('x = 1\ny = 2', false).tags, {});
+});
