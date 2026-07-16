@@ -17,14 +17,28 @@
 #   index.html sin runNotebookRCell (declare-og-injiser-integrasjonen).
 #
 # Robusthet (kritisk, spec-krav): denne fila kan bli sourced og kjørt UTEN at
-# `.ui_values`/`.ui_begin()` noensinne er injisert/kalt - vanlige R-scripts
-# (ingen notatbok) og R "Kjør alle" (runHybridR - dokumentert begrensning,
-# ingen per-celle-integrasjon der, se spec §Global Constraints) kaller aldri
-# index.html sin per-celle-brakett. Hver ui_*() må derfor virke med KUN
-# default-fallback i et slikt tilfelle - exists()-vakter rundt `.ui_values`,
-# ALDRI en antagelse om at den er satt. Selve `.ui`-miljøet og ordinal-
-# telleren er derimot ALLTID tilgjengelige - de opprettes av denne fila selv
-# idet den sources, uavhengig av om `.ui_begin()` noensinne blir kalt.
+# `.ui_values`/`.ui_begin()` noensinne er injisert/kalt - t.d. Forklar sin
+# per-blokk-sti (forklarRunOneRBlock) kaller aldri index.html sin
+# injeksjonsbrakett. Hver ui_*() må derfor virke med KUN default-fallback i
+# et slikt tilfelle - exists()-vakter rundt `.ui_values`, ALDRI en antagelse
+# om at den er satt. Selve `.ui`-miljøet og ordinal-telleren er derimot
+# ALLTID tilgjengelige - de opprettes av denne fila selv idet den sources,
+# uavhengig av om `.ui_begin()` noensinne blir kalt.
+#
+# Integrasjonspunkter i index.html (BEGGE bruker samme .ui_begin()+fromJSON-
+# injeksjon FØR kjøring og samme .ui_registry_json()-lesing ETTER, kun
+# celleindeksen skiller dem): runNotebookRCell (notatbok, per-celle-kjøring)
+# og runHybridR (R "Kjør alle" — per r-segment mot en justert celleplan når
+# notatboken er aktiv OG planen justerer, ELLERS ÉN GANG mot dokument-
+# konteksten (cellIdx null) for rene R-skript med ui_*-kall, se dens egen
+# "Fase 3"/"Dokument-sti"-kommentarer).
+#
+# sync_to (fase 3, spec §3, alle kontroller UNNTATT ui_button): valgfritt
+# navn på en sesjonsvariabel widgeten sin verdi skal PUSHES til ved endring
+# (js/ui.js sin normalizeSpec validerer navnet og ruter pushen - se dens
+# kommentar). Rent gjennomstrøms i denne fila, samme mønster som `placement`:
+# NULL som standard, sendes uendret inn i spec-listen, og fjernes av
+# .ui_register hvis ikke satt.
 
 .ui <- new.env(parent = emptyenv())
 .ui$registry <- list()
@@ -98,13 +112,14 @@
 #' faller da tilbake til cellens widgets=-default. `on_change` er kanonisk
 #' alias for `rerun` (W5.1) - aliaset vinner naar begge er satt.
 ui_slider <- function(min = 0, max = 100, value = NULL, step = 1, label = NULL,
-                      name = NULL, rerun = "self", on_change = NULL, placement = NULL) {
+                      name = NULL, rerun = "self", on_change = NULL, placement = NULL,
+                      sync_to = NULL) {
   if (!is.null(on_change)) rerun <- on_change
   key <- .ui_next_key(name)
   default <- if (is.null(value)) min else value
   .ui_register(list(type = "slider", name = key, label = label, min = min,
                     max = max, step = step, value = default, rerun = rerun,
-                    placement = placement))
+                    placement = placement, sync_to = sync_to))
   raw <- .ui_get_value(key)
   if (is.null(raw)) return(default)
   as.numeric(raw)
@@ -116,7 +131,8 @@ ui_slider <- function(min = 0, max = 100, value = NULL, step = 1, label = NULL,
 #' `on_change` er kanonisk alias for `rerun` (W5.1) - aliaset vinner naar
 #' begge er satt.
 ui_dropdown <- function(options, value = NULL, label = NULL, name = NULL,
-                        rerun = "self", on_change = NULL, placement = NULL) {
+                        rerun = "self", on_change = NULL, placement = NULL,
+                        sync_to = NULL) {
   if (!is.null(on_change)) rerun <- on_change
   key <- .ui_next_key(name)
   options <- as.character(options)
@@ -129,7 +145,7 @@ ui_dropdown <- function(options, value = NULL, label = NULL, name = NULL,
   # (samme begrunnelse som webr/dash.R sin dropdown()).
   .ui_register(list(type = "dropdown", name = key, label = label,
                     options = I(options), value = default, rerun = rerun,
-                    placement = placement))
+                    placement = placement, sync_to = sync_to))
   raw <- .ui_get_value(key)
   if (is.null(raw)) return(default)
   as.character(raw)
@@ -138,12 +154,13 @@ ui_dropdown <- function(options, value = NULL, label = NULL, name = NULL,
 #' Avkrysningsboks. Fallback: value. `on_change` er kanonisk alias for
 #' `rerun` (W5.1) - aliaset vinner naar begge er satt.
 ui_checkbox <- function(label = NULL, value = FALSE, name = NULL, rerun = "self",
-                        on_change = NULL, placement = NULL) {
+                        on_change = NULL, placement = NULL, sync_to = NULL) {
   if (!is.null(on_change)) rerun <- on_change
   key <- .ui_next_key(name)
   default <- isTRUE(value)
   .ui_register(list(type = "checkbox", name = key, label = label,
-                    value = default, rerun = rerun, placement = placement))
+                    value = default, rerun = rerun, placement = placement,
+                    sync_to = sync_to))
   raw <- .ui_get_value(key)
   if (is.null(raw)) return(default)
   isTRUE(raw)
@@ -153,12 +170,13 @@ ui_checkbox <- function(label = NULL, value = FALSE, name = NULL, rerun = "self"
 #' `on_change` er kanonisk alias for `rerun` (W5.1) - aliaset vinner naar
 #' begge er satt.
 ui_switch <- function(label = NULL, value = FALSE, name = NULL, rerun = "self",
-                      on_change = NULL, placement = NULL) {
+                      on_change = NULL, placement = NULL, sync_to = NULL) {
   if (!is.null(on_change)) rerun <- on_change
   key <- .ui_next_key(name)
   default <- isTRUE(value)
   .ui_register(list(type = "switch", name = key, label = label,
-                    value = default, rerun = rerun, placement = placement))
+                    value = default, rerun = rerun, placement = placement,
+                    sync_to = sync_to))
   raw <- .ui_get_value(key)
   if (is.null(raw)) return(default)
   isTRUE(raw)
@@ -170,13 +188,13 @@ ui_switch <- function(label = NULL, value = FALSE, name = NULL, rerun = "self",
 #' begge er satt.
 ui_number <- function(value = 0, min = NULL, max = NULL, step = NULL,
                       label = NULL, name = NULL, rerun = "self", on_change = NULL,
-                      placement = NULL) {
+                      placement = NULL, sync_to = NULL) {
   if (!is.null(on_change)) rerun <- on_change
   key <- .ui_next_key(name)
   default <- value
   .ui_register(list(type = "number", name = key, label = label, min = min,
                     max = max, step = step, value = default, rerun = rerun,
-                    placement = placement))
+                    placement = placement, sync_to = sync_to))
   raw <- .ui_get_value(key)
   if (is.null(raw)) return(default)
   as.numeric(raw)
@@ -186,12 +204,13 @@ ui_number <- function(value = 0, min = NULL, max = NULL, step = NULL,
 #' (speiler pyodide/ui.py sin text()). `on_change` er kanonisk alias for
 #' `rerun` (W5.1) - aliaset vinner naar begge er satt.
 ui_text <- function(value = "", label = NULL, name = NULL, rerun = "self",
-                    on_change = NULL, placement = NULL) {
+                    on_change = NULL, placement = NULL, sync_to = NULL) {
   if (!is.null(on_change)) rerun <- on_change
   key <- .ui_next_key(name)
   default <- as.character(value)
   .ui_register(list(type = "text", name = key, label = label,
-                    value = default, rerun = rerun, placement = placement))
+                    value = default, rerun = rerun, placement = placement,
+                    sync_to = sync_to))
   raw <- .ui_get_value(key)
   if (is.null(raw)) return(default)
   as.character(raw)

@@ -8113,6 +8113,30 @@ json.dumps(out)
         ? window.Cells.alignedPlanForKinds(_rSegsAll.map(function (s) { return s.kind; }))
         : null;
 
+      // Fase 3 (plan 2026-07-16, Task 3): rene R-skript med ui_* — samme
+      // declare-og-injiser-kanal som notatbokcellene (per-segment-injeksjonen
+      // i løkka under), men mot DOKUMENT-konteksten (cellIdx null —
+      // Ui.valuesForCell/Ui.registerFromRegistry sin doc-strip i
+      // #outputArea, Task 1) i stedet for en per-celle-plan.  _rUiActive er
+      // allerede false her når notatbok er inaktiv (eller planen ikke
+      // justerte, se kommentaren over) — _rDocUi er derfor det
+      // komplementære, UI_R_REGEX-gatede tilfellet: vanlige R-kjøringer uten
+      // ui_*-kall betaler fortsatt ingenting, og et notatbok-dokument som
+      // FAKTISK fikk en per-celle-plan tar IKKE også doc-stien (unngår
+      // dobbel injeksjon/lesing av samme script). __ensureUiR() er allerede
+      // kalt over (samme UI_R_REGEX-gate, ~linje 8095) — ingen ny fetch her.
+      // Dokument-sti, del A: injiser lagrede doc-verdier FØR noe segment
+      // kjører (speiler per-segment-løkka sitt steg (1) — samme
+      // .ui_begin()+.ui_values-i-ett-evalRVoid-mønster, samme begrunnelse).
+      var _rDocUi = !_rUiActive && UI_R_REGEX.test(src);
+      if (_rDocUi) {
+        try {
+          var _rDocUiValuesJson = (window.Ui && typeof window.Ui.valuesForCell === 'function')
+            ? window.Ui.valuesForCell(null) : '{}';
+          await webR.evalRVoid('.ui_begin(); .ui_values <- jsonlite::fromJSON(' + JSON.stringify(_rDocUiValuesJson) + ')');
+        } catch (e) { console.warn('ui: injeksjon (R, dokument):', e); }
+      }
+
       // ── Phase 2: run R segments via captureR — interleaved code/output/plot
       // For hver R-blokk: splitt i top-level statements via R-parser, kjor hver
       // for seg med autoprint, og rendrer kode-echo → R sin konsoll-output (rett
@@ -8208,6 +8232,28 @@ json.dumps(out)
             }
           } catch (e) { console.warn('ui: registeroppdatering (R, Kjør alle):', e); }
         }
+      }
+
+      // Dokument-sti, del B (Task 3): les registeret ÉN GANG for hele
+      // scriptet — speiler per-segment-løkka sitt steg (2) over (og
+      // runNotebookRCell sitt steg (4)), men mot doc-strip-konteksten
+      // (cellIdx null) siden rene skript ikke har noen per-celle-plan å lese
+      // registeret innimellom. Plassert ETTER hele statement-løkka (ikke
+      // inni den): statement-feil fanges PER STATEMENT (se catch lenger opp,
+      // ~linje 8194) og stopper ALDRI løkka, så et skript med en R-feil
+      // midtveis når likevel hit — hittil-deklarerte kontroller skal
+      // fortsatt rendres (samme intensjon som notatbok-stiens post-run-
+      // lesing). Kalles også når registeret er tomt ("[]") — mark-og-sopp-
+      // mekanismen i Ui.registerFromRegistry skal DA fjerne kontroller
+      // kilden ikke lenger deklarerer, samme resonnement som per-segment-
+      // lesingen over.
+      if (_rDocUi) {
+        try {
+          var _rDocSpecsJson = await __uiEvalRString('.ui_registry_json()');
+          if (_rDocSpecsJson && window.Ui && typeof window.Ui.registerFromRegistry === 'function') {
+            window.Ui.registerFromRegistry(null, _rDocSpecsJson);
+          }
+        } catch (e) { console.warn('ui: registeroppdatering (R, dokument):', e); }
       }
 
       // Trailing-slot fallback (Task 7, 2b): samlet R-output havner i
