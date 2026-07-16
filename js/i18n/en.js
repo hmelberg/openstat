@@ -6,6 +6,11 @@ window.M2PY_I18N = window.M2PY_I18N || {};
 window.M2PY_I18N.en = {
   "Meny": "Menu",
   "Fil": "File",
+  "Presentasjon": "Presentation",
+  "Presentasjon krever et notatbok-dokument (#%%-celler)": "Presentation requires a notebook document (#%% cells)",
+  "Forrige slide": "Previous slide",
+  "Neste slide": "Next slide",
+  "Velg visning (kolonner, stablet, kun output/dashboard, skrittvis, presentasjon)": "Choose view (columns, stacked, output only/dashboard, step-by-step, presentation)",
   "Nytt script": "New script",
   "Åpne fra URL": "Open from URL",
   "Åpne lokal fil": "Open local file",

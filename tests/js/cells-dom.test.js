@@ -1970,3 +1970,12 @@ test('presentStart: no-op uten aktiv notatbok', () => {
   assert.strictEqual(C.presentStart(), false);
   assert.strictEqual(C.presenting(), false);
 });
+
+test('contentLoaded: #options.view = present auto-starter presentasjonen', () => {
+  const { C, scriptInputEl } = freshEnv();
+  C.init('python');
+  scriptInputEl.value = '#options.view = present\n\n#%% md slide=1\nA\n#%% md slide=2\nB\n';
+  C.contentLoaded({ untrusted: true });
+  assert.strictEqual(C.active(), true);
+  assert.strictEqual(C.presenting(), true);
+});

@@ -1,0 +1,30 @@
+# label: Notatbok — presentasjon (slides)
+#options.mode = python
+#options.title = "Presentasjon — slides fra celler"
+#options.description = "slide=-attributtet grupperer celler i slides; piltaster/klikkesoner navigerer, Esc avslutter; #options.view = present åpner delte lenker rett i presentasjonen"
+# load https://raw.githubusercontent.com/hmelberg/openstat/main/data/iris.csv as iris
+
+#%% md slide=1
+# Iris som presentasjon
+
+Dette dokumentet er også en presentasjon: `slide=1` på cellemarkøren
+(eller `#tag.slide = 1` øverst i cellekroppen) grupperer celler i slides.
+Celler uten nummer følger forrige celle.
+
+Velg **Presentasjon** i visningsmenyen nede til venstre. Piltaster eller
+klikkesonene i kantene bytter slide; Esc avslutter. Legg til
+`#options.view = present` i preambelen for at en delt lenke skal åpne
+rett i presentasjonen.
+
+#%% python slide=2 hide-code
+iris.groupby("species")["sepal_length"].mean()
+
+#%% md
+Gjennomsnittlig begerbladlengde per art — kodecellen over har
+`hide-code`, så bare resultatet vises på sliden. Denne tekstcellen har
+ikke noe eget slide-nummer og følger forrige celle (slide 2).
+
+#%% python slide=3
+#tag.hide-code = true
+import plotly.express as pe
+pe.scatter(iris, x="sepal_length", y="sepal_width", color="species")

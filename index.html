@@ -278,7 +278,7 @@
       <!-- Visningsmodus samlet i én dropdown (før: tre ikonknapper) —
            kolonner/stablet/kun output/skrittvis. -->
       <div class="mode-dropdown-wrap">
-        <button type="button" class="mode-dropdown-btn" id="viewModeBtn" data-i18n-title title="Velg visning (kolonner, stablet, kun output/dashboard, skrittvis)">
+        <button type="button" class="mode-dropdown-btn" id="viewModeBtn" data-i18n-title title="Velg visning (kolonner, stablet, kun output/dashboard, skrittvis, presentasjon)">
           <span id="viewModeLabel" data-i18n>Kolonner</span>
           <span class="chevron">▲</span>
         </button>
@@ -287,6 +287,7 @@
           <button type="button" data-view="stacked" data-i18n>Stablet</button>
           <button type="button" data-view="output" data-i18n>Kun output / dashboard</button>
           <button type="button" data-view="forklar" data-i18n>Skrittvis</button>
+          <button type="button" data-view="present" data-i18n>Presentasjon</button>
         </div>
       </div>
       <div style="width:1px;height:20px;background:var(--border);margin:0 6px;flex-shrink:0"></div>
@@ -578,7 +579,7 @@
   <script src="js/brython-engine.js?v=2026-07-16a"></script>
   <script src="js/micropython-engine.js?v=2026-07-16a"></script>
   <script src="js/dash.js"></script>
-  <script src="js/cells.js?v=2026-07-16c"></script>
+  <script src="js/cells.js?v=2026-07-16d"></script>
   <script src="js/ui.js?v=2026-07-16b"></script>
   <script src="js/param-forms.js"></script>
   <script src="js/ipywidgets-bridge.js"></script>
@@ -3492,7 +3493,7 @@
       var label = document.getElementById('viewModeLabel');
       if (!btn || !menu) return;
       var LABELS = { columns: t('Kolonner'), stacked: t('Stablet'), output: t('Kun output / dashboard'),
-                     forklar: t('Skrittvis') };
+                     forklar: t('Skrittvis'), present: t('Presentasjon') };
       function setActive(view) {
         if (label) label.textContent = LABELS[view] || view;
         menu.querySelectorAll('button[data-view]').forEach(function (b) {
@@ -3509,7 +3510,16 @@
         b.addEventListener('click', function () {
           menu.classList.remove('open');
           var v = b.dataset.view;
+          if (v === 'present') {
+            if (window.Cells && window.Cells.active() && window.Cells.presentStart()) {
+              setActive('present');
+            } else {
+              setStatus(rightStatus, t('Presentasjon krever et notatbok-dokument (#%%-celler)'), true);
+            }
+            return;
+          }
           if (window.Cells && window.Cells.active() && v !== 'forklar') {
+            if (window.Cells.presentExit) window.Cells.presentExit();
             window.Cells.setLayout(v === 'output' ? 'output' : v);
             setActive(v);
             return;
@@ -9971,12 +9981,16 @@ async def _m2py_run_segment(_seg_json):
         //    kode-echo skal vises i output for R og Python.
         // Presedens: script-direktiv > Innstillinger > true.
         var _scriptOpts = extractScriptOptions(effectiveScript);
-        // #options.view = output-only | split  → toggle the input-panel visibility from a script
+        // #options.view = output-only | split | present → visnings-tilstand fra scriptet
         if (_scriptOpts.view !== undefined && window.mdSetInputHidden) {
           var _vw = String(_scriptOpts.view).toLowerCase().replace(/[\s_]+/g, '-');
-          var _hide = (_vw === 'output-only' || _vw === 'output' || _vw === 'results-only');
-          window.mdSetInputHidden(_hide);
-          if (window.mdOnInputToggle) window.mdOnInputToggle(_hide);
+          if (_vw === 'present' || _vw === 'presentasjon') {
+            if (window.Cells && window.Cells.active() && window.Cells.presentStart) window.Cells.presentStart();
+          } else {
+            var _hide = (_vw === 'output-only' || _vw === 'output' || _vw === 'results-only');
+            window.mdSetInputHidden(_hide);
+            if (window.mdOnInputToggle) window.mdOnInputToggle(_hide);
+          }
         }
         // Directive lines are metadata — strip them so the engine never runs them
         // (#options.* is not a comment in microdata, so it would otherwise error).

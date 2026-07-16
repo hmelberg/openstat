@@ -754,6 +754,11 @@
       "group": null
     },
     {
+      "file": "python/py_presentasjon.txt",
+      "label": "Notatbok — presentasjon (slides)",
+      "group": null
+    },
+    {
       "file": "python/py_tag_direktiver.txt",
       "label": "Notatbok — #tag-direktiver og innholds-sniffing",
       "group": null

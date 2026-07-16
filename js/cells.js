@@ -884,6 +884,14 @@
       if (NB.activeFlag) { if (C.hasMarkers(ta.value)) render(); else C.exit(); }
       else if (C.hasMarkers(ta.value) && C.supportedMode(NB.docMode)) { C.enter(appLayout()); }
       else { updateChip(); }
+      // #options.view = present (spec §3): delte lenker/eksempler/GitHub-
+      // filer åpner rett i presentasjon. Kun her (dokumentlasting) — vanlig
+      // redigering trigger aldri auto-start. Trygt for utrygt opphav:
+      // presentasjon KJØRER ingenting, og html-celler beholder trust-gaten.
+      if (NB.activeFlag && ta &&
+          /^\s*(?:#|\/\/)\s*options\.view\s*=\s*["']?present["']?\s*$/mi.test(ta.value)) {
+        C.presentStart();
+      }
       C.syncTickBaseline();
     };
 

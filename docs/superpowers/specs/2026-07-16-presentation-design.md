@@ -1,5 +1,7 @@
 # Presentation view — slides over the rendered notebook (design)
 
+**Status:** DELIVERED 2026-07-16 (plan 2026-07-16-presentation.md).
+
 Phase 2 of the unified document model
 (`2026-07-16-unified-document-model-notes.md` §4 and §6.2, decision 6 —
 "all three recommendations" approved by Hans 2026-07-16). Spec 3 in the
