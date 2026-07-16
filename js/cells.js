@@ -373,6 +373,52 @@
     return out.join('\n');
   };
 
+  // ---------- presentasjon: slide-plan (spec 2026-07-16-presentation-design.md §1) ----------
+
+  // Effektivt slide-nummer per celle: eget attrs.slide, ellers arvet fra
+  // forrige celle ("unummererte celler følger forrige celles slide").
+  // slide=N (heltall) = eksplisitt nummer; bare `slide`-flagget (boolean
+  // true) og ikke-numeriske verdier = auto-nummer (høyeste sett så langt
+  // + 1) — den ergonomiske «#%% md slide starter neste slide»-formen.
+  // Tolerant: aldri varsler (layout-nivå, ikke parse-nivå). Gruppering er
+  // PER NUMMER, ikke naboskap — slides er de distinkte numrene stigende
+  // sortert; synligheten er per-celle-CSS (DOM-halvdelen), så ikke-
+  // sammenhengende grupper koster ingenting og gir forfattere omstokkings-
+  // makt. skip-celler deltar i arven (en '#%% skip slide=4'-grensemarkør
+  // virker) men utelates fra cellIdxs (de rendrer ingenting — CSS skjuler
+  // dem uansett i presentasjon). Ledende celler uten nummer (preambelen
+  // inkludert) tilhører den FØRSTE eksplisitte sliden (1 når ingen finnes)
+  // — «tittel-cellene før første nummer hører til første slide».
+  C.slidePlan = function (cells) {
+    var eff = [], cur = null, maxSeen = 0, i;
+    for (i = 0; i < cells.length; i++) {
+      var a = cells[i].attrs ? cells[i].attrs.slide : undefined;
+      if (a !== undefined) {
+        var n = a === true ? NaN : parseInt(a, 10);
+        cur = isNaN(n) ? maxSeen + 1 : n;
+      }
+      if (cur !== null && cur > maxSeen) maxSeen = cur;
+      eff.push(cur);
+    }
+    var first = null;
+    for (i = 0; i < eff.length; i++) { if (eff[i] !== null) { first = eff[i]; break; } }
+    if (first === null) first = 1;
+    var nums = [];
+    for (i = 0; i < eff.length; i++) {
+      if (eff[i] === null) eff[i] = first;
+      if (nums.indexOf(eff[i]) === -1) nums.push(eff[i]);
+    }
+    nums.sort(function (x, y) { return x - y; });
+    var slides = [], byCell = [];
+    for (i = 0; i < nums.length; i++) slides.push({ num: nums[i], cellIdxs: [] });
+    for (i = 0; i < cells.length; i++) {
+      var pos = nums.indexOf(eff[i]);
+      byCell.push(pos);
+      if (C.resolveType(cells[i], null) !== 'skip') slides[pos].cellIdxs.push(i);
+    }
+    return { slides: slides, byCell: byCell };
+  };
+
   // Språk → legacy segmentmarkør slik parseHybridScript i index.html forventer.
   // Verifisert i Task 6 mot matchHybridMarker (index.html ~6028-6037, case-
   // insensitiv) og normalizeBlockMarkers (~7437-7450): '## python' matcher

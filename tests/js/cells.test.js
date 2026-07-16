@@ -858,3 +858,76 @@ test('forklarCellSteps: md-steg bruker renderContent (sniffede celler taler uten
   const codeStep = steps.find((s) => s.kind === 'code');
   assert.strictEqual(codeStep.source, '\nx = 1');
 });
+
+// ---------- presentasjon: slidePlan (spec 2026-07-16-presentation-design.md §1) ----------
+
+test('slidePlan: eksplisitte numre + arv — unummererte følger forrige', () => {
+  const p = C.parseCells('#%% md slide=1\na\n#%% python\nb\n#%% md slide=2\nc');
+  const sp = C.slidePlan(p.cells);
+  assert.deepStrictEqual(sp.slides.map((s) => s.num), [1, 2]);
+  assert.deepStrictEqual(sp.slides[0].cellIdxs, [0, 1]);
+  assert.deepStrictEqual(sp.slides[1].cellIdxs, [2]);
+  assert.deepStrictEqual(sp.byCell, [0, 0, 1]);
+});
+
+test('slidePlan: bare slide-flagget auto-nummererer (høyeste sett + 1)', () => {
+  const p = C.parseCells('#%% md slide=3\na\n#%% md slide\nb\n#%% md\nc');
+  const sp = C.slidePlan(p.cells);
+  assert.deepStrictEqual(sp.slides.map((s) => s.num), [3, 4]);
+  assert.deepStrictEqual(sp.byCell, [0, 1, 1]);
+});
+
+test('slidePlan: ikke-numerisk verdi behandles som flagget (auto), ingen varsler', () => {
+  const p = C.parseCells('#%% md slide=intro\na\n#%% md slide=abc\nb');
+  const sp = C.slidePlan(p.cells);
+  assert.deepStrictEqual(sp.slides.map((s) => s.num), [1, 2]);
+});
+
+test('slidePlan: gruppering per nummer, ikke naboskap — gjentatt nummer samler celler', () => {
+  const p = C.parseCells('#%% md slide=1\na\n#%% md slide=2\nb\n#%% md slide=1\nc');
+  const sp = C.slidePlan(p.cells);
+  assert.deepStrictEqual(sp.slides.map((s) => s.num), [1, 2]);
+  assert.deepStrictEqual(sp.slides[0].cellIdxs, [0, 2]);
+  assert.deepStrictEqual(sp.byCell, [0, 1, 0]);
+});
+
+test('slidePlan: ledende unummererte celler (inkl. preambel) → første eksplisitte slide', () => {
+  const p = C.parseCells('# preamble\n\n#%% md\nintro\n#%% md slide=5\na');
+  const sp = C.slidePlan(p.cells);
+  assert.deepStrictEqual(sp.slides.map((s) => s.num), [5]);
+  assert.deepStrictEqual(sp.slides[0].cellIdxs, [0, 1, 2]);
+  assert.deepStrictEqual(sp.byCell, [0, 0, 0]);
+});
+
+test('slidePlan: ingen slide-attrs → én slide med alt', () => {
+  const p = C.parseCells('#%% md\na\n#%% python\nb');
+  const sp = C.slidePlan(p.cells);
+  assert.strictEqual(sp.slides.length, 1);
+  assert.strictEqual(sp.slides[0].num, 1);
+  assert.deepStrictEqual(sp.slides[0].cellIdxs, [0, 1]);
+});
+
+test('slidePlan: skip-celler utelates fra cellIdxs men driver arven (grensemarkør)', () => {
+  const p = C.parseCells('#%% md slide=1\na\n#%% skip slide=2\nx\n#%% md\nb');
+  const sp = C.slidePlan(p.cells);
+  assert.deepStrictEqual(sp.slides.map((s) => s.num), [1, 2]);
+  assert.deepStrictEqual(sp.slides[1].cellIdxs, [2]);
+  assert.deepStrictEqual(sp.byCell, [0, 1, 1]);
+});
+
+test('slidePlan: #tag.slide og preambel-default mater planen via parseCells', () => {
+  const p = C.parseCells('#tag.slide = 1\n# load x\n\n#%% md\n#tag.slide = 2\na\n#%% python\nb');
+  const sp = C.slidePlan(p.cells);
+  assert.deepStrictEqual(sp.slides.map((s) => s.num), [1, 2]);
+  // preambelen (idx 0) er ledende-unummerert → FØRSTE EKSPLISITTE nummer i
+  // dokumentrekkefølge (md-cellens 2, ikke laveste); md-cellen har egen
+  // tag → 2; python-cellen får preambel-DEFAULTEN slide='1' (bakes i
+  // attrs) → 1. slides sorteres stigende: pos 0 = nummer 1, pos 1 = nummer 2.
+  assert.deepStrictEqual(sp.byCell, [1, 1, 0]);
+});
+
+test('slidePlan: tom celleliste → tom plan', () => {
+  const sp = C.slidePlan([]);
+  assert.deepStrictEqual(sp.slides, []);
+  assert.deepStrictEqual(sp.byCell, []);
+});
