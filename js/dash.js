@@ -526,7 +526,20 @@
     var ctx = (typeof global.mdUiRunCtx === 'function') ? global.mdUiRunCtx() : null;
     var slot = (ctx && ctx.cellEl && typeof ctx.cellEl.querySelector === 'function')
       ? ctx.cellEl.querySelector('.nb-output-body') : null;
-    return slot || document.getElementById('outputArea');
+    if (slot) return slot;
+    // ctx/slot-stien ga ingenting -- typisk en planavvik-kjøring (ctx.cellEl
+    // null, eller cellen manglet .nb-output-body). Mens notatboken er aktiv
+    // ligger #outputArea INNI .doc-root (Cells.active()), så et rått
+    // #outputArea-mål her ville montert dashbordroten som en søskennode
+    // VED SIDEN AV .doc-root i stedet for inni den (Task 3b-funnet). Bruk
+    // Cells.errorHost() -- samme samle-slot (NB.trailing) som all annen
+    // planavvik-output havner i -- før det rå #outputArea-fallbacket, som
+    // forblir uendret for vanlig skript uten notatbok (Cells inaktiv/mangler).
+    if (global.Cells && typeof global.Cells.active === 'function' && global.Cells.active()) {
+      var host = global.Cells.errorHost();
+      if (host) return host;
+    }
+    return document.getElementById('outputArea');
   }
 
   D.create = function (optsJson) {

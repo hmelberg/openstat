@@ -8857,6 +8857,16 @@ has and "int" in (m.get_microdata_functions() or {})
 
     // Translate the current script to standalone Python and show it in output.
     async function showOfflineTranslation(backend) {
+      // Konvergert dokument (Task 3b-funn 2): "Vis offline Python" er kun
+      // synlig i microdata-modus (data-mode-only), men ingenting hindret den
+      // FØR i å bli trigget mens en microdata-notatbok er aktiv -- de tre
+      // outputArea.innerHTML-skrivingene under (tomt script/laster/feil)
+      // ville da ha overskrevet .doc-root, som ligger INNI #outputArea, og
+      // slettet det levende dokumentet. Stopp derfor tidlig i notatbokmodus.
+      if (window.Cells && Cells.active()) {
+        setStatus(rightStatus, t('Offline-oversettelse vises ikke mens dokumentvisningen er aktiv'), true);
+        return;
+      }
       const dd = document.getElementById('hamburgerDropdown');
       const sub = document.getElementById('offlineSubmenu');
       if (sub) sub.classList.remove('open');
@@ -8875,12 +8885,11 @@ has and "int" in (m.get_microdata_functions() or {})
         const pre = document.createElement('pre');
         pre.className = 'offline-code';
         pre.textContent = code;
-        // Konvergert dokument (Task 3b): "Vis offline Python" er kun synlig i
-        // microdata-modus (data-mode-only), men ingenting hindrer den i å bli
-        // trigget mens en microdata-notatbok er aktiv — clearOutputAreaUnlessDoc()
-        // no-op'er da i stedet for å slette dokumentet, og oversettelsen vises
-        // ikke (kjent, ikke løst her — se Task 3b-rapporten; å injisere fremmed
-        // DOM i .doc-root ville vært verre enn å la visningen falle bort).
+        // clearOutputAreaUnlessDoc() no-op'er i notatbokmodus i stedet for å
+        // slette dokumentet, men den grenen er nå uansett uoppnåelig herfra:
+        // notatbokvakten øverst i funksjonen (Task 3b-funn 2) returnerer FØR
+        // dette punktet mens Cells.active(). Kallet står igjen som ren
+        // forsvarskode (samme signatur/atferd som overalt ellers).
         if (clearOutputAreaUnlessDoc()) outputArea.appendChild(pre);
       } catch (e) {
         const msg = String(e && e.message ? e.message : e);
@@ -9852,11 +9861,19 @@ async def _m2py_run_segment(_seg_json):
         // create() — en rerun som IKKE lenger kaller dashboard(), f.eks. etter
         // redigering, skal likevel rydde forrige runs oppføring NÅ, ikke ved
         // et vilkårlig FREMTIDIG dashboard()-kall et annet sted i dokumentet).
-        // MERK (kjent, ikke fikset her): #outputArea ligger inni `.container`,
-        // som får `.nb-hidden` mens notatbok-cellevisningen er aktiv — en
-        // python-dashboard() bygget per-celle er derfor teknisk ryddig
-        // (bounded), men usynlig for brukeren i Kolonner/Stablet-visning helt
-        // uavhengig av denne fiksen. Se Task 3-rapporten.
+        // MERK (oppdatert, Task 3b): påstanden over — at #outputArea sitter
+        // inni `.container` og får `.nb-hidden`, altså usynlig, mens notatbok-
+        // cellevisningen er aktiv — stemmer IKKE lenger. Container-byttet
+        // (.container ↔ .doc-root) er dødt kode etter konvergensen; #outputArea
+        // ER .doc-root sin vert og forblir synlig. Det som faktisk gjør en
+        // per-celle python-dashboard() trygg er at nbUiRunCtx (satt like over,
+        // ~9715) leder js/dash.js sin mountContainer() inn i DENNE cellens
+        // egen `.nb-output-body`, ikke til #outputArea — så .dash-noden havner
+        // i riktig celle-slot, synlig, ikke i den delte sloten. For et
+        // planavvik (ctx/slot mangler mens notatboken likevel er aktiv) faller
+        // mountContainer() ned på Cells.errorHost() (js/dash.js, se kommentaren
+        // der) FØR det rå #outputArea-fallbacket, slik at dashboardroten aldri
+        // havner som en søskennode ved siden av .doc-root.
         // Konvergert dokument (Task 3b): denne UBETINGEDE tømmingen (se
         // begrunnelsen over — dash skriver DIREKTE til #outputArea per celle,
         // uavhengig av notatbok-tilstand) må doc-bevisses: helperen no-op'er
@@ -10912,11 +10929,19 @@ def _run_microdata_chunk(_code):
         }
         const errMsg = (e && e.message) ? e.message : String(e);
         lastOutput = (lastOutput ? lastOutput + '\n\n' : '') + 'ERROR:\n' + errMsg;
-        // trygg: notatbok aldri aktiv her (Task 3b) — samme garanti som
-        // prepareForklarOutputPane() over (~6733): window.Cells.exit() kjørte
-        // ved starten av denne Forklar-kjøringen og scriptInput er tomt helt
-        // til finally-blokken gjenoppretter det, så cells.js sin
-        // tick()-heuristikk kan ikke reaktivere notatboken midt i løpet.
+        // trygg (Task 3b-korrigert): scriptInput.value blir IKKE stående tomt
+        // til finally — restore-if-blokken like over (~10918-10921) skriver
+        // snapshotScript tilbake i DENNE catch-grenen, synkront, hvis feltet
+        // fortsatt er tomt. Sikkerheten hviler derfor ikke på "tomt til
+        // finally", men på at det ikke finnes noe `await` mellom den
+        // restaureringen og purge/clear-kallene under: cells.js sin
+        // tick()-heuristikk kjører på en setInterval(tick, 1000) (cells.js
+        // ~linje 924) og får derfor KUN kjøre når kallstakken er tom, altså
+        // ved neste event loop-tur. Siden restore→clear her er én ubrutt
+        // synkron sekvens (ingen `await` innimellom), rekker tick() aldri
+        // å reaktivere notatboken mellom dem. En fremtidig editor som setter
+        // inn et `await` her (f.eks. for en bekreftelsesdialog) ville åpne
+        // akkurat det vinduet — ikke gjør det uten å re-verifisere.
         purgePlots(outputArea);
         outputArea.innerHTML = '';
         const pre = document.createElement('pre');

@@ -459,6 +459,7 @@ window.M2PY_I18N.en = {
   "Oversetter til {backend}…": "Translating to {backend}…",
   "(polars-oversettelse krever polars-pakken, som ikke alltid er tilgjengelig i nettleseren. Bruk pandas her, eller kjør polars offline.)": "(polars translation requires the polars package, which is not always available in the browser. Use pandas here, or run polars offline.)",
   "Offline-oversettingsfeil: {msg}": "Offline translation error: {msg}",
+  "Offline-oversettelse vises ikke mens dokumentvisningen er aktiv": "Offline translation is not shown while the document view is active",
   "rader": "rows",
   "Data-bygging (emulator): {msg}": "Data building (emulator): {msg}",
   "Datasett (df, {n} rader)": "Dataset (df, {n} rows)",
