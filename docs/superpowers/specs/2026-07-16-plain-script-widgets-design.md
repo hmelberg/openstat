@@ -4,17 +4,23 @@
 Exit-gate sweep (Task 5, `.superpowers/sdd/task-psw-5-report.md`): pyodide
 plain-script path (pull, `rerun="all"`, `sync_to`, mark-and-sweep, both
 themes) and R/brython/micropython's underlying registration/`sync_to`/
-mark-and-sweep data paths all verified working. KNOWN ISSUE found during
-the sweep and NOT fixed under this task's scope: the R, brython and
-micropython plain-script dispatch paths (index.html `runHybridR`'s
-`renderROutputParts` and the brython/micropython `runSelf` handlers'
-`renderOutput`) do a full `outputArea.innerHTML = ''` AFTER the doc-context
-control strip has already been built into `#outputArea`, wiping the
-strip from the DOM every run — the control never stays visible for those
-three engines (pyodide is unaffected; its segment loop appends
-incrementally instead of wholesale-replacing). Notebook cells (all
-engines) are unaffected — this is specific to the rent skript/doc-context
-path.
+mark-and-sweep data paths all verified working. The sweep found that the R,
+brython and micropython plain-script dispatch paths wiped the doc-context
+control strip from `#outputArea` on every run (a full `host.innerHTML = ''`
+in `renderROutputParts`/`renderOutput` ran AFTER the strip had already been
+built) — fixed via `Ui.reattachDocStrips()` (`js/ui.js`), called from the
+three affected call sites right after their wholesale render
+(`index.html`, brython/micropython `runSelf` and R's `runHybridR`). The
+strip node itself was never destroyed (listeners/values stayed intact in
+`_strips`/`_controls`), so the fix only re-inserts the existing node at its
+recorded position instead of rebuilding anything. Re-verified live in the
+browser (port 8896, Playwright, cache-bypassed): brython, micropython and R
+plain scripts with `ui.*`/`ui_*` controls now show the strip after Kjør and
+it survives repeated runs, with no duplicate strips; R's pull model
+(change slider → next Kjør uses the new value) confirmed end-to-end. See
+`.superpowers/sdd/task-psw-5-report.md` for the full re-verification table.
+Notebook cells (all engines) were unaffected by the bug — it was specific
+to the rent skript/doc-context path.
 
 Phase 3 of the unified document model
 (`2026-07-16-unified-document-model-notes.md` §3 and §6.3, decision 7 —

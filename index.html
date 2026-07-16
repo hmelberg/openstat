@@ -3235,6 +3235,10 @@
           } else {
             renderOutput(res.text || '', _asHtml, _suppress);
           }
+          // ui-widgets exit-gate-fiks: renderOutput over gjør et helhets-
+          // innerHTML=''-bytte som frakobler doc-stripa _ensureStrip bygget
+          // MENS scriptet kjørte — sett den tilbake om den ble frakoblet.
+          if (window.Ui && window.Ui.reattachDocStrips) window.Ui.reattachDocStrips();
           if (res.error) {
             var _pre = document.createElement('pre');
             _pre.className = 'error';
@@ -3276,6 +3280,8 @@
           } else {
             renderOutput(res.text || '', _asHtml, _suppress);
           }
+          // ui-widgets exit-gate-fiks: samme frakoblings-problem/fiks som Brython-raden over.
+          if (window.Ui && window.Ui.reattachDocStrips) window.Ui.reattachDocStrips();
           if (res.error) {
             var _pre = document.createElement('pre');
             _pre.className = 'error';
@@ -8278,6 +8284,12 @@ json.dumps(out)
       // uendret i #outputArea.
       renderROutputParts(outputParts,
         (window.Cells && window.Cells.active() && window.Cells.errorHost()) || null);
+      // ui-widgets exit-gate-fiks: renderROutputParts over gjør et helhets-
+      // innerHTML=''-bytte av #outputArea som frakobler doc-stripa
+      // registerFromRegistry(null, ...) bygde over (~linje 8264) — sett den
+      // tilbake om den ble frakoblet. Trygg no-op når notatbok er aktiv
+      // (target var errorHost, ikke #outputArea — ingen doc-strip der).
+      if (window.Ui && window.Ui.reattachDocStrips) window.Ui.reattachDocStrips();
       // dash v2: bygg dashboardet (om noe) etter at tekst-output er rendret.
       // mount() venter på førsterenders i egen Shelter, så purgen under er trygg.
       if (window.DashWebR) {

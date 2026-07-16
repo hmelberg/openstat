@@ -891,6 +891,38 @@
     };
 
     /**
+     * Ui.reattachDocStrips() — gjeninnsetter dokument-stripene (cellIdx=null)
+     * i #outputArea dersom en helhets-rendring har koblet dem fra. Brython/
+     * micropython sin runSelf og R sin plain-sti (Task PSW-5 exit-gate-funn,
+     * rad 6/7/8) bygger stripa MENS skriptet kjører (_ensureStrip setter den
+     * inn i #outputArea), men kaller SÅ renderOutput()/renderROutputParts()
+     * som gjør en fullstendig `host.innerHTML = ''`-erstatning av
+     * #outputArea AFTER stripa allerede er bygget — stripa forblir en
+     * gyldig, fullt fungerende DOM-node (lyttere og verdier intakt i
+     * _strips/_controls), men er ikke lenger et barn av #outputArea og blir
+     * dermed usynlig for brukeren. pyodide sin plain-sti er upåvirket (den
+     * bruker kun append, aldri innerHTML=''-erstatning, etter at stripa
+     * finnes). Denne funksjonen retter OPP en allerede frakoblet stripe —
+     * den bygger ingenting nytt, kun setter eksisterende noder tilbake på
+     * riktig plass (byPos-nøkkelen for hver posisjon styrer hvor: 'top' →
+     * settes inn som #outputArea sitt første barn, 'bottom' → appendes
+     * sist). Stille no-op om #outputArea mangler eller ingen
+     * dokument-striper (cellIdx=null) finnes ennå.
+     */
+    Ui.reattachDocStrips = function () {
+      var outputArea = document.getElementById ? document.getElementById('outputArea') : null;
+      if (!outputArea) return;
+      var byPos = _strips[null];
+      if (!byPos) return;
+      Object.keys(byPos).forEach(function (pos) {
+        var strip = byPos[pos];
+        if (!strip || strip.parentNode === outputArea) return;
+        if (pos === 'bottom') outputArea.appendChild(strip);
+        else outputArea.insertBefore(strip, outputArea.firstChild || null);
+      });
+    };
+
+    /**
      * Ui.valuesForCell(cellIdx) → JSON-streng, {navn → verdi} for cellens
      * kontroller — nøklene er kontrollnavnet ALENE (uten celle-prefikset
      * controlKey ellers legger på), f.eks. {"n": 7, "w0": "a"}. Dette er

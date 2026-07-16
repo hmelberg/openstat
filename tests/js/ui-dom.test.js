@@ -1408,3 +1408,40 @@ test('registerFromRegistry(null, json) → doc-stripa (webR plain-sti)', () => {
   assert.ok(!outEl.children.some((c) => c.classList.contains('ui-controls')),
     'ingen .ui-controls havnet i cellens .nb-output');
 });
+
+// Task PSW-5 exit-gate-funn (rad 6/7/8): brython/mpy runSelf og R sin
+// plain-sti bygger doc-stripa MENS skriptet kjører, men gjør SÅ et
+// helhets-render (host.innerHTML=''; host.appendChild(...)) som frakobler
+// den nettopp bygde stripa fra #outputArea uten å ødelegge selve noden —
+// Ui.reattachDocStrips() setter den tilbake. Simulerer wipen presist ved å
+// fjerne stripa fra outputAreaEl (samme sluttresultat som innerHTML='' gir
+// en ekte DOM-node: children-lista mister den OG dens parentNode nulles).
+test('reattachDocStrips: setter en frakoblet doc-stripe (etter helhets-render-wipe) tilbake i #outputArea, kontroll + verdi intakt', () => {
+  const { Ui, outputAreaEl } = freshEnv({ docCtx: true });
+  Ui.registerControl(JSON.stringify({ type: 'slider', name: 'n', value: 5, min: 0, max: 10 }));
+  const strip = outputAreaEl.children.find((c) => c.classList.contains('ui-controls'));
+  assert.ok(strip, 'stripa bygget under kjøring, som forventet');
+
+  // Simuler wholesale-rendringen (renderOutput/renderROutputParts sitt
+  // host.innerHTML=''; host.appendChild(nytt-innhold)) som skjer ETTER at
+  // stripa allerede er bygget i brython/mpy/R sin plain-sti.
+  outputAreaEl.removeChild(strip);
+  const nyOutputNode = new FakeEl('pre');
+  outputAreaEl.appendChild(nyOutputNode);
+  assert.strictEqual(strip.parentNode, null, 'stripa er nå frakoblet, samme som en ekte innerHTML=\'\'-wipe gir');
+  assert.strictEqual(outputAreaEl.children.indexOf(strip), -1);
+
+  Ui.reattachDocStrips();
+
+  assert.strictEqual(outputAreaEl.children[0], strip, 'stripa er satt tilbake som FØRSTE barn (data-pos "top")');
+  assert.strictEqual(strip.parentNode, outputAreaEl);
+  assert.strictEqual(strip.children.length, 1, 'kontrollen (slideren) sitter fortsatt inni stripa');
+  assert.strictEqual(JSON.parse(Ui.valuesForCell(null)).n, 5, 'lagret verdi er uendret');
+
+  // Idempotent: et andre kall når stripa allerede er tilkoblet endrer ikke
+  // rekkefølgen eller lager en duplikat-node.
+  Ui.reattachDocStrips();
+  assert.strictEqual(outputAreaEl.children.filter((c) => c.classList.contains('ui-controls')).length, 1,
+    'ingen duplikat-stripe etter et andre, no-op-kall');
+  assert.strictEqual(outputAreaEl.children[0], strip);
+});
