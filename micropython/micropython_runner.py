@@ -230,6 +230,16 @@ def _bind_datasets(spec_json):
     except Exception as e:
         return _format_exc(e)
 
+def _sync_var(name, value_json):
+    """ui sync_to (fase 3): skriv en widget-verdi inn i _shared_vars uten
+    kjøring. Speiler _bind_datasets-kontrakten: '' ved suksess, ellers
+    feilstreng."""
+    try:
+        _shared_vars[name] = json.loads(value_json)
+        return ''
+    except Exception as e:
+        return _format_exc(e)
+
 # Boot-baseline for fase C (spec 2026-07-16): et grunt bilde av
 # _shared_vars slik de så ut ved boot — ATSKILT fra _snapshot/_rollback-
 # paret, som er reservert duck-replay-løkken (per kjøring). _reset() spoler

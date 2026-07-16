@@ -132,3 +132,21 @@ def test_reset_keeps_registered_modules(capsys):
     mr._reset()
     out = run(capsys, 'import fasec_dummy_mpy\nprint(fasec_dummy_mpy.V)')
     assert '7' in out
+
+
+# ── ui sync_to (fase 3): _sync_var ─────────────────────────────────────────
+
+def test_sync_var_writes_shared_vars():
+    err = mr._sync_var('n', '7')
+    assert err == ''
+    assert mr._shared_vars['n'] == 7
+    err = mr._sync_var('s', '"hei"')
+    assert err == ''
+    assert mr._shared_vars['s'] == 'hei'
+
+
+def test_sync_var_bad_json_returns_error():
+    mr._shared_vars.pop('x', None)
+    err = mr._sync_var('x', '{not json')
+    assert err != ''
+    assert 'x' not in mr._shared_vars

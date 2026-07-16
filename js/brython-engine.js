@@ -199,6 +199,12 @@
   }
 
   var __enginePromise = null;
+  // ui sync_to (fase 3): siste vellykket resolverte modul-objekt, satt i
+  // load() under. syncVar() må svare SYNKRONT (samme kontrakt som
+  // ui.js sin mdUiSyncTo-bro), så den kan ikke selv avvente __enginePromise
+  // (som kan henge lenge/aldri under en pågående lasting) — best-effort: en
+  // motor som ikke er ferdig lastet ENNÅ gir stille no-op, ikke en trigget lasting.
+  var __loadedMod = null;
 
   function addScript(src) {
     return new Promise(function (resolve, reject) {
@@ -224,7 +230,9 @@
       await addScript(BRYTHON_STDLIB);
       var source = await fetchText('brython/brython_runner.py');
       global.brython();                // no-args (see header)
-      return global.__BRYTHON__.runPythonSource(source, 'brython_runner');
+      var mod = global.__BRYTHON__.runPythonSource(source, 'brython_runner');
+      __loadedMod = mod;               // ui sync_to (fase 3): synkron syncVar()-tilgang
+      return mod;
     })().catch(function (e) { __enginePromise = null; throw e; });
     return __enginePromise;
   }
@@ -409,6 +417,13 @@
     load: load, run: run, _scanImports: scanImports,
     getLastDatasetSpec: function () { return __lastSpec; },
     notebookSession: { ensure: nbEnsure, runCell: nbRunCell, reset: nbReset,
-                       invalidate: nbInvalidate, isLive: nbIsLive }
+                       invalidate: nbInvalidate, isLive: nbIsLive },
+    // ui sync_to (fase 3): skriv inn i _shared_vars uten kjøring. No-op
+    // ('' returneres) når motoren ikke er lastet — sync er best-effort.
+    syncVar: function (name, valueJson) {
+      if (!__loadedMod) return '';
+      try { return __loadedMod._sync_var(name, valueJson) || ''; }
+      catch (e) { return (e && e.message) || String(e); }
+    }
   };
 })(typeof window !== 'undefined' ? window : globalThis);

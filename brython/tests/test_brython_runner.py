@@ -255,6 +255,24 @@ def test_reset_keeps_registered_modules():
     out = br._execute_code('import fasec_dummy\nfasec_dummy.V')
     assert '7' in out
 
+
+# ── ui sync_to (fase 3): _sync_var ─────────────────────────────────────────
+
+def test_sync_var_writes_shared_vars():
+    err = br._sync_var('n', '7')
+    assert err == ''
+    assert br._shared_vars['n'] == 7
+    err = br._sync_var('s', '"hei"')
+    assert err == ''
+    assert br._shared_vars['s'] == 'hei'
+
+
+def test_sync_var_bad_json_returns_error():
+    br._shared_vars.pop('x', None)
+    err = br._sync_var('x', '{not json')
+    assert err != ''
+    assert 'x' not in br._shared_vars
+
 if __name__ == '__main__':
     # NOTE: iterate in declaration order (not sorted alphabetically) — several
     # tests share state via module globals (e.g. test_figure_embed_marker

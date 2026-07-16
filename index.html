@@ -580,7 +580,7 @@
   <script src="js/micropython-engine.js?v=2026-07-16a"></script>
   <script src="js/dash.js"></script>
   <script src="js/cells.js?v=2026-07-16d"></script>
-  <script src="js/ui.js?v=2026-07-16b"></script>
+  <script src="js/ui.js?v=2026-07-16c"></script>
   <script src="js/param-forms.js"></script>
   <script src="js/ipywidgets-bridge.js"></script>
   <script src="js/dash-webr.js"></script>
@@ -3212,7 +3212,21 @@
           // ville ellers slettet DOM-treet BrythonEngine.run() nettopp satte inn.
           purgePlots(outputArea);
           outputArea.innerHTML = '';
-          var res = await window.BrythonEngine.run(script, { loads: _dl.loads });
+          // ui-widgets (fase 3, spec 2026-07-16-plain-script-widgets): denne
+          // grenen kjører hele scriptet i ett — Cells.active()-notatbøker for
+          // brython/micropython går ALDRI hit (btnRun sin egen Fase C-gren
+          // over fanger dem via Cells.runCell, som allerede brackets per
+          // celle i runNotebookEngineCell) — så doc-konteksten her er trygg
+          // ubetinget, uten en _nbActive-sjekk.
+          nbUiRunCtx = { cellIdx: null, cellEl: null, doc: true };
+          if (window.Ui && window.Ui.beginCellRun) window.Ui.beginCellRun(null);
+          var res;
+          try {
+            res = await window.BrythonEngine.run(script, { loads: _dl.loads });
+          } finally {
+            nbUiRunCtx = null;
+            if (window.Ui && window.Ui.endCellRun) window.Ui.endCellRun(null);
+          }
           var _omEl = document.querySelector('input[name="outputMode"]:checked');
           var _asHtml = !_omEl || _omEl.value === 'html';
           var _suppress = (typeof suppressEmbedded !== 'undefined' && suppressEmbedded) ? !!suppressEmbedded.checked : false;
@@ -3240,7 +3254,20 @@
           // DOM direkte til #outputArea under kjøring — tøm FØR, ikke etter.
           purgePlots(outputArea);
           outputArea.innerHTML = '';
-          var res = await window.MicroPythonEngine.run(script, { loads: _dl.loads });
+          // ui-widgets (fase 3): samme begrunnelse som Brython-raden over —
+          // Cells.active()-notatbøker går aldri hit (Fase C-grenen i
+          // btnRun fanger dem via Cells.runCell/runNotebookEngineCell, som
+          // allerede brackets per celle), så doc-konteksten er trygg
+          // ubetinget her.
+          nbUiRunCtx = { cellIdx: null, cellEl: null, doc: true };
+          if (window.Ui && window.Ui.beginCellRun) window.Ui.beginCellRun(null);
+          var res;
+          try {
+            res = await window.MicroPythonEngine.run(script, { loads: _dl.loads });
+          } finally {
+            nbUiRunCtx = null;
+            if (window.Ui && window.Ui.endCellRun) window.Ui.endCellRun(null);
+          }
           var _omEl = document.querySelector('input[name="outputMode"]:checked');
           var _asHtml = !_omEl || _omEl.value === 'html';
           var _suppress = (typeof suppressEmbedded !== 'undefined' && suppressEmbedded) ? !!suppressEmbedded.checked : false;
@@ -8955,6 +8982,47 @@ options(width = 200)
     // run has settled before inspecting #outputArea for a `pre.error` node.
     window.mdIsScriptRunning = function () { return scriptRunInProgress; };
 
+    // Fase 3 (spec 2026-07-16-plain-script-widgets): hele-skriptet-rerun
+    // for ui-kontroller med rerun="all". Klikker Kjør-knappen (Kjør alle i
+    // notatbøker, vanlig kjøring ellers); nektes mens en kjøring pågår
+    // (samme refuse-drop som ui.js sin egen vakt).
+    window.mdRunWholeScript = function () {
+      if (scriptRunInProgress) return;
+      var b = document.getElementById('btnRun');
+      if (b && !b.disabled) b.click();
+    };
+
+    // Fase 3: sync_to-push — ruter på aktiv modus. Navnet er allerede
+    // regex-validert i js/ui.js (injeksjonsvernet ligger DER); verdier er
+    // tall/streng/boolean fra verdikontroller. Ingen levende sesjon →
+    // stille no-op (spec §3).
+    window.mdUiSyncTo = function (name, value) {
+      try {
+        if (activeEditorMode === 'python') {
+          if (!pyodide) return;
+          if (!pyodide.runPython('"_g" in globals()')) return;
+          pyodide.globals.set('__ui_sync_v', value);
+          pyodide.runPython('_g["' + name + '"] = __ui_sync_v');
+        } else if (activeEditorMode === 'brython' || activeEditorMode === 'micropython') {
+          var eng = activeEditorMode === 'brython' ? window.BrythonEngine : window.MicroPythonEngine;
+          if (eng && typeof eng.syncVar === 'function') {
+            var err = eng.syncVar(name, JSON.stringify(value));
+            if (err) console.warn('mdUiSyncTo(' + activeEditorMode + '): ' + err);
+          }
+        } else if (activeEditorMode === 'r') {
+          if (!webR || typeof webR.evalRVoid !== 'function') return;
+          var lit;
+          if (typeof value === 'number' && isFinite(value)) lit = String(value);
+          else if (typeof value === 'boolean') lit = value ? 'TRUE' : 'FALSE';
+          else lit = '"' + String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+          webR.evalRVoid(name + ' <- ' + lit).catch(function (e) { console.warn('mdUiSyncTo(r): ' + e); });
+        }
+        // andre moduser (duckdb/microdata/statx/jamovi): bevisst no-op.
+      } catch (e) {
+        console.warn('mdUiSyncTo: ' + ((e && e.message) || e));
+      }
+    };
+
     // Dokumentets fulle segment-array (kind + tekst + uses), bygget fra en
     // allerede direktiv-strippet effectiveScript. Delt av bootNotebookSession
     // ("Kjør alle") og window.mdRunNotebookCell (per-celle-kjøring, fase B1
@@ -9947,6 +10015,7 @@ async def _m2py_run_segment(_seg_json):
       setStatus(rightStatus, 'Starting...');
       let py = null;
       let incrementalStarted = false;
+      let _docUiRun = false;   // ui-widgets (fase 3): rent skript → doc-kontekst, se _nbActive-grenen under
       try {
         // Moduser med lett runtime (webr, senere brython) skal ikke betale
         // Pyodide-lastingen (10-30 s kaldt) — de py-avhengige blokkene i
@@ -10054,6 +10123,18 @@ async def _m2py_run_segment(_seg_json):
         const _nbSinks = _nbActive
           ? window.Cells.beginRun(segments.map(function (s) { return s.kind; }))
           : null;
+        // ui-widgets (fase 3, spec 2026-07-16-plain-script-widgets): rent
+        // skript (ingen notatbok aktiv) → doc-kontekst for HELE segmentløkken
+        // under, samme kontrakt som en enkelt-celle-kjøring men uten
+        // cellIdx/cellEl. _nbActive-grenen (per-segment nbUiRunCtx lenger
+        // ned) dekker notatbok-tilfellet som før — de to er gjensidig
+        // utelukkende (én _docUiRun-omslutning her, ELLER per-segment
+        // beginCellRun(_uiIdx) i løkka, aldri begge for samme kjøring).
+        _docUiRun = !_nbActive;
+        if (_docUiRun) {
+          nbUiRunCtx = { cellIdx: null, cellEl: null, doc: true };
+          if (window.Ui && window.Ui.beginCellRun) window.Ui.beginCellRun(null);
+        }
         let renderedLen = 0;
         for (let i = 0; i < segments.length; i++) {
           if (segments.length > 1) setStatus(rightStatus, t('Kjører del {i} av {n}…', { i: i + 1, n: segments.length }));
@@ -10093,13 +10174,18 @@ async def _m2py_run_segment(_seg_json):
           // inaktiv. Nullstilt igjen rett etter kjøringen, uavhengig av
           // rc === 'stop' (break under er dermed også dekket).
           var _uiIdx = _nbActive ? window.Cells.cellIdxForSegment(i) : null;
-          nbUiRunCtx = (_uiIdx !== null && _uiIdx !== undefined) ? _nbUiCtxFor(_uiIdx) : null;
+          // ui-widgets (fase 3): i doc-modus (_docUiRun) er _uiIdx alltid
+          // null (notatboken er inaktiv) — da skal doc-konteksten satt FØR
+          // løkka overleve segmentet i stedet for å nullstilles, ellers ser
+          // et ui.*-kall midt i scriptet en null-kontekst.
+          nbUiRunCtx = (_uiIdx !== null && _uiIdx !== undefined) ? _nbUiCtxFor(_uiIdx)
+                     : (_docUiRun ? { cellIdx: null, cellEl: null, doc: true } : null);
           // ui-widgets (Task 3-review): eksplisitt kjøringsstart for
           // stale-soppen — samme betingelse som satte konteksten over.
           if (_uiIdx !== null && _uiIdx !== undefined && window.Ui && window.Ui.beginCellRun) window.Ui.beginCellRun(_uiIdx);
           py.globals.set('_m2py_seg_json', JSON.stringify(segments[i]));
           const rc = await py.runPythonAsync('await _m2py_run_segment(_m2py_seg_json)');
-          nbUiRunCtx = null;
+          nbUiRunCtx = _docUiRun ? { cellIdx: null, cellEl: null, doc: true } : null;
           // ui-widgets (Task 3): stale-sopp for denne cellens kontrollstripe
           // — kun når planen faktisk ga en celleindeks for segmentet (se
           // _uiIdx over; null når notatboken er inaktiv/planen ikke er
@@ -10152,6 +10238,11 @@ async def _m2py_run_segment(_seg_json):
         // løkka-blokken. endCellRun er idempotent, så dette er trygt også
         // i det vanlige tilfellet der løkka allerede sopte ferdig selv.
         if (typeof _uiIdx !== 'undefined' && _uiIdx !== null && window.Ui && window.Ui.endCellRun) window.Ui.endCellRun(_uiIdx);
+        // ui-widgets (fase 3): lukk doc-braketten åpnet FØR segmentløkka —
+        // idempotent (samme begrunnelse som _uiIdx-sikkerhetsnettet over),
+        // dekker både normal fullføring og en feil kastet før løkka nådde
+        // sitt eget cellIdx-nullstillingssted.
+        if (_docUiRun && window.Ui && window.Ui.endCellRun) window.Ui.endCellRun(null);
         setRunButtonsUi('idle');
         // duckdb-modus: sidepanelet mates fra wasm-katalogen — fire-and-forget.
         if (activeEditorMode === 'duckdb') { refreshDatasetSidebarFromDuck(); }

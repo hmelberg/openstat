@@ -121,6 +121,12 @@
   }
 
   var __enginePromise = null;
+  // ui sync_to (fase 3): siste vellykket resolverte handle-objekt, satt i
+  // load() under. syncVar() må svare SYNKRONT (samme kontrakt som
+  // ui.js sin mdUiSyncTo-bro), så den kan ikke selv avvente __enginePromise
+  // (som kan henge lenge/aldri under en pågående lasting) — best-effort: en
+  // motor som ikke er ferdig lastet ENNÅ gir stille no-op, ikke en trigget lasting.
+  var __loadedHandles = null;
 
   function load() {
     if (__enginePromise) return __enginePromise;
@@ -133,7 +139,7 @@
       });
       var source = await fetchText('micropython/micropython_runner.py');
       mp.runPython(source);
-      return {
+      var handles = {
         mp: mp,
         _execute_code: mp.globals.get('_execute_code'),
         _get_last_error: mp.globals.get('_get_last_error'),
@@ -142,8 +148,11 @@
         _snapshot: mp.globals.get('_snapshot'),
         _rollback: mp.globals.get('_rollback'),
         _bind_datasets: mp.globals.get('_bind_datasets'),
-        _reset: mp.globals.get('_reset')
+        _reset: mp.globals.get('_reset'),
+        _sync_var: mp.globals.get('_sync_var')
       };
+      __loadedHandles = handles;   // ui sync_to (fase 3): synkron syncVar()-tilgang
+      return handles;
     })().catch(function (e) { __enginePromise = null; throw e; });
     return __enginePromise;
   }
@@ -390,6 +399,13 @@
     load: load, run: run, _scanImports: scanImports,
     getLastDatasetSpec: function () { return __lastSpec; },
     notebookSession: { ensure: nbEnsure, runCell: nbRunCell, reset: nbReset,
-                       invalidate: nbInvalidate, isLive: nbIsLive }
+                       invalidate: nbInvalidate, isLive: nbIsLive },
+    // ui sync_to (fase 3): skriv inn i _shared_vars uten kjøring. No-op
+    // ('' returneres) når motoren ikke er lastet — sync er best-effort.
+    syncVar: function (name, valueJson) {
+      if (!__loadedHandles) return '';
+      try { return __loadedHandles._sync_var(name, valueJson) || ''; }
+      catch (e) { return (e && e.message) || String(e); }
+    }
   };
 })(typeof window !== 'undefined' ? window : globalThis);
