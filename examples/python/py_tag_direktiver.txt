@@ -11,8 +11,9 @@
 Metadata kan ligge som kommentarlinjer ØVERST i cellekroppen i stedet for
 på `#%%`-linjen: `#tag.key = value`, én per linje. Colab og Jupytext eier
 `#%%`-linjene og skriver dem om — kommentarlinjer i kroppen overlever
-alltid. Denne cellen er dessuten *sniffet*: den er én `"""`-streng alene,
-og rendres derfor som markdown uten noen `md`-markering.
+alltid. Denne cellen er dessuten *sniffet*: den er én trippel-sitert streng
+alene (tre doble anførselstegn), og rendres derfor som markdown uten noen
+`md`-markering.
 
 - `#tag.type = python` i preambelen over gir dokumentets standard-celletype.
 - `#tag.hide-code = true` under skjuler koden i cellen, som header-flagget.
