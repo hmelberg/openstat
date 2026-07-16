@@ -1930,11 +1930,31 @@
         });
       })();
 
-      function clearOutput() {
-        lastOutput = '';
+      // Konvergert dokument (spec 2026-07-17 §1): #outputArea HUSER nå
+      // dokumentet (.doc-root) når en notatbok er aktiv — run-stiene skal
+      // da ALDRI tømme området (celleoutput går i slots, aldri hit).
+      function clearOutputAreaUnlessDoc() {
+        if (window.Cells && window.Cells.active && window.Cells.active()) return false;
         purgePlots(document.getElementById('outputArea'));
         document.getElementById('outputArea').innerHTML = '';
+        return true;
+      }
+
+      function clearOutput() {
+        lastOutput = '';
         const rightStatus = document.getElementById('rightStatus');
+        if (window.Cells && window.Cells.active && window.Cells.active()) {
+          // Notatbok aktiv: dokumentet ER #outputArea sitt innhold
+          // (.doc-root) — en full tømming ville slettet HELE dokumentet, ikke
+          // bare outputene. refreshFromScript() re-rendrer fra scratch, som
+          // gir tomme slots: den ærlige "nullstill output"-handlingen for et
+          // konvergert dokument (Task 3b).
+          window.Cells.refreshFromScript();
+          if (rightStatus) rightStatus.textContent = '';
+          return;
+        }
+        purgePlots(document.getElementById('outputArea'));
+        document.getElementById('outputArea').innerHTML = '';
         if (rightStatus) rightStatus.textContent = '';
       }
       window.mdClearOutput = clearOutput;
@@ -3210,8 +3230,11 @@
           // kjørings dashboard/output), og hopp over renderOutput sin
           // innerHTML=''-tømming etterpå hvis et dashboard ble bygget — den
           // ville ellers slettet DOM-treet BrythonEngine.run() nettopp satte inn.
-          purgePlots(outputArea);
-          outputArea.innerHTML = '';
+          // Konvergert dokument (Task 3b): kommentaren under hevder notatbøker
+          // ALDRI når denne grenen (Cells.runCell fanger dem tidligere) — men
+          // clearOutputAreaUnlessDoc() gir en belte-og-seler-garanti uten kost
+          // (ren no-op) om den antagelsen noensinne skulle vise seg feil.
+          clearOutputAreaUnlessDoc();
           // ui-widgets (fase 3, spec 2026-07-16-plain-script-widgets): denne
           // grenen kjører hele scriptet i ett — Cells.active()-notatbøker for
           // brython/micropython går ALDRI hit (btnRun sin egen Fase C-gren
@@ -3256,8 +3279,10 @@
           setStatus(ctx.rightStatus, t('Kjører…'));
           // Samme dash v2-forbehold som Brython-raden over: js/dash.js skriver
           // DOM direkte til #outputArea under kjøring — tøm FØR, ikke etter.
-          purgePlots(outputArea);
-          outputArea.innerHTML = '';
+          // Konvergert dokument (Task 3b): samme belte-og-seler-garanti som
+          // Brython-raden over — clearOutputAreaUnlessDoc() no-op'er trygt om
+          // en notatbok mot formodning skulle være aktiv her.
+          clearOutputAreaUnlessDoc();
           // ui-widgets (fase 3): samme begrunnelse som Brython-raden over —
           // Cells.active()-notatbøker går aldri hit (Fase C-grenen i
           // btnRun fanger dem via Cells.runCell/runNotebookEngineCell, som
@@ -6186,9 +6211,12 @@ json.dumps(out)
 
     if (btnClear) {
       btnClear.addEventListener('click', () => {
-        lastOutput = '';
-        purgePlots(outputArea);
-        outputArea.innerHTML = '';
+        // Dupliserte tidligere clearOutput() sin logikk direkte — id="btnClear"
+        // finnes ikke i dagens markup (se erklæringen over: "kan være null
+        // etter layoutendring"), så grenen er reelt død i dag. Delegerer nå
+        // til clearOutput() (Task 3b) for å arve Cells.active()-grenen der,
+        // i tilfelle en fremtidig layout gjenbruker id-en.
+        clearOutput();
         setStatus(rightStatus, '');
       });
     }
@@ -6729,6 +6757,11 @@ json.dumps(out)
 
     function prepareForklarOutputPane() {
       lastOutput = '';
+      // trygg: notatbok aldri aktiv her (Task 3b) — forklarRunLoop kaller
+      // window.Cells.exit() (~linje 10372) og tømmer scriptInput FØR denne
+      // funksjonen kalles (direkte og fra alle forklarRunOne*Block-grenene,
+      // som kun kalles derfra); ingen retur til notatbok-visning skjer før
+      // finally-blokken gjenoppretter scriptInput.value ved kjøringens slutt.
       purgePlots(outputArea);
       outputArea.innerHTML = '';
       if (outputArea) outputArea.classList.remove('forklar-output-reveal');
@@ -8842,8 +8875,13 @@ has and "int" in (m.get_microdata_functions() or {})
         const pre = document.createElement('pre');
         pre.className = 'offline-code';
         pre.textContent = code;
-        outputArea.innerHTML = '';
-        outputArea.appendChild(pre);
+        // Konvergert dokument (Task 3b): "Vis offline Python" er kun synlig i
+        // microdata-modus (data-mode-only), men ingenting hindrer den i å bli
+        // trigget mens en microdata-notatbok er aktiv — clearOutputAreaUnlessDoc()
+        // no-op'er da i stedet for å slette dokumentet, og oversettelsen vises
+        // ikke (kjent, ikke løst her — se Task 3b-rapporten; å injisere fremmed
+        // DOM i .doc-root ville vært verre enn å la visningen falle bort).
+        if (clearOutputAreaUnlessDoc()) outputArea.appendChild(pre);
       } catch (e) {
         const msg = String(e && e.message ? e.message : e);
         const hint = (backend === 'polars' && /polars/i.test(msg))
@@ -9819,8 +9857,12 @@ async def _m2py_run_segment(_seg_json):
         // python-dashboard() bygget per-celle er derfor teknisk ryddig
         // (bounded), men usynlig for brukeren i Kolonner/Stablet-visning helt
         // uavhengig av denne fiksen. Se Task 3-rapporten.
-        purgePlots(outputArea);
-        outputArea.innerHTML = '';
+        // Konvergert dokument (Task 3b): denne UBETINGEDE tømmingen (se
+        // begrunnelsen over — dash skriver DIREKTE til #outputArea per celle,
+        // uavhengig av notatbok-tilstand) må doc-bevisses: helperen no-op'er
+        // trygt når notatboken er aktiv (samme mønster som Kjør alle sin egen
+        // ubetingede purge, ~10186 under).
+        clearOutputAreaUnlessDoc();
         if (window.Dash && typeof window.Dash.sweepDisconnected === 'function') window.Dash.sweepDisconnected();
         if (isMicrodataReplay) {
           // ── Kjør fra toppen GJENNOM målcellen (spec §4-unntaket) ──────────
@@ -10182,8 +10224,12 @@ async def _m2py_run_segment(_seg_json):
         // og nettleseren får tegnet mellom segmentene (progressiv visning).
         const asHtml = document.querySelector('input[name="outputMode"]:checked').value === 'html';
         const suppress = suppressEmbedded.checked;
-        purgePlots(outputArea);
-        outputArea.innerHTML = '';
+        // Konvergert dokument (Task 3b): dash v2 skriver direkte til
+        // #outputArea uavhengig av notatbok-tilstand (samme forbehold som
+        // per-celle-stien over, ~9823) — clearOutputAreaUnlessDoc() no-op'er
+        // tømmingen når en notatbok er aktiv; segmentløkkens _nbActive-gren
+        // under ruter da output til slots via sinks i stedet.
+        clearOutputAreaUnlessDoc();
         incrementalStarted = true;
         // Notatbok aktiv (Task 6/9): per-celle output-slots for segmentløkken.
         // beginRun får segment-KINDENE (ikke bare antallet, Task 9 bug (a)):
@@ -10282,7 +10328,9 @@ async def _m2py_run_segment(_seg_json):
         lastOutput = 'ERROR:\n' + errMsg;
         // Segmentvis kjøring: allerede rendret output beholdes, feilen legges
         // til under (speiler remote-adferden: delresultater + feil).
-        if (!incrementalStarted) { purgePlots(outputArea); outputArea.innerHTML = ''; }
+        // Konvergert dokument (Task 3b): samme doc-bevisste tømming som
+        // ovenfor — no-op når notatboken er aktiv.
+        if (!incrementalStarted) clearOutputAreaUnlessDoc();
         const pre = document.createElement('pre');
         pre.className = 'error';
         pre.textContent = lastOutput;
@@ -10864,6 +10912,11 @@ def _run_microdata_chunk(_code):
         }
         const errMsg = (e && e.message) ? e.message : String(e);
         lastOutput = (lastOutput ? lastOutput + '\n\n' : '') + 'ERROR:\n' + errMsg;
+        // trygg: notatbok aldri aktiv her (Task 3b) — samme garanti som
+        // prepareForklarOutputPane() over (~6733): window.Cells.exit() kjørte
+        // ved starten av denne Forklar-kjøringen og scriptInput er tomt helt
+        // til finally-blokken gjenoppretter det, så cells.js sin
+        // tick()-heuristikk kan ikke reaktivere notatboken midt i løpet.
         purgePlots(outputArea);
         outputArea.innerHTML = '';
         const pre = document.createElement('pre');

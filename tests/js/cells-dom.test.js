@@ -1417,3 +1417,37 @@ test('contentLoaded: #options.view = present auto-starter presentasjonen', () =>
   assert.strictEqual(C.active(), true);
   assert.strictEqual(C.presenting(), true);
 });
+
+// ---------- Task 3b (spec 2026-07-17 §1): outputArea-tømming er doc-bevisst ----------
+//
+// index.html sin clearOutput()/mdClearOutput() kaller window.Cells.refreshFromScript()
+// i stedet for å tømme #outputArea når en notatbok er aktiv (se index.html sin
+// clearOutput()-funksjon) — refreshFromScript() re-rendrer dokumentet fra scratch,
+// som gir tomme output-slots (den "ærlige nullstillingen"). index.html selv er ikke
+// kjørbar i denne stub-DOM-en (for mange globaler), så kontrakten testes her på
+// cells.js-nivå: refreshFromScript() etterlater dokumentet aktivt med tomme slots,
+// aldri en slettet .doc-root. Run-stedene i index.html som ble gjort doc-bevisste
+// (clearOutputAreaUnlessDoc()) er dekket ved lesing + exit-garantiene dokumentert i
+// Task 3b-rapporten (.superpowers/sdd/task-3b-report.md), ikke av en egen stub her.
+test('Task 3b: refreshFromScript() etter en kjøring rebygger dokumentet med TOMME slots (ikke sletter det)', async () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 2\n#%% python\na + 3\n';
+  C.init('python');
+  assert.strictEqual(C.active(), true);
+
+  global.mdIsScriptRunning = () => false;
+  global.mdRunNotebookCell = () => Promise.resolve({ text: '5' });
+  await C.runCell(1);
+  assert.strictEqual(cellParts(containerEl, 1).out.textContent, '5', 'sanity: output ligger i slot 1 før refresh');
+
+  // Speiler clearOutput() sin Cells.active()-gren i index.html: kall
+  // refreshFromScript() i stedet for å tømme #outputArea direkte.
+  C.refreshFromScript();
+
+  assert.strictEqual(C.active(), true, 'dokumentet forblir aktivt — refreshFromScript() er ikke exit()');
+  assert.ok(nbRoot(containerEl), '.doc-root finnes fortsatt (ikke slettet)');
+  const cell0 = cellParts(containerEl, 0);
+  const cell1 = cellParts(containerEl, 1);
+  assert.strictEqual(cell0.out.textContent, '', 'slot 0 er tom etter rebygging');
+  assert.strictEqual(cell1.out.textContent, '', 'slot 1 sitt forrige resultat er borte — rebygd tomt, ikke bevart');
+});
