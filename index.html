@@ -9213,6 +9213,8 @@ async def _m2py_run_segment(_seg_json):
         // kjørings widgets åpner friske comms helt av seg selv (comm_open
         // via OpenstatComm). Guarded: broen er lazy og finnes kanskje aldri.
         if (window.IpwBridge && window.IpwBridge.reset) window.IpwBridge.reset();
+        // W5.2: element-event-bindinger er økt-scoped akkurat som ipywidgets-comms
+        if (window.Ui && window.Ui.resetBindings) window.Ui.resetBindings();
         // Fase C: motor-modus — runner-nivå reset (spec-avgjørelse 2), ingen
         // Pyodide-boot (samme F4-prinsipp som r-grenen under). live=false i
         // notebookSession → neste kjørings ensure() re-resolver # load og
@@ -9277,6 +9279,8 @@ async def _m2py_run_segment(_seg_json):
         // Samme ipywidgets-opprydding som restart() over (dokumentbytte
         // gjør comm-ene like døde som en restart gjør).
         if (window.IpwBridge && window.IpwBridge.reset) window.IpwBridge.reset();
+        // W5.2: element-event-bindinger er økt-scoped akkurat som ipywidgets-comms
+        if (window.Ui && window.Ui.resetBindings) window.Ui.resetBindings();
         if (window.BrythonEngine && window.BrythonEngine.notebookSession) window.BrythonEngine.notebookSession.invalidate();
         if (window.MicroPythonEngine && window.MicroPythonEngine.notebookSession) window.MicroPythonEngine.notebookSession.invalidate();
       },

@@ -37,6 +37,15 @@ class FakeEl {
   }
   set textContent(v) { this._text = v; this.children = []; }
   get textContent() { return this._text; }
+  // W5.2: Ui.renderEventResult bruker innerHTML to steder — '' for å tømme
+  // en gjenbrukt target-node FØR ny rendering, og som råmarkup-container for
+  // table-payloadets ferdig-bygde HTML (samme tillitsnivå/mønster som
+  // dash.js sine table-kort). Stubben er minimal: en tom streng nullstiller
+  // faktisk children (ekte DOM-semantikk vi trenger for replace-testen),
+  // en ikke-tom streng lagres bare rått (ingen HTML-parsing i stubben —
+  // testene leser den samme strengen rett tilbake).
+  set innerHTML(v) { this._innerHTML = v; if (v === '') this.children = []; }
+  get innerHTML() { return this._innerHTML !== undefined ? this._innerHTML : ''; }
   appendChild(c) { this.children.push(c); c._parentNode = this; return c; }
   insertBefore(node, ref) {
     if (ref == null) {
@@ -74,6 +83,25 @@ class FakeEl {
   // fjerner dem ikke pålitelig), og stubben må derfor ha en ekte
   // removeAttribute (ikke bare set/get) for at N3-testen skal bevise noe.
   removeAttribute(name) { delete this[name]; }
+  // W5.2: ui.js sin delegerte dokument-lytter bruker e.target.closest(selector)
+  // for å finne treffet element — minimal '#id'/'.klasse'/tagnavn-matching,
+  // ingen ekte selektor-motor (samme minimalisme-filosofi som resten av
+  // stubben; bindingenes selectors i testene er alltid enkle '#id'-former).
+  closest(selector) {
+    let node = this;
+    while (node) {
+      if (_matchesSelector(node, selector)) return node;
+      node = node.parentNode;
+    }
+    return null;
+  }
+}
+
+function _matchesSelector(node, selector) {
+  if (!node || !selector) return false;
+  if (selector[0] === '#') return node.id === selector.slice(1);
+  if (selector[0] === '.') return !!(node.classList && node.classList.contains(selector.slice(1)));
+  return node.tag === selector;
 }
 
 function wait(ms) {
@@ -86,7 +114,22 @@ function wait(ms) {
 function freshEnv(opts) {
   opts = opts || {};
   delete require.cache[require.resolve(UI_PATH)];
-  global.document = { createElement: (tag) => new FakeEl(tag) };
+  // W5.2: element-event-bindingene trenger litt mer av `document` enn
+  // kontroll-halvdelen gjorde — en EventTarget-lignende
+  // addEventListener/dispatchEvent-pardans for den delegerte lytteren
+  // (Ui.bindEvent/bindRunCell installerer ÉN document-lytter per
+  // eventType), getElementById (target-oppslag i Ui.renderEventResult) og
+  // et `head`-element (script-injeksjon i _renderFigure sin dash.js-
+  // lasting).
+  global.document = {
+    createElement: (tag) => new FakeEl(tag),
+    head: new FakeEl('head'),
+    _idIndex: {},
+    getElementById(id) { return this._idIndex[id] || null; },
+    _listeners: {},
+    addEventListener(type, fn) { (this._listeners[type] = this._listeners[type] || []).push(fn); },
+  };
+  delete global.Dash;
 
   const cellEl = new FakeEl('div');
   cellEl.className = 'nb-cell';
@@ -1004,4 +1047,239 @@ test('_ensureStrip: F6 (cellEl-identitetsbytte) etterfulgt av to kjøringer på 
   // (skulle sveipet slettet en SAMME-run-oppføring uten å fjerne DOM-noden,
   // hadde neste kjøring bygget en ANDRE node ved siden av — nettopp
   // duplikat-symptomet assertene over utelukker).
+});
+
+// ---- W5.2: element-events — bindingsregister, delegering, rendering ------
+// (spec 2026-07-16-notebook-widget-events). Ui.bindEvent/bindRunCell
+// registrerer en binding under en cellekjøring (samme begin/endCellRun-par
+// som kontrollene bruker over), Ui.renderEventResult tegner en handler sitt
+// payload. Simulerer en ekte klikk-bubbling til dokument-nivå ved å kalle
+// document-lytteren direkte (freshEnv sin document-stub har addEventListener
+// men ingen ekte bubbling-motor).
+
+function dispatchDocEvent(type, target) {
+  const evt = { type, target };
+  (global.document._listeners[type] || []).forEach((fn) => fn(evt));
+}
+
+test('W5.2: bindEvent registrerer og sveipes ved rerun uten re-deklarasjon', () => {
+  const { Ui } = freshEnv({ cellIdx: 0 });
+  const knapp = new FakeEl('button');
+  knapp.id = 'knapp';
+  let calls = 0;
+
+  Ui.beginCellRun(0);
+  const ok = Ui.bindEvent(JSON.stringify({ selector: '#knapp', event: 'click' }), () => {
+    calls++;
+    return '{"kind":"text","text":"hei"}';
+  });
+  Ui.endCellRun(0);
+  assert.strictEqual(ok, true);
+
+  dispatchDocEvent('click', knapp);
+  assert.strictEqual(calls, 1, 'handler kalles mens bindingen lever');
+
+  // Rerun som IKKE re-deklarerer bindingen → sveipes.
+  Ui.beginCellRun(0);
+  Ui.endCellRun(0);
+
+  dispatchDocEvent('click', knapp);
+  assert.strictEqual(calls, 1, 'sveipet binding mottar ingen flere dispatch');
+});
+
+test('W5.2: destroy kalles på handler med destroy-metode ved sveip', () => {
+  const { Ui } = freshEnv({ cellIdx: 0 });
+  let destroyed = false;
+  const h = () => '{"kind":"text","text":""}';
+  h.destroy = () => { destroyed = true; };
+
+  Ui.beginCellRun(0);
+  Ui.bindEvent(JSON.stringify({ selector: '#x', event: 'click' }), h);
+  Ui.endCellRun(0);
+
+  Ui.beginCellRun(0);
+  Ui.endCellRun(0); // sveip — ingen re-deklarasjon i denne kjøringen
+  assert.strictEqual(destroyed, true);
+});
+
+test('W5.2: bindEvent uten aktiv cellekjøring (plain script) registrerer likevel, cellIdx=null', () => {
+  const { Ui } = freshEnv({ ctxNull: true });
+  const ok = Ui.bindEvent(JSON.stringify({ selector: '#x', event: 'click' }), () => '{}');
+  assert.strictEqual(ok, true, 'i motsetning til registerControl kreves ikke et levende cellEl for en binding');
+});
+
+test('W5.2: bindEvent — ctx finnes men cellEl er null (kant-case) registrerer likevel', () => {
+  const { Ui } = freshEnv({ cellElNull: true });
+  const ok = Ui.bindEvent(JSON.stringify({ selector: '#x', event: 'click' }), () => '{}');
+  assert.strictEqual(ok, true);
+});
+
+test('W5.2: bindEvent uten mdUiRunCtx-mekanisme i det hele tatt → null', () => {
+  const { Ui } = freshEnv({ cellIdx: 0 });
+  delete global.mdUiRunCtx;
+  const ok = Ui.bindEvent(JSON.stringify({ selector: '#x', event: 'click' }), () => '{}');
+  assert.strictEqual(ok, null);
+});
+
+test('W5.2: bindEvent — ugyldig JSON eller manglende selector/event → null, console.warn', () => {
+  const { Ui } = freshEnv({ cellIdx: 0 });
+  assert.strictEqual(Ui.bindEvent('{ugyldig', () => '{}'), null);
+  assert.strictEqual(Ui.bindEvent(JSON.stringify({ selector: '#x' }), () => '{}'), null, 'mangler event');
+  assert.strictEqual(Ui.bindEvent(JSON.stringify({ selector: '#x', event: 'click' }), 'ikke-en-funksjon'), null);
+});
+
+test('W5.2: renderEventResult — text/error/table-kinds rendres i celle-slot (ingen target)', () => {
+  const { Ui, bodyEl } = freshEnv({ cellIdx: 0 });
+  const b = { cellIdx: 0, target: null };
+
+  Ui.renderEventResult(b, JSON.stringify({ kind: 'text', text: 'hallo' }));
+  assert.strictEqual(bodyEl.children.length, 1);
+  assert.strictEqual(bodyEl.children[0].tag, 'pre');
+  assert.strictEqual(bodyEl.children[0].textContent, 'hallo');
+
+  Ui.renderEventResult(b, JSON.stringify({ kind: 'error', text: 'oi' }));
+  assert.strictEqual(bodyEl.children[1].className, 'error');
+  assert.strictEqual(bodyEl.children[1].textContent, 'oi');
+
+  Ui.renderEventResult(b, JSON.stringify({ kind: 'table', html: '<table></table>' }));
+  assert.strictEqual(bodyEl.children[2].tag, 'div');
+  assert.strictEqual(bodyEl.children[2].innerHTML, '<table></table>');
+});
+
+test('W5.2: renderEventResult — target-id finnes → erstatter innholdet i DEN (ikke celle-slot)', () => {
+  const { Ui, bodyEl } = freshEnv({ cellIdx: 0 });
+  const mal = new FakeEl('div');
+  mal.id = 'mitt-mal';
+  mal.appendChild(new FakeEl('span')); // gammelt innhold som skal tømmes
+  global.document._idIndex['mitt-mal'] = mal;
+
+  Ui.renderEventResult({ cellIdx: 0, target: 'mitt-mal' }, JSON.stringify({ kind: 'text', text: 'ny' }));
+  assert.strictEqual(mal.children.length, 1, 'gammelt innhold er tømt');
+  assert.strictEqual(mal.children[0].textContent, 'ny');
+  assert.strictEqual(bodyEl.children.length, 0, 'celle-sloten er urørt — target-noden ble brukt');
+});
+
+test('W5.2: renderEventResult — target-id mangler → notis + fallback til celle-slot', () => {
+  const { Ui, bodyEl } = freshEnv({ cellIdx: 0 });
+  Ui.renderEventResult({ cellIdx: 0, target: 'finnes-ikke' }, JSON.stringify({ kind: 'text', text: 'x' }));
+  assert.strictEqual(bodyEl.children.length, 2, 'notis + selve teksten');
+  assert.match(bodyEl.children[0].textContent, /finnes-ikke/);
+  assert.strictEqual(bodyEl.children[1].textContent, 'x');
+});
+
+test('W5.2: renderEventResult — {} (eksplisitt no-op payload) tegner ingenting', () => {
+  const { Ui, bodyEl } = freshEnv({ cellIdx: 0 });
+  Ui.renderEventResult({ cellIdx: 0, target: null }, '{}');
+  assert.strictEqual(bodyEl.children.length, 0);
+});
+
+test('W5.2: renderEventResult — cellIdx null (plain-script) faller tilbake til #outputArea', () => {
+  const { Ui } = freshEnv({ cellIdx: 0 });
+  const outputArea = new FakeEl('div');
+  outputArea.id = 'outputArea';
+  global.document._idIndex.outputArea = outputArea;
+
+  Ui.renderEventResult({ cellIdx: null, target: null }, JSON.stringify({ kind: 'text', text: 'plain' }));
+  assert.strictEqual(outputArea.children.length, 1);
+  assert.strictEqual(outputArea.children[0].textContent, 'plain');
+});
+
+test('W5.2: renderEventResult figur — Dash allerede lastet: bruker Dash.renderPayload direkte', () => {
+  const { Ui, bodyEl } = freshEnv({ cellIdx: 0 });
+  const figNode = new FakeEl('div');
+  figNode.className = 'dash-figure';
+  global.Dash = {
+    renderPayload: (p) => {
+      assert.strictEqual(p.kind, 'figure');
+      assert.deepStrictEqual(p.spec, { data: [] });
+      return figNode;
+    },
+  };
+  Ui.renderEventResult({ cellIdx: 0, target: null }, JSON.stringify({ kind: 'figure', spec: { data: [] } }));
+  assert.strictEqual(bodyEl.children[0], figNode);
+});
+
+test('W5.2: renderEventResult figur — Dash mangler: laster js/dash.js lazy (memoized <script>), feil ved lasting gir tekstnotis', async () => {
+  const { Ui, bodyEl } = freshEnv({ cellIdx: 0 });
+
+  Ui.renderEventResult({ cellIdx: 0, target: null }, JSON.stringify({ kind: 'figure', spec: {} }));
+
+  const script = global.document.head.children.find((c) => c.tag === 'script');
+  assert.ok(script, 'js/dash.js injisert som <script> i <head>');
+  assert.strictEqual(script.src, 'js/dash.js');
+
+  script.onerror();
+  await wait(10); // flush .then/.catch-kjeden
+
+  const notice = bodyEl.children.find((c) => c.tag === 'pre' && c.className === 'error');
+  assert.ok(notice, 'feil ved lasting av dash.js gir en synlig tekstnotis');
+});
+
+test('W5.2: bindRunCell dispatcher til Cells.runCell via cellIndexById', () => {
+  const { Ui, runCellCalls } = freshEnv({ cellIdx: 0, idMap: { celleB: 3 } });
+  const knapp = new FakeEl('button');
+  knapp.id = 'kjor';
+
+  Ui.beginCellRun(0);
+  const ok = Ui.bindRunCell(JSON.stringify({ selector: '#kjor', event: 'click', cellId: 'celleB' }));
+  Ui.endCellRun(0);
+  assert.strictEqual(ok, true);
+
+  dispatchDocEvent('click', knapp);
+  assert.deepStrictEqual(runCellCalls, [3]);
+});
+
+test('W5.2: bindRunCell — ukjent cellId → console.warn, ingen kjøring', () => {
+  const { Ui, runCellCalls } = freshEnv({ cellIdx: 0 });
+  const knapp = new FakeEl('button');
+  knapp.id = 'kjor';
+  const warns = [];
+  const origWarn = console.warn;
+  console.warn = (msg) => warns.push(msg);
+  try {
+    Ui.bindRunCell(JSON.stringify({ selector: '#kjor', event: 'click', cellId: 'ukjent' }));
+    dispatchDocEvent('click', knapp);
+  } finally {
+    console.warn = origWarn;
+  }
+  assert.deepStrictEqual(runCellCalls, []);
+  assert.ok(warns.some((m) => m.includes('ukjent')));
+});
+
+test('W5.2: bindRunCell — mangler cellId → null, ingen registrering', () => {
+  const { Ui } = freshEnv({ cellIdx: 0 });
+  const ok = Ui.bindRunCell(JSON.stringify({ selector: '#x', event: 'click' }));
+  assert.strictEqual(ok, null);
+});
+
+test('W5.2: resetBindings destruerer alle handlere og glemmer registeret (dispatch etterpå er en no-op)', () => {
+  const { Ui } = freshEnv({ cellIdx: 0 });
+  let destroyed = 0;
+  let called = 0;
+  const h = () => { called++; return '{}'; };
+  h.destroy = () => { destroyed++; };
+  Ui.bindEvent(JSON.stringify({ selector: '#a', event: 'click' }), h);
+
+  Ui.resetBindings();
+  assert.strictEqual(destroyed, 1);
+
+  const el = new FakeEl('button');
+  el.id = 'a';
+  dispatchDocEvent('click', el);
+  assert.strictEqual(called, 0, 'bindingen er glemt etter resetBindings — handler kalles ikke');
+});
+
+test('W5.2: erstatning — re-deklarasjon av SAMME binding-nøkkel i samme kjøring destruerer forrige handler', () => {
+  const { Ui } = freshEnv({ cellIdx: 0 });
+  let destroyedFirst = false;
+  const h1 = () => '{}';
+  h1.destroy = () => { destroyedFirst = true; };
+  const h2 = () => '{}';
+
+  Ui.beginCellRun(0);
+  Ui.bindEvent(JSON.stringify({ selector: '#x', event: 'click' }), h1);
+  Ui.bindEvent(JSON.stringify({ selector: '#x', event: 'click' }), h2); // samme nøkkel, ny handler
+  Ui.endCellRun(0);
+
+  assert.strictEqual(destroyedFirst, true, 'den erstattede handleren destrueres, ikke bare glemmes');
 });
