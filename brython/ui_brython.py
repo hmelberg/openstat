@@ -130,7 +130,7 @@ def _event_payload(res, out_text):
         pj = res.to_plotly_json()
         return {"kind": "figure", "spec": {"data": pj.get("data"), "layout": pj.get("layout")}}
     if res is not None and hasattr(res, "to_html") and hasattr(res, "columns"):
-        return {"kind": "table", "html": res.to_html(border=0)}
+        return {"kind": "table", "html": res.to_html()}
     if res is None:
         return {"kind": "text", "text": out_text} if out_text else None
     text = str(res)
