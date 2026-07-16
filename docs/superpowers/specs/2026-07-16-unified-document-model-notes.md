@@ -39,12 +39,28 @@ mapping precisely (preamble, md cells: run = re-render/no-op).
 
 ## Component decisions
 
-1. **Dash**: frozen, not removed (20+ shipped examples, publish flow, W5
-   already reuses `Dash.renderPayload`; dash mounts into cell slots since
-   B2). New capability goes in the cell track. Grid/KPI needs become cell
-   layout features when a concrete need appears (interim: `#%% html` grid
-   + `target=` already works post-W5). "Publiser dashboard" generalizes
-   later to "publish document" (bake data + serve report view).
+1. **Dash: absorb and RETIRE** (Hans decision 2026-07-16: backwards
+   compatibility is NOT important — the system is not in use, examples
+   can be rewritten; what matters is that dash's functionality and its
+   widgets carry over into the common `ui`/cell system). Absorption
+   inventory (what `ui`/cells must gain before dash is removed):
+   - **Layout**: grid/multi-column card layout → cell-level layout
+     (e.g. `cols=`/row grouping attrs, or documented `#%% html` grid +
+     `target=` patterns).
+   - **Payload kinds**: KPI/number card (value + delta arrow), markdown,
+     image — added to the `ui` event/render payload vocabulary
+     (text/table/figure/error exist since W5).
+   - **Controls**: dash's play/animated-slider widget → `ui.play` (timer
+     hygiene per dash's documented pattern); dash's
+     controls-call-function-with-kwargs model is already covered by
+     `ui.on` + widget pull reads.
+   - **Publish**: "Publiser dashboard" (baked data, standalone HTML) →
+     "publish document" (report view of any notebook, data baked).
+   Then: rewrite the ~20 dash examples as cell/widget documents, remove
+   the four dash adapters (pyodide/brython/micropython/webr `dash.py`,
+   `dash-webr`) and `js/dash.js` — keeping/moving whatever renderer
+   internals `ui` reuses (`renderPayload` figure path from W5) into
+   ui.js. Removal happens LAST, only after the inventory above ships.
 2. **Presentation (spec 3) shrinks**: pagination of the rendered document.
    `slide=` attr (already reserved in spec 1 grammar) / `#tag.slide`
    groups slots into slides; unnumbered cells follow the previous one;
@@ -76,8 +92,10 @@ mapping precisely (preamble, md cells: run = re-render/no-op).
 
 `#tag` spec (smallest, unlocks Colab interop) → presentation spec 3
 (most visible, cheap in this model) → widgets-in-plain-scripts →
-edit-view convergence (cursor-run + editor/document view) → publish
-generalization. Each its own brainstorm-lite → spec → plan → SDD cycle.
+edit-view convergence (cursor-run + editor/document view) →
+dash absorption (layout + payload kinds + play + publish-document,
+then example rewrite and dash removal). Each its own brainstorm-lite →
+spec → plan → SDD cycle.
 
 ## Open questions for Hans
 
