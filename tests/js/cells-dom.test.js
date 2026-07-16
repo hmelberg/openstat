@@ -144,6 +144,14 @@ function freshEnv() {
   const bodyEl = new FakeEl('body');
   bodyEl._attachedRoot = true; // final-review F6: rot-sentinel for isConnected-kjeden
   bodyEl.appendChild(containerEl);
+  // 4a (spec 2026-07-17 §1): dokumentet rendres nå INN I #outputArea (en
+  // etterkommer av .container i det ekte dokumentet — panel-right) i stedet
+  // for en body-nivå #notebookRoot-søsken av .container. outputAreaEl er
+  // derfor barn av containerEl her, slik at isConnected-kjeden (rot-
+  // sentinelen på bodyEl) fortsatt fungerer for doc-root og alt inni den.
+  const outputAreaEl = new FakeEl('div');
+  outputAreaEl.id = 'outputArea';
+  containerEl.appendChild(outputAreaEl);
   const wrapEl = new FakeEl('div');
   wrapEl.className = 'code-input-wrap';
   // Stub for "Restart & kjør alle" (Task 5): klikk-mål index.html eier i det
@@ -157,6 +165,7 @@ function freshEnv() {
     getElementById: (id) => {
       if (id === 'scriptInput') return scriptInputEl;
       if (id === 'btnRun') return btnRunEl;
+      if (id === 'outputArea') return outputAreaEl;
       return null;
     },
     querySelector: (sel) => {
@@ -195,6 +204,7 @@ function freshEnv() {
     C,
     scriptInputEl,
     containerEl,
+    outputAreaEl,
     wrapEl,
     btnRunEl,
     getBtnRunClicks: () => btnRunClicks,
@@ -498,10 +508,88 @@ function collectNodes(node, acc) {
   (node.children || []).forEach((c) => collectNodes(c, acc));
   return acc;
 }
-function nbRoot(containerEl) {
-  const body = containerEl.parentNode;
-  return body.children.find((c) => c.classList.contains('nb-root'));
+// 4a (spec 2026-07-17 §1): doc-root lever nå INNI #outputArea, ikke som en
+// body-nivå #notebookRoot-søsken av .container — finn den via den globale
+// document-stubben freshEnv() satte opp (samme mønster som produksjonskoden
+// sin egen docHost(), se js/cells.js). Parameteret beholdes (alle
+// eksisterende kallsteder sender fortsatt containerEl) men brukes ikke
+// lenger — outputArea er alltid nåbar via document.getElementById uansett
+// hvilket element man kom fra.
+function nbRoot() {
+  const outputArea = global.document.getElementById('outputArea');
+  return outputArea && outputArea.children.find((c) => c.classList.contains('doc-root'));
 }
+
+// ---------- konvergert dokument (spec 2026-07-17, 4a Task 2) ----------
+
+test('enter(): doc-root bygges i #outputArea; .container røres ikke; ingen nb-input', () => {
+  const { C, scriptInputEl, outputAreaEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% md\n# Hei\n#%% python\nx = 1\n';
+  C.init('python');
+  assert.strictEqual(C.active(), true);
+  const root = outputAreaEl.children.find((n) => n.classList.contains('doc-root'));
+  assert.ok(root, 'doc-root i #outputArea');
+  assert.ok(!containerEl.classList.contains('nb-hidden'), 'container-swappen er borte');
+  const nodes = collectNodes(root, []);
+  assert.ok(!nodes.some((n) => n.classList && n.classList.contains('nb-input')), 'ingen editor-halvdel');
+  assert.ok(!nodes.some((n) => n.tag === 'textarea'), 'ingen celle-textareas');
+  // md-cellen rendret, kodecellen har tomt sluk
+  assert.ok(nodes.some((n) => n.classList && n.classList.contains('output-markdown')));
+  const cell1 = nodes.find((n) => n.classList && n.classList.contains('doc-cell') && n.dataset.idx === '1');
+  assert.ok(collectNodes(cell1, []).some((n) => n.classList && n.classList.contains('nb-output-body')));
+});
+
+test('cellElementAt/runCell/renderCellResult virker mot doc-slots', async () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 2\n#%% python\na + 3\n';
+  C.init('python');
+  const el1 = C.cellElementAt(1);
+  assert.ok(el1 && el1.classList.contains('doc-cell'));
+  global.mdIsScriptRunning = () => false;
+  global.mdRunNotebookCell = () => Promise.resolve({ text: '5' });
+  await C.runCell(1);
+  const body = collectNodes(el1, []).find((n) => n.classList && n.classList.contains('nb-output-body'));
+  assert.strictEqual(body.textContent, '5');
+});
+
+test('htmlTrusted-gaten gjelder i dokumentet (delt lenke → eskapert + Vis HTML)', () => {
+  const { C, scriptInputEl, outputAreaEl } = freshEnv();
+  C.init('python');
+  scriptInputEl.value = '#%% html\n<img src=x onerror="window.__pwned=1">\n';
+  C.contentLoaded({ untrusted: true });
+  const nodes = collectNodes(outputAreaEl, []);
+  assert.ok(!nodes.map((n) => n.innerHTML).filter(Boolean).some((h) => h.includes('onerror')));
+  assert.ok(nodes.some((n) => n.tag === 'button' && n.textContent === 'Vis HTML'));
+});
+
+test('beginRun/sinkForSegment/segmentDisplay mot doc-slots (Kjør alle-kontrakten)', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 1\n#%% duckdb\nselect 1\n';
+  C.init('python');
+  const plan = C.beginRun(['pyodide', 'duckdb']);
+  assert.ok(plan !== null, 'planen justeres');
+  assert.ok(C.sinkForSegment(0), 'sluk for segment 0');
+  assert.deepStrictEqual(C.segmentDisplay(0), { explicit: true });
+});
+
+test('skip-celler utelates; hide-output skjuler wrapper; style-klasser følger med', () => {
+  const { C, scriptInputEl, outputAreaEl } = freshEnv();
+  scriptInputEl.value = '#%% skip\nx\n#%% md style=note\nA\n#%% python hide-output\ny = 1\n';
+  C.init('python');
+  const cells = collectNodes(outputAreaEl, []).filter((n) => n.classList && n.classList.contains('doc-cell'));
+  assert.strictEqual(cells.length, 2, 'skip-cellen rendres ikke');
+  assert.ok(cells[0].classList.contains('nb-style-note'));
+  assert.ok(cells[1].classList.contains('nb-hide-output'));
+});
+
+test('exit() fjerner doc-root og gjenoppretter plain-oppførsel', () => {
+  const { C, scriptInputEl, outputAreaEl } = freshEnv();
+  scriptInputEl.value = '#%% python\nx = 1\n';
+  C.init('python');
+  C.exit();
+  assert.strictEqual(C.active(), false);
+  assert.ok(!outputAreaEl.children.some((n) => n.classList.contains('doc-root')));
+});
 
 test('contentLoaded({untrusted:true}) med html-celle → kilden eskapert (textContent), ingen live innerHTML', () => {
   const { C, scriptInputEl, containerEl } = freshEnv();
@@ -594,37 +682,30 @@ test('C.init slår opp #scriptInput kun én gang (finding 3: gjenbruk referanse)
 // window.mdRunNotebookCell stubbes her (den ekte implementasjonen lever i
 // index.html — sesjon/Pyodide/DuckDB er utenfor rekkevidde for et node-test).
 
+// 4a: forenklet til de feltene som fortsatt finnes i docCellNode (spec §1)
+// — ta/input/runBtn/verktøylinje-knappene hørte til den fjernede editor-
+// halvdelen (cellNode, nå unåbar) og er borte for godt her.
 function cellParts(containerEl, idx) {
   const root = nbRoot(containerEl);
   const wrap = root.children.find((n) => n.classList && n.classList.contains('nb-cell') &&
     n.dataset.idx === String(idx));
   const nodes = collectNodes(wrap, []);
-  const ta = nodes.find((n) => n.tag === 'textarea');
   // Widget-plassering-fasen: .nb-output er nå en WRAPPER (outWrap) som kan
   // holde .param-form/.ui-controls-striper — run-output-sluket (det gamle
   // `.out`-kontraktet testene under bruker) er `.nb-output-body`, samme node
   // som c._out peker på i produksjonskoden.
   const outWrap = nodes.find((n) => n.classList && n.classList.contains('nb-output'));
   const out = nodes.find((n) => n.classList && n.classList.contains('nb-output-body'));
-  const input = nodes.find((n) => n.classList && n.classList.contains('nb-input'));
-  const runBtn = nodes.find((n) => n.tag === 'button' && n.classList && n.classList.contains('nb-runbtn'));
-  const addAboveBtn = nodes.find((n) => n.classList && n.classList.contains('nb-tool-add-above'));
-  const addBelowBtn = nodes.find((n) => n.classList && n.classList.contains('nb-tool-add-below'));
-  const upBtn = nodes.find((n) => n.classList && n.classList.contains('nb-tool-up'));
-  const downBtn = nodes.find((n) => n.classList && n.classList.contains('nb-tool-down'));
-  const splitBtn = nodes.find((n) => n.classList && n.classList.contains('nb-tool-split'));
-  const mergeBtn = nodes.find((n) => n.classList && n.classList.contains('nb-tool-merge'));
-  const deleteBtn = nodes.find((n) => n.classList && n.classList.contains('nb-tool-delete'));
-  const typeSelect = nodes.find((n) => n.classList && n.classList.contains('nb-tool-type'));
-  return { wrap, ta, out, outWrap, input, runBtn, addAboveBtn, addBelowBtn, upBtn, downBtn,
-           splitBtn, mergeBtn, deleteBtn, typeSelect };
+  return { wrap, out, outWrap };
 }
 function click(node) { node.dispatchEvent({ type: 'click' }); }
 
-// .nb-bar (Task 5): sesjonschip + Restart-knapp lever der, ikke inni en celle.
+// .doc-bar (4a, tidligere .nb-bar): sesjonschip + Restart-knapp lever der,
+// ikke inni en celle. Rå tekst-knappen som levde i den gamle .nb-bar er
+// borte (docBar, spec §1: «Rå tekst» dør sammen med nb-bar).
 function nbBar(containerEl) {
   const root = nbRoot(containerEl);
-  return root.children.find((n) => n.classList && n.classList.contains('nb-bar'));
+  return root.children.find((n) => n.classList && n.classList.contains('doc-bar'));
 }
 function sessionChipEl(containerEl) {
   const bar = nbBar(containerEl);
@@ -761,24 +842,16 @@ test('runCell: nekter mens mdIsScriptRunning() er true (kaller ikke mdRunNoteboo
   assert.strictEqual(called, false, 'skal nekte å kjøre mens en annen kjøring pågår');
 });
 
-test('runCell: flusher ventende redigering synkront FØR kjøring (kanonisk #scriptInput oppdatert)', async () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
-  scriptInputEl.value = '#%% python\na = 2\n';
-  C.init('python');
-  const { ta } = cellParts(containerEl, 0);
-  ta.value = 'a = 10\n';
-  ta.dispatchEvent({ type: 'input' }); // starter 250ms-debouncen (ekte timer)
-  assert.strictEqual(scriptInputEl.value, '#%% python\na = 2\n',
-    'debouncen har ikke rukket å fyre ennå — #scriptInput er fortsatt den gamle teksten');
-
-  global.mdIsScriptRunning = () => false;
-  global.mdRunNotebookCell = () => Promise.resolve({ text: '10' });
-
-  await C.runCell(0);
-
-  assert.strictEqual(scriptInputEl.value, '#%% python\na = 10\n',
-    'runCell skal flushe debouncen synkront FØR kjøringen starter');
-});
+// 4a: DELETED (ikke rewritet) — testen dokumenterte at runCell() flusher en
+// ventende PER-CELLE redigeringsdebounce (armert av en textarea 'input'-
+// hendelse på cellens egen c._ta) synkront før kjøring. Den debounce-kilden
+// finnes ikke lenger: docCellNode har ingen textarea, og onEdit (som armerte
+// NB.editTimer) er dermed unåbar død kode i 4a — flushPendingEdit() i
+// C.runCell er fortsatt et no-op-safe kall (NB.editTimer er alltid null),
+// se js/cells.js. Den nye redigerings-debouncen lever i #scriptInput selv
+// (docReconcile/refreshFromScript) og er Task 3 sitt ansvar — et analogt
+// "runCell flusher ventende #scriptInput-redigering"-scenario hører hjemme
+// der, ikke her.
 
 // ---- C.runCell: R-modus per-celle-kjøring (Task 4, fase B1) ----
 // index.html sin mdRunNotebookCell/webRShelter.captureR er utenfor rekkevidde
@@ -892,250 +965,16 @@ test('strip (.param-form) overlever renderCellResult sin purge by construction �
   delete global.ParamForms;
 });
 
-// ---- Task 5 (fase B1): kjøreknapper, Shift/Ctrl+Enter, stale-markering,
-// sesjonschip + Restart ----------------------------------------------------
-
-function fakeKeydown(overrides) {
-  return Object.assign({
-    type: 'keydown', key: 'Enter', shiftKey: false, ctrlKey: false, metaKey: false,
-    _prevented: false,
-    preventDefault() { this._prevented = true; },
-  }, overrides);
-}
-
-test('kjøreknapp finnes kun på kode-celler, ikke på md/html/skip', () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
-  scriptInputEl.value = '#%% python\n1\n#%% md\nhei\n#%% html\n<b>x</b>\n#%% skip\nx\n';
-  C.init('python');
-  assert.strictEqual(C.active(), true);
-
-  assert.ok(cellParts(containerEl, 0).runBtn, 'python-celle har kjøreknapp');
-  assert.strictEqual(cellParts(containerEl, 1).runBtn, undefined, 'md-celle har INGEN kjøreknapp');
-  assert.strictEqual(cellParts(containerEl, 2).runBtn, undefined, 'html-celle har INGEN kjøreknapp');
-  assert.strictEqual(cellParts(containerEl, 3).runBtn, undefined, 'skip-celle har INGEN kjøreknapp');
-});
-
-test('kjøreknapp-klikk kaller C.runCell(idx)', async () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
-  scriptInputEl.value = '#%% python\na = 1\n#%% python\na + 1\n';
-  C.init('python');
-
-  let calledIdx = null;
-  global.mdIsScriptRunning = () => false;
-  global.mdRunNotebookCell = (payload) => { calledIdx = payload.cellIdx; return Promise.resolve({ text: '2' }); };
-
-  const cell1 = cellParts(containerEl, 1);
-  cell1.runBtn.dispatchEvent({ type: 'click' });
-  assert.strictEqual(calledIdx, 1);
-});
-
-test('Shift+Enter i cellens tekstfelt: preventDefault, kjører cellen og flytter fokus til NESTE kode-celle', () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
-  scriptInputEl.value = '#%% python\na = 1\n#%% md\nhei\n#%% python\na + 1\n';
-  C.init('python');
-
-  let calledIdx = null;
-  global.mdIsScriptRunning = () => false;
-  global.mdRunNotebookCell = (payload) => { calledIdx = payload.cellIdx; return Promise.resolve({ text: '2' }); };
-
-  const cell0 = cellParts(containerEl, 0);
-  const cell2 = cellParts(containerEl, 2); // md-cellen (idx 1) hoppes over
-
-  const ev = fakeKeydown({ shiftKey: true });
-  cell0.ta.dispatchEvent(ev);
-
-  assert.strictEqual(ev._prevented, true, 'Shift+Enter skal prevente default (linjeskift)');
-  assert.strictEqual(calledIdx, 0, 'runCell(0) skal ha kjørt');
-  assert.strictEqual(global.document.activeElement, cell2.ta,
-    'fokus hopper over md-cellen til NESTE kode-celle (idx 2)');
-});
-
-test('Shift+Enter i SISTE celle: kjører, men beholder fokus (ingen auto-opprettet halecelle i fase B1)', () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
-  scriptInputEl.value = '#%% python\na = 1\n';
-  C.init('python');
-  global.mdIsScriptRunning = () => false;
-  global.mdRunNotebookCell = () => Promise.resolve({ text: '1' });
-
-  const cell0 = cellParts(containerEl, 0);
-  global.document.activeElement = cell0.ta; // simuler at brukeren allerede står der
-
-  cell0.ta.dispatchEvent(fakeKeydown({ shiftKey: true }));
-  assert.strictEqual(global.document.activeElement, cell0.ta, 'ingen neste kode-celle → fokus urørt');
-});
-
-test('Ctrl+Enter kjører PÅ STEDET (ingen fokus-flytting)', () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
-  scriptInputEl.value = '#%% python\na = 1\n#%% python\na + 1\n';
-  C.init('python');
-
-  let calledIdx = null;
-  global.mdIsScriptRunning = () => false;
-  global.mdRunNotebookCell = (payload) => { calledIdx = payload.cellIdx; return Promise.resolve({ text: '2' }); };
-
-  const cell0 = cellParts(containerEl, 0);
-  const cell1 = cellParts(containerEl, 1);
-
-  const ev = fakeKeydown({ ctrlKey: true });
-  cell0.ta.dispatchEvent(ev);
-
-  assert.strictEqual(ev._prevented, true, 'Ctrl+Enter skal prevente default');
-  assert.strictEqual(calledIdx, 0, 'runCell(0) — kjøres på stedet');
-  assert.notStrictEqual(global.document.activeElement, cell1.ta, 'fokus skal IKKE flyttes til neste celle');
-});
-
-test('Shift+Enter i en md-celles editor: IKKE preventDefault, ingen kjøring, fokus urørt (linjeskift skal fungere normalt)', () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
-  scriptInputEl.value = '#%% md\nhei\n#%% python\n1 + 1\n';
-  C.init('python');
-
-  let called = false;
-  global.mdIsScriptRunning = () => false;
-  global.mdRunNotebookCell = () => { called = true; return Promise.resolve({ text: '2' }); };
-
-  const mdCell = cellParts(containerEl, 0);
-  const codeCell = cellParts(containerEl, 1);
-  global.document.activeElement = mdCell.ta; // brukeren redigerer md-cellen (post-dblclikk)
-
-  const ev = fakeKeydown({ shiftKey: true });
-  mdCell.ta.dispatchEvent(ev);
-
-  assert.strictEqual(ev._prevented, false,
-    'Shift+Enter i en ikke-kode-celle skal ALDRI prevente default — det er et vanlig linjeskift');
-  assert.strictEqual(called, false, 'ingen kjøring skal trigges fra en md-celle');
-  assert.strictEqual(global.document.activeElement, mdCell.ta,
-    'fokus skal IKKE rykkes til neste kodecelle midt i skrivingen');
-  assert.notStrictEqual(global.document.activeElement, codeCell.ta);
-
-  // Ctrl+Enter likeså: helt upåvirket i en ikke-kode-celle.
-  const ev2 = fakeKeydown({ ctrlKey: true });
-  mdCell.ta.dispatchEvent(ev2);
-  assert.strictEqual(ev2._prevented, false, 'Ctrl+Enter i en md-celle skal heller ikke prevente default');
-  assert.strictEqual(called, false);
-});
-
-test('vanlig Enter (uten shift/ctrl/cmd) er upåvirket: ingen preventDefault, ingen kjøring', () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
-  scriptInputEl.value = '#%% python\na = 1\n';
-  C.init('python');
-
-  let called = false;
-  global.mdIsScriptRunning = () => false;
-  global.mdRunNotebookCell = () => { called = true; return Promise.resolve({ text: '1' }); };
-
-  const cell0 = cellParts(containerEl, 0);
-  const ev = fakeKeydown({});
-  cell0.ta.dispatchEvent(ev);
-
-  assert.strictEqual(ev._prevented, false, 'vanlig Enter skal ALDRI prevente default (linjeskift i cellen)');
-  assert.strictEqual(called, false, 'vanlig Enter skal ikke trigge en kjøring');
-});
-
-test('stale-markering: ingen tint før første kjøring; redigering etter vellykket kjøring markerer .nb-stale; ny vellykket kjøring fjerner den', async () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
-  scriptInputEl.value = '#%% python\na = 1\n';
-  C.init('python');
-  global.mdIsScriptRunning = () => false;
-  global.mdRunNotebookCell = () => Promise.resolve({ text: '1' });
-
-  const cell0 = cellParts(containerEl, 0);
-
-  // Redigering FØR noen kjøring har skjedd: ingen stale-tint (ingenting å
-  // mistro ennå — cellen har aldri produsert et resultat).
-  cell0.ta.value = 'a = 2\n';
-  cell0.ta.dispatchEvent({ type: 'input' });
-  assert.strictEqual(cell0.input.classList.contains('nb-stale'), false,
-    'redigering før første kjøring skal ikke markere stale');
-
-  await C.runCell(0);
-  assert.strictEqual(cell0.input.classList.contains('nb-stale'), false, 'rett etter vellykket kjøring: ikke stale');
-
-  cell0.ta.value = 'a = 3\n';
-  cell0.ta.dispatchEvent({ type: 'input' });
-  assert.strictEqual(cell0.input.classList.contains('nb-stale'), true,
-    'redigering etter en vellykket kjøring markerer stale UMIDDELBART (ikke ventet på debounce)');
-
-  await C.runCell(0);
-  assert.strictEqual(cell0.input.classList.contains('nb-stale'), false,
-    'en ny vellykket kjøring fjerner stale-tinten igjen');
-});
-
-test('stale-markering: en FEILET kjøring rører IKKE en eksisterende stale-tint (kun suksess tømmer den)', async () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
-  scriptInputEl.value = '#%% python\na = 1\n';
-  C.init('python');
-  global.mdIsScriptRunning = () => false;
-  global.mdRunNotebookCell = () => Promise.resolve({ text: '1' });
-
-  const cell0 = cellParts(containerEl, 0);
-  await C.runCell(0); // markerer ranOk
-
-  cell0.ta.value = '1/0\n';
-  cell0.ta.dispatchEvent({ type: 'input' });
-  assert.strictEqual(cell0.input.classList.contains('nb-stale'), true);
-
-  global.mdRunNotebookCell = () => Promise.resolve({ error: 'ZeroDivisionError' });
-  await C.runCell(0);
-  assert.strictEqual(cell0.input.classList.contains('nb-stale'), true,
-    'feilet kjøring skal IKKE tømme en eksisterende stale-tint (spec: kun suksess tømmer)');
-});
-
-test('beginRun (Kjør alle-hook) tømmer ALLE stale-tinter — Kjør alle er reset-mekanismen', async () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
-  scriptInputEl.value = '#%% python\na = 1\n#%% python\na + 1\n';
-  C.init('python');
-  global.mdIsScriptRunning = () => false;
-  global.mdRunNotebookCell = () => Promise.resolve({ text: 'ok' });
-
-  const cell0 = cellParts(containerEl, 0);
-  const cell1 = cellParts(containerEl, 1);
-  await C.runCell(0);
-  await C.runCell(1);
-  cell0.ta.value = 'a = 9\n';
-  cell0.ta.dispatchEvent({ type: 'input' });
-  cell1.ta.value = 'a + 9\n';
-  cell1.ta.dispatchEvent({ type: 'input' });
-  assert.strictEqual(cell0.input.classList.contains('nb-stale'), true);
-  assert.strictEqual(cell1.input.classList.contains('nb-stale'), true);
-  // Flush den ekte 250ms-redigeringsdebouncen (uten å trigge en faktisk
-  // kjøring/_afterCellRun som ville rørt stale-tilstanden) — celle 99
-  // finnes ikke, så runCell returnerer tidlig RETT ETTER flushPendingEdit().
-  await C.runCell(99);
-
-  C.beginRun(['pyodide', 'pyodide']);
-
-  assert.strictEqual(cell0.input.classList.contains('nb-stale'), false, 'beginRun tømmer stale for celle 0');
-  assert.strictEqual(cell1.input.classList.contains('nb-stale'), false, 'beginRun tømmer stale for celle 1');
-});
-
-test('full render() (f.eks. contentLoaded-gjeninnlasting) nullstiller stale/ranOk-stempler', async () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
-  scriptInputEl.value = '#%% python\na = 1\n#%% python\na + 1\n';
-  C.init('python');
-  global.mdIsScriptRunning = () => false;
-  global.mdRunNotebookCell = () => Promise.resolve({ text: 'ok' });
-
-  const cell0 = cellParts(containerEl, 0);
-  await C.runCell(0);
-  cell0.ta.value = 'a = 9\n';
-  cell0.ta.dispatchEvent({ type: 'input' });
-  assert.strictEqual(cell0.input.classList.contains('nb-stale'), true, 'stale satt før re-rendring');
-  // Flush den ekte 250ms-redigeringsdebouncen først (unngår en hengende
-  // ekte timer som ellers ville overleve testen) — celle 99 finnes ikke.
-  await C.runCell(99);
-
-  // contentLoaded() på et notatbok-dokument mens notatboken er aktiv kjører
-  // render() på nytt (samme sti nye dokumenter/eksempler/share-lenker
-  // bruker) — en strukturendring er en ærlig reset (se render() i cells.js).
-  C.contentLoaded();
-
-  const freshCell0 = cellParts(containerEl, 0);
-  assert.strictEqual(freshCell0.input.classList.contains('nb-stale'), false,
-    'etter en full re-rendring skal ingen celle vises som stale');
-});
-
+// 4a: den gamle testen sjekket OGSÅ per-celle ▶-knapper (cell0.runBtn/
+// cell1.runBtn) og .nb-running på .nb-input (cell.input) — begge er borte
+// (docCellNode har verken kjøreknapp eller editor-halvdel, spec §1). Restart-
+// knappen (docBar) og .nb-running-tinten (nå på selve doc-cell-wrapperen,
+// c._wrap — se setRunningUi/js/cells.js) er de eneste overlevende
+// UI-observerbare delene av denne kontrakten; resten dekkes av
+// setNbButtonsDisabled sin interne c._runBtn/c._toolEls-løkke, som er
+// dødt kode inntil 4b (ingen slike noder finnes lenger å deaktivere).
 test('kjøreknapper + Restart deaktiveres mens en celle-kjøring pågår, gjenopprettes etter fullført kjøring', async () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
+  const { C, scriptInputEl } = freshEnv();
   scriptInputEl.value = '#%% python\na = 1\n#%% python\na + 1\n';
   C.init('python');
 
@@ -1143,36 +982,30 @@ test('kjøreknapper + Restart deaktiveres mens en celle-kjøring pågår, gjenop
   global.mdIsScriptRunning = () => false;
   global.mdRunNotebookCell = () => new Promise((res) => { resolveRun = res; });
 
-  const cell0 = cellParts(containerEl, 0);
-  const cell1 = cellParts(containerEl, 1);
-  const restartBtn = restartBtnEl(containerEl);
+  const cell0 = C.cellElementAt(0);
+  const cell1 = C.cellElementAt(1);
+  const restartBtn = restartBtnEl();
 
   const p = C.runCell(0);
-  assert.strictEqual(cell0.runBtn.disabled, true, 'den kjørende cellens knapp deaktiveres');
-  assert.strictEqual(cell1.runBtn.disabled, true, 'ALLE kjøreknapper deaktiveres, ikke bare den kjørende cellen sin');
-  assert.strictEqual(restartBtn.disabled, true, 'Restart-knappen deaktiveres også');
-  assert.strictEqual(cell0.input.classList.contains('nb-running'), true, 'kjørende celle får .nb-running');
-  assert.strictEqual(cell1.input.classList.contains('nb-running'), false, 'kun den kjørende cellen får .nb-running');
+  assert.strictEqual(restartBtn.disabled, true, 'Restart-knappen deaktiveres under kjøring');
+  assert.strictEqual(cell0.classList.contains('nb-running'), true, 'kjørende celle får .nb-running');
+  assert.strictEqual(cell1.classList.contains('nb-running'), false, 'kun den kjørende cellen får .nb-running');
 
   resolveRun({ text: '2' });
   await p;
 
-  assert.strictEqual(cell0.runBtn.disabled, false);
-  assert.strictEqual(cell1.runBtn.disabled, false);
-  assert.strictEqual(restartBtn.disabled, false);
-  assert.strictEqual(cell0.input.classList.contains('nb-running'), false, '.nb-running fjernes i finally');
+  assert.strictEqual(restartBtn.disabled, false, 'Restart-knappen re-aktiveres etter fullført kjøring');
+  assert.strictEqual(cell0.classList.contains('nb-running'), false, '.nb-running fjernes i finally');
 });
 
-test('render() setter kjøreknapper som disabled fra start hvis mdIsScriptRunning() allerede er true', () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
+test('docRender() setter Restart-knappen som disabled fra start hvis mdIsScriptRunning() allerede er true', () => {
+  const { C, scriptInputEl } = freshEnv();
   global.mdIsScriptRunning = () => true;
   scriptInputEl.value = '#%% python\n1\n';
   C.init('python');
 
-  const cell0 = cellParts(containerEl, 0);
-  const restartBtn = restartBtnEl(containerEl);
-  assert.strictEqual(cell0.runBtn.disabled, true, 'render()-tidens sjekk av mdIsScriptRunning() deaktiverer knappen');
-  assert.strictEqual(restartBtn.disabled, true);
+  const restartBtn = restartBtnEl();
+  assert.strictEqual(restartBtn.disabled, true, 'docRender-tidens sjekk av mdIsScriptRunning() deaktiverer Restart');
 });
 
 test('sesjonschip: viser kjøretid + kald/aktiv fra mdNotebookSession, oppdateres via onStateChange', () => {
@@ -1402,425 +1235,22 @@ test('Restart & kjør alle: nekter mens mdIsScriptRunning() er true (kaller ikke
 
   delete global.mdNotebookSession;
 });
-
-// ============================================================================
-// W4 Task 2 review-fiks 1 (krysskanal-race): onEdit synker skjema-tilstanden
-// SYNKront per tastetrykk (syncSource), og doFlush leser GJELDENDE c.source
-// (ikke den closure-fangede verdien fra tastetrykket som armerte debouncen).
-// ============================================================================
-
-test('onEdit: ParamForms.syncSource kalles SYNKRONT per tastetrykk — FØR 250ms-debouncens refresh (W4 review-fiks 1a)', async () => {
-  const { C, scriptInputEl } = freshEnv();
-  const syncCalls = [];
-  const refreshCalls = [];
-  global.ParamForms = {
-    decorate: () => {},
-    syncSource: (idx, src) => syncCalls.push([idx, src]),
-    refresh: (idx, src) => refreshCalls.push([idx, src]),
-    resetDocument: () => {},
-  };
-  try {
-    scriptInputEl.value = '#%% python\nx = 3  #@param {type:"number"}';
-    C.init('python');
-    const ta = C.cellElementAt(0).querySelector('.nb-src');
-    ta.value = 'y = 1\nx = 3  #@param {type:"number"}';
-    ta.dispatchEvent({ type: 'input' });
-
-    assert.deepStrictEqual(syncCalls, [[0, 'y = 1\nx = 3  #@param {type:"number"}']],
-      'syncSource fyrte umiddelbart i onEdit, i samme synkrone tikk som tastetrykket');
-    assert.deepStrictEqual(refreshCalls, [], 'refresh er fortsatt debouncet — kun kilde-SYNKEN er synkron');
-
-    await new Promise((r) => setTimeout(r, 320)); // la debouncen fyre ferdig
-    assert.strictEqual(refreshCalls.length, 1, 'flushens refresh kom etter debouncen');
-  } finally {
-    delete global.ParamForms;
-  }
-});
-
-test('doFlush: refresh/markørskann bruker GJELDENDE c.source — en updateCellSource INNI debounce-vinduet rulles ikke tilbake (W4 review-fiks 1b)', async () => {
-  const { C, scriptInputEl } = freshEnv();
-  const refreshCalls = [];
-  global.ParamForms = {
-    decorate: () => {},
-    syncSource: () => {},
-    refresh: (idx, src) => refreshCalls.push([idx, src]),
-    resetDocument: () => {},
-  };
-  try {
-    scriptInputEl.value = '#%% python\nx = 3  #@param {type:"number"}';
-    C.init('python');
-    const ta = C.cellElementAt(0).querySelector('.nb-src');
-
-    // Tastetrykk armerer debouncen — den fangede verdien har x = 3:
-    ta.value = 'y = 1\nx = 3  #@param {type:"number"}';
-    ta.dispatchEvent({ type: 'input' });
-
-    // Innen vinduet: en skjema-kontroll committer en NY kilde (x = 7):
-    C.updateCellSource(0, 'y = 1\nx = 7  #@param {type:"number"}');
-    assert.strictEqual(ta.value, 'y = 1\nx = 7  #@param {type:"number"}',
-      'updateCellSource synket cellens synlige textarea i place');
-
-    await new Promise((r) => setTimeout(r, 320)); // la den armerte debouncen fyre
-
-    const last = refreshCalls[refreshCalls.length - 1];
-    assert.deepStrictEqual(last, [0, 'y = 1\nx = 7  #@param {type:"number"}'],
-      'flushens refresh ser den GJELDENDE kilden (x = 7), ikke den fangede (x = 3)');
-    assert.ok(scriptInputEl.value.indexOf('x = 7') !== -1,
-      '#scriptInput serialisert fra gjeldende kilde — kontroll-endringen overlevde flushen');
-    assert.ok(scriptInputEl.value.indexOf('y = 1') !== -1,
-      'den manuelt skrevne linja overlevde også');
-  } finally {
-    delete global.ParamForms;
-  }
-});
-
-// ============================================================================
-// Fase B2 Task 1: celle-verktøylinje (.nb-tools) — strukturelle operasjoner.
-// Hver test: knapp-klikk/select-endring → #scriptInput er den forventede
-// serialiserte teksten (Rå tekst-round-trip) + fokus landet på riktig celles
-// tekstfelt. Se js/cells.js sin ren halvdel (cells.test.js) for selve
-// transform-logikken — disse testene dekker KUN DOM-limet.
-// ============================================================================
-
-function undoToastParts(containerEl) {
-  const root = nbRoot(containerEl);
-  const toast = root.children.find((n) => n.classList && n.classList.contains('nb-undo-toast'));
-  if (!toast) return { toast: undefined, btn: undefined };
-  const btn = collectNodes(toast, []).find((n) => n.tag === 'button' && n.classList.contains('nb-undo-btn'));
-  return { toast, btn };
-}
-
-test('verktøylinje: knapper finnes på hver celle; merge/type-dropdown mangler kun på preambelen', () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
-  scriptInputEl.value = '# load x\n#%% python\n1\n';
-  C.init('python');
-  const preamble = cellParts(containerEl, 0);
-  const real = cellParts(containerEl, 1);
-  assert.ok(preamble.addAboveBtn && preamble.addBelowBtn && preamble.upBtn &&
-    preamble.downBtn && preamble.splitBtn && preamble.deleteBtn, 'preambelen har de generelle knappene');
-  assert.strictEqual(preamble.mergeBtn, undefined, 'preambelen har INGEN slå-sammen-knapp');
-  assert.strictEqual(preamble.typeSelect, undefined, 'preambelen har INGEN type-dropdown');
-  assert.ok(real.mergeBtn, 'en ekte celle har slå-sammen-knapp');
-  assert.ok(real.typeSelect, 'en ekte celle har type-dropdown');
-});
-
-test('verktøylinje: opp/ned deaktivert ved dokumentgrensene', () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
-  scriptInputEl.value = '#%% python\n1\n#%% r\n2\n';
-  C.init('python');
-  const first = cellParts(containerEl, 0);
-  const last = cellParts(containerEl, 1);
-  assert.strictEqual(first.upBtn.disabled, true);
-  assert.strictEqual(last.downBtn.disabled, true);
-  assert.ok(!first.downBtn.disabled, 'første celle kan fortsatt flyttes NED');
-  assert.ok(!last.upBtn.disabled, 'siste celle kan fortsatt flyttes OPP');
-});
-
-test('type-dropdown: verdien reflekterer cellens gjeldende (resolverte) type', () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
-  scriptInputEl.value = '#%% r id=x\n1\n#%%\n2\n';
-  C.init('python');
-  assert.strictEqual(cellParts(containerEl, 0).typeSelect.value, 'r');
-  assert.strictEqual(cellParts(containerEl, 1).typeSelect.value, 'python', 'typeløs celle arver docMode');
-});
-
-test('+ under: setter inn ny celle med samme type rett etter, #scriptInput oppdatert, fokus på den NYE cellen', () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
-  scriptInputEl.value = '#%% python\n1\n';
-  C.init('python');
-  click(cellParts(containerEl, 0).addBelowBtn);
-  // NB: originalteksten hadde en avsluttende blank linje (source '1\n' — helt
-  // normalt, editoren la til et sluttlinjeskift), som dermed havner FORAN den
-  // nye cellens header etter innsettingen (samme "bevar innhold, ikke kast
-  // det" -prinsipp som resten av serialiseringen — se cells.test.js).
-  assert.strictEqual(scriptInputEl.value, '#%% python\n1\n\n#%% python\n');
-  const inserted = cellParts(containerEl, 1);
-  assert.strictEqual(global.document.activeElement, inserted.ta, 'fokus landet på den nye cellen');
-});
-
-test('+ over på FØRSTE celle: setter inn en ny celle FØRST, resten skyves ned', () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
-  scriptInputEl.value = '#%% python\n1\n';
-  C.init('python');
-  click(cellParts(containerEl, 0).addAboveBtn);
-  assert.strictEqual(scriptInputEl.value, '#%% python\n\n#%% python\n1\n');
-  assert.strictEqual(global.document.activeElement, cellParts(containerEl, 0).ta);
-});
-
-test('flytt ned/opp: bytter naboceller, #scriptInput reflekterer bytte, fokus følger den flyttede cellen', () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
-  scriptInputEl.value = '#%% python id=a\n1\n#%% r id=b\n2\n';
-  C.init('python');
-  click(cellParts(containerEl, 0).downBtn);
-  // NB: cellen som opprinnelig var SIST (r/id=b) hadde en avsluttende blank
-  // linje i kilden sin (vanlig sluttlinjeskift) — den blanke linja flytter
-  // MED cellen til dens nye posisjon (spec: "swap adjacent spans" — hele
-  // spennet, inkl. avsluttende blanke linjer, bytter plass som én enhet).
-  assert.strictEqual(scriptInputEl.value, '#%% r id=b\n2\n\n#%% python id=a\n1');
-  assert.strictEqual(global.document.activeElement, cellParts(containerEl, 1).ta,
-    'den flyttede cellen (nå på plass 1) har fokus');
-});
-
-test('flytt opp på FØRSTE celle → no-op (ingen krasj, ingen endring)', () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
-  scriptInputEl.value = '#%% python\n1\n#%% r\n2\n';
-  C.init('python');
-  const before = scriptInputEl.value;
-  assert.doesNotThrow(() => click(cellParts(containerEl, 0).upBtn));
-  assert.strictEqual(scriptInputEl.value, before);
-});
-
-test('del ved markøren: selectionStart → linjeoffset, ny celle får samme type, fokus på ny hale-celle (cursor 0)', () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
-  scriptInputEl.value = '#%% python\na\nb\nc\n';
-  C.init('python');
-  const cell0 = cellParts(containerEl, 0);
-  // Marker rett etter 'a\nb\n' (linje 2, dvs. offset=2) — 'c' skal flyttes ut.
-  cell0.ta.selectionStart = cell0.ta.value.indexOf('c');
-  click(cell0.splitBtn);
-  assert.strictEqual(scriptInputEl.value, '#%% python\na\nb\n#%% python\nc\n');
-  const tail = cellParts(containerEl, 1);
-  assert.strictEqual(global.document.activeElement, tail.ta);
-});
-
-test('del ved linje 0 (markør på starten) → no-op', () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
-  scriptInputEl.value = '#%% python\na\nb\n';
-  C.init('python');
-  const cell0 = cellParts(containerEl, 0);
-  cell0.ta.selectionStart = 0;
-  const before = scriptInputEl.value;
-  assert.doesNotThrow(() => click(cell0.splitBtn));
-  assert.strictEqual(scriptInputEl.value, before);
-});
-
-test('slå sammen med forrige: headerlinja fjernes, kroppene smelter sammen, fokus + markør på sømmen', () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
-  scriptInputEl.value = '#%% python id=a\n1\n#%% r\n2\n';
-  C.init('python');
-  const cell1 = cellParts(containerEl, 1);
-  click(cell1.mergeBtn);
-  assert.strictEqual(scriptInputEl.value, '#%% python id=a\n1\n2\n');
-  const merged = cellParts(containerEl, 0);
-  assert.strictEqual(global.document.activeElement, merged.ta);
-});
-
-test('type-dropdown-endring: skriver om KUN typen, attrs bevares, fokus blir værende i samme celle', () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
-  scriptInputEl.value = '#%% python id=x hide-code\n1+1\n';
-  C.init('python');
-  const cell0 = cellParts(containerEl, 0);
-  cell0.typeSelect.value = 'r';
-  cell0.typeSelect.dispatchEvent({ type: 'change' });
-  assert.strictEqual(scriptInputEl.value, '#%% r id=x hide-code\n1+1\n');
-  assert.strictEqual(global.document.activeElement, cellParts(containerEl, 0).ta);
-});
-
-test('slett celle: #scriptInput mister spannet, Angre-toast vises, "Angre" gjenoppretter TEKSTEN BYTE-FOR-BYTE', () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
-  const original = '#%% md\ntekst\n#%% python\n1+1\n';
-  scriptInputEl.value = original;
-  C.init('python');
-  click(cellParts(containerEl, 0).deleteBtn);
-  assert.strictEqual(scriptInputEl.value, '#%% python\n1+1\n');
-
-  const { toast, btn } = undoToastParts(containerEl);
-  assert.ok(toast, 'Angre-toast skal vises etter sletting');
-  assert.ok(btn, 'Angre-knappen skal finnes i toasten');
-
-  click(btn);
-  assert.strictEqual(scriptInputEl.value, original, 'Angre gjenoppretter EKSAKT tekst fra før slettingen');
-  assert.strictEqual(undoToastParts(containerEl).toast, undefined, 'toasten fjernes etter Angre-klikk');
-});
-
-test('slett siste gjenværende celle → tom implisitt celle (#scriptInput blir tom streng)', () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
-  scriptInputEl.value = '#%% python\nx=1\n';
-  C.init('python');
-  click(cellParts(containerEl, 0).deleteBtn);
-  assert.strictEqual(scriptInputEl.value, '');
-});
-
-test('slett: ugyldig no-op-vei (ingen krasj) — knappen finnes uansett for enhver gyldig idx', () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
-  scriptInputEl.value = '#%% python\n1\n#%% r\n2\n#%% md\nx\n';
-  C.init('python');
-  assert.doesNotThrow(() => click(cellParts(containerEl, 1).deleteBtn));
-  assert.strictEqual(scriptInputEl.value, '#%% python\n1\n#%% md\nx\n');
-});
-
-// ---- B2-review-fikser: preambel-vern, kjøre-guard, flush-før-op -----------
-
-test('+ over på PREAMBELEN: ny celle settes inn ETTER preambelen — preambelen (# load) forblir først og intakt', () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
-  scriptInputEl.value = '# load x\nprint(1)\n#%% python\ny=2\n';
-  C.init('python');
-  click(cellParts(containerEl, 0).addAboveBtn);
-  assert.strictEqual(scriptInputEl.value, '# load x\nprint(1)\n#%% python\n\n#%% python\ny=2\n',
-    'preambelen står først, den nye cellen rett etter');
-  const inserted = cellParts(containerEl, 1);
-  assert.strictEqual(global.document.activeElement, inserted.ta,
-    'fokus landet på den NYE cellen (idx 1, etter preambelen) — ikke på preambelen');
-});
-
-test('kjøre-guard: alle strukturelle operasjoner avvises stille mens mdIsScriptRunning() er true', () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
-  scriptInputEl.value = '#%% python\n1\n#%% r\n2\n';
-  C.init('python');
-  global.mdIsScriptRunning = () => true;
-  try {
-    const before = scriptInputEl.value;
-    const c0 = cellParts(containerEl, 0);
-    const c1 = cellParts(containerEl, 1);
-    click(c0.addAboveBtn);
-    click(c0.addBelowBtn);
-    click(c0.downBtn);
-    click(c0.splitBtn);
-    click(c1.mergeBtn);
-    c1.typeSelect.value = 'md';
-    c1.typeSelect.dispatchEvent({ type: 'change' });
-    click(c0.deleteBtn);
-    assert.strictEqual(scriptInputEl.value, before,
-      'ingen av de sju operasjonene fikk endre dokumentet under en kjøring');
-    const root = nbRoot(containerEl);
-    const toast = root.children.find((n) => n.classList && n.classList.contains('nb-undo-toast'));
-    assert.strictEqual(toast, undefined, 'sletting avvist → ingen Angre-toast');
-  } finally {
-    delete global.mdIsScriptRunning;
-  }
-});
-
-test('setNbButtonsDisabled: verktøylinje-knappene deaktiveres under en kjøring og re-aktiveres etterpå — grense-↑/↓ forblir deaktivert', async () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
-  scriptInputEl.value = '#%% python\n1\n#%% python\n2\n';
-  C.init('python');
-  global.mdIsScriptRunning = () => false;
-  let release;
-  global.mdRunNotebookCell = () => new Promise((r) => { release = () => r({ text: 'ok' }); });
-  try {
-    const p = C.runCell(0);
-    const first = cellParts(containerEl, 0);
-    const last = cellParts(containerEl, 1);
-    assert.strictEqual(first.deleteBtn.disabled, true, 'slett deaktivert midt i kjøringen');
-    assert.strictEqual(first.addBelowBtn.disabled, true);
-    assert.strictEqual(last.typeSelect.disabled, true, 'type-dropdown deaktivert også');
-    release();
-    await p;
-    assert.strictEqual(first.deleteBtn.disabled, false, 'slett re-aktivert etter kjøringen');
-    assert.strictEqual(last.typeSelect.disabled, false);
-    assert.strictEqual(first.upBtn.disabled, true, '↑ på FØRSTE celle er statisk deaktivert — re-aktiveringen slår den ikke på');
-    assert.strictEqual(last.downBtn.disabled, true, '↓ på SISTE celle likeså');
-  } finally {
-    delete global.mdIsScriptRunning;
-    delete global.mdRunNotebookCell;
-  }
-});
-
-test('flush-før-op: en armert redigeringsdebounce anvendes FØR den strukturelle operasjonen — begge overlever', async () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
-  scriptInputEl.value = '#%% python\nx = 1\n#%% r\n2\n';
-  C.init('python');
-  const cell0 = cellParts(containerEl, 0);
-  // Tastetrykk i celle 0 armerer 250ms-debouncen (flushes IKKE ennå):
-  cell0.ta.value = 'x = 99\n';
-  cell0.ta.dispatchEvent({ type: 'input' });
-  assert.ok(scriptInputEl.value.indexOf('x = 99') === -1, 'sanity: debouncen har ikke fyrt ennå');
-  // Strukturell operasjon INNENFOR debounce-vinduet: flytt celle 0 ned.
-  // (Den redigerte kilden 'x = 99\n' ender med linjeskift — den blanke
-  // linja følger cellen i byttet, samme format-bevaring som move-testen over.)
-  click(cell0.downBtn);
-  assert.strictEqual(scriptInputEl.value, '#%% r\n2\n\n#%% python\nx = 99\n',
-    'både redigeringen (x = 99, flushet synkront først) og flyttingen er til stede');
-  // Og ingen forsinket debounce-refire ødelegger noe i etterkant:
-  await new Promise((r) => setTimeout(r, 320));
-  assert.strictEqual(scriptInputEl.value, '#%% r\n2\n\n#%% python\nx = 99\n',
-    'teksten er stabil etter at debounce-vinduet har passert');
-});
-
-// B2 Task 4-fiks: C.exit() må flushe en ventende redigeringsdebounce FØR den
-// bytter til Rå tekst — mirroring av toolbarGate/runCell sin flush-først-
-// disiplin over. Før fiksen kansellerte exit() bare timeren (clearTimeout)
-// uten å kjøre den ventende doFlush-lukningen, så en redigering skrevet
-// <250ms før klikk på "Rå tekst" ble stille DROPPET fra #scriptInput.
-test('exit({raw:true}) flusher en ventende redigeringsdebounce synkront FØR bytte til Rå tekst', () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
-  scriptInputEl.value = '#%% python\na = 2\n';
-  C.init('python');
-  const { ta } = cellParts(containerEl, 0);
-  ta.value = 'a = 10\n';
-  ta.dispatchEvent({ type: 'input' }); // starter 250ms-debouncen (ekte timer)
-  assert.strictEqual(scriptInputEl.value, '#%% python\na = 2\n',
-    'debouncen har ikke rukket å fyre ennå — #scriptInput er fortsatt den gamle teksten');
-
-  C.exit({ raw: true });
-
-  assert.strictEqual(scriptInputEl.value, '#%% python\na = 10\n',
-    'exit() skal flushe debouncen synkront FØR Rå tekst-bytte — ikke droppe redigeringen');
-  assert.strictEqual(C.active(), false);
-});
-
-// ---- autoSize (W-issue 1-fiks: .nb-src skal vise hele cellen opp til et
-// tak, ikke en fastlåst 1.6em-boks) -----------------------------------------
-// autoSize() selv er ikke eksportert (DOM-intern hjelpefunksjon), men den
-// kalles SYNKRONT fra tekstfeltets 'input'-lytter (cellNode, uavhengig av
-// rAF-samlepasset autoSizeAll kaller ved render()/setLayout sin hale) — så
-// den kan observeres her ved å dispatch'e et 'input'-event og lese
-// ta.style.height etterpå. FakeEl har ingen ekte layout, så scrollHeight
-// settes manuelt for å simulere en kort vs. en lang (40+ linjers) celle.
-test('autoSize: under taket vokser tekstfeltet fritt (scrollHeight + 2px), ingen klemming', () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
-  scriptInputEl.value = '#%% python\na = 1\n';
-  C.init('python');
-  const { ta } = cellParts(containerEl, 0);
-
-  ta.scrollHeight = 40; // simulerer en kort, veldefinert celle
-  ta.dispatchEvent({ type: 'input' });
-
-  assert.strictEqual(ta.style.height, '42px',
-    'under taket: inline-høyden er uklemt (scrollHeight + 2), ikke fastlåst på en gammel minihøyde');
-});
-
-test('autoSize: over taket klemmes inline-høyden til 420px (holdes i sync med .nb-src max-height i app.css)', () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
-  scriptInputEl.value = '#%% python\na = 1\n';
-  C.init('python');
-  const { ta } = cellParts(containerEl, 0);
-
-  // Simulerer en 40+ linjers celle: scrollHeight LANGT over taket.
-  ta.scrollHeight = 5000;
-  ta.dispatchEvent({ type: 'input' });
-
-  assert.strictEqual(ta.style.height, '420px',
-    'over taket: inline-høyden klemmes til 420px (ikke 5002px) — CSS-en (.nb-src ' +
-    'max-height: 420px; overflow-y: auto) tar seg av selve klippingen/indre scroll ' +
-    'i en ekte nettleser, men JS-en skal likevel aldri skrive en urimelig stor verdi');
-});
-
-test('autoSize: klemmingen er ikke fastlåst — en celle som krymper under taket igjen vokser/krymper fritt', () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
-  scriptInputEl.value = '#%% python\na = 1\n';
-  C.init('python');
-  const { ta } = cellParts(containerEl, 0);
-
-  ta.scrollHeight = 5000;
-  ta.dispatchEvent({ type: 'input' });
-  assert.strictEqual(ta.style.height, '420px');
-
-  ta.scrollHeight = 100; // brukeren slettet det meste av innholdet igjen
-  ta.dispatchEvent({ type: 'input' });
-  assert.strictEqual(ta.style.height, '102px',
-    'krymper fritt igjen når scrollHeight faller under taket — ingen fastlåst gammel høyde');
-});
-
 // ---- #tag-direktiver (spec 2026-07-16-tag-directives-design.md, Task 4) ----
 
-test('sniffet md-celle rendres uten """ og uten tag-linjer; textarea beholder rå kilde', () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
+// 4a: den gamle testen sjekket ekstra at CELLENS TEXTAREA (c._ta, editor-
+// halvdelen) beholdt rå kilde inkl. tag-linjer/"""-delimitere — den editor-
+// halvdelen finnes ikke lenger (docCellNode har ingen textarea i det hele
+// tatt, spec §1). Kildens rå tekst lever nå UTELUKKENDE i #scriptInput
+// (uendret av docRender/docCellNode), så den påstanden er umulig å teste
+// mot en celle-node og faller bort; selve rendrings-intensjonen (sniffet
+// md vises rent, uten """ eller #tag-linjer) overlever uendret under.
+test('sniffet md-celle rendres uten """ og uten tag-linjer i dokumentet', () => {
+  const { C, scriptInputEl } = freshEnv();
   scriptInputEl.value = '#%% python\nx = 1\n#%%\n#tag.slide = 1\n"""\n# Hei\n"""\n';
   C.init('python');
   assert.strictEqual(C.active(), true);
 
-  const nodes = collectNodes(nbRoot(containerEl), []);
+  const nodes = collectNodes(nbRoot(), []);
   const mdDiv = nodes.find((n) => n.classList && n.classList.contains('output-markdown'));
   assert.ok(mdDiv, 'sniffet celle rendres som markdown (nb-rendered-only)');
   const rendered = (mdDiv.innerHTML || '') + (mdDiv.textContent || '');
@@ -1828,9 +1258,8 @@ test('sniffet md-celle rendres uten """ og uten tag-linjer; textarea beholder r�
   assert.ok(!rendered.includes('"""'), 'delimiterne er skjult i rendringen');
   assert.ok(!rendered.includes('#tag'), 'tag-linjene er skjult i rendringen');
 
-  const cell1 = cellParts(containerEl, 1);
-  assert.ok(cell1.ta.value.includes('#tag.slide = 1'), 'textarea viser rå kilde (tags)');
-  assert.ok(cell1.ta.value.includes('"""'), 'textarea viser rå kilde (delimitere)');
+  assert.strictEqual(scriptInputEl.value.indexOf('#tag.slide = 1') !== -1, true,
+    'rå kilde (inkl. tags/delimitere) lever i #scriptInput, ikke i en celle-node');
 });
 
 test('runCell: payload.text er tag-blanket (linjetall bevart)', async () => {
@@ -1856,12 +1285,21 @@ test('runCell: payload.text er tag-blanket (linjetall bevart)', async () => {
   assert.strictEqual(captured.cellIdx, 0);
 });
 
-test('hide-code via #tag gir nb-hide-code-klassen (attrs-mergen når DOM-en uten egen wiring)', () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
+// 4a (spec §1): "Code cells: hide-code is meaningless in the document
+// (there is no code there) and is ignored by the renderer (the attr
+// remains valid for skrittvis/echo policy)" — docCellNode viser ALDRI kode
+// i det hele tatt, så hide-code-attributtet produserer bevisst INGEN
+// DOM-klasse lenger (motsatt av den gamle cellNode-oppførselen denne testen
+// tidligere dekket). Regresjonsvakt: attrs-mergen (#tag → attrs.hide-code)
+// skal fortsatt parses uten å krasje docRender, selv om DOM-en ignorerer den.
+test('hide-code via #tag: attrs-mergen krasjer ikke docRender, men gir INGEN DOM-effekt (kode vises aldri i dokumentet)', () => {
+  const { C, scriptInputEl } = freshEnv();
   scriptInputEl.value = '#%% python\n#tag.hide-code = true\nx = 1\n';
-  C.init('python');
-  const cell0 = cellParts(containerEl, 0);
-  assert.ok(cell0.wrap.classList.contains('nb-hide-code'));
+  assert.doesNotThrow(() => C.init('python'));
+  const cell0 = C.cellElementAt(0);
+  assert.ok(cell0, 'cellen rendres uansett');
+  assert.ok(!cell0.classList.contains('nb-hide-code'),
+    'hide-code er meningsløst i dokumentet (spec §1) — ingen klasse settes');
 });
 
 // ---- presentasjon (spec 2026-07-16-presentation-design.md, Task 2) ----

@@ -1447,3 +1447,11 @@ body.present-active .topbar, body.present-active .bottombar { display: none; }
 .nb-present-next { right: 0; }
 .nb-present-counter { position: fixed; right: 16px; bottom: 12px; z-index: 260;
   font-size: 13px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+/* ---------- konvergert dokument (spec 2026-07-17) ---------- */
+.doc-root { padding: 4px 8px; }
+.doc-bar { display: flex; align-items: center; gap: 10px; padding: 2px 0 8px;
+  font-size: 12px; color: var(--text-muted); }
+.doc-cell { padding: 2px 0; }
+.doc-cell.nb-running { outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent); }
+.doc-cell.nb-stale { opacity: .75; }

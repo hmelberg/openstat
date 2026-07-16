@@ -903,7 +903,7 @@
       NB.rawOverride = false;
       var ta = $('scriptInput');
       if (!ta) return;
-      if (NB.activeFlag) { if (C.hasMarkers(ta.value)) render(); else C.exit(); }
+      if (NB.activeFlag) { if (C.hasMarkers(ta.value)) docRender(); else C.exit(); }
       else if (C.hasMarkers(ta.value) && C.supportedMode(NB.docMode)) { C.enter(appLayout()); }
       else { updateChip(); }
       // #options.view = present (spec §3): delte lenker/eksempler/GitHub-
@@ -940,31 +940,17 @@
       return 'columns';
     }
 
+    // 4a (spec 2026-07-17 §1): .container-swappen er død — dokumentet
+    // rendres INN I #outputArea (docRender/docHost under), .container
+    // beholder sine vanlige layoutklasser og blir ALDRI nb-hidden.
     C.enter = function (layout) {
       var ta = $('scriptInput');
       if (!ta || !C.supportedMode(NB.docMode) || !C.hasMarkers(ta.value)) return false;
-      var container = document.querySelector('.container');
-      if (!container) return false;
+      if (!docHost()) return false;
       NB.activeFlag = true;
       NB.rawOverride = false;
       if (layout) NB.layout = layout;
-      container.classList.add('nb-hidden');
-      if (!NB.root) {
-        NB.root = el('div', 'nb-root');
-        NB.root.id = 'notebookRoot';
-        container.parentNode.insertBefore(NB.root, container.nextSibling);
-        // Kopier-knapper (tabell/pre/plotly) på resultater rendret inn i
-        // celle-outputene, samme mekanisme som #outputArea (index.html).
-        // MutationObserver mangler i test-harnessets lette DOM-fake — bare
-        // ekte browsere (og jsdom) trenger/har denne forsterkningen.
-        if (typeof global.MutationObserver === 'function') {
-          new global.MutationObserver(function () {
-            if (global.mdScheduleResultEnhance) global.mdScheduleResultEnhance();
-          }).observe(NB.root, { childList: true, subtree: true });
-        }
-      }
-      NB.root.hidden = false;
-      render();
+      docRender();
       updateChip();
       return true;
     };
@@ -982,17 +968,13 @@
       // runCell() allerede stoler på), så #scriptInput alltid speiler akkurat
       // det brukeren nettopp skrev, uansett når exit() kalles.
       flushPendingEdit();
-      if (NB.root) { purge(NB.root); NB.root.hidden = true; }
-      var container = document.querySelector('.container');
-      if (container) container.classList.remove('nb-hidden');
-      // Speil notatbokens layoutvalg tilbake til den underliggende skript-
-      // visningen, så «Rå tekst» og senere re-inngang stemmer med siste valg.
-      if (NB.layout === 'output') {
-        if (global.mdSetInputHidden) global.mdSetInputHidden(true);
-      } else {
-        if (global.mdSetInputHidden) global.mdSetInputHidden(false);
-        if (global.mdSetLayoutMode) global.mdSetLayoutMode(NB.layout);
-      }
+      // 4a: doc-root fjernes fra #outputArea (gjenoppretter tom output-
+      // flate for påfølgende vanlig skript-kjøring) — ingen container-
+      // klasse å reversere lenger, og ingen layout-speiling tilbake til
+      // app-primitivene (layouten ble aldri endret av docRender/enter,
+      // se spec §1 — den mirroring-back-compat-koden hørte til den gamle
+      // .container-swappen og er død sammen med den).
+      if (NB.root) { purge(NB.root); NB.root.remove(); NB.root = null; }
       if (global.updateLineNumbers) global.updateLineNumbers();
       if (global.refreshPlotlyAfterLayout) global.refreshPlotlyAfterLayout();
       updateChip();
@@ -1117,8 +1099,128 @@
       }
     };
 
-    C.refreshFromScript = function () { if (NB.activeFlag) render(); else updateChip(); };
+    // ---------- konvergert dokument (spec 2026-07-17 §1) ----------
+    // Dokumentet rendres INN I #outputArea (doc-root); .container beholder
+    // sine layoutklasser (nb-hidden-swappen er død). Slots beholder
+    // .nb-cell/.nb-output/.nb-output-body-klassene med vilje: ParamForms/
+    // Ui/dash/ipywidgets finner vertene sine uendret via cellElementAt.
 
+    function docHost() { return document.getElementById('outputArea'); }
+
+    function docBar(parsed) {
+      var bar = el('div', 'doc-bar');
+      if (parsed.warnings.length) bar.appendChild(el('span', 'nb-warnings', parsed.warnings.join(' · ')));
+      var sessionChip = el('span', 'nb-session-chip');
+      NB.sessionChip = sessionChip;
+      bar.appendChild(sessionChip);
+      var restartBtn = el('button', 'nb-restart-btn', t('Restart & kjør alle'));
+      restartBtn.type = 'button';
+      restartBtn.title = t('Restart & kjør alle');
+      restartBtn.addEventListener('click', onRestartClick);
+      NB.restartBtn = restartBtn;
+      bar.appendChild(restartBtn);
+      return bar;
+    }
+
+    // Output-only cellenode (spec §1): ETTERFØLGER av cellNode under, men
+    // uten .nb-input/textarea/head/toolbar — kun .nb-output → .nb-output-body
+    // (identisk klassenavn/struktur, så ParamForms/Ui/dash/ipywidgets sine
+    // mount-seams via cellElementAt/renderCellResult trenger ingen endring).
+    function docCellNode(c, idx) {
+      var type = C.resolveType(c, NB.docMode);
+      var wrap = el('div', 'nb-cell doc-cell');
+      wrap.dataset.idx = String(idx);
+      if (c.attrs.style && /^(note|warn|card)$/.test(c.attrs.style)) wrap.classList.add('nb-style-' + c.attrs.style);
+      if (c.attrs['hide-output']) wrap.classList.add('nb-hide-output');
+      var out = el('div', 'nb-output');
+      var widgetsPos = WIDGETS_POS[c.attrs.widgets] ? c.attrs.widgets : 'top';
+      out.classList.add('nb-widgets-' + widgetsPos);
+      var body = el('div', 'nb-output-body');
+      out.appendChild(body);
+      if (!C.isCodeType(type)) {
+        // md/html rendres direkte inn i sluket (nb-rendered-only semantics
+        // uten noen redigerings-affordance — spec §1: ingen editor-halvdel
+        // i dokumentet i det hele tatt, kun ren tekst i #scriptInput).
+        wrap.classList.add('nb-rendered-only');
+        renderNonCode(body, type, C.renderContent(c.source, type, c.sniffed));
+      }
+      wrap.appendChild(out);
+      c._out = body;
+      c._wrap = wrap;
+      var paramLang = C.paramLangForType(type);
+      if (paramLang && global.ParamForms && typeof global.ParamForms.decorate === 'function') {
+        global.ParamForms.decorate(idx, wrap, c.source, paramLang);
+      }
+      return wrap;
+    }
+
+    function docRender() {
+      var ta = $('scriptInput');
+      var parsed = C.parseCells(ta.value);
+      NB.cells = parsed.cells;
+      NB.lastSerialized = ta.value;
+      NB.plan = C.segmentPlan(ta.value, NB.docMode);
+      NB.runSinks = null; NB.runPlan = null; NB.trailing = null;
+      // Struktur-(re)rendring er en ærlig reset av stale/ranOk (samme
+      // begrunnelse som gamle render()): friskt parsede celleobjekter kan
+      // ikke arve forrige generasjons indeks-keyede stempler.
+      NB.stale = {}; NB.ranOk = {};
+      var host = docHost();
+      if (!host) return;
+      if (NB.root) { purge(NB.root); NB.root.remove(); }
+      NB.root = el('div', 'doc-root');
+      host.innerHTML = '';
+      host.appendChild(NB.root);
+      // Kopier-knapper (tabell/pre/plotly) på resultater rendret inn i
+      // celle-outputene: samme forsterkning som #outputArea sin egen
+      // MutationObserver (index.html), men scopet til doc-root — flyttet
+      // hit fra den gamle C.enter (spec §1: hooket til doc-root-skaping,
+      // ikke til enter() — docRender bygger en FERSK rot ved hver
+      // (re-)inngang inntil Task 3 sin forsoningspolicy). Guardet — mangler
+      // i test-harnessets lette DOM-fake, bare ekte browsere/jsdom har den.
+      if (typeof global.MutationObserver === 'function') {
+        new global.MutationObserver(function () {
+          if (global.mdScheduleResultEnhance) global.mdScheduleResultEnhance();
+        }).observe(NB.root, { childList: true, subtree: true });
+      }
+      NB.root.appendChild(docBar(parsed));
+      attachSessionListener();
+      updateSessionChip();
+      for (var i = 0; i < NB.cells.length; i++) {
+        var type = C.resolveType(NB.cells[i], NB.docMode);
+        if (type === 'skip') continue;               // spec §1: skip rendres ikke
+        NB.root.appendChild(docCellNode(NB.cells[i], i));
+      }
+      // Render-tidens engangs-sjekk (poll-fri per Task 5-kontrakten, se
+      // gamle render()): fanger et Kjør alle/Forklar-løp som allerede er i
+      // gang idet dokumentet (re-)rendres.
+      setNbButtonsDisabled(!!(global.mdIsScriptRunning && global.mdIsScriptRunning()));
+      // Presentasjons-overlevelse (spec §2, gjenbruker gamle render() sin
+      // hale uendret, mot doc-cellene): host.innerHTML=''-rebyggingen over
+      // kastet nav-nodene/synlighetsklassene/nb-present — regn planen på
+      // nytt (dokumentet kan ha endret seg), klem cur, bygg overlegget på nytt.
+      if (NB.present) {
+        var _plan = C.slidePlan(NB.cells);
+        if (!_plan.slides.length) {
+          C.presentExit();
+        } else {
+          NB.present.slides = _plan.slides;
+          NB.present.byCell = _plan.byCell;
+          if (NB.present.cur >= _plan.slides.length) NB.present.cur = _plan.slides.length - 1;
+          NB.root.classList.add('nb-present');
+          presentBuildNav();
+          presentApply();
+        }
+      }
+    }
+
+    C.refreshFromScript = function () { if (NB.activeFlag) docRender(); else updateChip(); };
+
+    // DØD ETTER 4a — fjernes i plan 4b (spec §5). cellNode/buildToolbar og
+    // resten av celleliste-redigeringsmaskineriet under er UNÅBAR: ingenting
+    // kaller render() lenger (docRender over har overtatt ALLE reelle
+    // rendrings-stier — enter/contentLoaded/refreshFromScript/grantHtmlTrust/
+    // tick). Holdes i filen kun til 4b sin verifiserte fjerning.
     function render() {
       var ta = $('scriptInput');
       var parsed = C.parseCells(ta.value);
@@ -1536,7 +1638,7 @@
     C.grantHtmlTrust = function () {
       if (NB.htmlTrusted) return;
       NB.htmlTrusted = true;
-      if (NB.activeFlag && NB.root) render();
+      if (NB.activeFlag && NB.root) docRender();
     };
 
     // W-issue 1 fiks: klem inline-høyden til samme tak som CSS-en (.nb-src
@@ -1749,7 +1851,7 @@
       var v = ta.value;
       if (NB.activeFlag) {
         if (v !== NB.lastSerialized) {
-          if (C.hasMarkers(v)) render();
+          if (C.hasMarkers(v)) docRender();
           else C.exit();
         }
       } else if (v !== NB.lastTickValue && NB.lastUserInput < NB.lastTickTime &&
@@ -1802,11 +1904,15 @@
       // .nb-output er nå en wrapper som også kan holde .param-form/
       // .ui-controls-striper, og disse skal IKKE tømmes her (de overlever
       // «Kjør alle» akkurat som de overlever enkelt-celle-rerun). Body sin
-      // besteforelder er cellens .nb-cell-wrap (body → .nb-output → .nb-cell).
-      var outs = NB.root.querySelectorAll('.nb-cell .nb-output-body');
+      // besteforelder er cellens .doc-cell-wrap (body → .nb-output → .doc-cell).
+      var outs = NB.root.querySelectorAll('.doc-cell .nb-output-body');
       for (var i = 0; i < outs.length; i++) {
         var cellEl = outs[i].parentNode && outs[i].parentNode.parentNode;
-        if (cellEl && cellEl.classList.contains('nb-noncode')) continue;   // md/html beholder rendringen
+        // md/html-celler er markert 'nb-rendered-only' (docCellNode) i stedet
+        // for det gamle cellNode sitt 'nb-noncode' — samme "behold rendringen,
+        // ikke purge"-vakt, ny klassekilde (skip-celler finnes ikke i
+        // dokumentet lenger, se docRender, så det skillet trengs ikke her).
+        if (cellEl && cellEl.classList.contains('nb-rendered-only')) continue;
         purge(outs[i]);
         outs[i].innerHTML = '';
       }
@@ -1822,7 +1928,7 @@
       NB.runPlan = plan;
       NB.runSinks = [];
       for (var s = 0; s < plan.length; s++) {
-        var node = NB.root.querySelector('.nb-cell[data-idx="' + plan[s] + '"] .nb-output-body');
+        var node = NB.root.querySelector('.doc-cell[data-idx="' + plan[s] + '"] .nb-output-body');
         NB.runSinks.push(node || null);
       }
       return NB.runSinks;
@@ -1892,13 +1998,15 @@
 
     // Celleindeks → gjeldende DOM-node (Task 2, ui-widgets W1): brukes av
     // window.mdUiRunCtx() sin cellEl-oppslag. Querier NB.root direkte (samme
-    // '.nb-cell[data-idx="…"]'-mønster som beginRun bruker) i stedet for å
+    // '.doc-cell[data-idx="…"]'-mønster som beginRun bruker) i stedet for å
     // cache en referanse — cellens node byttes ut ved enhver struktur-
     // re-rendring (final-review F6-mønsteret), en frisk oppslag er alltid
     // korrekt. null når notatboken ikke har en rendret rot, eller idx mangler.
+    // 4a: returnerer .doc-cell-noden (docCellNode) — samme mount-seam-
+    // kontrakt som før (.nb-output/.nb-output-body finnes uendret inni).
     C.cellElementAt = function (idx) {
       if (!NB.root) return null;
-      return NB.root.querySelector('.nb-cell[data-idx="' + idx + '"]') || null;
+      return NB.root.querySelector('.doc-cell[data-idx="' + idx + '"]') || null;
     };
 
     // Celleindeks → STABIL nøkkel (ui-widgets W2, Task 1): attrs.id når
@@ -2049,7 +2157,7 @@
       if (NB.stale[idx]) {
         NB.stale[idx] = false;
         var c = NB.cells[idx];
-        if (c && c._input) c._input.classList.remove('nb-stale');
+        if (c && c._wrap) c._wrap.classList.remove('nb-stale');
       }
       // Kjør-chip (param-forms.js): denne kanalen dekker BÅDE celle-hodets
       // ▶ og chippen sitt eget klikk (begge kaller Cells.runCell → hit ved
@@ -2067,7 +2175,7 @@
       if (!NB.ranOk[idx] || NB.stale[idx]) return;
       NB.stale[idx] = true;
       var c = NB.cells[idx];
-      if (c && c._input) c._input.classList.add('nb-stale');
+      if (c && c._wrap) c._wrap.classList.add('nb-stale');
     }
 
     function clearAllStale() {
@@ -2075,7 +2183,7 @@
       for (var i = 0; i < NB.cells.length; i++) {
         ranOk[i] = true;
         var c = NB.cells[i];
-        if (c && c._input) c._input.classList.remove('nb-stale');
+        if (c && c._wrap) c._wrap.classList.remove('nb-stale');
         // Kjør-chip: "Kjør alle"/"Restart & kjør alle"/Forklar (Cells.beginRun,
         // eneste kaller av denne funksjonen) regner — akkurat som for
         // .nb-stale over — HELE kjøringen som frisk FØR selve løkka starter
@@ -2117,7 +2225,7 @@
 
     function setRunningUi(idx, running) {
       var c = NB.cells[idx];
-      if (c && c._input) c._input.classList.toggle('nb-running', running);
+      if (c && c._wrap) c._wrap.classList.toggle('nb-running', running);
       setNbButtonsDisabled(running);
     }
 
@@ -2194,7 +2302,7 @@
     // fremfor å kaste (kjøringen fullførte tross alt).
     function renderCellResult(idx, out, res) {
       if (out && !out.isConnected && NB.root) {
-        out = NB.root.querySelector('.nb-cell[data-idx="' + idx + '"] .nb-output-body');
+        out = NB.root.querySelector('.doc-cell[data-idx="' + idx + '"] .nb-output-body');
         if (!out) {
           console.warn('renderCellResult: celle', idx, 'finnes ikke lenger (strukturendring midt i kjøring) — resultat droppet');
           return;
