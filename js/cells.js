@@ -1039,7 +1039,7 @@
       out.appendChild(body);
       if (nonCode && type !== 'skip') {
         wrap.classList.add('nb-rendered-only');
-        renderNonCode(body, type, c.source);
+        renderNonCode(body, type, C.renderContent(c.source, type, c.sniffed));
         body.title = t('Dobbeltklikk for å redigere');
         var enterEdit = function () {
           wrap.classList.remove('nb-rendered-only');
@@ -1052,7 +1052,7 @@
         editBtn.addEventListener('click', enterEdit);
         wrap.appendChild(editBtn);
         ta.addEventListener('blur', function () {
-          renderNonCode(body, type, ta.value);
+          renderNonCode(body, type, C.renderContent(ta.value, type, c.sniffed));
           wrap.classList.add('nb-rendered-only');
         });
       }
@@ -1803,7 +1803,7 @@
       }
       var payload = {
         kind: kind,
-        text: c.source || '',
+        text: C.execCellSource(c) || '',
         uses: [],
         // Eksplisitt celle (spec §4 "Display policy"): echo av, kun siste
         // uttrykk vises — index.html overstyrer/dropper dette selv når

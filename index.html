@@ -578,7 +578,7 @@
   <script src="js/brython-engine.js?v=2026-07-16a"></script>
   <script src="js/micropython-engine.js?v=2026-07-16a"></script>
   <script src="js/dash.js"></script>
-  <script src="js/cells.js?v=2026-07-16a"></script>
+  <script src="js/cells.js?v=2026-07-16c"></script>
   <script src="js/ui.js?v=2026-07-16b"></script>
   <script src="js/param-forms.js"></script>
   <script src="js/ipywidgets-bridge.js"></script>
@@ -9506,7 +9506,8 @@ async def _m2py_run_segment(_seg_json):
           var _parsed = window.Cells.parseCells(scriptInput.value);
           var _pre = _parsed.cells[0];
           if (_pre && _pre.headerRaw === null && payload.cellIdx !== 0) {
-            var _preRes = await sess.runCell(_pre.source || '');
+            // preambelens tag-linjer blankes (spec 2026-07-16-tag-directives) — samme kontrakt som executableSource.
+            var _preRes = await sess.runCell(window.Cells.execCellSource(_pre) || '');
             if (_preRes.error) console.warn('preambel (fase C):', _preRes.error);
           }
         }

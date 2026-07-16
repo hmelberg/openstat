@@ -1811,3 +1811,55 @@ test('autoSize: klemmingen er ikke fastlåst — en celle som krymper under take
   assert.strictEqual(ta.style.height, '102px',
     'krymper fritt igjen når scrollHeight faller under taket — ingen fastlåst gammel høyde');
 });
+
+// ---- #tag-direktiver (spec 2026-07-16-tag-directives-design.md, Task 4) ----
+
+test('sniffet md-celle rendres uten """ og uten tag-linjer; textarea beholder rå kilde', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\nx = 1\n#%%\n#tag.slide = 1\n"""\n# Hei\n"""\n';
+  C.init('python');
+  assert.strictEqual(C.active(), true);
+
+  const nodes = collectNodes(nbRoot(containerEl), []);
+  const mdDiv = nodes.find((n) => n.classList && n.classList.contains('output-markdown'));
+  assert.ok(mdDiv, 'sniffet celle rendres som markdown (nb-rendered-only)');
+  const rendered = (mdDiv.innerHTML || '') + (mdDiv.textContent || '');
+  assert.ok(rendered.includes('Hei'), 'innholdet rendres');
+  assert.ok(!rendered.includes('"""'), 'delimiterne er skjult i rendringen');
+  assert.ok(!rendered.includes('#tag'), 'tag-linjene er skjult i rendringen');
+
+  const cell1 = cellParts(containerEl, 1);
+  assert.ok(cell1.ta.value.includes('#tag.slide = 1'), 'textarea viser rå kilde (tags)');
+  assert.ok(cell1.ta.value.includes('"""'), 'textarea viser rå kilde (delimitere)');
+});
+
+test('runCell: payload.text er tag-blanket (linjetall bevart)', async () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python\n#tag.slide = 1\nx = 1\n';
+  C.init('python');
+  assert.strictEqual(C.active(), true);
+
+  let captured = null;
+  global.mdIsScriptRunning = () => false;
+  global.mdRunNotebookCell = (payload) => {
+    captured = payload;
+    return Promise.resolve({ text: 'ok' });
+  };
+
+  await C.runCell(0);
+
+  assert.ok(captured, 'mdRunNotebookCell kalles');
+  // c.source for siste (og eneste) celle beholder kildens avsluttende '\n'
+  // (rundtur-egenskapen serializeCells(parseCells(d)) === d, se cells.test.js);
+  // execCellSource blanker KUN tag-linjen og bevarer linjetallet nøyaktig.
+  assert.strictEqual(captured.text, '\nx = 1\n', 'tag-linjen blanket PÅ PLASS');
+  assert.strictEqual(captured.cellIdx, 0);
+});
+
+test('hide-code via #tag gir nb-hide-code-klassen (attrs-mergen når DOM-en uten egen wiring)', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\n#tag.hide-code = true\nx = 1\n';
+  C.init('python');
+  const cell0 = cellParts(containerEl, 0);
+  assert.ok(cell0.wrap.classList.contains('nb-hide-code'));
+});
