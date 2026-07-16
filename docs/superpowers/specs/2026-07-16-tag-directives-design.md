@@ -49,8 +49,11 @@ existing choke points.
 ## 1. Tag lines
 
 **Recognition.** A tag line matches
-`/^\s*#\s*tag\.([A-Za-z_][\w-]*)\s*=\s*(.*?)\s*$/` (key group 1, value
-group 2). `#` only — no `//` form (tags live in cell bodies, which are
+`/^\s*#\s*tag\.([A-Za-z_][\w-]*)\s*=\s*(\S.*?)\s*$/` (key group 1, value
+group 2). The value must be non-blank: a bare `#tag.key =` (or `= ` with
+only trailing whitespace) is far more likely a typo than an intentional
+empty string, so it falls to the `ugyldig #tag-linje` warning; an explicit
+empty string is written `#tag.key = ""`. `#` only — no `//` form (tags live in cell bodies, which are
 comment-`#` languages or md/html where the line is stripped before
 render anyway).
 
