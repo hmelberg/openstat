@@ -844,6 +844,293 @@
       return JSON.stringify(out);
     };
 
+    // ── W5.2: element-events (spec 2026-07-16-notebook-widget-events) ────
+    // Delegerte dokument-lyttere + bindingsregister. En binding deklareres
+    // under en cellekjøring (ui.on()/ui.run_cell() i fasadene, Task 3-4) og
+    // lever til cellen re-kjøres uten å re-deklarere den (mark-og-sveip,
+    // SAMME par — Ui.beginCellRun/endCellRun — som kontrollene over bruker),
+    // eller til Ui.resetBindings() (sesjonsrestart/invalidate, index.html —
+    // samme sted som IpwBridge.reset()). JS EIER handler-livssyklusen:
+    // pyodide-proxier har .destroy() — kalles GUARDET overalt en binding
+    // fjernes (sveip/erstatning/reset); brython/mpy-funksjoner har ingen
+    // destroy og er da en no-op.
+    var _bindings = {};      // "cellKey::selector::event" -> binding
+    var _delegated = {};     // eventType -> true når dokument-lytteren er satt
+    var _dashLoadPromise = null; // memoized dash.js-lasting, se _renderFigure
+
+    function _destroyHandler(b) {
+      if (b && b.handler && typeof b.handler.destroy === 'function') {
+        try { b.handler.destroy(); } catch (e) { /* allerede destruert e.l. — ufarlig */ }
+      }
+    }
+
+    // Én delegert lytter PER eventType for HELE dokumentets levetid (aldri
+    // fjernet — når _bindings er tom for en type er den bare en evig no-op,
+    // billigere enn å legge til/fjerne én lytter per binding).
+    function _installDelegate(eventType) {
+      if (_delegated[eventType] || typeof document === 'undefined') return;
+      _delegated[eventType] = true;
+      document.addEventListener(eventType, function (e) {
+        for (var key in _bindings) {
+          if (!_bindings.hasOwnProperty(key)) continue;
+          var b = _bindings[key];
+          if (b.event !== eventType) continue;
+          var hit = (e.target && typeof e.target.closest === 'function') ? e.target.closest(b.selector) : null;
+          if (hit) _dispatchBinding(b, e, hit);
+        }
+      });
+    }
+
+    function _dispatchBinding(b, e, hit) {
+      if (b.kind === 'cell') {
+        if (!global.Cells || typeof global.Cells.cellIndexById !== 'function') return;
+        var idx = global.Cells.cellIndexById(b.cellId);
+        if (idx === -1) { console.warn('Ui.run_cell: fant ikke celle-id ' + b.cellId); return; }
+        global.Cells.runCell(idx);
+        return;
+      }
+      // kind === 'fn': dropp events midt i en kjøring (v1 — ingen kø, samme
+      // refuse-drop-filosofi som _rerunFor over bruker for kontroll-endringer).
+      if (global.mdIsScriptRunning && global.mdIsScriptRunning()) {
+        console.debug('Ui.on: event droppet (kjøring pågår)');
+        return;
+      }
+      var evt = {
+        type: e.type,
+        value: (hit && hit.value !== undefined) ? hit.value : null,
+        checked: (hit && hit.checked !== undefined) ? !!hit.checked : null,
+        targetId: (hit && hit.id) ? hit.id : null
+      };
+      var payloadJson;
+      try {
+        payloadJson = b.handler(JSON.stringify(evt));
+      } catch (err) {
+        payloadJson = JSON.stringify({ kind: 'error', text: String((err && err.message) || err) });
+      }
+      Ui.renderEventResult(b, payloadJson);
+    }
+
+    // Finn/opprett cellens kjørebrakett — DELT _cellRuns-register med
+    // kontrollene (Ui.beginCellRun/endCellRun under) — og sørg for at
+    // bindingsRegistered-settet finnes: braketten kan i prinsippet være
+    // opprettet av _registerInto (en kontroll registrert FØR noen binding i
+    // samme kjøring) og hadde da manglet dette feltet.
+    function _bindingsRunFor(cellIdx) {
+      var run = _cellRuns[cellIdx];
+      if (!run || run.closed) run = _cellRuns[cellIdx] = { ordinal: 0, registered: {}, bindingsRegistered: {} };
+      if (!run.bindingsRegistered) run.bindingsRegistered = {};
+      return run;
+    }
+
+    // Kjørekontekst-oppløsning for bindEvent/bindRunCell: samme
+    // mdUiRunCtx()-mekanisme som Ui.registerControl (js/ui.js: se
+    // dokumentasjonen der), MEN med et løsere krav — en binding er en
+    // DELEGERT dokument-lytter, ikke en inline DOM-node i cellestripa, og
+    // trenger ALDRI et levende cellEl for selve registreringen. Kun det å
+    // MANGLE selve mekanismen (window.mdUiRunCtx ikke satt i det hele tatt)
+    // regnes som "ingen kjørekontekst" og returnerer undefined (avvises av
+    // kallerne under) — speiler registerControl sin ternary-fallback
+    // nøyaktig. En ekte plain-script-kjøring (mekanismen finnes, men
+    // returnerer null — ingen aktiv cellekjøring akkurat nå) ELLER ctx sitt
+    // kant-case uten cellEl (samme kant-case som registerControl sin egen
+    // test) gir BEGGE cellIdx=null her: rendering faller da tilbake til
+    // #outputArea (se _slotFor) i stedet for en cellespesifikk slot.
+    function _resolveCellIdx() {
+      if (typeof global.mdUiRunCtx !== 'function') return undefined; // ingen mekanisme i det hele tatt
+      var ctx = global.mdUiRunCtx();
+      return (ctx && ctx.cellIdx != null) ? ctx.cellIdx : null;
+    }
+
+    // Delt registreringskjerne for Ui.bindEvent/Ui.bindRunCell.
+    function _registerBinding(raw, kind, handler) {
+      var cellIdx = _resolveCellIdx();
+      if (cellIdx === undefined) return null; // ingen kjørekontekst-mekanisme i det hele tatt
+
+      var cellKey = cellIdx != null ? _cellKeyAt(cellIdx) : 'doc';
+      var key = cellKey + '::' + raw.selector + '::' + raw.event;
+
+      if (cellIdx != null) {
+        var run = _bindingsRunFor(cellIdx);
+        run.bindingsRegistered[key] = true;
+      }
+
+      var old = _bindings[key];
+      if (old) _destroyHandler(old); // erstatning — samme guardede destroy som sveip/reset
+      var binding = {
+        key: key, cellIdx: cellIdx, kind: kind,
+        selector: raw.selector, event: raw.event,
+        target: raw.target || null
+      };
+      if (kind === 'fn') binding.handler = handler;
+      else binding.cellId = raw.cellId;
+      _bindings[key] = binding;
+      _installDelegate(raw.event);
+      return true;
+    }
+
+    /**
+     * Ui.bindEvent(bindingJson, handler) → true (registrert) eller null
+     * (ugyldig binding, eller ingen kjørekontekst-mekanisme i det hele
+     * tatt). bindingJson = {"selector","event","target"?}. handler kalles
+     * med ÉN JSON-streng (event-payload: {type,value,checked,targetId}) og
+     * MÅ returnere en JSON-streng payload ('{}' for no-op) — se
+     * Ui.renderEventResult for payload-formatet.
+     */
+    Ui.bindEvent = function (bindingJson, handler) {
+      var raw;
+      try {
+        raw = JSON.parse(bindingJson);
+      } catch (e) {
+        console.warn('Ui.bindEvent: ugyldig JSON: ' + (e && e.message));
+        return null;
+      }
+      if (!raw || !raw.selector || !raw.event) {
+        console.warn('Ui.bindEvent: binding krever selector og event');
+        return null;
+      }
+      if (typeof handler !== 'function') {
+        console.warn('Ui.bindEvent: handler er ikke en funksjon');
+        return null;
+      }
+      return _registerBinding(raw, 'fn', handler);
+    };
+
+    /**
+     * Ui.bindRunCell(bindingJson) → true/null, samme kontekst-oppløsning
+     * som bindEvent, men uten handler: bindingJson =
+     * {"selector","event","cellId","target"?} — et treff dispatcher
+     * direkte til Cells.runCell(Cells.cellIndexById(cellId)), ingen
+     * payload/rendering involvert.
+     */
+    Ui.bindRunCell = function (bindingJson) {
+      var raw;
+      try {
+        raw = JSON.parse(bindingJson);
+      } catch (e) {
+        console.warn('Ui.bindRunCell: ugyldig JSON: ' + (e && e.message));
+        return null;
+      }
+      if (!raw || !raw.selector || !raw.event || !raw.cellId) {
+        console.warn('Ui.bindRunCell: binding krever selector, event og cellId');
+        return null;
+      }
+      return _registerBinding(raw, 'cell', null);
+    };
+
+    // Finn cellens .nb-output-body (Cells.cellElementAt → .nb-output →
+    // .nb-output-body, samme oppslag som resten av modulen), eller
+    // #outputArea når bindingen ikke er celle-scoped (cellIdx null,
+    // plain-script) eller cellen ikke lenger finnes.
+    function _slotFor(b) {
+      if (b.cellIdx != null) {
+        var cellEl = (global.Cells && typeof global.Cells.cellElementAt === 'function')
+          ? global.Cells.cellElementAt(b.cellIdx) : null;
+        if (cellEl) {
+          var outEl = _findChild(cellEl, 'nb-output');
+          var body = outEl ? _findChild(outEl, 'nb-output-body') : null;
+          if (body) return body;
+        }
+      }
+      return (typeof document !== 'undefined' && document.getElementById)
+        ? document.getElementById('outputArea') : null;
+    }
+
+    // Lazy-laster js/dash.js (memoized promise — speiler engine-modulenes
+    // (js/brython-engine.js, js/micropython-engine.js) egen addScript-
+    // idiom) og tegner {kind:'figure', spec} via Dash.renderPayload — SAMME
+    // figur-rendering som dashboard()-kortene, ingen egen Plotly-
+    // integrasjon her.
+    function _loadDash() {
+      if (global.Dash) return Promise.resolve(global.Dash);
+      if (_dashLoadPromise) return _dashLoadPromise;
+      _dashLoadPromise = new Promise(function (resolve, reject) {
+        var s = document.createElement('script');
+        s.src = 'js/dash.js';
+        s.onload = function () { resolve(global.Dash); };
+        s.onerror = function () { reject(new Error('kunne ikke laste js/dash.js')); };
+        document.head.appendChild(s);
+      });
+      return _dashLoadPromise;
+    }
+
+    function _renderFigure(p, node) {
+      if (global.Dash && typeof global.Dash.renderPayload === 'function') {
+        var figEl = global.Dash.renderPayload({ kind: 'figure', spec: p.spec }, null);
+        if (figEl) node.appendChild(figEl);
+        return;
+      }
+      _loadDash().then(function (Dash) {
+        if (!Dash || typeof Dash.renderPayload !== 'function') throw new Error('Dash.renderPayload mangler');
+        var figEl = Dash.renderPayload({ kind: 'figure', spec: p.spec }, null);
+        if (figEl) node.appendChild(figEl);
+      }).catch(function (err) {
+        var pre = document.createElement('pre');
+        pre.className = 'error';
+        pre.textContent = 'Ui.on: kunne ikke tegne figur (' + ((err && err.message) || err) + ')';
+        node.appendChild(pre);
+      });
+    }
+
+    /**
+     * Ui.renderEventResult(b, payloadJson) — tegner en handler sitt
+     * payload-resultat. b er den interne binding-oppføringen (trenger kun
+     * .target og .cellIdx). payload = {"kind":"text"|"error"|"table"|"figure", ...},
+     * eller '{}' (eksplisitt no-op — ingenting tegnes).
+     */
+    Ui.renderEventResult = function (b, payloadJson) {
+      var p;
+      try {
+        p = JSON.parse(payloadJson || '{}');
+      } catch (e) {
+        p = { kind: 'error', text: 'Ui.on: ugyldig payload fra handler' };
+      }
+      if (!p || !p.kind) return; // '{}' — eksplisitt no-op, ingenting å tegne
+
+      var node = null, replace = false, missingTarget = null;
+      if (b.target) {
+        node = (typeof document !== 'undefined' && document.getElementById) ? document.getElementById(b.target) : null;
+        if (node) replace = true;
+        else missingTarget = b.target;
+      }
+      if (!node) node = _slotFor(b);
+      if (!node) return;
+      if (replace) node.innerHTML = '';
+      if (missingTarget) {
+        var notice = document.createElement('pre');
+        notice.className = 'error';
+        notice.textContent = 'Ui.on: fant ikke target-element #' + missingTarget + ' — viser her i stedet';
+        node.appendChild(notice);
+      }
+
+      if (p.kind === 'text' || p.kind === 'error') {
+        var pre = document.createElement('pre');
+        if (p.kind === 'error') pre.className = 'error';
+        pre.textContent = p.text || '';
+        node.appendChild(pre);
+      } else if (p.kind === 'table') {
+        var div = document.createElement('div');
+        div.innerHTML = p.html || ''; // vår egen to_html-bygger, samme tillitsnivå som dash-kort
+        node.appendChild(div);
+      } else if (p.kind === 'figure') {
+        _renderFigure(p, node);
+      } else {
+        console.warn('Ui.renderEventResult: ukjent payload-kind: ' + p.kind);
+      }
+    };
+
+    /**
+     * Ui.resetBindings() — sesjons-scoped livssyklus (index.html sine
+     * restart()/invalidate()-braketter, samme sted som IpwBridge.reset()):
+     * destruer HVER handler (guardet) og glem alle bindinger. Delegerte
+     * dokument-lyttere (_delegated) FJERNES ikke — de blir stående som
+     * evige no-ops når _bindings er tom, samme memoiserings-forutsetning
+     * som _installDelegate over allerede bygger på.
+     */
+    Ui.resetBindings = function () {
+      Object.keys(_bindings).forEach(function (key) { _destroyHandler(_bindings[key]); });
+      _bindings = {};
+    };
+
     /**
      * Ui.beginCellRun(cellIdx) — eksplisitt start på en celles kjøring:
      * nullstiller ordinal-teller og registrert-sett. Kalles fra de samme
@@ -856,7 +1143,10 @@
      * kontrollene stå igjen.
      */
     Ui.beginCellRun = function (cellIdx) {
-      _cellRuns[cellIdx] = { ordinal: 0, registered: {} };
+      // W5.2: bindingsRegistered er kontrollenes registered-sett sin
+      // tvilling for element-event-bindinger — nullstilt her på nøyaktig
+      // samme måte, av samme grunn (se docstringen over).
+      _cellRuns[cellIdx] = { ordinal: 0, registered: {}, bindingsRegistered: {} };
     };
 
     /**
@@ -877,6 +1167,16 @@
           if (ctrl.wrap && typeof ctrl.wrap.remove === 'function') ctrl.wrap.remove();
           delete _controls[key];
           delete _values[key];
+        }
+      });
+      // W5.2: samme mark-og-sopp-skjema for element-event-bindinger —
+      // guardet destroy (pyodide-proxy) på hver sopt binding.
+      var bindingsRegistered = run ? (run.bindingsRegistered || {}) : {};
+      Object.keys(_bindings).forEach(function (key) {
+        var b = _bindings[key];
+        if (b.cellIdx === cellIdx && !bindingsRegistered[key]) {
+          _destroyHandler(b);
+          delete _bindings[key];
         }
       });
       if (run) run.closed = true;
@@ -902,6 +1202,11 @@
       _controls = {};
       _strips = {};
       _cellRuns = {};
+      // W5.2: et helt nytt dokument invaliderer også alle element-event-
+      // bindinger fra det forrige (samme "glem ALT"-hensikt som resten av
+      // denne funksjonen) — guardet Ui.resetBindings finnes alltid her
+      // siden begge er definert i samme DOM-halvdel-blokk.
+      if (Ui.resetBindings) Ui.resetBindings();
     };
   }
 })(typeof window !== 'undefined' ? window : global);

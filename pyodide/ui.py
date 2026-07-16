@@ -30,6 +30,12 @@ try:
 except ImportError:      # CPython (pytest uten js-stub, eller ingen browser)
     window = None
 
+try:
+    from pyodide.ffi import create_proxy
+except ImportError:          # CPython (pytest med js-stub): ingen proxy noedvendig
+    def create_proxy(f):
+        return f
+
 
 def _ui():
     """window.Ui hvis den finnes og er lastet ennå, ellers None."""
@@ -109,8 +115,60 @@ def _num(value):
     return int(f) if f.is_integer() else f
 
 
-def slider(min=0, max=100, *, value=None, step=1, label=None, name=None, rerun='self', placement=None):
-    """Glidebryter. Fallback (ingen notatbok): value hvis gitt, ellers min."""
+def _event_payload(res, out_text):
+    """Klassifiser (returverdi, stdout) -> payload-dict for
+    Ui.renderEventResult (W5.2). Egen kompakt variant inspirert av dash.py
+    sin kort-klassifisering (dash ducktyper figurer via to_json+data/layout;
+    her brukes to_plotly_json, frame via to_html/columns) - fasadene er
+    divergente kopier per konvensjon (builder-dedup er et eksisterende
+    backlog-punkt)."""
+    out_text = (out_text or "").rstrip("\n")
+    if res is not None and hasattr(res, "to_plotly_json"):
+        pj = res.to_plotly_json()
+        return {"kind": "figure", "spec": {"data": pj.get("data"), "layout": pj.get("layout")}}
+    if res is not None and hasattr(res, "to_html") and hasattr(res, "columns"):
+        return {"kind": "table", "html": res.to_html(border=0)}
+    if res is None:
+        return {"kind": "text", "text": out_text} if out_text else None
+    text = str(res)
+    if out_text:
+        text = out_text + "\n" + text
+    return {"kind": "text", "text": text}
+
+
+def _make_event_wrapper(handler):
+    """Wrapperen JS faktisk kaller: JSON-event inn, payload-JSON ut.
+    Fanger stdout (sys.stdout-bytte, dash-presedens) og ALLE unntak ->
+    {"kind":"error"}. Kontrakt: handler tar ALLTID ett argument
+    (event-dicten) - ingen aritetssniffing (spec-avgjørelse)."""
+    def _wrapper(event_json):
+        import io, sys, traceback
+        buf = io.StringIO()
+        old = sys.stdout
+        sys.stdout = buf
+        try:
+            evt = json.loads(event_json) if event_json else {}
+            res = handler(evt)
+            p = _event_payload(res, buf.getvalue())
+            return json.dumps(p) if p is not None else '{}'   # tom payload -> JS no-op
+        except BaseException:
+            return json.dumps({"kind": "error", "text": traceback.format_exc()})
+        finally:
+            sys.stdout = old
+    return _wrapper
+
+
+def _alias_rerun(rerun, alias):
+    """W5.1 (spec 2026-07-16-notebook-widget-events): on_click=/on_change=
+    er kanoniske aliaser for rerun= - aliaset vinner når begge er satt
+    (dokumentert kontrakt, ingen advarselskanal i v1)."""
+    return alias if alias is not None else rerun
+
+
+def slider(min=0, max=100, *, value=None, step=1, label=None, name=None, rerun='self', on_change=None, placement=None):
+    """Glidebryter. Fallback (ingen notatbok): value hvis gitt, ellers min.
+    on_change= er kanonisk alias for rerun= (W5.1) - aliaset vinner."""
+    rerun = _alias_rerun(rerun, on_change)
     spec = _spec("slider", min=min, max=max, value=value, step=step,
                  label=label, name=name, rerun=rerun, placement=placement)
     result = _register(spec)
@@ -119,8 +177,10 @@ def slider(min=0, max=100, *, value=None, step=1, label=None, name=None, rerun='
     return _num(result)
 
 
-def dropdown(options, *, value=None, label=None, name=None, rerun='self', placement=None):
-    """Nedtrekksmeny. Fallback: value hvis gitt, ellers første valg."""
+def dropdown(options, *, value=None, label=None, name=None, rerun='self', on_change=None, placement=None):
+    """Nedtrekksmeny. Fallback: value hvis gitt, ellers første valg.
+    on_change= er kanonisk alias for rerun= (W5.1) - aliaset vinner."""
+    rerun = _alias_rerun(rerun, on_change)
     options = list(options)
     if not options:
         raise ValueError("ui.dropdown: options kan ikke være en tom liste.")
@@ -132,8 +192,10 @@ def dropdown(options, *, value=None, label=None, name=None, rerun='self', placem
     return str(result)
 
 
-def checkbox(label=None, *, value=False, name=None, rerun='self', placement=None):
-    """Avkrysningsboks. Fallback: value."""
+def checkbox(label=None, *, value=False, name=None, rerun='self', on_change=None, placement=None):
+    """Avkrysningsboks. Fallback: value.
+    on_change= er kanonisk alias for rerun= (W5.1) - aliaset vinner."""
+    rerun = _alias_rerun(rerun, on_change)
     spec = _spec("checkbox", value=bool(value), label=label, name=name, rerun=rerun, placement=placement)
     result = _register(spec)
     if result is None:
@@ -141,8 +203,10 @@ def checkbox(label=None, *, value=False, name=None, rerun='self', placement=None
     return bool(result)
 
 
-def switch(label=None, *, value=False, name=None, rerun='self', placement=None):
-    """Bryter (samme semantikk som checkbox, annen visning). Fallback: value."""
+def switch(label=None, *, value=False, name=None, rerun='self', on_change=None, placement=None):
+    """Bryter (samme semantikk som checkbox, annen visning). Fallback: value.
+    on_change= er kanonisk alias for rerun= (W5.1) - aliaset vinner."""
+    rerun = _alias_rerun(rerun, on_change)
     spec = _spec("switch", value=bool(value), label=label, name=name, rerun=rerun, placement=placement)
     result = _register(spec)
     if result is None:
@@ -150,8 +214,10 @@ def switch(label=None, *, value=False, name=None, rerun='self', placement=None):
     return bool(result)
 
 
-def number(value=0, *, min=None, max=None, step=None, label=None, name=None, rerun='self', placement=None):
-    """Tallfelt. Fallback: value."""
+def number(value=0, *, min=None, max=None, step=None, label=None, name=None, rerun='self', on_change=None, placement=None):
+    """Tallfelt. Fallback: value.
+    on_change= er kanonisk alias for rerun= (W5.1) - aliaset vinner."""
+    rerun = _alias_rerun(rerun, on_change)
     spec = _spec("number", value=value, min=min, max=max, step=step,
                  label=label, name=name, rerun=rerun, placement=placement)
     result = _register(spec)
@@ -160,9 +226,11 @@ def number(value=0, *, min=None, max=None, step=None, label=None, name=None, rer
     return _num(result)
 
 
-def text(value='', *, label=None, name=None, rerun='self', placement=None):
+def text(value='', *, label=None, name=None, rerun='self', on_change=None, placement=None):
     """Tekstfelt. Fallback: str(value) - returtypen er alltid str
-    (speiler dash.py sin textfield(default=str(default)))."""
+    (speiler dash.py sin textfield(default=str(default))).
+    on_change= er kanonisk alias for rerun= (W5.1) - aliaset vinner."""
+    rerun = _alias_rerun(rerun, on_change)
     spec = _spec("text", value=str(value), label=label, name=name, rerun=rerun, placement=placement)
     result = _register(spec)
     if result is None:
@@ -170,9 +238,47 @@ def text(value='', *, label=None, name=None, rerun='self', placement=None):
     return str(result)
 
 
-def button(label, *, rerun='self', name=None, placement=None):
+def button(label, *, rerun='self', on_click=None, name=None, placement=None):
     """Trykknapp. Returnerer alltid None - selve klikket trigger en rerun
-    av målcellen (js/ui.js), ikke en verdi å lese ut."""
+    av målcellen (js/ui.js), ikke en verdi å lese ut.
+    on_click= er kanonisk alias for rerun= (W5.1) - aliaset vinner."""
+    rerun = _alias_rerun(rerun, on_click)
     spec = _spec("button", label=label, name=name, rerun=rerun, placement=placement)
     _register(spec)
+    return None
+
+
+def on(selector, event, handler, *, target=None):
+    """Bind en python-funksjon til en HTML-event på et vilkårlig
+    DOM-element (typisk i en #%% html-celle). handler(evt) kalles med
+    event-dicten; returverdien rendres (tekst -> <pre>, DataFrame ->
+    tabell, plotly-figur -> graf) i target-id-en, eller appendes i
+    cellens output-slot når target utelates. Utenfor nettleser: no-op."""
+    u = _ui()
+    if u is None:
+        return None
+    binding = {"selector": str(selector), "event": str(event)}
+    if target is not None:
+        binding["target"] = str(target)
+    try:
+        u.bindEvent(json.dumps(binding), create_proxy(_make_event_wrapper(handler)))
+    except Exception:
+        # Samme defensive konvensjon som _register: en utdatert js/ui.js
+        # (uten bindEvent) skal degradere stille til no-op, ikke kaste.
+        return None
+    return None
+
+
+def run_cell(selector, event, cell_id):
+    """Kjør en navngitt celle (id= i #%%-headeren) når HTML-eventen
+    fyrer - cellevarianten av on() (eget navn, ingen overloading)."""
+    u = _ui()
+    if u is None:
+        return None
+    try:
+        u.bindRunCell(json.dumps({"selector": str(selector), "event": str(event), "cellId": str(cell_id)}))
+    except Exception:
+        # Samme defensive konvensjon som _register: en utdatert js/ui.js
+        # (uten bindRunCell) skal degradere stille til no-op, ikke kaste.
+        return None
     return None

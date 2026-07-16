@@ -45,6 +45,7 @@ Brython-registeret (filnavnet, og dermed registry-nøkkelen, skiller seg
 fra det offentlige importnavnet, løst via alias-mekanismen)."""
 from js import window                # MicroPython: js-modulen (jsffi)
 import json
+import sys                           # _format_exc: sys.print_exception (ekte mpy)
 
 
 def _ui():
@@ -140,8 +141,117 @@ def _num(value):
     return int(f) if f == int(f) else f
 
 
-def slider(min=0, max=100, *, value=None, step=1, label=None, name=None, rerun='self', placement=None):
-    """Glidebryter. Fallback (ingen notatbok-støtte): value hvis gitt, ellers min."""
+def _event_payload(res, out_text):
+    """Klassifiser (returverdi, stdout) -> payload-dict for
+    Ui.renderEventResult (W5.2). Som pyodide/ui.py sin _event_payload,
+    med ETT dokumentert avvik (delt med brython-fasaden): to_html()
+    kalles uten border=0 - denne motorens DataFrame.to_html tar ingen
+    kwargs (browser-verifisert i W5-exit-gate; pyodide har ekte pandas
+    og beholder border=0). (Fasadene er divergente kopier per
+    konvensjon - builder-dedup er et eksisterende backlog-punkt.)"""
+    out_text = (out_text or "").rstrip("\n")
+    if res is not None and hasattr(res, "to_plotly_json"):
+        pj = res.to_plotly_json()
+        return {"kind": "figure", "spec": {"data": pj.get("data"), "layout": pj.get("layout")}}
+    if res is not None and hasattr(res, "to_html") and hasattr(res, "columns"):
+        return {"kind": "table", "html": res.to_html()}
+    if res is None:
+        return {"kind": "text", "text": out_text} if out_text else None
+    text = str(res)
+    if out_text:
+        text = out_text + "\n" + text
+    return {"kind": "text", "text": text}
+
+
+def _format_exc(e):
+    """Traceback-tekst på begge dialekter - mirror av
+    micropython/micropython_runner.py sin _format_exc (samme begrunnelse):
+    ekte MicroPython (unix/wasm) mangler `traceback`-modulen helt
+    (browser-verifisert), men har `sys.print_exception(e, stream)`. CPython
+    (pytest) har `traceback.format_exc()`, ikke `sys.print_exception`. Gir
+    en ikke-tom streng i begge dialekter."""
+    if hasattr(sys, 'print_exception'):        # MicroPython
+        import io
+        buf = io.StringIO()
+        sys.print_exception(e, buf)
+        return buf.getvalue()
+    import traceback                            # CPython (pytest)
+    return traceback.format_exc()
+
+
+def _make_event_wrapper(handler):
+    """Wrapperen JS faktisk kaller: JSON-event inn, payload-JSON ut.
+    Fanger ALLE unntak -> {"kind":"error"}. Kontrakt: handler tar ALLTID
+    ett argument (event-dicten) - ingen aritetssniffing (spec-avgjørelse).
+
+    INGEN sys.stdout-bytte (i motsetning til pyodide/ui.py og
+    brython/ui_brython.py): ekte MicroPython tillater ikke det
+    (fase 0-funn c_sys_stdout_assign, se micropython/dash.py sin
+    filhode-kommentar). I stedet brukes motorens delte utskriftsbuffer via
+    window.__mpyCaptureStart()/__mpyCaptureEnd() (js/micropython-engine.js)
+    - DESTRUKTIVT, må kalles NØYAKTIG én gang per invokasjon. Samme
+    nøstede try/finally-struktur som micropython/dash.py sin _run()
+    (~L536-575, inkl. gjenutgitt reentrancy-fiks): __mpyCaptureEnd() kalles
+    i en `finally` rundt BARE selve handler-kallet, mens payload-byggingen
+    ligger INNE i den ytre try-en (ikke i en `else`-klausul) - en `else`
+    ville aldri blitt fanget av samme try sitt `except BaseException`,
+    så unntak fra _event_payload selv (f.eks. en to_html() som kaster)
+    ville da propagert ukontrollert i stedet for å bli et {"kind":"error"}.
+
+    CPython-testvakt: `window is None` under pytest (ingen ekte mpy-motor
+    - se brython/tests-mønsteret der window monkeypatches til None) faller
+    tilbake til et vanlig StringIO-bytte av sys.stdout, slik at
+    klassifiserings-/feilstiene i _event_payload lar seg teste meningsfullt
+    under CPython. Ekte mpy: window er ALLTID satt (motoren eksponerer
+    __mpyCaptureStart/__mpyCaptureEnd globalt på window), så denne grenen
+    tas aldri i en faktisk kjørende notatbok."""
+    def _wrapper(event_json):
+        if window is None:
+            import io
+            buf = io.StringIO()
+            old = sys.stdout
+            sys.stdout = buf
+            try:
+                try:
+                    evt = json.loads(event_json) if event_json else {}
+                    res = handler(evt)
+                finally:
+                    sys.stdout = old
+                    out_text = buf.getvalue()
+                p = _event_payload(res, out_text)
+                return json.dumps(p) if p is not None else '{}'   # tom payload -> JS no-op
+            except BaseException as e:
+                return json.dumps({"kind": "error", "text": _format_exc(e)})
+        window.__mpyCaptureStart()
+        try:
+            try:
+                evt = json.loads(event_json) if event_json else {}
+                res = handler(evt)
+            finally:
+                # __mpyCaptureEnd() splitter (destruktivt) fra motorens
+                # buffer - må kalles NØYAKTIG én gang. Denne finally
+                # garanterer det uansett om handler-kallet lykkes eller
+                # kaster, før resten av try (payload-byggingen) får
+                # forsøke å bruke teksten.
+                out_text = window.__mpyCaptureEnd()
+            p = _event_payload(res, out_text)
+            return json.dumps(p) if p is not None else '{}'   # tom payload -> JS no-op
+        except BaseException as e:
+            return json.dumps({"kind": "error", "text": _format_exc(e)})
+    return _wrapper
+
+
+def _alias_rerun(rerun, alias):
+    """W5.1 (spec 2026-07-16-notebook-widget-events): on_click=/on_change=
+    er kanoniske aliaser for rerun= - aliaset vinner når begge er satt
+    (dokumentert kontrakt, ingen advarselskanal i v1)."""
+    return alias if alias is not None else rerun
+
+
+def slider(min=0, max=100, *, value=None, step=1, label=None, name=None, rerun='self', on_change=None, placement=None):
+    """Glidebryter. Fallback (ingen notatbok-støtte): value hvis gitt, ellers min.
+    on_change= er kanonisk alias for rerun= (W5.1) - aliaset vinner."""
+    rerun = _alias_rerun(rerun, on_change)
     spec = _spec("slider", min=min, max=max, value=value, step=step,
                  label=label, name=name, rerun=rerun, placement=placement)
     result = _register(spec)
@@ -150,8 +260,10 @@ def slider(min=0, max=100, *, value=None, step=1, label=None, name=None, rerun='
     return _num(result)
 
 
-def dropdown(options, *, value=None, label=None, name=None, rerun='self', placement=None):
-    """Nedtrekksmeny. Fallback: value hvis gitt, ellers første valg."""
+def dropdown(options, *, value=None, label=None, name=None, rerun='self', on_change=None, placement=None):
+    """Nedtrekksmeny. Fallback: value hvis gitt, ellers første valg.
+    on_change= er kanonisk alias for rerun= (W5.1) - aliaset vinner."""
+    rerun = _alias_rerun(rerun, on_change)
     options = list(options)
     if not options:
         raise ValueError("ui.dropdown: options kan ikke være en tom liste.")
@@ -163,8 +275,10 @@ def dropdown(options, *, value=None, label=None, name=None, rerun='self', placem
     return str(result)
 
 
-def checkbox(label=None, *, value=False, name=None, rerun='self', placement=None):
-    """Avkrysningsboks. Fallback: value."""
+def checkbox(label=None, *, value=False, name=None, rerun='self', on_change=None, placement=None):
+    """Avkrysningsboks. Fallback: value.
+    on_change= er kanonisk alias for rerun= (W5.1) - aliaset vinner."""
+    rerun = _alias_rerun(rerun, on_change)
     spec = _spec("checkbox", value=bool(value), label=label, name=name, rerun=rerun, placement=placement)
     result = _register(spec)
     if result is None:
@@ -172,8 +286,10 @@ def checkbox(label=None, *, value=False, name=None, rerun='self', placement=None
     return bool(result)
 
 
-def switch(label=None, *, value=False, name=None, rerun='self', placement=None):
-    """Bryter (samme semantikk som checkbox, annen visning). Fallback: value."""
+def switch(label=None, *, value=False, name=None, rerun='self', on_change=None, placement=None):
+    """Bryter (samme semantikk som checkbox, annen visning). Fallback: value.
+    on_change= er kanonisk alias for rerun= (W5.1) - aliaset vinner."""
+    rerun = _alias_rerun(rerun, on_change)
     spec = _spec("switch", value=bool(value), label=label, name=name, rerun=rerun, placement=placement)
     result = _register(spec)
     if result is None:
@@ -181,8 +297,10 @@ def switch(label=None, *, value=False, name=None, rerun='self', placement=None):
     return bool(result)
 
 
-def number(value=0, *, min=None, max=None, step=None, label=None, name=None, rerun='self', placement=None):
-    """Tallfelt. Fallback: value."""
+def number(value=0, *, min=None, max=None, step=None, label=None, name=None, rerun='self', on_change=None, placement=None):
+    """Tallfelt. Fallback: value.
+    on_change= er kanonisk alias for rerun= (W5.1) - aliaset vinner."""
+    rerun = _alias_rerun(rerun, on_change)
     spec = _spec("number", value=value, min=min, max=max, step=step,
                  label=label, name=name, rerun=rerun, placement=placement)
     result = _register(spec)
@@ -191,9 +309,11 @@ def number(value=0, *, min=None, max=None, step=None, label=None, name=None, rer
     return _num(result)
 
 
-def text(value='', *, label=None, name=None, rerun='self', placement=None):
+def text(value='', *, label=None, name=None, rerun='self', on_change=None, placement=None):
     """Tekstfelt. Fallback: str(value) - returtypen er alltid str
-    (speiler dash.py sin textfield(default=str(default)))."""
+    (speiler dash.py sin textfield(default=str(default))).
+    on_change= er kanonisk alias for rerun= (W5.1) - aliaset vinner."""
+    rerun = _alias_rerun(rerun, on_change)
     spec = _spec("text", value=str(value), label=label, name=name, rerun=rerun, placement=placement)
     result = _register(spec)
     if result is None:
@@ -201,9 +321,53 @@ def text(value='', *, label=None, name=None, rerun='self', placement=None):
     return str(result)
 
 
-def button(label, *, rerun='self', name=None, placement=None):
+def button(label, *, rerun='self', on_click=None, name=None, placement=None):
     """Trykknapp. Returnerer alltid None - selve klikket trigger en rerun
-    av målcellen (js/ui.js), ikke en verdi å lese ut."""
+    av målcellen (js/ui.js), ikke en verdi å lese ut.
+    on_click= er kanonisk alias for rerun= (W5.1) - aliaset vinner."""
+    rerun = _alias_rerun(rerun, on_click)
     spec = _spec("button", label=label, name=name, rerun=rerun, placement=placement)
     _register(spec)
+    return None
+
+
+def on(selector, event, handler, *, target=None):
+    """Bind en python-funksjon til en HTML-event på et vilkårlig
+    DOM-element (typisk i en #%% html-celle). handler(evt) kalles med
+    event-dicten; returverdien rendres (tekst -> <pre>, DataFrame ->
+    tabell, plotly-figur -> graf) i target-id-en, eller appendes i
+    cellens output-slot når target utelates. Utenfor nettleser: no-op.
+
+    INGEN create_proxy her (som i brython/ui_brython.py, i motsetning til
+    pyodide/ui.py): MicroPython-funksjoner er jsffi-kallbare direkte over
+    grensen - samme presedens som micropython/dash.py sin _add_func()/
+    controls() (on_change sendes rått til window.Dash.addCard/
+    addControls, se ~L491)."""
+    u = _ui()
+    if u is None:
+        return None
+    binding = {"selector": str(selector), "event": str(event)}
+    if target is not None:
+        binding["target"] = str(target)
+    try:
+        u.bindEvent(json.dumps(binding), _make_event_wrapper(handler))
+    except Exception:
+        # Samme defensive konvensjon som _register: en utdatert js/ui.js
+        # (uten bindEvent) skal degradere stille til no-op, ikke kaste.
+        return None
+    return None
+
+
+def run_cell(selector, event, cell_id):
+    """Kjør en navngitt celle (id= i #%%-headeren) når HTML-eventen
+    fyrer - cellevarianten av on() (eget navn, ingen overloading)."""
+    u = _ui()
+    if u is None:
+        return None
+    try:
+        u.bindRunCell(json.dumps({"selector": str(selector), "event": str(event), "cellId": str(cell_id)}))
+    except Exception:
+        # Samme defensive konvensjon som _register: en utdatert js/ui.js
+        # (uten bindRunCell) skal degradere stille til no-op, ikke kaste.
+        return None
     return None

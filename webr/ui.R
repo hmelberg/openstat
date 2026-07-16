@@ -82,14 +82,24 @@
 
 # ---- offentlig API (samme vokabular som pyodide/ui.py) ----
 
+# W5.1 (spec 2026-07-16-notebook-widget-events): on_click=/on_change= er
+# kanoniske aliaser for rerun= - aliaset vinner naar begge er satt
+# (dokumentert kontrakt, ingen advarselskanal i v1). R-motoren har ingen
+# _alias_rerun-funksjon slik de tre Python-fasadene faar (ingen delt
+# hjelpefunksjon i R-filen fra foer) - hver ui_*() gjoer i stedet
+# `if (!is.null(alias)) rerun <- alias` foer specen bygges, som er det
+# R-idiomatiske ekvivalentet.
+
 #' Glidebryter. Fallback (ingen notatbok/verdi ikke injisert): value hvis
 #' gitt, ellers min - samme regel som pyodide/ui.py sin slider(). `placement`
 #' (Task 3, per-kontroll plassering: "top"/"bottom"/"left") er en ren
 #' gjennomstrøms-kwarg - valideringen skjer på JS-siden (js/ui.js sin
 #' normalizeSpec); NULL droppes av .ui_register som vanlig og kontrollen
-#' faller da tilbake til cellens widgets=-default.
+#' faller da tilbake til cellens widgets=-default. `on_change` er kanonisk
+#' alias for `rerun` (W5.1) - aliaset vinner naar begge er satt.
 ui_slider <- function(min = 0, max = 100, value = NULL, step = 1, label = NULL,
-                      name = NULL, rerun = "self", placement = NULL) {
+                      name = NULL, rerun = "self", on_change = NULL, placement = NULL) {
+  if (!is.null(on_change)) rerun <- on_change
   key <- .ui_next_key(name)
   default <- if (is.null(value)) min else value
   .ui_register(list(type = "slider", name = key, label = label, min = min,
@@ -103,8 +113,11 @@ ui_slider <- function(min = 0, max = 100, value = NULL, step = 1, label = NULL,
 #' Nedtrekksmeny. Fallback: value hvis gitt, ellers første valg. Tom
 #' options-liste er en programmeringsfeil og skal feile HØYT (samme som
 #' pyodide/ui.py sin ValueError), ikke stille falle tilbake til noe.
+#' `on_change` er kanonisk alias for `rerun` (W5.1) - aliaset vinner naar
+#' begge er satt.
 ui_dropdown <- function(options, value = NULL, label = NULL, name = NULL,
-                        rerun = "self", placement = NULL) {
+                        rerun = "self", on_change = NULL, placement = NULL) {
+  if (!is.null(on_change)) rerun <- on_change
   key <- .ui_next_key(name)
   options <- as.character(options)
   if (length(options) == 0) {
@@ -122,9 +135,11 @@ ui_dropdown <- function(options, value = NULL, label = NULL, name = NULL,
   as.character(raw)
 }
 
-#' Avkrysningsboks. Fallback: value.
+#' Avkrysningsboks. Fallback: value. `on_change` er kanonisk alias for
+#' `rerun` (W5.1) - aliaset vinner naar begge er satt.
 ui_checkbox <- function(label = NULL, value = FALSE, name = NULL, rerun = "self",
-                        placement = NULL) {
+                        on_change = NULL, placement = NULL) {
+  if (!is.null(on_change)) rerun <- on_change
   key <- .ui_next_key(name)
   default <- isTRUE(value)
   .ui_register(list(type = "checkbox", name = key, label = label,
@@ -135,8 +150,11 @@ ui_checkbox <- function(label = NULL, value = FALSE, name = NULL, rerun = "self"
 }
 
 #' Bryter (samme semantikk som ui_checkbox, annen visning). Fallback: value.
+#' `on_change` er kanonisk alias for `rerun` (W5.1) - aliaset vinner naar
+#' begge er satt.
 ui_switch <- function(label = NULL, value = FALSE, name = NULL, rerun = "self",
-                      placement = NULL) {
+                      on_change = NULL, placement = NULL) {
+  if (!is.null(on_change)) rerun <- on_change
   key <- .ui_next_key(name)
   default <- isTRUE(value)
   .ui_register(list(type = "switch", name = key, label = label,
@@ -148,8 +166,12 @@ ui_switch <- function(label = NULL, value = FALSE, name = NULL, rerun = "self",
 
 #' Tallfelt. Fallback: value. min/max/step er valgfrie (i motsetning til
 #' ui_slider, som krever dem) - speiler pyodide/ui.py sin number()-signatur.
+#' `on_change` er kanonisk alias for `rerun` (W5.1) - aliaset vinner naar
+#' begge er satt.
 ui_number <- function(value = 0, min = NULL, max = NULL, step = NULL,
-                      label = NULL, name = NULL, rerun = "self", placement = NULL) {
+                      label = NULL, name = NULL, rerun = "self", on_change = NULL,
+                      placement = NULL) {
+  if (!is.null(on_change)) rerun <- on_change
   key <- .ui_next_key(name)
   default <- value
   .ui_register(list(type = "number", name = key, label = label, min = min,
@@ -161,9 +183,11 @@ ui_number <- function(value = 0, min = NULL, max = NULL, step = NULL,
 }
 
 #' Tekstfelt. Fallback: as.character(value) - returtypen er alltid character
-#' (speiler pyodide/ui.py sin text()).
+#' (speiler pyodide/ui.py sin text()). `on_change` er kanonisk alias for
+#' `rerun` (W5.1) - aliaset vinner naar begge er satt.
 ui_text <- function(value = "", label = NULL, name = NULL, rerun = "self",
-                    placement = NULL) {
+                    on_change = NULL, placement = NULL) {
+  if (!is.null(on_change)) rerun <- on_change
   key <- .ui_next_key(name)
   default <- as.character(value)
   .ui_register(list(type = "text", name = key, label = label,
@@ -175,8 +199,11 @@ ui_text <- function(value = "", label = NULL, name = NULL, rerun = "self",
 
 #' Trykknapp. Returnerer alltid usynlig NULL - selve klikket trigger en
 #' rerun av målcellen (js/ui.js), ikke en verdi å lese ut (speiler
-#' pyodide/ui.py sin button()).
-ui_button <- function(label, rerun = "self", name = NULL, placement = NULL) {
+#' pyodide/ui.py sin button()). `on_click` er kanonisk alias for `rerun`
+#' (W5.1) - aliaset vinner naar begge er satt.
+ui_button <- function(label, rerun = "self", on_click = NULL, name = NULL,
+                      placement = NULL) {
+  if (!is.null(on_click)) rerun <- on_click
   key <- .ui_next_key(name)
   .ui_register(list(type = "button", name = key, label = label, rerun = rerun,
                     placement = placement))

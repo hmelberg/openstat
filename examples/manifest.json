@@ -124,6 +124,11 @@
       "file": "brython/bry24_notatbok_widgets.txt",
       "label": "Notatbok — widgets og #@param (Brython)",
       "group": null
+    },
+    {
+      "file": "brython/bry25_widget_events.txt",
+      "label": "Widget-events — ui.on og ui.run_cell (Brython)",
+      "group": null
     }
   ],
   "duckdb": [
@@ -680,6 +685,11 @@
       "file": "micropython/05_notatbok_widgets.txt",
       "label": "Notatbok — widgets og #@param (MicroPython)",
       "group": null
+    },
+    {
+      "file": "micropython/06_widget_events.txt",
+      "label": "Widget-events — ui.on og ui.run_cell (MicroPython)",
+      "group": null
     }
   ],
   "python": [
@@ -741,6 +751,11 @@
     {
       "file": "python/py_param_forms.txt",
       "label": "#@param-skjemaer (Colab-kompatible)",
+      "group": null
+    },
+    {
+      "file": "python/py_widget_events.txt",
+      "label": "Widget-events — ui.on og ui.run_cell",
       "group": null
     },
     {
