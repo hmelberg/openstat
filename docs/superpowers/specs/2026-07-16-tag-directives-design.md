@@ -1,5 +1,7 @@
 # `#tag.` cell directives, content sniffing, preamble defaults (design)
 
+**Status:** DELIVERED 2026-07-16 (plan 2026-07-16-tag-directives.md).
+
 Phase 1 of the unified document model
 (`2026-07-16-unified-document-model-notes.md` §2 and §6.1). Companion to
 spec 1 (`2026-07-13-notebook-cells-design.md`). All directional decisions

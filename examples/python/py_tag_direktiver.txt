@@ -1,0 +1,33 @@
+# label: Notatbok — #tag-direktiver og innholds-sniffing
+#options.mode = python
+#options.title = "Celle-direktiver med #tag"
+#options.description = "#tag.key = value i cellekroppen: metadata som overlever Colab/Jupytext-runde-turer, defaults i preambelen, og celler som selv røper typen sin"
+#tag.type = python
+
+#%%
+"""
+# `#tag`-direktiver
+
+Metadata kan ligge som kommentarlinjer ØVERST i cellekroppen i stedet for
+på `#%%`-linjen: `#tag.key = value`, én per linje. Colab og Jupytext eier
+`#%%`-linjene og skriver dem om — kommentarlinjer i kroppen overlever
+alltid. Denne cellen er dessuten *sniffet*: den er én `"""`-streng alene,
+og rendres derfor som markdown uten noen `md`-markering.
+
+- `#tag.type = python` i preambelen over gir dokumentets standard-celletype.
+- `#tag.hide-code = true` under skjuler koden i cellen, som header-flagget.
+- Alt vises fortsatt som ren tekst i editoren — rå tekst ER editoren.
+"""
+
+#%%
+#tag.hide-code = true
+#tag.id = beregning
+summen = sum(range(10))
+summen
+
+#%%
+<p>Denne cellen begynner med <code>&lt;</code> og sniffes som <b>html</b>.</p>
+
+#%% duckdb
+#tag.id = tabell
+select 42 as svar

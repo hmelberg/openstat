@@ -754,6 +754,11 @@
       "group": null
     },
     {
+      "file": "python/py_tag_direktiver.txt",
+      "label": "Notatbok — #tag-direktiver og innholds-sniffing",
+      "group": null
+    },
+    {
       "file": "python/py_widget_events.txt",
       "label": "Widget-events — ui.on og ui.run_cell",
       "group": null
