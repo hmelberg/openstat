@@ -3342,6 +3342,17 @@
       // Web send button is only shown in python/r/duckdb modes (admin-gated);
       // re-check eligibility now that the mode changed (cross-IIFE via window).
       if (window.mdSyncWebBtnVisibility) window.mdSyncWebBtnVisibility();
+      // Fase C sweep-fiks (Task 7): motor-notatbøkenes sesjons-liv eies av
+      // motorøkta (BrythonEngine/MicroPythonEngine.notebookSession.isLive),
+      // IKKE av `nbSessionLive`. nbSetSessionLive(false) øverst er derfor et
+      // no-op når en motor-notatbok aldri satte flagget, så sesjonschippen
+      // (som leser motorøktas isLive) ble hengende på «● aktiv» etter et
+      // modusbytte selv om motoren nettopp ble invalidert. Varsle
+      // abonnentene eksplisitt nå — etter at activeEditorMode/setDocMode er
+      // oppdatert — slik at chippen re-rendres til riktig «○ kald».
+      // Dekket av: browser-sweep Task 7 rad 5 / ⚠️-punkt 3 (modusbytte
+      // bort-og-tilbake → chip «kald»).
+      nbNotifyStateChange();
     }
 
     function updateModeButtonsUi() {
@@ -3687,13 +3698,19 @@
     // interrupt-vakt fanger ikke et nytt klikk midt i løkka.
     let engineNbRunActive = false;
     let nbStateChangeCbs = [];
+    // Varsle abonnenter (sesjonschippen i cells.js) om at sesjonstilstanden
+    // KAN ha endret seg. Callbacken leser selv isLive()/runtime() ferskt, så
+    // den boolske parameteren er kun et hint — abonnenten trenger den ikke.
+    function nbNotifyStateChange() {
+      for (var _nsi = 0; _nsi < nbStateChangeCbs.length; _nsi++) {
+        try { nbStateChangeCbs[_nsi](nbSessionLive); } catch (_e) {}
+      }
+    }
     function nbSetSessionLive(v) {
       v = !!v;
       if (v === nbSessionLive) return;
       nbSessionLive = v;
-      for (var _nsi = 0; _nsi < nbStateChangeCbs.length; _nsi++) {
-        try { nbStateChangeCbs[_nsi](nbSessionLive); } catch (_e) {}
-      }
+      nbNotifyStateChange();
     }
     // ── Editor mode (always-on, controlled by bottom-bar dropdown) ──────
     let activeEditorMode  = 'microdata'; // 'microdata' | 'python' | 'r'
