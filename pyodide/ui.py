@@ -30,6 +30,12 @@ try:
 except ImportError:      # CPython (pytest uten js-stub, eller ingen browser)
     window = None
 
+try:
+    from pyodide.ffi import create_proxy
+except ImportError:          # CPython (pytest med js-stub): ingen proxy noedvendig
+    def create_proxy(f):
+        return f
+
 
 def _ui():
     """window.Ui hvis den finnes og er lastet ennå, ellers None."""
@@ -111,10 +117,11 @@ def _num(value):
 
 def _event_payload(res, out_text):
     """Klassifiser (returverdi, stdout) -> payload-dict for
-    Ui.renderEventResult (W5.2). Speiler dash.py sin kort-klassifisering
-    (figur-ducktyping via to_plotly_json, frame via to_html/columns),
-    men som egen kompakt kopi - fasadene er divergente kopier per
-    konvensjon (builder-dedup er et eksisterende backlog-punkt)."""
+    Ui.renderEventResult (W5.2). Egen kompakt variant inspirert av dash.py
+    sin kort-klassifisering (dash ducktyper figurer via to_json+data/layout;
+    her brukes to_plotly_json, frame via to_html/columns) - fasadene er
+    divergente kopier per konvensjon (builder-dedup er et eksisterende
+    backlog-punkt)."""
     out_text = (out_text or "").rstrip("\n")
     if res is not None and hasattr(res, "to_plotly_json"):
         pj = res.to_plotly_json()
@@ -254,11 +261,11 @@ def on(selector, event, handler, *, target=None):
     if target is not None:
         binding["target"] = str(target)
     try:
-        from pyodide.ffi import create_proxy
-    except ImportError:
-        def create_proxy(f):
-            return f
-    u.bindEvent(json.dumps(binding), create_proxy(_make_event_wrapper(handler)))
+        u.bindEvent(json.dumps(binding), create_proxy(_make_event_wrapper(handler)))
+    except Exception:
+        # Samme defensive konvensjon som _register: en utdatert js/ui.js
+        # (uten bindEvent) skal degradere stille til no-op, ikke kaste.
+        return None
     return None
 
 
@@ -268,5 +275,10 @@ def run_cell(selector, event, cell_id):
     u = _ui()
     if u is None:
         return None
-    u.bindRunCell(json.dumps({"selector": str(selector), "event": str(event), "cellId": str(cell_id)}))
+    try:
+        u.bindRunCell(json.dumps({"selector": str(selector), "event": str(event), "cellId": str(cell_id)}))
+    except Exception:
+        # Samme defensive konvensjon som _register: en utdatert js/ui.js
+        # (uten bindRunCell) skal degradere stille til no-op, ikke kaste.
+        return None
     return None
