@@ -222,11 +222,19 @@ def _bind_datasets(spec_json):
 _baseline_vars = dict(_shared_vars)
 
 def _reset():
-    """Spol brukerglobals tilbake til boot-baseline; ''/traceback-kontrakt."""
+    """Spol brukerglobals tilbake til boot-baseline; ''/traceback-kontrakt.
+    Per-nøkkel med vilje — SAMME Brython 3.12-felle som _rollback over
+    dokumenterer: clear()+update() mistet gjenopprettede nøkler (browser-
+    verifisert 2026-07-16: _baseline_vars['show'] overlevde ikke en
+    clear()+update()-reset, «Restart & kjør alle» endte med at selv show()
+    ga NameError). d[k]=v / del d[k] oppfører seg riktig, som i _rollback."""
     global _last_error
     try:
-        _shared_vars.clear()
-        _shared_vars.update(_baseline_vars)
+        for k in list(_shared_vars.keys()):
+            if k not in _baseline_vars:
+                del _shared_vars[k]
+        for k in list(_baseline_vars.keys()):
+            _shared_vars[k] = _baseline_vars[k]
         _last_error = ''
         return ''
     except BaseException:

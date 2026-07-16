@@ -7,7 +7,7 @@
 # motoren (js/micropython-engine.js) fanger stdout via loadMicroPython({stdout}).
 # _execute_code print()-er derfor alt (også trailing expression) og
 # returnerer ''. Under CPython (pytest) fanges utskriften med capsys.
-import sys, json, traceback
+import sys, json
 from io import StringIO
 
 _EMBED_S = '__micro_transform_start_'
@@ -240,12 +240,26 @@ def _bind_datasets(spec_json):
 _baseline_vars = dict(_shared_vars)
 
 def _reset():
-    """Spol brukerglobals tilbake til boot-baseline; ''/traceback-kontrakt."""
+    """Spol brukerglobals tilbake til boot-baseline; ''/traceback-kontrakt.
+    Per-nøkkel med vilje — SAMME Brython 3.12-felle som _rollback over
+    dokumenterer (arvet av MicroPython-runneren via tvillingstrukturen selv
+    om fella i seg selv er Brython-spesifikk): clear()+update() mistet
+    gjenopprettede nøkler (browser-verifisert 2026-07-16 i Brython-tvillingen
+    — _reset() speiles her uendret for symmetri). d[k]=v / del d[k] oppfører
+    seg riktig, som i _rollback. Bruker _format_exc(e) (IKKE bar
+    traceback.format_exc()) — ekte MicroPython (WASM) mangler `traceback`-
+    modulen (browser-verifisert 2026-07-16: et modulnivå-`import traceback`
+    her feilet ALL sesjonsboot med "ImportError: no module named
+    'traceback'"); _format_exc() dekker begge dialekter via
+    sys.print_exception()."""
     global _last_error
     try:
-        _shared_vars.clear()
-        _shared_vars.update(_baseline_vars)
+        for k in list(_shared_vars.keys()):
+            if k not in _baseline_vars:
+                del _shared_vars[k]
+        for k in list(_baseline_vars.keys()):
+            _shared_vars[k] = _baseline_vars[k]
         _last_error = ''
         return ''
-    except BaseException:
-        return traceback.format_exc()
+    except BaseException as e:
+        return _format_exc(e)
