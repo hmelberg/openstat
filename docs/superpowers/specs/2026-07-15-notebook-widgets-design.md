@@ -133,11 +133,12 @@ MODES have no notebook support (spec 1 §3.3), so their `ui` facades ship as
 API-compatible fallbacks (return defaults in scripts; dash v2 remains the
 interactive story there) until those runners gain cell support; full cell
 widgets land in pyodide (W1, done) and R-mode notebooks (W2).
-*Update 2026-07-16:* that cell support is now a planned phase — spec 1
-§6 Phase C (brython/micropython notebook execution). When it lands,
-widgets and `#@param` follow for free: the facades and the param parser
-are already dialect-ready, and both engines being main-thread means the
-pyodide pull model applies unchanged.
+*Update 2026-07-16:* Phase C (brython/micropython notebook execution, spec
+1 §6) is now DONE — widgets and `#@param` came for free as predicted: the
+facades and the param parser were already dialect-ready, and both engines
+being main-thread means the pyodide pull model applies unchanged. Full
+cell-widget parity across pyodide/R/brython/micropython is delivered; see
+`2026-07-16-notebook-cells-phase-c-design.md` for the execution seam.
 
 **Track-1 parity note (placement phase, Task 2, fixed 2026-07-15):** R's
 "Kjør alle" originally shipped as a documented W2 adaptation — no per-cell

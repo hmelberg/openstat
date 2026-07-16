@@ -19,18 +19,13 @@ MicroPython kjører på hovedtråden (som Brython, ikke i en worker slik webR
 gjør), så `registerControl` kan kalles synkront akkurat som i pyodide/
 Brython - se micropython/dash.py (`window.Dash`) for presedens.
 
-Widgets krever i dag en aktiv notatbok-kjørekontekst (satt av
-`Ui.beginCellRun`) for at kontrollen faktisk skal registreres og tegnes.
-MicroPython-motoren har IKKE notatbok-cellestøtte ennå (kommer i en senere
-fase) - `SEG_MARKER` (js/cells.js) mangler micropython, så en
-notatbok-celle i denne motoren blir i dag blanket i stedet for kjørt.
-Følgelig finnes det ingen aktiv kjørekontekst å registrere en kontroll mot,
-og `registerControl` returnerer null uansett - hvert `ui.*`-kall faller
-derfor ALLTID tilbake til sin dokumenterte deterministiske default (under,
-per funksjon). Dette er IKKE en feil eller midlertidig begrensning i denne
-fila - det er den korrekte oppførselen inntil notatbok-cellestøtte finnes
-for denne motoren. API-et er likevel identisk med pyodide-varianten, slik
-at kode kan porteres uendret den dagen støtten kommer.
+Fase C (spec 2026-07-16): motoren HAR notatbok-cellestøtte - under
+per-celle-kjøring/Kjør alle setter index.html kjørekonteksten
+(Ui.beginCellRun), og registerControl registrerer/tegner kontrollen
+akkurat som i pyodide-modus (samme pull-modell; hovedtråd = synkron
+lesing). Utenfor en notatbok-kjørekontekst (vanlige scripts) returnerer
+registerControl fortsatt null, og hvert ui.*-kall faller da tilbake til
+sin dokumenterte deterministiske default (under, per funksjon).
 
 Kritisk FFI-detalj: Brython 3.12 er verifisert til IKKE å konvertere en
 ekte JS `null` til Python `None` over grensen (se brython/duckdb_brython.py,
@@ -130,11 +125,19 @@ def _spec(type_, **kwargs):
 
 def _num(value):
     """JSON-tall -> int hvis heltallig, ellers float (dokumentert
-    returtype for slider/number er int|float)."""
+    returtype for slider/number er int|float).
+
+    `f == int(f)` i stedet for `f.is_integer()` (som pyodide/ui.py og
+    brython/ui_brython.py sin tvilling bruker) - browserverifisert
+    (Fase C, Task 6): ekte MicroPython (i motsetning til CPython/Brython)
+    mangler `float.is_integer()`, så et helt ordinært `ui.slider(1, 20,
+    value=5)`-kall i en faktisk kjørende notatbokcelle krasjet med
+    AttributeError. `==` er en universell sammenligning som virker
+    identisk i alle tre motorene."""
     if value is None or isinstance(value, bool):
         return value
     f = float(value)
-    return int(f) if f.is_integer() else f
+    return int(f) if f == int(f) else f
 
 
 def slider(min=0, max=100, *, value=None, step=1, label=None, name=None, rerun='self', placement=None):

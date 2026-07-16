@@ -119,6 +119,11 @@
       "file": "brython/bry23_sklearn.txt",
       "label": "sklearn — KMeans, PCA, regresjon",
       "group": null
+    },
+    {
+      "file": "brython/bry24_notatbok_widgets.txt",
+      "label": "Notatbok — widgets og #@param (Brython)",
+      "group": null
     }
   ],
   "duckdb": [
@@ -669,6 +674,11 @@
     {
       "file": "micropython/04_csv_url.txt",
       "label": "Les en CSV fra en URL",
+      "group": null
+    },
+    {
+      "file": "micropython/05_notatbok_widgets.txt",
+      "label": "Notatbok — widgets og #@param (MicroPython)",
       "group": null
     }
   ],
