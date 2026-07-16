@@ -3681,6 +3681,11 @@
     // "Kjør alle" (btnRun) re-booter alltid ubetinget og markerer deretter
     // levende; modusbytte og restart() markerer død FØR ny boot.
     let nbSessionLive = false;
+    // Fase C: vakt mot dobbel "Kjør alle" i motor-notatbøker — løkka under
+    // (btnRun) slipper scriptRunInProgress mellom cellene (hver celle eier
+    // sitt eget flagg via mdRunNotebookCell), så btnRun sin vanlige
+    // interrupt-vakt fanger ikke et nytt klikk midt i løkka.
+    let engineNbRunActive = false;
     let nbStateChangeCbs = [];
     function nbSetSessionLive(v) {
       v = !!v;
@@ -9850,6 +9855,32 @@ async def _m2py_run_segment(_seg_json):
     btnRun.addEventListener('click', async () => {
       if (scriptRunInProgress) {
         performRunInterrupt();
+        return;
+      }
+      // Fase C (spec 2026-07-16, valg A): motor-notatbøker (brython/
+      // micropython) kjøres celle for celle via Cells.runCell — HELT UTENOM
+      // executableSource/segmentmaskineriet under (som ville blanket alle
+      // cellene: SEG_MARKER har med vilje ingen brython/micropython-
+      // oppføringer). Cells.runCell gir stale-rydding, Kjør-chip-skjuling,
+      // dash-sweep og renderCellResult gratis; fremmede kode-kinds får sin
+      // notis fra mdRunNotebookCell. Kjør/idle-knappetilstanden blafrer kort
+      // mellom cellene (hver celle eier sitt eget scriptRunInProgress-vindu)
+      // — akseptert: en delt løkke-flagg ville fått Cells.runCell sin egen
+      // mdIsScriptRunning-vakt til å avvise alle cellene.
+      if (window.Cells && window.Cells.active()
+          && (activeEditorMode === 'brython' || activeEditorMode === 'micropython')) {
+        if (engineNbRunActive) return;
+        engineNbRunActive = true;
+        try {
+          if (window.Cells.grantHtmlTrust) window.Cells.grantHtmlTrust();
+          var _engPlan = window.Cells.engineRunPlan() || [];
+          for (var _ei = 0; _ei < _engPlan.length; _ei++) {
+            await window.Cells.runCell(_engPlan[_ei]);
+          }
+        } finally {
+          engineNbRunActive = false;
+          setRunButtonsUi('idle');
+        }
         return;
       }
       // Notatbok aktiv (Task 6): #%%-celler → legacy '## lang'-segmentmarkører
