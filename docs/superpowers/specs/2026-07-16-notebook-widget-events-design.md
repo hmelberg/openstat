@@ -71,9 +71,10 @@ for callback results. R/webR is deferred (worker round-trip; parity rule).
 In `pyodide/ui.py`, `brython/ui_brython.py`, `micropython/ui_mpy.py`,
 `webr/ui.R`: `on_click=` accepted by `button()` and `on_change=` by the
 value controls (slider/dropdown/checkbox/switch/number/text), each mapped
-to the existing `rerun` spec field before JSON crossing; passing both
-`rerun=` and the alias raises/warns (one wins deterministically: the
-alias). `rerun=` stays. JS side unchanged (still sees `spec.rerun`).
+to the existing `rerun` spec field before JSON crossing; if both
+`rerun=` and the alias are given, the alias wins (documented in the
+docstrings — no warning channel in v1). `rerun=` stays. JS side
+unchanged (still sees `spec.rerun`).
 
 ### 2. W5.2 — `Ui` bindings registry (js/ui.js)
 
@@ -108,18 +109,21 @@ alias). `rerun=` stays. JS side unchanged (still sees `spec.rerun`).
   crosses as JSON to `Ui.bindRunCell`. No function crossing.
 - `ui.on(selector, event, handler, target=None)`: wraps `handler` in a
   runner closure and crosses it per runtime exactly as dash does:
-  - pyodide: `create_proxy(wrapper)`, proxy tracked per cellKey and
-    destroyed by the JS sweep callback (a small
-    `Ui.onBindingSwept`-driven destroy, mirroring `dash._reap`'s intent
-    without its laziness) — detail plan-level.
+  - pyodide: `create_proxy(wrapper)` handed to JS — and **JS owns
+    destruction**: everywhere a binding is removed (sweep, replace,
+    resetBindings), js/ui.js calls `handler.destroy()` when the method
+    exists (PyProxy has it; brython/micropython function objects do not
+    → guarded no-op). This removes any need for a dash-`_reap`-style
+    Python-side proxy ledger.
   - brython/micropython: pass the wrapper directly.
 - **The wrapper** (per facade, dialect-adapted): captures stdout
   (`sys.stdout` swap in pyodide/brython; `__mpyCaptureStart/End` in
   micropython — destructive, exactly one pair per invocation, dash
   precedent `micropython/dash.py:536-575`), calls `handler(event_dict)`
-  if it accepts an argument else `handler()` (inspect/try — mirror
-  dash's `_func_params` tolerance; micropython lambdas limitation
-  documented), then classifies `(return_value, stdout_text)` into a
+  — the handler contract is ALWAYS one argument (the event dict:
+  `{"type", "value", "checked", "targetId"}`); no arity sniffing in v1
+  (a fixed contract beats `_func_params`-style guessing, which
+  micropython cannot do reliably anyway), then classifies `(return_value, stdout_text)` into a
   payload dict and returns it as a JSON string:
   - plotly figure (`to_plotly_json`/`fig`-duck-typing as in dash) →
     `{kind:'figure', spec:{data,layout}}`
