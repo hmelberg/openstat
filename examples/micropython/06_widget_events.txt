@@ -1,0 +1,35 @@
+# label: Widget-events — ui.on og ui.run_cell (MicroPython)
+#options.mode = micropython
+#options.title = "Widget-events (ui.on / ui.run_cell) (MicroPython)"
+#options.description = "HTML-events på vilkårlige DOM-elementer: micropython-callbacks med target-rendering, og celle-kjøring fra HTML-knapper"
+# load https://raw.githubusercontent.com/hmelberg/openstat/main/data/iris.csv as iris
+
+#%% md
+# Events på HTML-elementer (MicroPython)
+
+`ui.on(selector, event, funksjon, target=…)` binder en micropython-funksjon
+til en HTML-event; returverdien rendres i `target`-elementet (tekst →
+`<pre>`, DataFrame → tabell, plotly-figur → graf). Utelates `target`,
+appendes resultatet i cellens egen output-slot. `ui.run_cell(selector,
+event, celle_id)` kjører i stedet en navngitt celle på nytt.
+
+Dette er **push-modellen**: knappen dytter en event inn i MicroPython, i
+motsetning til `ui.slider`/`ui.dropdown` som er pull (cellen leser verdien).
+
+#%% html
+<button id="beregnBtn">Vis rader</button>
+<button id="plotBtn">Tegn plott på nytt</button>
+<div id="resultat"></div>
+
+#%% micropython
+import ui
+
+def vis(evt):
+    return iris.head(5)
+
+ui.on("#beregnBtn", "click", vis, target="resultat")
+ui.run_cell("#plotBtn", "click", "plot")
+
+#%% micropython id=plot
+import plotly_express_mpy as pe
+pe.scatter(iris, x="sepal_length", y="petal_length", color="species")

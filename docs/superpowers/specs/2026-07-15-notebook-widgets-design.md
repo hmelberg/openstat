@@ -326,8 +326,18 @@ cleanly in its new anchor, reading its current value fresh from the
 Each phase gets its own implementation plan; W1 must not start before
 phase B1's session machinery is merged (done — merged to main 2026-07-14).
 
-- **W5 — PLANNED (user request 2026-07-16): widget events
+- **W5 — DONE 2026-07-16: widget events
   (`on_click`/`on_change`), two-step delivery.**
+  Delivered per the dedicated W5 spec
+  [`2026-07-16-notebook-widget-events.md`](2026-07-16-notebook-widget-events.md)
+  (dash-callback precedence, `ui.on`/`ui.run_cell`, typed payloads). One
+  supersession from the planning notes below: the return-value rendering
+  does **not** route through `window.mdRenderOutput`; the facades classify
+  the handler's `(return, stdout)` into **typed payloads**
+  (`text`/`error`/`table`/`figure`) that `Ui.renderEventResult` draws
+  directly — same type→view mapping, but no embed-marker round-trip.
+  Examples: `examples/{python/py_widget_events,brython/bry25_widget_events,micropython/06_widget_events}.txt`.
+  The original two-step plan is retained below for provenance.
   - **Step 1 — cell-name targets (all widget runtimes, cheap):**
     `on_click="cellname"` / `on_change="cellname"` (string or list) as
     the canonical names for what `rerun=` does today — same JS path,

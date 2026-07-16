@@ -1,0 +1,36 @@
+# label: Widget-events — ui.on og ui.run_cell
+#options.mode = python
+#options.title = "Widget-events (ui.on / ui.run_cell)"
+#options.description = "HTML-events på vilkårlige DOM-elementer: python-callbacks med target-rendering, og celle-kjøring fra HTML-knapper"
+# load https://raw.githubusercontent.com/hmelberg/openstat/main/data/iris.csv as iris
+
+#%% md
+# Events på HTML-elementer
+
+`ui.on(selector, event, funksjon, target=…)` binder en python-funksjon til
+en HTML-event; returverdien rendres i `target`-elementet (tekst → `<pre>`,
+DataFrame → tabell, plotly-figur → graf). Utelates `target`, appendes
+resultatet i cellens egen output-slot. `ui.run_cell(selector, event,
+celle_id)` kjører i stedet en navngitt celle på nytt — nyttig når du vil
+gjenbruke en hel plott-celle fra en knapp.
+
+Dette er **push-modellen**: knappen dytter en event inn i Python, i
+motsetning til `ui.slider`/`ui.dropdown` som er pull (cellen leser verdien).
+
+#%% html
+<button id="beregnBtn">Beregn snitt</button>
+<button id="plotBtn">Tegn plott på nytt</button>
+<div id="resultat"></div>
+
+#%% python
+import ui
+
+def beregn(evt):
+    return iris.groupby("species")["sepal_length"].mean().to_frame()
+
+ui.on("#beregnBtn", "click", beregn, target="resultat")
+ui.run_cell("#plotBtn", "click", "plot")
+
+#%% python id=plot
+import plotly.express as px
+px.scatter(iris, x="sepal_length", y="petal_length", color="species")
