@@ -92,11 +92,11 @@ def _spec(type_, **kwargs):
     Numeriske kwargs (min/max/value/step) koerseres via _scalar, slik at
     f.eks. `max=df['x'].max()` (numpy-skalar) overlever json.dumps.
 
-    placement (Task 3, per-kontroll plassering) er en ren gjennomstrøms-
-    kwarg her - selve valideringen ("top"/"bottom"/"left", ellers advarsel +
-    ignorert) skjer på JS-siden (js/ui.js sin normalizeSpec), akkurat som
-    rerun allerede er. None (ikke gitt) droppes av løkka under som vanlig,
-    og kontrollen faller da tilbake til cellens widgets=-default."""
+    placement (Task 3, per-kontroll plassering) og sync_to (Task 4,
+    synkronisering til live-sesjonsvariabel) er rene gjennomstrøms-kwargs
+    her - selve valideringen skjer på JS-siden (js/ui.js sin normalizeSpec),
+    akkurat som rerun allerede er. None (ikke gitt) droppes av løkka under
+    som vanlig, og kontrollen faller da tilbake til cellens widgets=-default."""
     spec = {"type": type_}
     for k, v in kwargs.items():
         if k in ("min", "max", "value", "step"):
@@ -165,73 +165,79 @@ def _alias_rerun(rerun, alias):
     return alias if alias is not None else rerun
 
 
-def slider(min=0, max=100, *, value=None, step=1, label=None, name=None, rerun='self', on_change=None, placement=None):
+def slider(min=0, max=100, *, value=None, step=1, label=None, name=None, rerun='self', on_change=None, placement=None, sync_to=None):
     """Glidebryter. Fallback (ingen notatbok): value hvis gitt, ellers min.
-    on_change= er kanonisk alias for rerun= (W5.1) - aliaset vinner."""
+    on_change= er kanonisk alias for rerun= (W5.1) - aliaset vinner.
+    sync_to= pusher verdien inn i live-sesjonsvariabelen ved endring, uten rerun."""
     rerun = _alias_rerun(rerun, on_change)
     spec = _spec("slider", min=min, max=max, value=value, step=step,
-                 label=label, name=name, rerun=rerun, placement=placement)
+                 label=label, name=name, rerun=rerun, placement=placement, sync_to=sync_to)
     result = _register(spec)
     if result is None:
         return _scalar(value) if value is not None else _scalar(min)
     return _num(result)
 
 
-def dropdown(options, *, value=None, label=None, name=None, rerun='self', on_change=None, placement=None):
+def dropdown(options, *, value=None, label=None, name=None, rerun='self', on_change=None, placement=None, sync_to=None):
     """Nedtrekksmeny. Fallback: value hvis gitt, ellers første valg.
-    on_change= er kanonisk alias for rerun= (W5.1) - aliaset vinner."""
+    on_change= er kanonisk alias for rerun= (W5.1) - aliaset vinner.
+    sync_to= pusher verdien inn i live-sesjonsvariabelen ved endring, uten rerun."""
     rerun = _alias_rerun(rerun, on_change)
     options = list(options)
     if not options:
         raise ValueError("ui.dropdown: options kan ikke være en tom liste.")
     spec = _spec("dropdown", options=[str(o) for o in options], value=value,
-                 label=label, name=name, rerun=rerun, placement=placement)
+                 label=label, name=name, rerun=rerun, placement=placement, sync_to=sync_to)
     result = _register(spec)
     if result is None:
         return str(value) if value is not None else str(options[0])
     return str(result)
 
 
-def checkbox(label=None, *, value=False, name=None, rerun='self', on_change=None, placement=None):
+def checkbox(label=None, *, value=False, name=None, rerun='self', on_change=None, placement=None, sync_to=None):
     """Avkrysningsboks. Fallback: value.
-    on_change= er kanonisk alias for rerun= (W5.1) - aliaset vinner."""
+    on_change= er kanonisk alias for rerun= (W5.1) - aliaset vinner.
+    sync_to= pusher verdien inn i live-sesjonsvariabelen ved endring, uten rerun."""
     rerun = _alias_rerun(rerun, on_change)
-    spec = _spec("checkbox", value=bool(value), label=label, name=name, rerun=rerun, placement=placement)
+    spec = _spec("checkbox", value=bool(value), label=label, name=name, rerun=rerun, placement=placement, sync_to=sync_to)
     result = _register(spec)
     if result is None:
         return bool(value)
     return bool(result)
 
 
-def switch(label=None, *, value=False, name=None, rerun='self', on_change=None, placement=None):
+def switch(label=None, *, value=False, name=None, rerun='self', on_change=None, placement=None, sync_to=None):
     """Bryter (samme semantikk som checkbox, annen visning). Fallback: value.
-    on_change= er kanonisk alias for rerun= (W5.1) - aliaset vinner."""
+    on_change= er kanonisk alias for rerun= (W5.1) - aliaset vinner.
+    sync_to= pusher verdien inn i live-sesjonsvariabelen ved endring, uten rerun."""
     rerun = _alias_rerun(rerun, on_change)
-    spec = _spec("switch", value=bool(value), label=label, name=name, rerun=rerun, placement=placement)
+    spec = _spec("switch", value=bool(value), label=label, name=name, rerun=rerun, placement=placement, sync_to=sync_to)
     result = _register(spec)
     if result is None:
         return bool(value)
     return bool(result)
 
 
-def number(value=0, *, min=None, max=None, step=None, label=None, name=None, rerun='self', on_change=None, placement=None):
+def number(value=0, *, min=None, max=None, step=None, label=None, name=None, rerun='self', on_change=None, placement=None, sync_to=None):
     """Tallfelt. Fallback: value.
-    on_change= er kanonisk alias for rerun= (W5.1) - aliaset vinner."""
+    on_change= er kanonisk alias for rerun= (W5.1) - aliaset vinner.
+    sync_to= pusher verdien inn i live-sesjonsvariabelen ved endring, uten rerun."""
     rerun = _alias_rerun(rerun, on_change)
     spec = _spec("number", value=value, min=min, max=max, step=step,
-                 label=label, name=name, rerun=rerun, placement=placement)
+                 label=label, name=name, rerun=rerun, placement=placement, sync_to=sync_to)
     result = _register(spec)
     if result is None:
         return _scalar(value)
     return _num(result)
 
 
-def text(value='', *, label=None, name=None, rerun='self', on_change=None, placement=None):
+def text(value='', *, label=None, name=None, rerun='self', on_change=None, placement=None, sync_to=None):
     """Tekstfelt. Fallback: str(value) - returtypen er alltid str
     (speiler dash.py sin textfield(default=str(default))).
-    on_change= er kanonisk alias for rerun= (W5.1) - aliaset vinner."""
+    on_change= er kanonisk alias for rerun= (W5.1) - aliaset vinner.
+    sync_to= pusher verdien inn i live-sesjonsvariabelen ved endring, uten rerun."""
     rerun = _alias_rerun(rerun, on_change)
-    spec = _spec("text", value=str(value), label=label, name=name, rerun=rerun, placement=placement)
+    spec = _spec("text", value=str(value), label=label, name=name, rerun=rerun, placement=placement, sync_to=sync_to)
     result = _register(spec)
     if result is None:
         return str(value)
