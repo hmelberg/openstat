@@ -293,6 +293,107 @@ def test_ingen_ui_paa_window_gir_samme_fallback(monkeypatch):
     assert mod.text("hei") == "hei"
 
 
+# ---- (e) event-payload klassifisering (W5.2) ----
+
+def test_event_payload_text_from_return(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    p = mod._event_payload(42, "")
+    assert p == {"kind": "text", "text": "42"}
+
+
+def test_event_payload_stdout_prepended(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    p = mod._event_payload("res", "logget\n")
+    assert p["kind"] == "text" and "logget" in p["text"] and "res" in p["text"]
+
+
+def test_event_payload_none_with_stdout(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    assert mod._event_payload(None, "bare print\n") == {"kind": "text", "text": "bare print"}
+
+
+def test_event_payload_none_silent(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    assert mod._event_payload(None, "") is None   # ingenting å rendre
+
+
+def test_event_payload_figure_ducktype(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    class Fig:
+        def to_plotly_json(self):
+            return {"data": [{"y": [1]}], "layout": {"title": "x"}}
+    p = mod._event_payload(Fig(), "")
+    assert p["kind"] == "figure" and p["spec"]["layout"]["title"] == "x"
+
+
+def test_event_payload_dataframe_ducktype(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    class DF:
+        columns = ["a"]
+        def to_html(self, **kw):
+            return "<table><tr><td>1</td></tr></table>"
+    p = mod._event_payload(DF(), "")
+    assert p["kind"] == "table" and p["html"].startswith("<table")
+
+
+# ---- _make_event_wrapper: window=None -> StringIO-fallback (CPython-vakt) ----
+# (mirror av micropython/dash.py sitt capture-par, men under pytest finnes
+# ingen window.__mpyCaptureStart/__mpyCaptureEnd - _wrapper faller derfor
+# tilbake til et vanlig sys.stdout-bytte når window er None, akkurat som
+# on()/run_cell() sin egen "ingen browser"-fallback under. Dette er den
+# eneste måten å teste klassifiserings-/feilstien meningsfullt i CPython:
+# med en window-stub UTEN capture-metodene ville _wrapper i stedet
+# rapportert AttributeError fra selve capture-kallet, ikke fra handleren.)
+
+def test_wrapper_catches_exception(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    monkeypatch.setattr(mod, "window", None)
+    def boom(evt):
+        raise ValueError("au")
+    w = mod._make_event_wrapper(boom)
+    out = json.loads(w('{"type":"click"}'))
+    assert out["kind"] == "error" and "au" in out["text"]
+
+
+def test_wrapper_passes_event_dict(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    monkeypatch.setattr(mod, "window", None)
+    seen = {}
+    def h(evt):
+        seen.update(evt)
+        return "ok"
+    w = mod._make_event_wrapper(h)
+    out = json.loads(w('{"type":"click","value":"7"}'))
+    assert seen["value"] == "7" and out["kind"] == "text"
+
+
+def test_wrapper_uses_capture_pair_when_window_present(monkeypatch):
+    """Ekte-mpy-stien (window ikke None): capture-paret kalles nøyaktig én
+    gang hver, og teksten derfra går inn i payloaden - motsatt av
+    CPython-vaktens StringIO-fallback testet over."""
+    mod, fake = _load_ui(monkeypatch)
+    calls = {"start": 0, "end": 0}
+    def start():
+        calls["start"] += 1
+    def end():
+        calls["end"] += 1
+        return "fanget\n"
+    mod.window.__mpyCaptureStart = start
+    mod.window.__mpyCaptureEnd = end
+    w = mod._make_event_wrapper(lambda evt: None)
+    out = json.loads(w('{"type":"click"}'))
+    assert calls == {"start": 1, "end": 1}
+    assert out == {"kind": "text", "text": "fanget"}
+
+
+def test_on_and_run_cell_return_none_without_browser(monkeypatch):
+    # CPython: window is None -> begge er no-op uten å kaste
+    mod, _ = _load_ui(monkeypatch, next_result=None)
+    monkeypatch.setattr(mod, "window", None)
+    assert mod.on("#x", "click", lambda e: None) is None
+    assert mod.run_cell("#x", "click", "plot") is None
+
+
 # MERK: ui_mpy.py, i likhet med micropython/dash.py, gjør `from js import
 # window` UBESKYTTET (ingen try/except ImportError) - bevisst forskjellig
 # fra pyodide/ui.py. MicroPython-motoren garanterer at `js`-modulen alltid
