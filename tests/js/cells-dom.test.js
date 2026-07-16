@@ -1863,3 +1863,110 @@ test('hide-code via #tag gir nb-hide-code-klassen (attrs-mergen når DOM-en uten
   const cell0 = cellParts(containerEl, 0);
   assert.ok(cell0.wrap.classList.contains('nb-hide-code'));
 });
+
+// ---- presentasjon (spec 2026-07-16-presentation-design.md, Task 2) ----
+
+test('presentStart: kun gjeldende slides celler synlige; nb-present på rota', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% md slide=1\n# En\n#%% python\nx = 1\n#%% md slide=2\n# To\n';
+  C.init('python');
+  assert.strictEqual(C.active(), true);
+  assert.strictEqual(C.presentStart(), true);
+  assert.strictEqual(C.presenting(), true);
+  const root = nbRoot(containerEl);
+  assert.ok(root.classList.contains('nb-present'));
+  assert.ok(!cellParts(containerEl, 0).wrap.classList.contains('nb-slide-hidden'));
+  assert.ok(!cellParts(containerEl, 1).wrap.classList.contains('nb-slide-hidden'));
+  assert.ok(cellParts(containerEl, 2).wrap.classList.contains('nb-slide-hidden'));
+});
+
+test('present: klikk-soner navigerer, teller oppdateres, klemming i endene', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% md slide=1\nA\n#%% md slide=2\nB\n';
+  C.init('python');
+  C.presentStart();
+  const root = nbRoot(containerEl);
+  const nodes = collectNodes(root, []);
+  const nextBtn = nodes.find((n) => n.classList && n.classList.contains('nb-present-next'));
+  const prevBtn = nodes.find((n) => n.classList && n.classList.contains('nb-present-prev'));
+  const counter = nodes.find((n) => n.classList && n.classList.contains('nb-present-counter'));
+  assert.strictEqual(counter.textContent, '1 / 2');
+  click(nextBtn);
+  assert.strictEqual(counter.textContent, '2 / 2');
+  assert.ok(cellParts(containerEl, 0).wrap.classList.contains('nb-slide-hidden'));
+  click(nextBtn); // klem: forbli på siste
+  assert.strictEqual(counter.textContent, '2 / 2');
+  click(prevBtn);
+  assert.strictEqual(counter.textContent, '1 / 2');
+});
+
+test('presentExit gjenoppretter layout og fjerner nav-noder + synlighetsklasser', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% md slide=1\nA\n#%% md slide=2\nB\n';
+  C.init('python');
+  C.presentStart();
+  C.presentExit();
+  assert.strictEqual(C.presenting(), false);
+  const root = nbRoot(containerEl);
+  assert.ok(!root.classList.contains('nb-present'));
+  assert.ok(root.classList.contains('nb-layout-columns'));
+  assert.ok(!cellParts(containerEl, 1).wrap.classList.contains('nb-slide-hidden'));
+  const nodes = collectNodes(root, []);
+  assert.ok(!nodes.some((n) => n.classList && n.classList.contains('nb-present-nav')));
+  assert.ok(!nodes.some((n) => n.classList && n.classList.contains('nb-present-counter')));
+});
+
+test('_presentKeydown: piler navigerer, Escape avslutter; skjemafelt ignoreres', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% md slide=1\nA\n#%% md slide=2\nB\n';
+  C.init('python');
+  C.presentStart();
+  let prevented = 0;
+  const mk = (key, tag) => ({ key, target: { tagName: tag }, preventDefault: () => { prevented++; } });
+  C._presentKeydown(mk('ArrowRight', 'DIV'));
+  let counter = collectNodes(nbRoot(containerEl), []).find((n) => n.classList && n.classList.contains('nb-present-counter'));
+  assert.strictEqual(counter.textContent, '2 / 2');
+  C._presentKeydown(mk('ArrowRight', 'TEXTAREA'));   // skjemafelt: ignorert
+  assert.strictEqual(counter.textContent, '2 / 2');
+  C._presentKeydown(mk('Escape', 'DIV'));
+  assert.strictEqual(C.presenting(), false);
+  assert.ok(prevented >= 2, 'ArrowRight + Escape skal preventDefault');
+});
+
+test('re-render mens presentasjon er aktiv: modus beholdes, cur klemmes', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% md slide=1\nA\n#%% md slide=2\nB\n';
+  C.init('python');
+  C.presentStart();
+  const nodes = collectNodes(nbRoot(containerEl), []);
+  click(nodes.find((n) => n.classList && n.classList.contains('nb-present-next')));
+  scriptInputEl.value = '#%% md slide=1\nA\n';
+  C.refreshFromScript();
+  assert.strictEqual(C.presenting(), true);
+  const root = nbRoot(containerEl);
+  assert.ok(root.classList.contains('nb-present'), 'nb-present overlever render()s className-reset');
+  const counter = collectNodes(root, []).find((n) => n.classList && n.classList.contains('nb-present-counter'));
+  assert.strictEqual(counter.textContent, '1 / 1');
+});
+
+test('contentLoaded (nytt dokument) og exit (Rå tekst) avslutter presentasjonen', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% md slide=1\nA\n';
+  C.init('python');
+  C.presentStart();
+  scriptInputEl.value = '#%% md\nB\n';
+  C.contentLoaded();
+  assert.strictEqual(C.presenting(), false);
+  C.presentStart();
+  C.exit({ raw: true });
+  assert.strictEqual(C.presenting(), false);
+});
+
+test('presentStart: no-op uten aktiv notatbok', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = 'print(1)\n';
+  C.init('python');
+  assert.strictEqual(C.active(), false);
+  assert.strictEqual(C.presentStart(), false);
+  assert.strictEqual(C.presenting(), false);
+});

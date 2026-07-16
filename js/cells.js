@@ -874,6 +874,9 @@
       // det FORRIGE dokumentet fyre etter at et nytt dokument er lastet og
       // (hvis samme celleindeks tilfeldigvis finnes der òg) kjøre feil celle.
       if (global.ParamForms && global.ParamForms.resetDocument) global.ParamForms.resetDocument();
+      // Nytt dokument → presentasjonen avsluttes (samme invalidering som
+      // sesjonen over; presentasjon overlever aldri dokument-/modusbytte).
+      C.presentExit();
       NB.htmlTrusted = !(opts && opts.untrusted === true);
       NB.rawOverride = false;
       var ta = $('scriptInput');
@@ -937,6 +940,7 @@
     };
 
     C.exit = function (opts) {
+      C.presentExit();
       if (opts && opts.raw) NB.rawOverride = true;
       NB.activeFlag = false;
       // Flush en ventende celle-redigerings-debounce FØR vi bytter til Rå
@@ -974,6 +978,112 @@
         // teksten mot (to kolonner vs. full bredde), så linjetallet — og
         // dermed nødvendig høyde — må regnes om for hver celle på nytt.
         autoSizeAll();
+      }
+    };
+
+    // ---------- presentasjon (spec 2026-07-16-presentation-design.md §2) ----------
+    // Layout-TILSTAND over samme rendrede dokument: ingen DOM-flytting —
+    // synlighet per celle via .nb-slide-hidden, editor-chrome skjules av
+    // .nb-present-CSS-en (nb-layout-output-oppskriften, app.css). Widgets/
+    // plots/dash blir stående i cellene sine og lever videre på sin slide.
+    // Stub-DOM-forbehold: document.body/addEventListener kan mangle i test-
+    // harnesset — samme dobbelt-guard som resten av fila bruker for globaler.
+
+    function presentApply() {
+      var P = NB.present;
+      if (!P || !NB.root) return;
+      for (var i = 0; i < NB.cells.length; i++) {
+        var c = NB.cells[i];
+        if (c && c._wrap) c._wrap.classList.toggle('nb-slide-hidden', P.byCell[i] !== P.cur);
+      }
+      // Samle-sloten (planavvik-fallback) hører til siste slide.
+      if (NB.trailing) NB.trailing.classList.toggle('nb-slide-hidden', P.cur !== P.slides.length - 1);
+      if (P.counter) P.counter.textContent = (P.cur + 1) + ' / ' + P.slides.length;
+    }
+
+    function presentNav(delta) {
+      var P = NB.present;
+      if (!P) return;
+      var next = Math.min(P.slides.length - 1, Math.max(0, P.cur + delta));
+      if (next === P.cur) return;
+      P.cur = next;
+      presentApply();
+      if (NB.root) NB.root.scrollTop = 0;
+    }
+
+    // Piler/Esc — kun installert mens presentasjonen er aktiv. Skjemafelt
+    // (widgets på sliden) beholder tastene sine; eksisterende Esc-handlere
+    // er overlay-scopet og sameksisterer. Eksportert (_-prefiks) for
+    // stub-DOM-testene, som mangler document.addEventListener.
+    function presentKeydown(ev) {
+      if (!NB.present) return;
+      var tgt = ev.target;
+      var tag = tgt && tgt.tagName ? String(tgt.tagName).toLowerCase() : '';
+      if (tag === 'input' || tag === 'textarea' || tag === 'select' || (tgt && tgt.isContentEditable)) return;
+      if (ev.key === 'ArrowRight' || ev.key === 'ArrowDown' || ev.key === 'PageDown' || ev.key === ' ') {
+        ev.preventDefault(); presentNav(1);
+      } else if (ev.key === 'ArrowLeft' || ev.key === 'ArrowUp' || ev.key === 'PageUp') {
+        ev.preventDefault(); presentNav(-1);
+      } else if (ev.key === 'Escape') {
+        ev.preventDefault(); C.presentExit();
+      }
+    }
+    C._presentKeydown = presentKeydown;
+
+    function presentBuildNav() {
+      var P = NB.present;
+      if (!P || !NB.root) return;
+      var prev = el('button', 'nb-present-nav nb-present-prev', '‹');
+      prev.type = 'button'; prev.title = t('Forrige slide');
+      prev.addEventListener('click', function () { presentNav(-1); });
+      var next = el('button', 'nb-present-nav nb-present-next', '›');
+      next.type = 'button'; next.title = t('Neste slide');
+      next.addEventListener('click', function () { presentNav(1); });
+      var counter = el('span', 'nb-present-counter');
+      P.counter = counter;
+      P.navEls = [prev, next, counter];
+      NB.root.appendChild(prev); NB.root.appendChild(next); NB.root.appendChild(counter);
+    }
+
+    C.presenting = function () { return !!NB.present; };
+
+    C.presentStart = function () {
+      if (!NB.activeFlag || !NB.root) return false;
+      if (NB.present) return true;                       // idempotent
+      var plan = C.slidePlan(NB.cells);
+      if (!plan.slides.length) return false;
+      NB.present = { slides: plan.slides, byCell: plan.byCell, cur: 0,
+                     prevLayout: NB.layout, counter: null, navEls: [] };
+      NB.root.classList.add('nb-present');
+      if (document.body && document.body.classList) document.body.classList.add('present-active');
+      presentBuildNav();
+      presentApply();
+      if (document.addEventListener) document.addEventListener('keydown', presentKeydown);
+      if (global.mdSyncViewDropdown) global.mdSyncViewDropdown('present');
+      if (global.refreshPlotlyAfterLayout) global.refreshPlotlyAfterLayout();
+      return true;
+    };
+
+    C.presentExit = function () {
+      if (!NB.present) return;
+      var P = NB.present;
+      NB.present = null;
+      if (document.removeEventListener) document.removeEventListener('keydown', presentKeydown);
+      if (document.body && document.body.classList) document.body.classList.remove('present-active');
+      if (NB.root) {
+        NB.root.classList.remove('nb-present');
+        for (var i = 0; i < P.navEls.length; i++) { if (P.navEls[i] && P.navEls[i].remove) P.navEls[i].remove(); }
+        for (var j = 0; j < NB.cells.length; j++) {
+          var c = NB.cells[j];
+          if (c && c._wrap) c._wrap.classList.remove('nb-slide-hidden');
+        }
+        if (NB.trailing) NB.trailing.classList.remove('nb-slide-hidden');
+      }
+      // Gjenopprett layouten fra før presentasjonen (setLayout re-appliserer
+      // nb-layout-klassen render()s className-reset ellers ville satt).
+      C.setLayout(P.prevLayout || 'columns');
+      if (global.mdSyncViewDropdown) {
+        global.mdSyncViewDropdown(P.prevLayout === 'output' ? 'output' : (P.prevLayout || 'columns'));
       }
     };
 
@@ -1025,6 +1135,23 @@
       // autoSizeAll for hvorfor det tidligere per-celle rAF-kallet i
       // cellNode ikke var pålitelig ved (re-)inngang.
       autoSizeAll();
+      // Presentasjon overlever re-render (spec §2): innerHTML=''-rebyggingen
+      // over kastet nav-nodene og alle synlighetsklasser, og className-
+      // resetten fjernet nb-present. Regn planen på nytt (dokumentet kan ha
+      // endret seg), klem cur, og bygg overlegget på nytt.
+      if (NB.present) {
+        var _plan = C.slidePlan(NB.cells);
+        if (!_plan.slides.length) {
+          C.presentExit();
+        } else {
+          NB.present.slides = _plan.slides;
+          NB.present.byCell = _plan.byCell;
+          if (NB.present.cur >= _plan.slides.length) NB.present.cur = _plan.slides.length - 1;
+          NB.root.classList.add('nb-present');
+          presentBuildNav();
+          presentApply();
+        }
+      }
     }
 
     function cellNode(c, idx) {

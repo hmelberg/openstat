@@ -1422,3 +1422,28 @@ body[data-theme="dark"] .nb-undo-btn:hover { color: #1a1b26; }
 }
 .param-form-runchip:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .param-form-runchip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* ---------- presentasjon (spec 2026-07-16-presentation-design.md) ---------- */
+/* Layout-tilstand over samme rendrede dokument: full-viewport-overlegg,
+   editor-chrome skjult (nb-layout-output-oppskriften), én slide synlig.
+   Temaer via de eksisterende variablene (--bg/--text-muted/--border). */
+body.present-active .topbar, body.present-active .bottombar { display: none; }
+.nb-root.nb-present { position: fixed; inset: 0; z-index: 250; overflow-y: auto;
+  background: var(--bg); margin: 0; padding: 48px 72px; font-size: 1.15em; }
+.nb-present .nb-bar, .nb-present .nb-input, .nb-present .nb-tools,
+.nb-present .nb-edit-btn, .nb-present .nb-skip { display: none; }
+/* Ren slide-flate: cellekort-chrome av — men style=note/warn/card er INNHOLD
+   og beholder utseendet sitt. */
+.nb-present .nb-cell:not(.nb-style-note):not(.nb-style-warn):not(.nb-style-card) {
+  border: none; padding: 4px 0; }
+.nb-present .nb-cell { grid-template-columns: 1fr; }
+.nb-slide-hidden { display: none !important; }
+.nb-present-nav { position: fixed; top: 0; bottom: 0; width: 7%; min-width: 48px;
+  border: none; background: transparent; color: transparent; font-size: 42px;
+  cursor: pointer; z-index: 260; }
+.nb-present-nav:hover { color: var(--text-muted);
+  background: color-mix(in srgb, var(--text) 5%, transparent); }
+.nb-present-prev { left: 0; }
+.nb-present-next { right: 0; }
+.nb-present-counter { position: fixed; right: 16px; bottom: 12px; z-index: 260;
+  font-size: 13px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
