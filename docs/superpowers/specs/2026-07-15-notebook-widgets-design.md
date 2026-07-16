@@ -362,6 +362,36 @@ phase B1's session machinery is merged (done — merged to main 2026-07-14).
       later under the parity-is-a-goal rule.
     - Open at planning time: re-entrancy (event firing during a run),
       error surfacing, and forklar/skrittvis semantics for callbacks.
+  - **User input 2026-07-16 (second round) — incorporated decisions:**
+    - **Start with pyodide + brython** (both have native DOM event
+      binding on the main thread: Brython's `elt.bind(...)`, pyodide's
+      FFI `addEventListener` + `create_proxy`); micropython follows
+      (same main-thread model), R last. Note Phase C is delivered, so
+      brython/micropython notebooks are real targets now.
+    - **A second, element-level API layer** alongside the `on_click=`
+      kwargs on `ui.*` controls: wrap native event binding so ANY DOM
+      element (typically one in an `#%% html` cell) can drive Python.
+      Two distinct names instead of one overloaded handler argument
+      (user delegated naming; decided):
+      `ui.on(selector, event, handler, target=None)` binds a Python
+      function to an HTML event ("click", "change", "input", …);
+      `ui.run_cell(selector, event, cell_id)` is the cell variant —
+      separate name, no function/string overloading.
+    - **Return-value rendering reuses the existing output pipeline** —
+      this dissolves the type-conversion question (plot → base64 vs
+      plotly-JSON, dataframe → table, text → `<pre>`): the runner's
+      existing formatting (`_fmt`/show → embed-marker text) +
+      `window.mdRenderOutput(text, targetEl)` already implement
+      exactly that mapping for cell output today (plotly embed
+      markers rendered as charts, frames as tables, text as pre).
+      Callbacks format their return value through the same machinery
+      and route it to the target node — no new per-type converters.
+    - **Omitted `target` default:** the registering cell's own output
+      slot with append semantics (keeps results next to their
+      context); in a plain script (no notebook) the fallback is
+      `#outputArea` (append at the end of the visible output — the
+      user's "end of screen" suggestion, applied where no cell slot
+      exists).
 
 ## Testing
 
