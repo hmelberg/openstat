@@ -419,6 +419,28 @@
     return { slides: slides, byCell: byCell };
   };
 
+  // ---------- editor-konvergens (spec 2026-07-17-editor-convergence-design.md) ----------
+
+  // Markørlinje → celleindeks: cellen hvis [startLine, endLine] inneholder
+  // linjen. #%%-linjen tilhører sin egen celle (startLine = headerLine).
+  // -1 utenfor dokumentet / tom celleliste.
+  C.cellAtLine = function (cells, line) {
+    for (var i = 0; i < cells.length; i++) {
+      if (line >= cells[i].startLine && line <= cells[i].endLine) return i;
+    }
+    return -1;
+  };
+
+  // Forsonings-porten (spec §1 render/update-policy): samme antall celler
+  // med samme headerRaw-sekvens → oppdater på plass; ellers full rebuild.
+  C.sameStructure = function (a, b) {
+    if (!a || !b || a.length !== b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].headerRaw !== b[i].headerRaw) return false;
+    }
+    return true;
+  };
+
   // Språk → legacy segmentmarkør slik parseHybridScript i index.html forventer.
   // Verifisert i Task 6 mot matchHybridMarker (index.html ~6028-6037, case-
   // insensitiv) og normalizeBlockMarkers (~7437-7450): '## python' matcher

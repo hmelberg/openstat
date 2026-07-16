@@ -931,3 +931,26 @@ test('slidePlan: tom celleliste → tom plan', () => {
   assert.deepStrictEqual(sp.slides, []);
   assert.deepStrictEqual(sp.byCell, []);
 });
+
+// ---------- editor-konvergens: rene hjelpere (spec 2026-07-17 §1/§2) ----------
+
+test('cellAtLine: linje → celleindeks via startLine/endLine; utenfor → -1', () => {
+  const p = C.parseCells('# pre\n\n#%% python\nx = 1\ny = 2\n#%% md\ntekst');
+  assert.strictEqual(C.cellAtLine(p.cells, 0), 0);   // preambel
+  assert.strictEqual(C.cellAtLine(p.cells, 1), 0);
+  assert.strictEqual(C.cellAtLine(p.cells, 2), 1);   // #%%-linjen tilhører cellen
+  assert.strictEqual(C.cellAtLine(p.cells, 4), 1);
+  assert.strictEqual(C.cellAtLine(p.cells, 6), 2);
+  assert.strictEqual(C.cellAtLine(p.cells, 99), -1);
+  assert.strictEqual(C.cellAtLine([], 0), -1);
+});
+
+test('sameStructure: samme headerRaw-sekvens → true; endret antall/markør → false', () => {
+  const a = C.parseCells('#%% python\nx = 1\n#%% md\nA').cells;
+  const b = C.parseCells('#%% python\ny = 2\n#%% md\nB endret').cells;
+  const c = C.parseCells('#%% python\nx = 1\n#%% html\nA').cells;
+  const d = C.parseCells('#%% python\nx = 1').cells;
+  assert.strictEqual(C.sameStructure(a, b), true);   // kun kropper endret
+  assert.strictEqual(C.sameStructure(a, c), false);  // markørlinje endret
+  assert.strictEqual(C.sameStructure(a, d), false);  // antall endret
+});
