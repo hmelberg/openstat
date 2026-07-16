@@ -187,11 +187,50 @@
     return res;
   };
 
+  // Kroppslinjene uten de konsumerte tag-linjene — delt av sniffing (her)
+  // og renderContent (rendring). tagLines er kort (en håndfull), indexOf ok.
+  function linesWithoutTags(source, tagLines) {
+    var lines = String(source == null ? '' : source).split('\n');
+    if (!tagLines || !tagLines.length) return lines;
+    var keep = [];
+    for (var i = 0; i < lines.length; i++) {
+      if (tagLines.indexOf(i) === -1) keep.push(lines[i]);
+    }
+    return keep;
+  }
+
+  // Innholds-sniffing for UMERKEDE celler (spec §3): '<' som første tegn på
+  // første ikke-blanke linje → html ('<' kan aldri starte gyldig python/r/
+  // sql). ÉN trippel-sitert streng ALENE → md: '"""' i kolonne 0, FØRSTE
+  // '"""' etter åpneren lukker (indexOf, ingen regex-backtracking), og alt
+  // etter lukkeren må være blankt — docstring-vernet: '"""doc"""' fulgt av
+  // kode sniffes aldri. Presedens: notebook_prose.py sin "bare streng alene
+  // = prosa", løftet til celletyping. "'''" og \"""-escapes sniffes ikke
+  // (dokumentert begrensning i spec).
+  function sniffType(lines) {
+    var first = -1;
+    for (var i = 0; i < lines.length; i++) {
+      if (lines[i].trim() !== '') { first = i; break; }
+    }
+    if (first === -1) return null;
+    if (/^\s*</.test(lines[first])) return 'html';
+    if (lines[first].slice(0, 3) !== '"""') return null;
+    var rest = lines.slice(first).join('\n').slice(3);
+    var close = rest.indexOf('"""');
+    if (close === -1) return null;
+    if (rest.slice(close + 3).trim() !== '') return null;
+    return 'md';
+  }
+
   // Parse hele dokumentet → { cells, warnings }.
-  // Celle: { type, attrs, headerRaw, headerLine, startLine, endLine, source, hasBody }
+  // Celle: { type, attrs, tags, tagLines, sniffed, headerRaw, headerLine, startLine, endLine, source, hasBody }
   //  - headerRaw === null: implisitt preambel (tekst før første markør)
   //  - source: linjene ETTER headeren t.o.m. linjen før neste markør
   //  - hasBody: om cellen hadde minst én kildelinje (skiller '#%% r' fra '#%% r\n')
+  //  - tags: objekt med samla #tag-direktiver (type og attributter)
+  //  - tagLines: null-baserte kroppslinjer som inneholder #tag-linjer
+  //  - sniffed: 'md', 'html', eller null — innholds-sniffet type for umerkede celler
+  //  - type, attrs: effektive (mergede) verdier: header > tag > sniff > preambel-default
   C.parseCells = function (text) {
     var lines = String(text == null ? '' : text).split('\n');
     var cells = [], warnings = [], ids = {};
@@ -222,6 +261,64 @@
       }
     }
     close(lines.length - 1);
+    // --- #tag-direktiver: merge, sniffing, preambel-defaults (spec §1-§3).
+    // Kjøres som post-pass over ferdiglukkede celler: presedens
+    // header-attr > celle-tag > (kun type: sniff) > preambel-default.
+    // Merge baker effektive attrs/type inn i celleobjektet — round-trip
+    // røres ikke (serialisering bruker headerRaw + source, aldri attrs).
+    var defaults = { type: null, attrs: {} };
+    for (var ci = 0; ci < cells.length; ci++) {
+      var cell = cells[ci];
+      var isPre = cell.headerRaw === null;
+      var scan = C.scanTagBlock(cell.source, isPre);
+      cell.tags = scan.tags;
+      cell.tagLines = scan.tagLines;
+      cell.sniffed = null;
+      var bodyBase = isPre ? cell.startLine : cell.startLine + 1;
+      for (var wi = 0; wi < scan.warnings.length; wi++) {
+        warnings.push('linje ' + (bodyBase + scan.warnings[wi].line + 1) + ': ' + scan.warnings[wi].msg);
+      }
+      if (isPre) {
+        // Preambelens tags er DOKUMENT-defaults (spec §2): type = default
+        // CELLE-type (retyper aldri preambelen selv), øvrige nøkler =
+        // attr-defaults. id er alt avvist av skanneren i preambel-modus.
+        for (var pk in scan.tags) {
+          if (pk === 'type') defaults.type = scan.tags[pk];
+          else defaults.attrs[pk] = scan.tags[pk];
+        }
+        continue;
+      }
+      // Siste forekomst per nøkkel styrer mergen (skanneren har alt varslet
+      // duplikater) — entries-løkka under må derfor dedupliseres først, så
+      // en tidligere forekomst ikke utløser et falskt overstyrt-varsel.
+      var lastEnt = {};
+      for (var ei = 0; ei < scan.entries.length; ei++) lastEnt[scan.entries[ei].key] = scan.entries[ei];
+      for (var mk in lastEnt) {
+        var ent = lastEnt[mk];
+        var lineNo = bodyBase + ent.line + 1;
+        if (mk === 'type') {
+          if (cell.type !== null) warnings.push('linje ' + lineNo + ': #tag.type overstyrt av #%%-typen');
+          else cell.type = ent.value;
+          continue;
+        }
+        if (Object.prototype.hasOwnProperty.call(cell.attrs, mk)) {
+          warnings.push('linje ' + lineNo + ': #tag.' + mk + ' overstyrt av #%%-attributt');
+          continue;
+        }
+        cell.attrs[mk] = ent.value;
+      }
+      // Innholds-sniffing — kun helt umerkede celler (spec §3); sniff slår
+      // preambel-defaulten (den finnes nettopp for å slå dokument-defaulten).
+      if (cell.type === null && cell.hasBody) {
+        cell.sniffed = sniffType(linesWithoutTags(cell.source, cell.tagLines));
+        if (cell.sniffed) cell.type = cell.sniffed;
+      }
+      // Preambel-defaults — svakest presedens.
+      if (cell.type === null && defaults.type) cell.type = defaults.type;
+      for (var dk in defaults.attrs) {
+        if (!Object.prototype.hasOwnProperty.call(cell.attrs, dk)) cell.attrs[dk] = defaults.attrs[dk];
+      }
+    }
     return { cells: cells, warnings: warnings };
   };
 

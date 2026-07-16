@@ -675,3 +675,125 @@ test('scanTagBlock: tom/blank verdi er ugyldig linje — konsumeres med varsel, 
   assert.strictEqual(s.warnings.length, 3);
   assert.ok(s.warnings.slice(0, 2).every((w) => /ugyldig #tag-linje/.test(w.msg)));
 });
+
+test('parseCells: cellens tags merges inn i attrs; tagLines/sniffed settes', () => {
+  const p = C.parseCells('#%% python\n#tag.slide = 3\n#tag.hide-code = true\nx = 1');
+  const c = p.cells[0];
+  assert.strictEqual(c.attrs.slide, '3');
+  assert.strictEqual(c.attrs['hide-code'], true);
+  assert.deepStrictEqual(c.tags, { slide: '3', 'hide-code': true });
+  assert.deepStrictEqual(c.tagLines, [0, 1]);
+  assert.strictEqual(c.sniffed, null);
+  assert.deepStrictEqual(p.warnings, []);
+});
+
+test('parseCells: #tag.type setter celletypen når headeren ikke har en', () => {
+  const p = C.parseCells('#%%\n#tag.type = r\nx <- 1');
+  assert.strictEqual(p.cells[0].type, 'r');
+  assert.strictEqual(C.resolveType(p.cells[0], 'python'), 'r');
+});
+
+test('parseCells: header vinner over tag — verdi beholdes, varsel med absolutt linjetall', () => {
+  const p = C.parseCells('#%% python slide=1\n#tag.slide = 2\n#tag.type = r\nx = 1');
+  const c = p.cells[0];
+  assert.strictEqual(c.attrs.slide, '1');
+  assert.strictEqual(c.type, 'python');
+  assert.strictEqual(p.warnings.length, 2);
+  assert.ok(p.warnings.some((w) => /^linje 2: #tag\.slide overstyrt av #%%-attributt$/.test(w)));
+  assert.ok(p.warnings.some((w) => /^linje 3: #tag\.type overstyrt av #%%-typen$/.test(w)));
+});
+
+test('parseCells: duplisert tag-nøkkel — siste vinner også i merge (ingen falskt overstyrt-varsel)', () => {
+  const p = C.parseCells('#%%\n#tag.type = r\n#tag.type = md\nheisann');
+  assert.strictEqual(p.cells[0].type, 'md');
+  // kun duplikat-varselet fra skanneren, INGEN 'overstyrt av #%%-typen'
+  assert.strictEqual(p.warnings.length, 1);
+  assert.ok(/duplisert/.test(p.warnings[0]));
+});
+
+test('parseCells sniffing: lone-string """-celle → md; docstring + kode forblir kode', () => {
+  const md = C.parseCells('#%%\n"""\n# Overskrift\ntekst\n"""');
+  assert.strictEqual(md.cells[0].type, 'md');
+  assert.strictEqual(md.cells[0].sniffed, 'md');
+  const code = C.parseCells('#%%\n"""docstring"""\nx = 1');
+  assert.strictEqual(code.cells[0].type, null);
+  assert.strictEqual(code.cells[0].sniffed, null);
+});
+
+test('parseCells sniffing: enlinjes """x""" → md; """ midt i teksten etterfulgt av kode → kode', () => {
+  assert.strictEqual(C.parseCells('#%%\n"""Hei **verden**"""').cells[0].sniffed, 'md');
+  // første lukker etter 'a', deretter kode → IKKE sniffet (indexOf-regelen, ingen backtracking)
+  assert.strictEqual(C.parseCells('#%%\n"""a""" b\nx = """s"""').cells[0].sniffed, null);
+});
+
+test('parseCells sniffing: """ må stå i kolonne 0; uavsluttet streng sniffes ikke', () => {
+  assert.strictEqual(C.parseCells('#%%\n  """tekst"""').cells[0].sniffed, null);
+  assert.strictEqual(C.parseCells('#%%\n"""aldri lukket').cells[0].sniffed, null);
+});
+
+test('parseCells sniffing: <-førstelinje → html; ledende blanklinjer og tag-blokk hoppes over', () => {
+  const p = C.parseCells('#%%\n#tag.slide = 2\n\n  <div>hei</div>');
+  assert.strictEqual(p.cells[0].type, 'html');
+  assert.strictEqual(p.cells[0].sniffed, 'html');
+  assert.strictEqual(p.cells[0].attrs.slide, '2');
+});
+
+test('parseCells sniffing: eksplisitt type (header eller tag) vinner over sniff', () => {
+  assert.strictEqual(C.parseCells('#%% python\n"""bare en streng"""').cells[0].sniffed, null);
+  const p = C.parseCells('#%%\n#tag.type = python\n"""bare en streng"""');
+  assert.strictEqual(p.cells[0].type, 'python');
+  assert.strictEqual(p.cells[0].sniffed, null);
+});
+
+test('parseCells preambel-defaults: type og attrs gjelder celler uten egen verdi', () => {
+  const src = '#tag.type = r\n#tag.hide-code = true\n# load x\n\n#%%\ny <- 1\n#%% python slide=1\nz = 2\n#%%\n#tag.hide-code = false\nw <- 3';
+  const p = C.parseCells(src);
+  // preambelen selv røres ikke
+  assert.strictEqual(p.cells[0].type, null);
+  assert.deepStrictEqual(p.cells[0].attrs, {});
+  // celle 1: arver begge defaults
+  assert.strictEqual(p.cells[1].type, 'r');
+  assert.strictEqual(p.cells[1].attrs['hide-code'], true);
+  // celle 2: header-type vinner; attrs-default gjelder fortsatt
+  assert.strictEqual(p.cells[2].type, 'python');
+  assert.strictEqual(p.cells[2].attrs.slide, '1');
+  assert.strictEqual(p.cells[2].attrs['hide-code'], true);
+  // celle 3: egen tag overstyrer defaulten
+  assert.strictEqual(p.cells[3].attrs['hide-code'], false);
+  assert.strictEqual(p.cells[3].type, 'r');
+});
+
+test('parseCells: sniff vinner over preambel-default (umerket prosacelle i typet dokument)', () => {
+  const p = C.parseCells('#tag.type = python\n\n#%%\n"""# Notat"""');
+  assert.strictEqual(p.cells[1].type, 'md');
+  assert.strictEqual(p.cells[1].sniffed, 'md');
+});
+
+test('parseCells: round-trip-garantien holder med tags og sniffede celler', () => {
+  const src = '#tag.type = python\n# load x\n\n#%%\n#tag.slide = 3\n"""tekst"""\n#%% r id=a\n#tag.speak = hei\ny <- 1';
+  assert.strictEqual(C.serializeCells(C.parseCells(src).cells), src);
+});
+
+test('parseCells: #tag.type = r gir r-segment i python-dokument (segmentPlan + executableSource)', () => {
+  const src = '#%%\n#tag.type = r\ny <- 1\n#%% python\nx = 1';
+  assert.deepStrictEqual(C.segmentPlan(src, 'python'), [0, 1]);
+  const exec = C.executableSource(src, 'python');
+  assert.ok(/^## r$/m.test(exec));
+  assert.ok(/^## python$/m.test(exec));
+});
+
+test('parseCells: sniffet md-celle blankes av executableSource (ikke-kode)', () => {
+  const src = '#%% python\nx = 1\n#%%\n"""tekst"""';
+  const exec = C.executableSource(src, 'python');
+  assert.strictEqual(exec.split('\n').length, src.split('\n').length);
+  assert.ok(exec.indexOf('tekst') === -1);
+  assert.deepStrictEqual(C.segmentPlan(src, 'python'), [0]);
+});
+
+test('parseCells: ingen #%% → ingen tag-maskineri påvirker dokumentet (paramount-invarianten)', () => {
+  const src = '#tag.type = r\nx = 1';
+  assert.strictEqual(C.executableSource(src, 'python'), src);
+  // parseCells på ren tekst: preambel-cellen beholder type null/attrs {}
+  const p = C.parseCells(src);
+  assert.strictEqual(p.cells[0].type, null);
+});
