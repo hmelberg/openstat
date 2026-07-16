@@ -667,3 +667,11 @@ test('scanTagBlock: tom kropp og kropp uten tags → tomt resultat', () => {
   assert.deepStrictEqual(C.scanTagBlock('', false).tagLines, []);
   assert.deepStrictEqual(C.scanTagBlock('x = 1\ny = 2', false).tags, {});
 });
+
+test('scanTagBlock: tom/blank verdi er ugyldig linje — konsumeres med varsel, ingen tag lagres', () => {
+  const s = C.scanTagBlock('#tag.foo =\n#tag.bar = \n#tag.ok = 1\nx', false);
+  assert.deepStrictEqual(s.tags, { ok: '1' });
+  assert.deepStrictEqual(s.tagLines, [0, 1, 2]);
+  assert.strictEqual(s.warnings.length, 3);
+  assert.ok(s.warnings.slice(0, 2).every((w) => /ugyldig #tag-linje/.test(w.msg)));
+});

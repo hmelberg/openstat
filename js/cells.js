@@ -97,7 +97,7 @@
   // ---------- #tag-celledirektiver (spec 2026-07-16-tag-directives-design.md) ----------
 
   var TAG_PREFIX_RE = /^\s*#\s*tag\./;
-  var TAG_LINE_RE = /^\s*#\s*tag\.([A-Za-z_][\w-]*)\s*=\s*(.+?)\s*$/;
+  var TAG_LINE_RE = /^\s*#\s*tag\.([A-Za-z_][\w-]*)\s*=\s*(\S.*?)\s*$/;
 
   // Verdi-koersjon (spec §1): '"x"'/"'x'" → x; usitert true/false → boolean
   // (så '#tag.hide-code = true' gir samme attrs-form som header-flagget);
