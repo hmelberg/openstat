@@ -176,10 +176,13 @@
   // Per-run duckdb-bro — identisk protokoll som Brython-motorens
   // beginDuckBridge (JSON-streng {pending}|{cols}|{error}), eget globalnavn
   // så motorene ikke tråkker i hverandres closures.
-  function beginDuckBridge(spec) {
+  function beginDuckBridge(spec, sharedState) {
     var cache = {};
     var pending = [];
-    var registered = false;
+    // Notatbok-økten (notebookSession) eier et delt {registered}-objekt så
+    // view-registreringen skjer én gang per ØKT selv om broen er fersk per
+    // celle; run() sender ingenting og får lokal engangs-tilstand som før.
+    var st = sharedState || { registered: false };
     global.__mpyDuckSync = function (sqlText) {
       if (cache.hasOwnProperty(sqlText)) return cache[sqlText];
       if (pending.indexOf(sqlText) === -1) pending.push(sqlText);
@@ -191,11 +194,11 @@
         if (!global.__brythonDuck) {
           throw new Error('duckdb i MicroPython-modus krever DuckDB-hjelperen (__brythonDuck) i index.html');
         }
-        if (!registered) {
+        if (!st.registered) {
           for (var name in spec) {
             await global.__brythonDuck.register(name, spec[name].kind, spec[name].payload);
           }
-          registered = true;
+          st.registered = true;
         }
         var batch = pending;
         pending = [];
@@ -306,10 +309,11 @@
   // ── Notatbok-sesjon (fase C, spec 2026-07-16) ─────────────────────────
   // ÉN levende økt for celle-for-celle-kjøring: datasett bindes ÉN gang i
   // ensure() (IKKE per celle slik run() gjør — brukerens mutasjoner av
-  // datasettvariabler skal overleve mellom celler), og duck-broen deles på
-  // tvers av celler (views registreres én gang, spørringscachen gjenbrukes).
-  // Vanlige scripts (uten #%%) bruker run() uendret — paramount-invarianten.
-  var __nb = { live: false, duck: null };
+  // datasettvariabler skal overleve mellom celler). Duck-broen er derimot
+  // FERSK per celle (se nbRunCell) — kun view-registreringen deles per økt
+  // via duckShared. Vanlige scripts (uten #%%) bruker run() uendret —
+  // paramount-invarianten.
+  var __nb = { live: false, spec: null, duckShared: null };
 
   async function nbEnsure(loads) {
     if (__nb.live) return;
@@ -321,7 +325,8 @@
       var bindErr = mod._bind_datasets(JSON.stringify(spec));
       if (bindErr) throw new Error(String(bindErr));
     }
-    __nb.duck = beginDuckBridge(spec);
+    __nb.spec = spec;
+    __nb.duckShared = { registered: false };   // views registreres én gang per økt
     __nb.live = true;
   }
 
@@ -332,7 +337,12 @@
       }
       var mod = await load();
       await ensureLibs(mod, scanImports(source));
-      var duck = __nb.duck;
+      // Fersk bro (og dermed ferskt hook+cache) per celle — samme
+      // per-kjøring-cachesemantikk som run(); kun view-registreringen deles
+      // per økt via duckShared. En delt bro ville ellers både mistet det
+      // globale sync-hooket til en mellomliggende run() og servert stale
+      // cache-treff etter muterende SQL (INSERT/CREATE OR REPLACE).
+      var duck = beginDuckBridge(__nb.spec, __nb.duckShared);
       __scriptLog.push(source);   // dash _func_params-fallback (se run())
       mod._snapshot();
       var err = null, pass;
@@ -367,12 +377,13 @@
     // live=false → neste ensure() re-resolver # load og rebinder datasett
     // (rene frames tilbake etter reset). __brythonDuck.register er
     // idempotent (typebevisst DROP + CREATE VIEW, index.html ~2707), så
-    // en frisk bro kan trygt re-registrere de samme viewene.
+    // neste økt kan trygt re-registrere de samme viewene.
     __nb.live = false;
-    __nb.duck = null;
+    __nb.spec = null;
+    __nb.duckShared = null;
   }
 
-  function nbInvalidate() { __nb.live = false; __nb.duck = null; }
+  function nbInvalidate() { __nb.live = false; __nb.spec = null; __nb.duckShared = null; }
   function nbIsLive() { return __nb.live; }
 
   global.MicroPythonEngine = {
