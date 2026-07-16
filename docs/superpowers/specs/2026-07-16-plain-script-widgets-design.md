@@ -1,5 +1,21 @@
 # Widgets in plain scripts + `sync_to` (design)
 
+**Status:** DELIVERED 2026-07-16 (plan 2026-07-16-plain-script-widgets.md).
+Exit-gate sweep (Task 5, `.superpowers/sdd/task-psw-5-report.md`): pyodide
+plain-script path (pull, `rerun="all"`, `sync_to`, mark-and-sweep, both
+themes) and R/brython/micropython's underlying registration/`sync_to`/
+mark-and-sweep data paths all verified working. KNOWN ISSUE found during
+the sweep and NOT fixed under this task's scope: the R, brython and
+micropython plain-script dispatch paths (index.html `runHybridR`'s
+`renderROutputParts` and the brython/micropython `runSelf` handlers'
+`renderOutput`) do a full `outputArea.innerHTML = ''` AFTER the doc-context
+control strip has already been built into `#outputArea`, wiping the
+strip from the DOM every run — the control never stays visible for those
+three engines (pyodide is unaffected; its segment loop appends
+incrementally instead of wholesale-replacing). Notebook cells (all
+engines) are unaffected — this is specific to the rent skript/doc-context
+path.
+
 Phase 3 of the unified document model
 (`2026-07-16-unified-document-model-notes.md` §3 and §6.3, decision 7 —
 approved by Hans 2026-07-16). Extends spec 2's `ui` system (W1-W5).

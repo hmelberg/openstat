@@ -754,6 +754,11 @@
       "group": null
     },
     {
+      "file": "python/py_plain_widgets.txt",
+      "label": "Widgets i rent skript — pull, rerun=\"all\" og sync_to",
+      "group": null
+    },
+    {
       "file": "python/py_presentasjon.txt",
       "label": "Notatbok — presentasjon (slides)",
       "group": null

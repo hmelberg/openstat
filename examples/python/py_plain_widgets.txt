@@ -1,0 +1,22 @@
+# label: Widgets i rent skript — pull, rerun="all" og sync_to
+#options.mode = python
+#options.title = "Widgets uten celler"
+#options.description = "ui-kontroller i et vanlig skript: verdiene leses ved neste Kjør (pull); rerun=\"all\" kjører hele skriptet på nytt ved endring; sync_to holder en variabel oppdatert uten kjøring"
+# load https://raw.githubusercontent.com/hmelberg/openstat/main/data/iris.csv as iris
+
+import ui
+
+# Kontrollene havner i en stripe øverst i output-området. Standard i rene
+# skript er rerun="none": du endrer verdiene og trykker Kjør når du vil.
+n = ui.slider(1, 50, value=10, label="Antall rader", name="n")
+art = ui.dropdown(["setosa", "versicolor", "virginica"], label="Art", name="art")
+
+# rerun="all": endres denne, kjøres HELE skriptet på nytt (debounced).
+vis_snitt = ui.checkbox(label="Vis gjennomsnitt", value=False, name="snitt", rerun="all")
+
+# sync_to: holder python-variabelen `terskel` oppdatert i sesjonen uten
+# å kjøre noe — nyttig for ui.on-handlere.
+terskel = ui.slider(0, 10, value=5, step=0.5, label="Terskel", name="t", sync_to="terskel")
+
+utvalg = iris[iris["species"] == art].head(n)
+utvalg if not vis_snitt else utvalg.describe()
