@@ -122,9 +122,12 @@ def _num(value):
 
 def _event_payload(res, out_text):
     """Klassifiser (returverdi, stdout) -> payload-dict for
-    Ui.renderEventResult (W5.2). Identisk med pyodide/ui.py sin
-    _event_payload (fasadene er divergente kopier per konvensjon -
-    builder-dedup er et eksisterende backlog-punkt)."""
+    Ui.renderEventResult (W5.2). Som pyodide/ui.py sin _event_payload,
+    med ETT dokumentert avvik: to_html() kalles uten border=0 - denne
+    motorens DataFrame.to_html tar ingen kwargs (browser-verifisert i
+    W5-exit-gate; pyodide har ekte pandas og beholder border=0).
+    (Fasadene er divergente kopier per konvensjon - builder-dedup er
+    et eksisterende backlog-punkt.)"""
     out_text = (out_text or "").rstrip("\n")
     if res is not None and hasattr(res, "to_plotly_json"):
         pj = res.to_plotly_json()
