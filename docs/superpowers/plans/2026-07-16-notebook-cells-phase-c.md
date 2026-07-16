@@ -164,6 +164,19 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ### Task 2: Engine `notebookSession` API (both engines)
 
+> **AMENDED after first review (2026-07-16):** the original design below
+> held ONE duck bridge for the whole session. Two Important findings:
+> (1) `beginDuckBridge` installs a module-global sync hook, so a plain
+> `run()` between cells desyncs hook↔bridge (wrong-bridge cache hits);
+> (2) a session-wide query cache silently no-ops re-run mutating SQL and
+> can serve stale reads. Amended contract: `beginDuckBridge(spec,
+> sharedState)` takes an optional session-owned `{registered}` object;
+> `ensure()` stores `__nb.spec`/`__nb.duckShared` (no bridge); `runCell`
+> creates a FRESH bridge per call (re-arms the hook, per-execution cache
+> like `run()`), view registration shared once-per-session via
+> `duckShared.registered`; `reset()`/`invalidate()` null both. The code
+> blocks below predate the amendment — the committed code is canonical.
+
 **Files:**
 - Modify: `js/brython-engine.js` (add before the final `global.BrythonEngine = …` export, extend the export)
 - Modify: `js/micropython-engine.js` (same, before `global.MicroPythonEngine = …`)

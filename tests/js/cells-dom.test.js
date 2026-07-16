@@ -263,11 +263,13 @@ test('syncTickBaseline() etter modusbytte-gjenoppretting sluker endringen: neste
   // Simulerer switchEditorMode: bytt til en ustøttet modus (exit), gjenopprett
   // gammelt python-innhold ved retur (programmatisk .value-set uten input-event),
   // men kall syncTickBaseline() rett etter — akkurat som index.html nå gjør.
-  C.setDocMode('brython');
+  // (jamovi: ustøttet modus — fase C la brython/micropython TIL SUPPORTED_MODES,
+  // så testen bruker nå en fortsatt-ustøttet modus for samme regresjonsscenario.)
+  C.setDocMode('jamovi');
   assert.strictEqual(C.active(), false, 'ustøttet modus → forlater notatboken');
 
-  scriptInputEl.value = 'plain brython script\n';
-  C.setDocMode('brython'); // no-op, already brython
+  scriptInputEl.value = 'plain jamovi script\n';
+  C.setDocMode('jamovi'); // no-op, already jamovi
   tick(); // ingen markører uansett, forblir inaktiv
 
   // Bytt tilbake til python: gjenopprett den lagrede python-teksten MED
@@ -421,6 +423,20 @@ test('alignedPlanForKinds: reelt avvik (ingen 1:1-mapping) → null', () => {
 
   const aligned = C.alignedPlanForKinds(['pyodide', 'r']); // r-cellene matcher ikke 'pyodide'
   assert.strictEqual(aligned, null);
+});
+
+// ---- engineRunPlan (fase C Task 3: kjøreplan for motor-notatbøker) ----
+
+test('fase C: engineRunPlan lister kodeceller i dokumentrekkefølge', () => {
+  const { C, scriptInputEl } = freshEnv();
+  // dokument i brython-modus: preambel + brython-celle + md + brython-celle
+  scriptInputEl.value = '# load a as b\n#%% brython\nx = 1\n#%% md\nhei\n#%% brython\nx + 1';
+  C.init('brython');
+  assert.strictEqual(C.active(), true);
+
+  assert.deepStrictEqual(C.engineRunPlan(), [0, 1, 3]);   // preambel er celle 0
+  C.exit();
+  assert.strictEqual(C.engineRunPlan(), null);
 });
 
 // ---- segmentDisplay (Task 10: notatbok-visningspolicy, spec §4 "Display policy") ----

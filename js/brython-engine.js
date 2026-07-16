@@ -156,10 +156,13 @@
   // køen asynkront via index.html-hjelperen __brythonDuck og cacher svarene;
   // run() re-kjører deretter scriptet (replay). Closure settes friskt per run
   // — en gammel closure ville ellers servert forrige runs data.
-  function beginDuckBridge(spec) {
+  function beginDuckBridge(spec, sharedState) {
     var cache = {};      // sql -> JSON-streng {cols} | {error}
     var pending = [];    // sql-strenger i kø til neste flush
-    var registered = false;
+    // Notatbok-økten (notebookSession) eier et delt {registered}-objekt så
+    // view-registreringen skjer én gang per ØKT selv om broen er fersk per
+    // celle; run() sender ingenting og får lokal engangs-tilstand som før.
+    var st = sharedState || { registered: false };
     // Returnerer ALLTID en JSON-streng — JS null blir IKKE Python None i
     // Brython 3.12, så miss signaliseres med {"pending":true} i stedet.
     global.__brythonDuckSync = function (sqlText) {
@@ -173,12 +176,12 @@
         if (!global.__brythonDuck) {
           throw new Error('duckdb i Brython-modus krever DuckDB-hjelperen (__brythonDuck) i index.html');
         }
-        if (!registered) {
+        if (!st.registered) {
           // # load-datasett (og innbakte blokker) blir spørrbare views
           for (var name in spec) {
             await global.__brythonDuck.register(name, spec[name].kind, spec[name].payload);
           }
-          registered = true;
+          st.registered = true;
         }
         var batch = pending;
         pending = [];
@@ -325,8 +328,87 @@
     }
   }
 
+  // ── Notatbok-sesjon (fase C, spec 2026-07-16) ─────────────────────────
+  // ÉN levende økt for celle-for-celle-kjøring: datasett bindes ÉN gang i
+  // ensure() (IKKE per celle slik run() gjør — brukerens mutasjoner av
+  // datasettvariabler skal overleve mellom celler). Duck-broen er derimot
+  // FERSK per celle (se nbRunCell) — kun view-registreringen deles per økt
+  // via duckShared. Vanlige scripts (uten #%%) bruker run() uendret —
+  // paramount-invarianten.
+  var __nb = { live: false, spec: null, duckShared: null };
+
+  async function nbEnsure(loads) {
+    if (__nb.live) return;
+    var mod = await load();
+    var spec = await buildDatasetSpec(loads);
+    __lastSpec = spec;   // "Publiser dashboard" leser herfra, som ved run()
+    if (Object.keys(spec).length) {
+      await ensureLibs(mod, ['pandas_brython']);   // _bind_datasets bygger DataFrames
+      var bindErr = mod._bind_datasets(JSON.stringify(spec));
+      if (bindErr) throw new Error(String(bindErr));
+    }
+    __nb.spec = spec;
+    __nb.duckShared = { registered: false };   // views registreres én gang per økt
+    __nb.live = true;
+  }
+
+  async function nbRunCell(source) {
+    // Kontrakt som run(): resolver ALLTID {text, error} — aldri reject.
+    try {
+      if (!__nb.live) {
+        return { text: '', error: 'notebookSession.ensure() må kalles før runCell()' };
+      }
+      var mod = await load();
+      await ensureLibs(mod, scanImports(source));
+      // Fersk bro (og dermed ferskt hook+cache) per celle — samme
+      // per-kjøring-cachesemantikk som run(); kun view-registreringen deles
+      // per økt via duckShared. En delt bro ville ellers både mistet det
+      // globale sync-hooket til en mellomliggende run() og servert stale
+      // cache-treff etter muterende SQL (INSERT/CREATE OR REPLACE).
+      var duck = beginDuckBridge(__nb.spec, __nb.duckShared);
+      mod._snapshot();   // duck-replay-spoling gjelder KUN denne cellens pass
+      var text = '', err = null, pass;
+      for (pass = 0; pass < MAX_DUCK_PASSES; pass++) {
+        if (pass > 0) mod._rollback();
+        text = mod._execute_code(source);
+        err = mod._get_last_error();
+        if (err !== PENDING_MARKER) break;
+        if (!duck.hasPending()) {
+          return { text: '', error: 'duckdb_brython: replay uten ventende spørringer (intern feil)' };
+        }
+        await duck.flush();
+      }
+      if (err === PENDING_MARKER) {
+        return { text: '', error: 'duckdb-spørringene stabiliserer seg ikke etter ' +
+                 MAX_DUCK_PASSES + ' pass — bygges SQL-tekstene av ikke-deterministiske ' +
+                 'verdier (f.eks. random uten seed)?' };
+      }
+      return { text: String(text == null ? '' : text), error: err ? String(err) : null };
+    } catch (e) {
+      return { text: '', error: (e && e.message) || String(e) };
+    }
+  }
+
+  async function nbReset() {
+    var mod = await load();
+    var err = mod._reset();
+    if (err) throw new Error(String(err));
+    // live=false → neste ensure() re-resolver # load og rebinder datasett
+    // (rene frames tilbake etter reset). __brythonDuck.register er
+    // idempotent (typebevisst DROP + CREATE VIEW, index.html ~2707), så
+    // neste økt kan trygt re-registrere de samme viewene.
+    __nb.live = false;
+    __nb.spec = null;
+    __nb.duckShared = null;
+  }
+
+  function nbInvalidate() { __nb.live = false; __nb.spec = null; __nb.duckShared = null; }
+  function nbIsLive() { return __nb.live; }
+
   global.BrythonEngine = {
     load: load, run: run, _scanImports: scanImports,
-    getLastDatasetSpec: function () { return __lastSpec; }
+    getLastDatasetSpec: function () { return __lastSpec; },
+    notebookSession: { ensure: nbEnsure, runCell: nbRunCell, reset: nbReset,
+                       invalidate: nbInvalidate, isLive: nbIsLive }
   };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -81,7 +81,9 @@ test('isMarkerLine/hasMarkers', () => {
 test('supportedMode / isCodeType / resolveType', () => {
   assert.ok(C.supportedMode('python') && C.supportedMode('r') &&
             C.supportedMode('duckdb') && C.supportedMode('microdata'));
-  assert.ok(!C.supportedMode('brython') && !C.supportedMode('jamovi'));
+  // Fase C (spec 2026-07-16): brython er nå en støttet modus — se egen
+  // test lenger ned. jamovi er fortsatt ikke-støttet (ingen motor).
+  assert.ok(!C.supportedMode('jamovi'));
   assert.ok(C.isCodeType('python') && !C.isCodeType('md') &&
             !C.isCodeType('html') && !C.isCodeType('skip'));
   assert.strictEqual(C.resolveType({ type: null }, 'r'), 'r');
@@ -555,4 +557,26 @@ test('mergeWithPrevious: ugyldig indeks (>= length) → no-op + advarsel', () =>
   const r = C.mergeWithPrevious(cells, 9);
   assert.strictEqual(r.cells, cells);
   assert.ok(r.warnings.length > 0);
+});
+
+// -- fase C: brython/micropython moduser + kinds --
+
+test('fase C: brython/micropython er støttede notatbok-moduser', function () {
+  assert.equal(C.supportedMode('brython'), true);
+  assert.equal(C.supportedMode('micropython'), true);
+  assert.equal(C.supportedMode('statx'), false);   // uendret
+});
+
+test('fase C: KIND_FOR_TYPE har brython/micropython, SEG_MARKER har dem IKKE', function () {
+  assert.equal(C.KIND_FOR_TYPE.brython, 'brython');
+  assert.equal(C.KIND_FOR_TYPE.micropython, 'micropython');
+  assert.equal(C.SEG_MARKER.brython, undefined);
+  assert.equal(C.SEG_MARKER.micropython, undefined);
+});
+
+test('fase C: executableSource blanker fortsatt brython-celler (invariant)', function () {
+  var doc = '# load x as y\n#%% brython\nprint(1)\n#%% md\nhei';
+  var out = C.executableSource(doc, 'brython');
+  assert.ok(out.indexOf('print(1)') === -1);
+  assert.equal(out.split('\n').length, doc.split('\n').length);  // linjetall bevart
 });

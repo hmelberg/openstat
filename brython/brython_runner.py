@@ -211,3 +211,31 @@ def _bind_datasets(spec_json):
         return ''
     except Exception:
         return traceback.format_exc()
+
+# Boot-baseline for fase C (spec 2026-07-16): et grunt bilde av
+# _shared_vars slik de så ut ved boot — ATSKILT fra _snapshot/_rollback-
+# paret, som er reservert duck-replay-løkken (per kjøring). _reset() spoler
+# brukerglobals tilbake hit ("Restart & kjør alle" i notatbok), men beholder
+# registrerte biblioteker i sys.modules — samme avveining som R-modusens
+# rm(list=ls()) (og samme grunt-kopi-forbehold som _rollback dokumenterer:
+# muterte objekter DELES med baselinen; grunne kopier er kontrakten her).
+_baseline_vars = dict(_shared_vars)
+
+def _reset():
+    """Spol brukerglobals tilbake til boot-baseline; ''/traceback-kontrakt.
+    Per-nøkkel med vilje — SAMME Brython 3.12-felle som _rollback over
+    dokumenterer: clear()+update() mistet gjenopprettede nøkler (browser-
+    verifisert 2026-07-16: _baseline_vars['show'] overlevde ikke en
+    clear()+update()-reset, «Restart & kjør alle» endte med at selv show()
+    ga NameError). d[k]=v / del d[k] oppfører seg riktig, som i _rollback."""
+    global _last_error
+    try:
+        for k in list(_shared_vars.keys()):
+            if k not in _baseline_vars:
+                del _shared_vars[k]
+        for k in list(_baseline_vars.keys()):
+            _shared_vars[k] = _baseline_vars[k]
+        _last_error = ''
+        return ''
+    except BaseException:
+        return traceback.format_exc()

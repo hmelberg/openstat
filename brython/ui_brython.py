@@ -10,19 +10,13 @@ Brython/MicroPython kjører på hovedtråden (ikke i en worker slik webR gjør),
 så `registerControl` kan kalles synkront akkurat som i pyodide - se
 `brython/dash.py` (`window.Dash`) for presedens på dette mønsteret.
 
-Widgets krever i dag en aktiv notatbok-kjørekontekst (satt av
-`Ui.beginCellRun`) for at kontrollen faktisk skal registreres og tegnes.
-Brython/MicroPython-motorene har IKKE notatbok-cellestøtte ennå (kommer i
-en senere fase) - `SEG_MARKER` (js/cells.js) mangler brython/micropython,
-så en notatbok-celle i disse modusene blir i dag blanket i stedet for
-kjørt. Følgelig finnes det ingen aktiv kjørekontekst å registrere en
-kontroll mot, og `registerControl` returnerer null uansett - hvert
-`ui.*`-kall faller derfor ALLTID tilbake til sin dokumenterte deterministiske
-default (under, per funksjon). Dette er IKKE en feil eller midlertidig
-begrensning i denne fila - det er den korrekte oppførselen inntil
-notatbok-cellestøtte finnes for disse motorene. API-et er likevel identisk
-med pyodide-varianten, slik at kode kan porteres uendret den dagen støtten
-kommer.
+Fase C (spec 2026-07-16): motoren HAR notatbok-cellestøtte - under
+per-celle-kjøring/Kjør alle setter index.html kjørekonteksten
+(Ui.beginCellRun), og registerControl registrerer/tegner kontrollen
+akkurat som i pyodide-modus (samme pull-modell; hovedtråd = synkron
+lesing). Utenfor en notatbok-kjørekontekst (vanlige scripts) returnerer
+registerControl fortsatt null, og hvert ui.*-kall faller da tilbake til
+sin dokumenterte deterministiske default (under, per funksjon).
 
 Kritisk FFI-detalj (verifisert, se brython/duckdb_brython.py og
 js/brython-engine.js): en ekte JS `null` som kommer tilbake over

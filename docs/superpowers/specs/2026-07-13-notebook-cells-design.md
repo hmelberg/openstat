@@ -171,10 +171,10 @@ auto-sizing source editor, output slot. Details:
 
 ### 3.3 Mode support (phase A)
 
-Notebook rendering engages in **python / r / duckdb / microdata** modes
-(the hybrid-segment family). In other modes (brython, micropython, statx,
-jamovi) `#%%` lines are inert comments and the document renders as a plain
-script, until those runners gain cell support in a later phase.
+Notebook rendering engages in **python / r / duckdb / microdata / brython /
+micropython** modes. In other modes (statx, jamovi) `#%%` lines are inert
+comments and the document renders as a plain script, until those runners
+gain cell support in a later phase.
 
 ## 4. Execution
 
@@ -344,8 +344,9 @@ run's output rendered into **that cell's slot**. Design:
 Phase A and B1 remain independently shippable if a future phase stalls;
 with B2 done, all three phases of spec 1 are complete.
 
-- **Phase C — PLANNED (user request 2026-07-16): brython/micropython
-  notebook execution.** Lifts the §3.3 restriction for the two
+- **Phase C — DONE 2026-07-16: brython/micropython notebook execution.**
+  See `2026-07-16-notebook-cells-phase-c-design.md` for the full design and
+  task breakdown. Lifts the §3.3 restriction for the two
   main-thread Python engines so notebooks (and with them widgets and
   `#@param`) work in brython/micropython modes. Most of the stack is
   already in place and language-ready: the `ui` facades ship with

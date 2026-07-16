@@ -575,10 +575,10 @@
        app.css sin ?v= over (statiske <script>-tagger kan ikke lese
        window.M2PY_VERSION — det settes av en senere <script>-blokk, lenge
        etter at nettleseren allerede har startet disse to lastingene). -->
-  <script src="js/brython-engine.js?v=2026-07-13a"></script>
-  <script src="js/micropython-engine.js?v=2026-07-13a"></script>
+  <script src="js/brython-engine.js?v=2026-07-16a"></script>
+  <script src="js/micropython-engine.js?v=2026-07-16a"></script>
   <script src="js/dash.js"></script>
-  <script src="js/cells.js"></script>
+  <script src="js/cells.js?v=2026-07-16a"></script>
   <script src="js/ui.js"></script>
   <script src="js/param-forms.js"></script>
   <script src="js/ipywidgets-bridge.js"></script>
@@ -3292,6 +3292,9 @@
       // et modusbytte gjør den levende Python-sesjonen (e/_g) ugyldig — neste
       // kjøring (Kjør alle eller en fremtidig per-celle-kjøring) booter på nytt.
       nbSetSessionLive(false);
+      // Fase C: motor-sesjonene er også modus-bundet
+      if (window.BrythonEngine && window.BrythonEngine.notebookSession) window.BrythonEngine.notebookSession.invalidate();
+      if (window.MicroPythonEngine && window.MicroPythonEngine.notebookSession) window.MicroPythonEngine.notebookSession.invalidate();
       // Save departing mode's content and breakpoints
       const si = document.getElementById('scriptInput');
       if (si) editorContent[activeEditorMode] = si.value;
@@ -3339,6 +3342,17 @@
       // Web send button is only shown in python/r/duckdb modes (admin-gated);
       // re-check eligibility now that the mode changed (cross-IIFE via window).
       if (window.mdSyncWebBtnVisibility) window.mdSyncWebBtnVisibility();
+      // Fase C sweep-fiks (Task 7): motor-notatbøkenes sesjons-liv eies av
+      // motorøkta (BrythonEngine/MicroPythonEngine.notebookSession.isLive),
+      // IKKE av `nbSessionLive`. nbSetSessionLive(false) øverst er derfor et
+      // no-op når en motor-notatbok aldri satte flagget, så sesjonschippen
+      // (som leser motorøktas isLive) ble hengende på «● aktiv» etter et
+      // modusbytte selv om motoren nettopp ble invalidert. Varsle
+      // abonnentene eksplisitt nå — etter at activeEditorMode/setDocMode er
+      // oppdatert — slik at chippen re-rendres til riktig «○ kald».
+      // Dekket av: browser-sweep Task 7 rad 5 / ⚠️-punkt 3 (modusbytte
+      // bort-og-tilbake → chip «kald»).
+      nbNotifyStateChange();
     }
 
     function updateModeButtonsUi() {
@@ -3678,14 +3692,25 @@
     // "Kjør alle" (btnRun) re-booter alltid ubetinget og markerer deretter
     // levende; modusbytte og restart() markerer død FØR ny boot.
     let nbSessionLive = false;
+    // Fase C: vakt mot dobbel "Kjør alle" i motor-notatbøker — løkka under
+    // (btnRun) slipper scriptRunInProgress mellom cellene (hver celle eier
+    // sitt eget flagg via mdRunNotebookCell), så btnRun sin vanlige
+    // interrupt-vakt fanger ikke et nytt klikk midt i løkka.
+    let engineNbRunActive = false;
     let nbStateChangeCbs = [];
+    // Varsle abonnenter (sesjonschippen i cells.js) om at sesjonstilstanden
+    // KAN ha endret seg. Callbacken leser selv isLive()/runtime() ferskt, så
+    // den boolske parameteren er kun et hint — abonnenten trenger den ikke.
+    function nbNotifyStateChange() {
+      for (var _nsi = 0; _nsi < nbStateChangeCbs.length; _nsi++) {
+        try { nbStateChangeCbs[_nsi](nbSessionLive); } catch (_e) {}
+      }
+    }
     function nbSetSessionLive(v) {
       v = !!v;
       if (v === nbSessionLive) return;
       nbSessionLive = v;
-      for (var _nsi = 0; _nsi < nbStateChangeCbs.length; _nsi++) {
-        try { nbStateChangeCbs[_nsi](nbSessionLive); } catch (_e) {}
-      }
+      nbNotifyStateChange();
     }
     // ── Editor mode (always-on, controlled by bottom-bar dropdown) ──────
     let activeEditorMode  = 'microdata'; // 'microdata' | 'python' | 'r'
@@ -9188,6 +9213,20 @@ async def _m2py_run_segment(_seg_json):
         // kjørings widgets åpner friske comms helt av seg selv (comm_open
         // via OpenstatComm). Guarded: broen er lazy og finnes kanskje aldri.
         if (window.IpwBridge && window.IpwBridge.reset) window.IpwBridge.reset();
+        // Fase C: motor-modus — runner-nivå reset (spec-avgjørelse 2), ingen
+        // Pyodide-boot (samme F4-prinsipp som r-grenen under). live=false i
+        // notebookSession → neste kjørings ensure() re-resolver # load og
+        // rebinder friske datasettvariabler.
+        if (activeEditorMode === 'brython' || activeEditorMode === 'micropython') {
+          var _eng = activeEditorMode === 'brython' ? window.BrythonEngine : window.MicroPythonEngine;
+          if (_eng && _eng.notebookSession) {
+            return _eng.notebookSession.reset().catch(function (e) {
+              console.warn('motor-reset (fase C):', e);
+              _eng.notebookSession.invalidate();   // feilet reset → i det minste kald sesjon
+            });
+          }
+          return Promise.resolve();
+        }
         // Ekte R-sesjonsreset (fase B2 Task 3 — F4-kommentaren over
         // nbEnsureSession dokumenterte dette som en gjenstående oppgave):
         // webR-interpreteren er PERSISTENT for hele sidens levetid (ingen
@@ -9238,14 +9277,25 @@ async def _m2py_run_segment(_seg_json):
         // Samme ipywidgets-opprydding som restart() over (dokumentbytte
         // gjør comm-ene like døde som en restart gjør).
         if (window.IpwBridge && window.IpwBridge.reset) window.IpwBridge.reset();
+        if (window.BrythonEngine && window.BrythonEngine.notebookSession) window.BrythonEngine.notebookSession.invalidate();
+        if (window.MicroPythonEngine && window.MicroPythonEngine.notebookSession) window.MicroPythonEngine.notebookSession.invalidate();
       },
-      isLive: function () { return nbSessionLive; },
+      isLive: function () {
+        if (activeEditorMode === 'brython' && window.BrythonEngine && window.BrythonEngine.notebookSession) {
+          return window.BrythonEngine.notebookSession.isLive();
+        }
+        if (activeEditorMode === 'micropython' && window.MicroPythonEngine && window.MicroPythonEngine.notebookSession) {
+          return window.MicroPythonEngine.notebookSession.isLive();
+        }
+        return nbSessionLive;
+      },
       // Klemmer til de fire kjøretidene notatbok-sesjonen faktisk kjenner
       // (status-chips, Task 5) — en ukjent/fremtidig modusverdi gir null
       // fremfor å lekke en vilkårlig streng videre til UI-en.
       runtime: function () {
         var m = activeEditorMode;
-        return (m === 'python' || m === 'r' || m === 'duckdb' || m === 'microdata') ? m : null;
+        return (m === 'python' || m === 'r' || m === 'duckdb' || m === 'microdata'
+                || m === 'brython' || m === 'micropython') ? m : null;
       },
       onStateChange: function (cb) {
         if (typeof cb === 'function') nbStateChangeCbs.push(cb);
@@ -9419,6 +9469,59 @@ async def _m2py_run_segment(_seg_json):
         setRunButtonsUi('idle');
       }
     }
+
+    // Fase C (spec 2026-07-16): per-celle-kjøring for motor-notatbøker
+    // (brython/micropython) — EGEN sti, som runNotebookRCell: ingen
+    // Pyodide-sesjon skal bootes her. Motorene kjører på hovedtråden, så
+    // ui-fasadenes pull-modell virker via nbUiRunCtx/beginCellRun-bracketen
+    // (samme kontrakt som pyodide-grenen ~9726/~9746). Kald sesjon: ensure()
+    // binder # load-datasett ÉN gang og preambelen (celle 0) kjøres FØRST
+    // inn i økten — dens output forkastes (console.warn ved feil), målcellen
+    // rendrer sin egen.
+    async function runNotebookEngineCell(payload) {
+      var kind = payload && payload.kind;
+      if (activeEditorMode !== kind) {
+        return { notice: t('{kind}-celler kjøres bare i {kind}-modus — bytt modus først', { kind: kind }) };
+      }
+      var engine = kind === 'brython' ? window.BrythonEngine : window.MicroPythonEngine;
+      if (!engine || !engine.notebookSession) {
+        return { error: t('Motoren er ikke lastet ennå. Vent og prøv igjen.') };
+      }
+      var sess = engine.notebookSession;
+      scriptRunInProgress = true;
+      setRunButtonsUi('running');
+      try {
+        if (!sess.isLive()) {
+          setStatus(rightStatus, t('Starter økt…'));
+          var _dl = await window.DataLoader.resolveAndFetchLoads(scriptInput.value,
+            { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey });
+          await sess.ensure(_dl.loads);
+          // Preambel (celle 0, headerRaw === null) inn i den ferske økten —
+          // med mindre målcellen ER preambelen (da kjøres den under, med
+          // synlig output i sin egen slot).
+          var _parsed = window.Cells.parseCells(scriptInput.value);
+          var _pre = _parsed.cells[0];
+          if (_pre && _pre.headerRaw === null && payload.cellIdx !== 0) {
+            var _preRes = await sess.runCell(_pre.source || '');
+            if (_preRes.error) console.warn('preambel (fase C):', _preRes.error);
+          }
+        }
+        setStatus(rightStatus, t('Kjører…'));
+        nbUiRunCtx = _nbUiCtxFor(payload.cellIdx);
+        if (window.Ui && window.Ui.beginCellRun) window.Ui.beginCellRun(payload.cellIdx);
+        var res = await sess.runCell(payload.text || '');
+        setStatus(rightStatus, res.error ? t('Feil') : t('Ferdig'));
+        if (res.error) return { error: res.error };
+        return { text: (res.text || '').trim() };
+      } catch (e) {
+        return { error: (e && e.message) || String(e) };
+      } finally {
+        nbUiRunCtx = null;
+        if (window.Ui && window.Ui.endCellRun) window.Ui.endCellRun(payload.cellIdx);
+        scriptRunInProgress = false;
+        setRunButtonsUi('idle');
+      }
+    }
     window.mdRunNotebookCell = async function (payload) {
       if (scriptRunInProgress) {
         return { error: t('En kjøring pågår allerede.') };
@@ -9430,11 +9533,22 @@ async def _m2py_run_segment(_seg_json):
         }
         return runNotebookRCell(payload);
       }
+      // Fase C: motor-celler (egen sti — se runNotebookEngineCell over).
+      // Modusmatch håndheves DER (kind !== activeEditorMode → notis), så
+      // en #%% brython-celle i et r-/python-dokument også lander riktig.
+      if (kind === 'brython' || kind === 'micropython') {
+        return runNotebookEngineCell(payload);
+      }
       // R-modus: pyodide-sesjonen bootes ikke lenger der (F4-fiksen), så ALLE
       // ikke-R-kinds får limitation-notis — ellers ville ensure() gitt {py:null}
       // og en rå TypeError i stedet for den kontraktsfestede meldingen.
       if (activeEditorMode === 'r') {
         return { notice: t('Denne celletypen i R-modus kjøres foreløpig kun via Kjør alle (fase B2)') };
+      }
+      // Fase C: fremmede kode-kinds i motor-modus (spec-avgjørelse 1:
+      // enspråklige dokumenter) — notis, aldri Pyodide-boot.
+      if (activeEditorMode === 'brython' || activeEditorMode === 'micropython') {
+        return { notice: t('Denne celletypen kjøres ikke i {mode}-modus — dokumentet er enspråklig', { mode: activeEditorMode }) };
       }
       if (kind !== 'pyodide' && kind !== 'duckdb' && kind !== 'microdata') {
         return { error: t('Ukjent celletype: {kind}', { kind: String(kind) }) };
@@ -9758,6 +9872,32 @@ async def _m2py_run_segment(_seg_json):
     btnRun.addEventListener('click', async () => {
       if (scriptRunInProgress) {
         performRunInterrupt();
+        return;
+      }
+      // Fase C (spec 2026-07-16, valg A): motor-notatbøker (brython/
+      // micropython) kjøres celle for celle via Cells.runCell — HELT UTENOM
+      // executableSource/segmentmaskineriet under (som ville blanket alle
+      // cellene: SEG_MARKER har med vilje ingen brython/micropython-
+      // oppføringer). Cells.runCell gir stale-rydding, Kjør-chip-skjuling,
+      // dash-sweep og renderCellResult gratis; fremmede kode-kinds får sin
+      // notis fra mdRunNotebookCell. Kjør/idle-knappetilstanden blafrer kort
+      // mellom cellene (hver celle eier sitt eget scriptRunInProgress-vindu)
+      // — akseptert: en delt løkke-flagg ville fått Cells.runCell sin egen
+      // mdIsScriptRunning-vakt til å avvise alle cellene.
+      if (window.Cells && window.Cells.active()
+          && (activeEditorMode === 'brython' || activeEditorMode === 'micropython')) {
+        if (engineNbRunActive) return;
+        engineNbRunActive = true;
+        try {
+          if (window.Cells.grantHtmlTrust) window.Cells.grantHtmlTrust();
+          var _engPlan = window.Cells.engineRunPlan() || [];
+          for (var _ei = 0; _ei < _engPlan.length; _ei++) {
+            await window.Cells.runCell(_engPlan[_ei]);
+          }
+        } finally {
+          engineNbRunActive = false;
+          setRunButtonsUi('idle');
+        }
         return;
       }
       // Notatbok aktiv (Task 6): #%%-celler → legacy '## lang'-segmentmarkører

@@ -24,7 +24,11 @@
   C.WIDGETS_POS = WIDGETS_POS;
   var ID_RE = /^[A-Za-z0-9_-]+$/;
   // Fase A: modusene der notebook-rendring og segmentkjøring er støttet.
-  var SUPPORTED_MODES = { python: 1, r: 1, duckdb: 1, microdata: 1 };
+  // Fase C (spec 2026-07-16): + brython/micropython — motor-notatbøker som
+  // kjøres celle-for-celle UTENOM segmentmaskineriet (SEG_MARKER har dem
+  // med vilje IKKE; executableSource skal fortsette å blanke dem).
+  var SUPPORTED_MODES = { python: 1, r: 1, duckdb: 1, microdata: 1,
+                          brython: 1, micropython: 1 };
 
   C.isMarkerLine = function (line) { return MARKER_RE.test(String(line)); };
 
@@ -206,7 +210,9 @@
   // (index.html ~6039-6072) navngir dem: python→'pyodide', r→'r',
   // duckdb→'duckdb', microdata→'microdata'. Samme mapping som SEG_MARKER,
   // bare med kjøretidens kind-navn i stedet for legacy-markørteksten.
-  var KIND_FOR_TYPE = { python: 'pyodide', r: 'r', duckdb: 'duckdb', microdata: 'microdata' };
+  var KIND_FOR_TYPE = { python: 'pyodide', r: 'r', duckdb: 'duckdb',
+                        microdata: 'microdata',
+                        brython: 'brython', micropython: 'micropython' };
   C.KIND_FOR_TYPE = KIND_FOR_TYPE;
 
   // Celletype → #@param-språk (spec 2 W4, Task 2): python-familien (python +
@@ -1409,6 +1415,23 @@
     C.alignedPlanForKinds = function (kinds) {
       if (!NB.activeFlag) return null;
       return C.alignPlan(NB.plan, NB.cells, NB.docMode, kinds);
+    };
+
+    // Fase C (spec 2026-07-16): kjøreplan for motor-notatbøker (brython/
+    // micropython) — celleindeksene til ALLE kodeceller med en KIND_FOR_TYPE-
+    // oppføring, i dokumentrekkefølge (preambelen inkludert: den resolver
+    // til docMode og kjøres som "celle 0" inn i sesjonen). Ingen segmenter
+    // her — enspråklige dokumenter kjøres celle for celle via C.runCell, og
+    // fremmede kode-kinds får sin notis fra mdRunNotebookCell, ikke herfra.
+    // null når notatboken er inaktiv (samme kontrakt som alignedPlanForKinds).
+    C.engineRunPlan = function () {
+      if (!NB.activeFlag) return null;
+      var out = [];
+      for (var i = 0; i < NB.cells.length; i++) {
+        var type = C.resolveType(NB.cells[i], NB.docMode);
+        if (C.isCodeType(type) && KIND_FOR_TYPE[type]) out.push(i);
+      }
+      return out;
     };
 
     // Segment-indeks → celleindeks i den justerte planen (Task 2, ui-widgets
