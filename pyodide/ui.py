@@ -109,6 +109,48 @@ def _num(value):
     return int(f) if f.is_integer() else f
 
 
+def _event_payload(res, out_text):
+    """Klassifiser (returverdi, stdout) -> payload-dict for
+    Ui.renderEventResult (W5.2). Speiler dash.py sin kort-klassifisering
+    (figur-ducktyping via to_plotly_json, frame via to_html/columns),
+    men som egen kompakt kopi - fasadene er divergente kopier per
+    konvensjon (builder-dedup er et eksisterende backlog-punkt)."""
+    out_text = (out_text or "").rstrip("\n")
+    if res is not None and hasattr(res, "to_plotly_json"):
+        pj = res.to_plotly_json()
+        return {"kind": "figure", "spec": {"data": pj.get("data"), "layout": pj.get("layout")}}
+    if res is not None and hasattr(res, "to_html") and hasattr(res, "columns"):
+        return {"kind": "table", "html": res.to_html(border=0)}
+    if res is None:
+        return {"kind": "text", "text": out_text} if out_text else None
+    text = str(res)
+    if out_text:
+        text = out_text + "\n" + text
+    return {"kind": "text", "text": text}
+
+
+def _make_event_wrapper(handler):
+    """Wrapperen JS faktisk kaller: JSON-event inn, payload-JSON ut.
+    Fanger stdout (sys.stdout-bytte, dash-presedens) og ALLE unntak ->
+    {"kind":"error"}. Kontrakt: handler tar ALLTID ett argument
+    (event-dicten) - ingen aritetssniffing (spec-avgjørelse)."""
+    def _wrapper(event_json):
+        import io, sys, traceback
+        buf = io.StringIO()
+        old = sys.stdout
+        sys.stdout = buf
+        try:
+            evt = json.loads(event_json) if event_json else {}
+            res = handler(evt)
+            p = _event_payload(res, buf.getvalue())
+            return json.dumps(p) if p is not None else '{}'   # tom payload -> JS no-op
+        except BaseException:
+            return json.dumps({"kind": "error", "text": traceback.format_exc()})
+        finally:
+            sys.stdout = old
+    return _wrapper
+
+
 def _alias_rerun(rerun, alias):
     """W5.1 (spec 2026-07-16-notebook-widget-events): on_click=/on_change=
     er kanoniske aliaser for rerun= - aliaset vinner når begge er satt
@@ -196,4 +238,35 @@ def button(label, *, rerun='self', on_click=None, name=None, placement=None):
     rerun = _alias_rerun(rerun, on_click)
     spec = _spec("button", label=label, name=name, rerun=rerun, placement=placement)
     _register(spec)
+    return None
+
+
+def on(selector, event, handler, *, target=None):
+    """Bind en python-funksjon til en HTML-event på et vilkårlig
+    DOM-element (typisk i en #%% html-celle). handler(evt) kalles med
+    event-dicten; returverdien rendres (tekst -> <pre>, DataFrame ->
+    tabell, plotly-figur -> graf) i target-id-en, eller appendes i
+    cellens output-slot når target utelates. Utenfor nettleser: no-op."""
+    u = _ui()
+    if u is None:
+        return None
+    binding = {"selector": str(selector), "event": str(event)}
+    if target is not None:
+        binding["target"] = str(target)
+    try:
+        from pyodide.ffi import create_proxy
+    except ImportError:
+        def create_proxy(f):
+            return f
+    u.bindEvent(json.dumps(binding), create_proxy(_make_event_wrapper(handler)))
+    return None
+
+
+def run_cell(selector, event, cell_id):
+    """Kjør en navngitt celle (id= i #%%-headeren) når HTML-eventen
+    fyrer - cellevarianten av on() (eget navn, ingen overloading)."""
+    u = _ui()
+    if u is None:
+        return None
+    u.bindRunCell(json.dumps({"selector": str(selector), "event": str(event), "cellId": str(cell_id)}))
     return None
