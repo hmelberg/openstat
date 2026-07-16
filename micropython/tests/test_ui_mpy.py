@@ -102,6 +102,26 @@ def test_slider_spec_default_rerun_er_self(monkeypatch):
     assert fake.calls[-1]["rerun"] == "self"
 
 
+# ---- on_click/on_change (W5.1) — kanoniske aliaser for rerun, aliaset vinner ----
+
+def test_on_click_alias_wins_over_rerun(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=None)
+    mod.button("Kjør", rerun="a", on_click="plot")
+    assert fake.calls[-1]["rerun"] == "plot"
+
+
+def test_on_change_alias_on_slider(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=None)
+    mod.slider(1, 10, on_change="plot")
+    assert fake.calls[-1]["rerun"] == "plot"
+
+
+def test_no_alias_keeps_rerun_default(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=None)
+    mod.slider(1, 10)
+    assert fake.calls[-1].get("rerun") == "self"
+
+
 # ---- placement (Task 3, per-kontroll plassering) — ren gjennomstrøms-kwarg,
 # validering skjer på JS-siden (js/ui.js sin normalizeSpec) ----
 

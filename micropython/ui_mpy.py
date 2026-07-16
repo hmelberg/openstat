@@ -140,8 +140,17 @@ def _num(value):
     return int(f) if f == int(f) else f
 
 
-def slider(min=0, max=100, *, value=None, step=1, label=None, name=None, rerun='self', placement=None):
-    """Glidebryter. Fallback (ingen notatbok-støtte): value hvis gitt, ellers min."""
+def _alias_rerun(rerun, alias):
+    """W5.1 (spec 2026-07-16-notebook-widget-events): on_click=/on_change=
+    er kanoniske aliaser for rerun= - aliaset vinner når begge er satt
+    (dokumentert kontrakt, ingen advarselskanal i v1)."""
+    return alias if alias is not None else rerun
+
+
+def slider(min=0, max=100, *, value=None, step=1, label=None, name=None, rerun='self', on_change=None, placement=None):
+    """Glidebryter. Fallback (ingen notatbok-støtte): value hvis gitt, ellers min.
+    on_change= er kanonisk alias for rerun= (W5.1) - aliaset vinner."""
+    rerun = _alias_rerun(rerun, on_change)
     spec = _spec("slider", min=min, max=max, value=value, step=step,
                  label=label, name=name, rerun=rerun, placement=placement)
     result = _register(spec)
@@ -150,8 +159,10 @@ def slider(min=0, max=100, *, value=None, step=1, label=None, name=None, rerun='
     return _num(result)
 
 
-def dropdown(options, *, value=None, label=None, name=None, rerun='self', placement=None):
-    """Nedtrekksmeny. Fallback: value hvis gitt, ellers første valg."""
+def dropdown(options, *, value=None, label=None, name=None, rerun='self', on_change=None, placement=None):
+    """Nedtrekksmeny. Fallback: value hvis gitt, ellers første valg.
+    on_change= er kanonisk alias for rerun= (W5.1) - aliaset vinner."""
+    rerun = _alias_rerun(rerun, on_change)
     options = list(options)
     if not options:
         raise ValueError("ui.dropdown: options kan ikke være en tom liste.")
@@ -163,8 +174,10 @@ def dropdown(options, *, value=None, label=None, name=None, rerun='self', placem
     return str(result)
 
 
-def checkbox(label=None, *, value=False, name=None, rerun='self', placement=None):
-    """Avkrysningsboks. Fallback: value."""
+def checkbox(label=None, *, value=False, name=None, rerun='self', on_change=None, placement=None):
+    """Avkrysningsboks. Fallback: value.
+    on_change= er kanonisk alias for rerun= (W5.1) - aliaset vinner."""
+    rerun = _alias_rerun(rerun, on_change)
     spec = _spec("checkbox", value=bool(value), label=label, name=name, rerun=rerun, placement=placement)
     result = _register(spec)
     if result is None:
@@ -172,8 +185,10 @@ def checkbox(label=None, *, value=False, name=None, rerun='self', placement=None
     return bool(result)
 
 
-def switch(label=None, *, value=False, name=None, rerun='self', placement=None):
-    """Bryter (samme semantikk som checkbox, annen visning). Fallback: value."""
+def switch(label=None, *, value=False, name=None, rerun='self', on_change=None, placement=None):
+    """Bryter (samme semantikk som checkbox, annen visning). Fallback: value.
+    on_change= er kanonisk alias for rerun= (W5.1) - aliaset vinner."""
+    rerun = _alias_rerun(rerun, on_change)
     spec = _spec("switch", value=bool(value), label=label, name=name, rerun=rerun, placement=placement)
     result = _register(spec)
     if result is None:
@@ -181,8 +196,10 @@ def switch(label=None, *, value=False, name=None, rerun='self', placement=None):
     return bool(result)
 
 
-def number(value=0, *, min=None, max=None, step=None, label=None, name=None, rerun='self', placement=None):
-    """Tallfelt. Fallback: value."""
+def number(value=0, *, min=None, max=None, step=None, label=None, name=None, rerun='self', on_change=None, placement=None):
+    """Tallfelt. Fallback: value.
+    on_change= er kanonisk alias for rerun= (W5.1) - aliaset vinner."""
+    rerun = _alias_rerun(rerun, on_change)
     spec = _spec("number", value=value, min=min, max=max, step=step,
                  label=label, name=name, rerun=rerun, placement=placement)
     result = _register(spec)
@@ -191,9 +208,11 @@ def number(value=0, *, min=None, max=None, step=None, label=None, name=None, rer
     return _num(result)
 
 
-def text(value='', *, label=None, name=None, rerun='self', placement=None):
+def text(value='', *, label=None, name=None, rerun='self', on_change=None, placement=None):
     """Tekstfelt. Fallback: str(value) - returtypen er alltid str
-    (speiler dash.py sin textfield(default=str(default)))."""
+    (speiler dash.py sin textfield(default=str(default))).
+    on_change= er kanonisk alias for rerun= (W5.1) - aliaset vinner."""
+    rerun = _alias_rerun(rerun, on_change)
     spec = _spec("text", value=str(value), label=label, name=name, rerun=rerun, placement=placement)
     result = _register(spec)
     if result is None:
@@ -201,9 +220,11 @@ def text(value='', *, label=None, name=None, rerun='self', placement=None):
     return str(result)
 
 
-def button(label, *, rerun='self', name=None, placement=None):
+def button(label, *, rerun='self', on_click=None, name=None, placement=None):
     """Trykknapp. Returnerer alltid None - selve klikket trigger en rerun
-    av målcellen (js/ui.js), ikke en verdi å lese ut."""
+    av målcellen (js/ui.js), ikke en verdi å lese ut.
+    on_click= er kanonisk alias for rerun= (W5.1) - aliaset vinner."""
+    rerun = _alias_rerun(rerun, on_click)
     spec = _spec("button", label=label, name=name, rerun=rerun, placement=placement)
     _register(spec)
     return None
