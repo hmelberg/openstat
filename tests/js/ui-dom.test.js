@@ -147,9 +147,18 @@ function freshEnv(opts) {
   cellEl.appendChild(inputEl);
   cellEl.appendChild(outEl);
 
+  // Fase 3 (Task 1): doc-konteksten (rent skript) sin vert er #outputArea,
+  // ikke en celles .nb-output — stubbet her, samme mønster som cellEl over,
+  // slik at ALLE tester (ikke bare doc-ctx-spesifikke) kan finne den via
+  // document.getElementById('outputArea') uten egen oppsett.
+  const outputAreaEl = new FakeEl('div');
+  outputAreaEl.id = 'outputArea';
+  global.document._idIndex.outputArea = outputAreaEl;
+
   const cellIdx = opts.cellIdx != null ? opts.cellIdx : 0;
   let ctx;
   if (opts.ctxNull) ctx = null;
+  else if (opts.docCtx) ctx = { cellIdx: null, cellEl: null, doc: true };
   else if (opts.cellElNull) ctx = { cellIdx: cellIdx, cellEl: null };
   else ctx = { cellIdx: cellIdx, cellEl: cellEl };
 
@@ -176,7 +185,7 @@ function freshEnv(opts) {
   const Ui = require(UI_PATH);
 
   return {
-    Ui, cellEl, inputEl, outEl, bodyEl, runCellCalls,
+    Ui, cellEl, inputEl, outEl, bodyEl, outputAreaEl, runCellCalls,
     setCtx: (c) => { ctx = c; },
     setScriptRunning: (v) => { global.mdIsScriptRunning = () => v; },
   };
@@ -1282,4 +1291,120 @@ test('W5.2: erstatning — re-deklarasjon av SAMME binding-nøkkel i samme kjør
   Ui.endCellRun(0);
 
   assert.strictEqual(destroyedFirst, true, 'den erstattede handleren destrueres, ikke bare glemmes');
+});
+
+// ============================================================================
+// Fase 3 / Task 1: doc-kontekst (rent skript uten #%%), rerun="all",
+// sync_to — spec 2026-07-15-notebook-widgets-design.md §1/§3.
+// ============================================================================
+
+test('doc-kontekst: registerControl uten celle men med doc-ctx → stripe i #outputArea, nøkkel doc::', () => {
+  const { Ui, outputAreaEl } = freshEnv({ docCtx: true });
+  const v = Ui.registerControl(JSON.stringify({ type: 'slider', name: 'n', value: 5, min: 0, max: 10 }));
+  assert.strictEqual(JSON.parse(v), 5);
+  const strip = outputAreaEl.children.find((c) => c.classList.contains('ui-controls'));
+  assert.ok(strip, 'stripe opprettet i #outputArea');
+  assert.strictEqual(strip.getAttribute('data-pos'), 'top');
+  assert.strictEqual(JSON.parse(Ui.valuesForCell(null)).n, 5);
+});
+
+test('doc-kontekst: uten aktiv doc-kjøring er registerControl fortsatt null (uendret no-op)', () => {
+  const { Ui } = freshEnv({ ctxNull: true });
+  assert.strictEqual(Ui.registerControl(JSON.stringify({ type: 'slider', name: 'n' })), null);
+});
+
+test('doc-kontekst: rerun-oppløsning — self→ingen (stille), id→warn+ingen, all→mdRunWholeScript etter debounce', async () => {
+  const { Ui, outputAreaEl, runCellCalls } = freshEnv({ docCtx: true });
+  let wholeScriptCalls = 0;
+  global.mdRunWholeScript = () => { wholeScriptCalls++; };
+  // Doc-kontekst har ingen notatbok — Cells trengs aldri for disse tre
+  // scenarioene (self→[] og id→[] løses FØR noe Cells-oppslag, all→
+  // mdRunWholeScript i stedet for Cells.runCell), så en fraværende Cells
+  // beviser det.
+  global.Cells = undefined;
+
+  // 1) self (default): endre slider-verdi → ingen mdRunWholeScript, ingen runCell
+  Ui.registerControl(JSON.stringify({ type: 'slider', name: 's1', value: 1, min: 0, max: 10 }));
+  let strip = outputAreaEl.children.find((c) => c.classList.contains('ui-controls'));
+  let input = strip.children[0].children[1];
+  input.value = '5';
+  input.dispatchEvent({ type: 'input' });
+  await wait(200);
+  assert.strictEqual(wholeScriptCalls, 0, 'self i doc-ctx løses stille til ingen mål');
+  assert.deepStrictEqual(runCellCalls, []);
+
+  // 2) rerun:'plot' (id): console.warn fanget, ingen kall — id-mål er
+  // meningsløst uten celler å peke på.
+  const origWarn = console.warn;
+  let warned = 0;
+  console.warn = () => { warned++; };
+  try {
+    Ui.registerControl(JSON.stringify({ type: 'slider', name: 's2', value: 1, min: 0, max: 10, rerun: 'plot' }));
+    strip = outputAreaEl.children.find((c) => c.classList.contains('ui-controls'));
+    input = strip.children[1].children[1];
+    input.value = '3';
+    input.dispatchEvent({ type: 'input' });
+    await wait(200);
+  } finally {
+    console.warn = origWarn;
+  }
+  assert.ok(warned >= 1, 'console.warn kalt for id-mål i doc-kontekst');
+  assert.strictEqual(wholeScriptCalls, 0);
+  assert.deepStrictEqual(runCellCalls, []);
+
+  // 3) rerun:'all': endre verdi → etter 150ms+ er mdRunWholeScript kalt
+  // nøyaktig én gang (to raske endringer → fortsatt én, debounce).
+  Ui.registerControl(JSON.stringify({ type: 'slider', name: 's3', value: 1, min: 0, max: 10, rerun: 'all' }));
+  strip = outputAreaEl.children.find((c) => c.classList.contains('ui-controls'));
+  input = strip.children[2].children[1];
+  input.value = '2';
+  input.dispatchEvent({ type: 'input' });
+  input.value = '4';
+  input.dispatchEvent({ type: 'input' });
+  await wait(200);
+  assert.strictEqual(wholeScriptCalls, 1, "rerun:'all' kaller mdRunWholeScript nøyaktig én gang etter debounce");
+});
+
+test('sync_to: push ved registrering og ved endring, FØR evt. rerun', async () => {
+  const { Ui, outputAreaEl } = freshEnv({ docCtx: true });
+  const log = [];
+  global.mdUiSyncTo = (name, value) => { log.push([name, value]); };
+
+  const v = Ui.registerControl(JSON.stringify({ type: 'slider', name: 'n', value: 3, min: 0, max: 10, sync_to: 'n' }));
+  assert.strictEqual(JSON.parse(v), 3);
+  assert.deepStrictEqual(log, [['n', 3]], 'push skjedde allerede ved registrering');
+
+  const strip = outputAreaEl.children.find((c) => c.classList.contains('ui-controls'));
+  const input = strip.children[0].children[1];
+  input.value = '7';
+  input.dispatchEvent({ type: 'input' });
+  assert.deepStrictEqual(log, [['n', 3], ['n', 7]],
+    'push skjer UMIDDELBART ved endring (før den 150ms-debouncede reruen har rukket å fyre)');
+  await wait(200); // flush løs debounce-timer FØR neste test overtar globalene
+});
+
+test('doc-kontekst: mark-og-sopp på tvers av to brakettede kjøringer', () => {
+  const { Ui, outputAreaEl } = freshEnv({ docCtx: true });
+  Ui.beginCellRun(null);
+  Ui.registerControl(JSON.stringify({ type: 'text', name: 'a', value: '1' }));
+  Ui.registerControl(JSON.stringify({ type: 'text', name: 'b', value: '2' }));
+  Ui.endCellRun(null);
+  const strip = outputAreaEl.children.find((c) => c.classList.contains('ui-controls'));
+  assert.strictEqual(strip.children.length, 2, 'begge finnes etter første brakett');
+
+  Ui.beginCellRun(null);
+  Ui.registerControl(JSON.stringify({ type: 'text', name: 'a', value: '1' }));
+  Ui.endCellRun(null);
+  assert.strictEqual(strip.children.length, 1, "'b' er fjernet fra stripa — ikke gjenregistrert i andre brakett");
+});
+
+test('registerFromRegistry(null, json) → doc-stripa (webR plain-sti)', () => {
+  const { Ui, outputAreaEl, outEl } = freshEnv();
+  Ui.registerFromRegistry(null, JSON.stringify([{ type: 'slider', name: 'r1', value: 2, min: 0, max: 5 }]));
+  assert.strictEqual(JSON.parse(Ui.valuesForCell(null)).r1, 2);
+  const strip = outputAreaEl.children.find((c) => c.classList.contains('ui-controls'));
+  assert.ok(strip, 'stripa lever i #outputArea, ikke i en celle');
+  assert.strictEqual(strip.children.length, 1);
+  assert.ok(!outEl.children.some((c) => c.classList.contains('ui-controls')),
+    'ingen .ui-controls havnet i cellens .nb-output');
 });

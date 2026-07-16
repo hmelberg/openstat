@@ -32,7 +32,8 @@
     step: 1,
     options: 1,
     rerun: 1,
-    placement: 1
+    placement: 1,
+    sync_to: 1
   };
 
   // Gyldige placement-verdier (per-kontroll plassering, Task 3) — samme
@@ -96,6 +97,20 @@
         spec.placement = placementVal;
       } else {
         warnings.push('ugyldig placement: ' + placementVal);
+      }
+    }
+
+    // sync_to (fase 3, spec §3): push av verdien inn i en navngitt sesjons-
+    // variabel. Navnet interpoleres i kodestrenger hos mottakerne
+    // (mdUiSyncTo) — regexen her ER injeksjonsvernet, aldri fjern den.
+    if (raw.sync_to !== undefined) {
+      var syncName = String(raw.sync_to);
+      if (type === 'button') {
+        warnings.push('sync_to støttes ikke på button');
+      } else if (!/^[A-Za-z_.][\w.]*$/.test(syncName)) {
+        warnings.push('ugyldig sync_to-navn: ' + syncName);
+      } else {
+        spec.sync_to = syncName;
       }
     }
 
@@ -298,7 +313,18 @@
     function _resolveTargets(spec, selfCellIdx) {
       var rerun = spec.rerun;
       if (rerun === 'none') return [];
-      if (rerun === 'self' || rerun == null) return [selfCellIdx];
+      if (rerun === 'all') return 'all';   // sentinel — hele skriptet (fase 3)
+      if (rerun === 'self' || rerun == null) {
+        // doc-kontekst (rent skript): default er rerun="none" per decision 7
+        // — 'self' har ingen celle å peke på og løses STILLE til ingen mål.
+        if (selfCellIdx == null) return [];
+        return [selfCellIdx];
+      }
+      // id-mål i doc-kontekst: meningsløst — ett varsel, ingen mål.
+      if (selfCellIdx == null) {
+        console.warn('Ui: rerun-mål ignoreres i rent skript: ' + rerun);
+        return [];
+      }
       var ids = Array.isArray(rerun) ? rerun : [rerun];
       var idxs = [];
       ids.forEach(function (id) {
@@ -322,6 +348,13 @@
       if (!ctrl) return;
       if (global.mdIsScriptRunning && global.mdIsScriptRunning()) return;
       var targets = _resolveTargets(ctrl.spec, ctrl.cellIdx);
+      if (targets === 'all') {
+        // Hele skriptet: index.html-kroken klikker #btnRun (Kjør alle i
+        // notatbøker, vanlig kjøring ellers). Refuse-drop-vakta over
+        // dekker allerede pågående kjøringer.
+        if (typeof global.mdRunWholeScript === 'function') global.mdRunWholeScript();
+        return;
+      }
       // B3-fiksen (final-review): mdRunNotebookCell (index.html) setter
       // scriptRunInProgress SYNKRONT idet kjøringen starter — å fyre
       // global.Cells.runCell(idx) for alle mål i samme synkrone forEach
@@ -347,12 +380,25 @@
       }, Promise.resolve()).catch(console.warn);
     }
 
+    // sync_to-push (fase 3, spec §3): inn i motorens sesjonsvariabel via
+    // index.html-kroken. Fyrer ved registrering OG ved hver endring, alltid
+    // FØR en evt. rerun. Ingen krok / ingen sesjon → stille no-op
+    // (verdilageret er uansett autoritativt for neste pull).
+    function _syncPush(spec, value) {
+      if (!spec.sync_to) return;
+      if (typeof global.mdUiSyncTo !== 'function') return;
+      try { global.mdUiSyncTo(spec.sync_to, value); }
+      catch (e) { console.warn('Ui sync_to: ' + ((e && e.message) || e)); }
+    }
+
     // Felles endrings-håndterer: lagrer verdien UMIDDELBART (getValue()),
     // debouncer selve rerun-kallet 150ms.
     function _wireChange(key, getValue) {
       var fireDebounced = _debounce(function () { _rerunFor(key); }, 150);
       return function () {
         _values[key] = getValue();
+        var ctrl = _controls[key];
+        if (ctrl) _syncPush(ctrl.spec, _values[key]);
         fireDebounced();
       };
     }
@@ -522,6 +568,7 @@
     // den, se VALID_PLACEMENTS over). 'top' er defaulten når klassen selv
     // mangler (cellEl uten .nb-output-barn, f.eks. en avvikende test-stub).
     function _cellDefaultPlacement(cellEl) {
+      if (!cellEl) return 'top';
       var outEl = _findChild(cellEl, 'nb-output');
       if (outEl && outEl.classList) {
         if (outEl.classList.contains('nb-widgets-left')) return 'left';
@@ -572,8 +619,16 @@
     // opprettes men forblir en løsrevet node, samme stille-forkastet-
     // filosofi som resten av modulen.
     function _ensureStrip(cellEl, cellIdx, pos) {
-      var outEl = _findChild(cellEl, 'nb-output');
-      var container = pos === 'left' ? _ensureLeftWrapper(outEl) : outEl;
+      // Doc-kontekst (fase 3): verten er #outputArea, ikke en celles
+      // .nb-output. 'left' faller til 'top' (ingen grid der — spec §1).
+      var docHost = null;
+      if (!cellEl) {
+        docHost = document.getElementById ? document.getElementById('outputArea') : null;
+        if (!docHost) return document.createElement('div');   // løsrevet, stille-forkastet
+        if (pos === 'left') pos = 'top';
+      }
+      var outEl = docHost || _findChild(cellEl, 'nb-output');
+      var container = (!docHost && pos === 'left') ? _ensureLeftWrapper(outEl) : outEl;
       var byPos = _strips[cellIdx] || (_strips[cellIdx] = {});
       var strip = byPos[pos];
       if (strip && strip.parentNode === container) return strip;
@@ -609,7 +664,10 @@
       strip.className = 'ui-controls';
       strip.setAttribute('data-pos', pos);
       if (container) {
-        if (container === outEl) {
+        if (docHost) {
+          if (pos === 'bottom') container.appendChild(strip);
+          else container.insertBefore(strip, container.firstChild || null);
+        } else if (container === outEl) {
           var body = _findChild(outEl, 'nb-output-body');
           if (body) outEl.insertBefore(strip, body);
           else outEl.appendChild(strip);
@@ -627,6 +685,7 @@
     // id-løse gren — holdt i sync eksplisitt her fordi Cells kan mangle helt
     // i node:test-stubbene og i "plain script"-kjøretid uten notatbok).
     function _cellKeyAt(cellIdx) {
+      if (cellIdx == null) return 'doc';   // rent skript (fase 3) — samme sentinel som bindingsstien
       return (global.Cells && typeof global.Cells.cellKeyAt === 'function')
         ? global.Cells.cellKeyAt(cellIdx) : String(cellIdx);
     }
@@ -743,6 +802,7 @@
         value = stored;
       }
       _values[key] = value;
+      _syncPush(spec, value);
       return value;
     }
 
@@ -754,9 +814,12 @@
      */
     Ui.registerControl = function (specJson) {
       var ctx = (typeof global.mdUiRunCtx === 'function') ? global.mdUiRunCtx() : null;
+      if (!ctx) return null;
       // cellEl kan være null i en kant-case (Task 2-rapporten) — dette
       // guardes eksplisitt, ikke bare "ctx finnes".
-      if (!ctx || !ctx.cellEl) return null;
+      // Fase 3: doc-kontekst (rent skript) — cellEl er null MED VILJE.
+      // Uten doc-flagget gjelder den gamle vakta uendret.
+      if (!ctx.cellEl && ctx.doc !== true) return null;
 
       var raw;
       try {
@@ -770,7 +833,8 @@
       var spec = result.spec;
       if (!spec) return null;
 
-      var value = _registerInto(ctx.cellIdx, ctx.cellEl, spec);
+      var value = _registerInto(ctx.doc === true ? null : ctx.cellIdx,
+                                ctx.doc === true ? null : ctx.cellEl, spec);
       return JSON.stringify(value);
     };
 
@@ -803,11 +867,14 @@
         console.warn('Ui.registerFromRegistry: forventet et JSON-array av specs');
         return;
       }
-      var cellEl = (global.Cells && typeof global.Cells.cellElementAt === 'function')
-        ? global.Cells.cellElementAt(cellIdx) : null;
-      if (!cellEl) {
-        console.warn('Ui.registerFromRegistry: fant ingen celle-node for cellIdx ' + cellIdx);
-        return;
+      var cellEl = null;
+      if (cellIdx != null) {
+        cellEl = (global.Cells && typeof global.Cells.cellElementAt === 'function')
+          ? global.Cells.cellElementAt(cellIdx) : null;
+        if (!cellEl) {
+          console.warn('Ui.registerFromRegistry: fant ingen celle-node for cellIdx ' + cellIdx);
+          return;
+        }
       }
 
       Ui.beginCellRun(cellIdx);

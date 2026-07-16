@@ -333,3 +333,25 @@ test('controlKey: cellKey som en id-streng (Cells.cellKeyAt sin attrs.id-gren) f
   assert.strictEqual(Ui.controlKey('mycell', spec, 0), 'mycell::x');
   assert.strictEqual(Ui.controlKey('mycell', { type: 'slider' }, 3), 'mycell::w3');
 });
+
+// ===== fase 3: sync_to, rerun="all" =====
+
+test('normalizeSpec: sync_to — gyldig navn lagres, ugyldig varsles og droppes, button avvises', () => {
+  const ok = Ui.normalizeSpec({ type: 'slider', sync_to: 'n' });
+  assert.strictEqual(ok.spec.sync_to, 'n');
+  assert.deepStrictEqual(ok.warnings, []);
+  const dotted = Ui.normalizeSpec({ type: 'number', sync_to: 'my.var_2' });
+  assert.strictEqual(dotted.spec.sync_to, 'my.var_2');
+  const bad = Ui.normalizeSpec({ type: 'slider', sync_to: 'x; rm()' });
+  assert.strictEqual(bad.spec.sync_to, undefined);
+  assert.ok(bad.warnings.some((w) => /ugyldig sync_to-navn/.test(w)));
+  const btn = Ui.normalizeSpec({ type: 'button', sync_to: 'n' });
+  assert.strictEqual(btn.spec.sync_to, undefined);
+  assert.ok(btn.warnings.some((w) => /sync_to støttes ikke på button/.test(w)));
+});
+
+test('normalizeSpec: rerun="all" aksepteres uendret', () => {
+  const r = Ui.normalizeSpec({ type: 'slider', rerun: 'all' });
+  assert.strictEqual(r.spec.rerun, 'all');
+  assert.deepStrictEqual(r.warnings, []);
+});
