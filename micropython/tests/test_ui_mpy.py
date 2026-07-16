@@ -173,6 +173,44 @@ def test_button_placement_passthrough(monkeypatch):
     assert fake.calls[-1]["placement"] == "top"
 
 
+# ---- sync_to (Task 4, push til live session variable utan rerun) ----
+
+def test_sync_to_passed_through_all_value_controls(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=None)
+    mod.slider(1, 10, sync_to="n")
+    mod.dropdown(["a", "b"], sync_to="valg")
+    mod.number(value=3, sync_to="my.var")
+    specs = [s for s in fake.calls]
+    assert specs[0].get("sync_to") == "n"
+    assert specs[1].get("sync_to") == "valg"
+    assert specs[2].get("sync_to") == "my.var"
+
+
+def test_sync_to_absent_when_not_given(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=None)
+    mod.slider(0, 10)
+    spec = fake.calls[-1]
+    assert "sync_to" not in spec
+
+
+def test_checkbox_sync_to_passthrough(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=None)
+    mod.checkbox("Vis", sync_to="cb_state")
+    assert fake.calls[-1].get("sync_to") == "cb_state"
+
+
+def test_switch_sync_to_passthrough(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=None)
+    mod.switch("Aktiv", sync_to="switch_state")
+    assert fake.calls[-1].get("sync_to") == "switch_state"
+
+
+def test_text_sync_to_passthrough(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=None)
+    mod.text("default", sync_to="txt_val")
+    assert fake.calls[-1].get("sync_to") == "txt_val"
+
+
 # ---- (c) live-sti: registerControl returnerer en verdi ----
 
 def test_slider_live_returnerer_int(monkeypatch):
