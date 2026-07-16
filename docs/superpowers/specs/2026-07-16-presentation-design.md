@@ -136,15 +136,17 @@ New state on NB: `NB.present = null | { slides, byCell, cur, prevLayout }`.
   routes notebook layouts through `Cells.setLayout`). New i18n keys in
   `js/i18n/en.js` ("Presentasjon" → "Presentation", the notice, nav
   titles).
-- **Load-time directive** (the shared-link path): in
-  `mdNotebookMaybeAutorun` (index.html ~1966-1995, the existing
-  `#options.mode` load hook), also match
-  `^\s*(?:#|//)\s*options\.view\s*=\s*["']?present["']?\s*$` (mi) and,
-  when the document is a supported notebook, call
-  `Cells.presentStart()` after the notebook has auto-opened. No run
-  gate needed (presentation executes nothing; any `?run=`/output
-  autorun keeps its existing `autorunNeedsGate` behavior and simply
-  fills the slides' slots when it completes).
+- **Load-time directive** (all load paths — examples, share links,
+  GitHub files, deep links): at the tail of `C.contentLoaded`
+  (js/cells.js), after the notebook has auto-opened, match
+  `^\s*(?:#|\/\/)\s*options\.view\s*=\s*["']?present["']?\s*$` (mi)
+  against the document and call `C.presentStart()` when the notebook is
+  active. (`mdNotebookMaybeAutorun` would be the wrong hook — it
+  early-returns unless the link requested autorun (`?run=`/output
+  action), while `contentLoaded` fires for every programmatic document
+  load.) No run gate needed (presentation executes nothing; any
+  `?run=` autorun keeps its existing `autorunNeedsGate` behavior and
+  simply fills the slides' slots when it completes).
 - **Run-time directive**: the existing `#options.view` run handler
   (index.html ~9974-9979) additionally recognizes `present` →
   `Cells.presentStart()` (idempotent if already presenting) instead of
