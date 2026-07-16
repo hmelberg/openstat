@@ -105,8 +105,14 @@ header attr  >  cell tag  >  (type only: content sniff)  >  preamble default
 
 ## 2. Preamble defaults
 
-- The preamble (cell with `headerRaw === null`) gets the same tag-block
-  scan at its very top (leading blank lines allowed).
+- The preamble (cell with `headerRaw === null`) collects its tag lines
+  from the **leading run of blank and `#`-comment lines** (i.e. before the
+  first code line) rather than the strict cell rule: real preambles start
+  with `# label:`, `#options.*` and `# load` directives, and requiring
+  tags before those would fight every existing document convention. Only
+  lines matching the tag pattern are consumed; the surrounding comment/
+  directive lines are untouched. The first non-blank, non-`#` line ends
+  the scan.
 - Every known key in the preamble block becomes a document default,
   applied to each cell that has neither a header attr nor an own tag for
   that key. Exception: `id` cannot be defaulted (would duplicate) —
@@ -152,12 +158,14 @@ Explicit type always wins over sniffing.
 The editor is raw text — tags stay visible there (decision). Everywhere
 else:
 
-- **Render content helper** — a single pure-half accessor (working name
-  `C.cellContent(cell)`) returns the body minus the tag block, and for
-  sniffed-md cells the text inside the delimiters. Consumers:
-  `renderNonCode` (md/html output), forklar md-steps, `mdNarrationText`
-  (TTS), and forklar code-step display. Today these read `c.source`
-  verbatim; they switch to the helper.
+- **Render content helper** — a single pure-half accessor
+  `C.renderContent(source, type, sniffed)` returns the body minus the tag
+  lines, and for sniffed-md cells the text inside the delimiters
+  (re-derived from the text; falls back to the tag-stripped body if the
+  pattern no longer holds after an edit). Source-level (not cell-level)
+  so the blur-preview path in `cellNode`, which renders the live textarea
+  value, can use it too. Consumers: `renderNonCode` (md/html output, both
+  call sites), forklar md-steps (which also feeds `mdNarrationText`/TTS).
 - **Execution paths blank tag-block lines in place** (empty line per tag
   line, line count preserved — the `#options.*` stripping precedent at
   the cell level):
@@ -167,6 +175,13 @@ else:
     microdata — tag lines must never reach those engines.
   - the per-cell run payload (`C.runCell` → `mdRunNotebookCell`): same
     blanking for the same reason.
+  - the engine-notebook preamble run (`runNotebookEngineCell` in
+    index.html, the `_pre.source` call) — the one execution path that
+    reads a cell body directly instead of going through `C.runCell` or
+    `executableSource`.
+  - Blanking helper: `C.execCellSource(cell)` — cell-level (the parse
+    already knows the consumed tag lines), returns `cell.source` with
+    those lines emptied.
 - Code echo paths flow from the executable text and are covered by the
   blanking. `#@param` scanning (`ParamForms.parse`) does not match tag
   lines (its `LINE_RE` requires an assignment) — no interaction.
@@ -182,11 +197,17 @@ else:
 - `attrs` / `type` — now effective (merged), see §1.
 - `tags` — the raw parsed tag object for the cell's own block (empty
   object when none); used by tests/debugging and the conflict warnings.
-- `contentStart` — body-relative index of the first line after the tag
-  block (equals 0 when no block), the seam `cellContent` and the blanking
-  transforms share.
-- For sniffed md: the delimiters' positions are not stored; `cellContent`
-  re-derives the inner text (the source of truth stays the raw text).
+- `tagLines` — body-relative indices of the consumed tag lines (empty
+  array when none), the seam `renderContent` (removes them) and
+  `execCellSource` (blanks them) share. An array, not a start/end pair,
+  because the preamble's tag lines may be interspersed among other
+  comment lines (§2).
+- `sniffed` — `'md' | 'html' | null`; lets `renderContent` know to
+  extract the inner text (the delimiters' positions are not stored; the
+  source of truth stays the raw text).
+- The scanner itself is exposed as `C.scanTagBlock(source, isPreamble)`
+  → `{ tags, entries, tagLines, warnings }` (pure, body-relative line
+  numbers; `parseCells` absolutizes warnings to `linje N:`).
 
 The parse result keeps `{ cells, warnings }`. `hasBody`, `headerRaw`,
 line indices, and serialization are untouched.
