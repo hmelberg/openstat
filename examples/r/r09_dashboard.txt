@@ -1,29 +1,45 @@
 # label: Dashboard — fordelingsutforsker
 #options.mode = r
-#options.title = "Dashboard — fordelingsutforsker (R)"
-#options.description = "Samme dashboard som bry18/py06, i R — base-plot fanges som bilde"
+#options.title = "Dashboard — fordelingsutforsker (R, celle/ui-modellen)"
+#options.description = "Samme dashboard som py06/bry18, i R — ingen ui_kpi()/ui_markdown() finnes i R, så «kort»-tallene er vanlig tekstoutput (cat/sprintf) i stedet"
 #options.show_commands = False
-d <- dashboard("Normalfordelingen", layout = "
-    kurve kurve kurve over
-    kurve kurve kurve kvantil
-")
 
-d$controls(mu = slider(-5, 5, step = 1, default = 0, label = "Forventning (mu)"),
-           sigma = slider(1, 4, step = 1, label = "Standardavvik (sigma)"),
-           terskel = play(-5, 10, step = 1, label = "Terskel (spill av)"))
+#%% md
+# Dashboard — fordelingsutforsker (R)
 
-tetthet <- function(mu, sigma, terskel) {
-  xs <- seq(mu - 4 * sigma, mu + 4 * sigma, length.out = 121)
+Normalfordelingen N(mu, sigma). R-fasaden har INGEN `ui_kpi()`/
+`ui_markdown()`-byggere (kun python/mpy/brython har `ui.html`-elementer å
+bygge kort av — spec §3/§6) — «KPI-kortene» under er derfor to vanlige
+tekstlinjer fra `cat()`/`sprintf()`, ikke et eget kort-vokabular. Kurven er
+et base-plott, fanget som bilde slik R-motoren alltid gjør det.
+
+Kontrollcellen bruker `on_change = c("stats", "plott")` (begge mål-
+cellene) OG `sync_to =` på hver kontroll: `sync_to` holder mu/sigma/
+terskel oppdatert i R-sesjonen med det samme, uten at selve
+kontrollcellen kjøres på nytt.
+
+#%% r id=kontroller
+mu <- ui_slider(-5, 5, value = 0, step = 1, label = "Forventning (mu)",
+                name = "mu", on_change = c("stats", "plott"), sync_to = "mu")
+sigma <- ui_slider(1, 4, value = 1, step = 1, label = "Standardavvik (sigma)",
+                   name = "sigma", on_change = c("stats", "plott"), sync_to = "sigma")
+terskel <- ui_play(-5, 10, value = -5, step = 1, label = "Terskel (spill av)",
+                   name = "terskel", on_change = c("stats", "plott"), sync_to = "terskel")
+
+#%% r id=stats
+# Ingen ui_kpi()/ui_markdown() i R (spec §3/§6) — to tekstlinjer i stedet
+# for kort.
+cat(sprintf("P(X > terskel): %.1f %%\n",
+            100 * pnorm(terskel, mean = mu, sd = sigma, lower.tail = FALSE)))
+cat(sprintf("97,5%%-kvantilen: %.2f\n", qnorm(0.975, mean = mu, sd = sigma)))
+
+#%% r id=plott
+# «Kjør alle» evaluerer setning for setning — plot() + abline() må derfor
+# stå samlet i én { }-blokk, ellers feiler abline() med «plot.new has not
+# been called yet» (samme fallgruve som rex_param_forms.txt sitt tips).
+xs <- seq(mu - 4 * sigma, mu + 4 * sigma, length.out = 121)
+{
   plot(xs, dnorm(xs, mean = mu, sd = sigma), type = "l",
        xlab = "", ylab = "", main = "Tetthet")
   abline(v = terskel, col = "red")
 }
-d$add(tetthet, at = "kurve")
-
-d$add(function(mu, sigma, terskel)
-        round(100 * pnorm(terskel, mean = mu, sd = sigma, lower.tail = FALSE), 1),
-      title = "P(X > terskel)", unit = "%", at = "over")
-
-d$add(function(mu, sigma, terskel)
-        round(qnorm(0.975, mean = mu, sd = sigma), 2),
-      title = "97,5 %-kvantilen", at = "kvantil")

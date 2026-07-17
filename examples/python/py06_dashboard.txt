@@ -1,38 +1,50 @@
 # label: Dashboard — fordelingsutforsker
 #options.mode = python
 #options.title = "Dashboard — fordelingsutforsker (pyodide)"
-#options.description = "scipy.stats i et interaktivt dashboard — normalfordeling med terskel"
-import dash
-import plotly.express as px
+#options.description = "scipy.stats i et interaktivt dashboard — normalfordeling med terskel (celle/ui-modellen)"
+
+#%% md
+# Dashboard — fordelingsutforsker
+
+Normalfordelingen N(mu, sigma): flytt kontrollene under, så oppdaterer
+tetthetskurven, andelen over terskelen og 97,5 %-kvantilen seg sammen.
+`terskel` har en innebygd avspillingsknapp (`ui.play`) som stepper
+verdien automatisk. Kontrollcellen setter `on_change=["kpi", "plott"]`
+(en liste med to celle-id-er) OG `sync_to=` på hver kontroll: `sync_to`
+holder mu/sigma/terskel oppdatert i sesjonen med det samme, uten at selve
+kontrollcellen kjøres på nytt — det er kpi- og plott-cellene som skal
+kjøres, ikke kontrollcellen.
+
+#%% python id=kontroller
+import ui
+
+mu = ui.slider(-5, 5, value=0, step=1, label="Forventning (mu)", name="mu",
+               on_change=["kpi", "plott"], sync_to="mu")
+sigma = ui.slider(1, 4, value=1, step=1, label="Standardavvik (sigma)", name="sigma",
+                   on_change=["kpi", "plott"], sync_to="sigma")
+terskel = ui.play(-5, 10, value=-5, step=1, label="Terskel (spill av)", name="terskel",
+                   on_change=["kpi", "plott"], sync_to="terskel")
+
+#%% python id=kpi cols=2
+import ui
 from scipy.stats import norm
 
-d = dash.dashboard("Normalfordelingen", layout="""
-    kurve kurve kurve over
-    kurve kurve kurve kvantil
-""")
+(ui.kpi(round(100 * float(norm.sf(terskel, loc=mu, scale=sigma)), 1),
+        unit="%", label="P(X > terskel)"),
+ ui.kpi(round(float(norm.ppf(0.975, loc=mu, scale=sigma)), 2),
+        label="97,5 %-kvantilen"))
+
+#%% python id=plott
+import plotly.express as px
+from scipy.stats import norm
 
 def xakse(mu, sigma):
     lo, hi = mu - 4 * sigma, mu + 4 * sigma
     n = 120
     return [lo + i * (hi - lo) / n for i in range(n + 1)]
 
-d.controls(mu=dash.slider(-5, 5, step=1, default=0, label="Forventning (mu)"),
-           sigma=dash.slider(1, 4, step=1, label="Standardavvik (sigma)"),
-           terskel=dash.play(-5, 10, step=1, label="Terskel (spill av)"))
-
-def tetthet(mu, sigma, terskel):
-    xs = xakse(mu, sigma)
-    ys = [float(norm.pdf(x, loc=mu, scale=sigma)) for x in xs]
-    fig = px.line(x=xs, y=ys, title="Tetthet")
-    fig.add_vline(x=terskel)
-    return fig
-
-d.add(tetthet, at="kurve")
-
-d.add(lambda mu, sigma, terskel:
-          round(100 * float(norm.sf(terskel, loc=mu, scale=sigma)), 1),
-      title="P(X > terskel)", unit="%", at="over")
-
-d.add(lambda mu, sigma, terskel:
-          round(float(norm.ppf(0.975, loc=mu, scale=sigma)), 2),
-      title="97,5 %-kvantilen", at="kvantil")
+xs = xakse(mu, sigma)
+ys = [float(norm.pdf(x, loc=mu, scale=sigma)) for x in xs]
+fig = px.line(x=xs, y=ys, title="Tetthet")
+fig.add_vline(x=terskel)
+fig
