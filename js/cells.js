@@ -329,9 +329,12 @@
         // Preambelens tags er DOKUMENT-defaults (spec §2): type = default
         // CELLE-type (retyper aldri preambelen selv), øvrige nøkler =
         // attr-defaults. id er alt avvist av skanneren i preambel-modus.
+        // 'import' er PREAMBEL-ONLY — må IKKE bli en default-attributt
+        // (ville blitt satt på ALLE celler, og motsier celleblokk-guardet som
+        // eksplisitt dropper det der).
         for (var pk in scan.tags) {
           if (pk === 'type') defaults.type = scan.tags[pk];
-          else defaults.attrs[pk] = scan.tags[pk];
+          else if (pk !== 'import') defaults.attrs[pk] = scan.tags[pk];
         }
         continue;
       }

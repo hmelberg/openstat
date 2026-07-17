@@ -1038,8 +1038,19 @@ def lib(name):
     ENESTE måten å nå et GENERISK (#tag.import = <url> as navn)
     navnerom på i denne fasaden - `ui.<navn>` attributt-syntaks fungerer
     KUN for sl/pico (forhåndsinstansiert under), ALDRI for et generisk
-    navn (ingen modul-`__getattr__` her til å bygge det lazy)."""
+    navn (ingen modul-`__getattr__` her til å bygge det lazy).
+
+    Dialektavvik fra pyodide/brython: sl/pico-spesialtilfeller returnerer
+    de forhåndsinstansierte modul-attributtene (samme semantikk som direkte
+    `ui.sl`/`ui.pico`-oppslag), ikke opprett nye _LibNamespace-instanser."""
     name = str(name)
+    # Specialize sl and pico to return pre-instantiated namespaces
+    # (dialectal difference from pyodide/brython, where these route
+    # through module-level __getattr__)
+    if name == "sl":
+        return sl
+    if name == "pico":
+        return pico
     if not _has_import(name):
         raise _not_imported_error(name)
     return _LibNamespace(name)

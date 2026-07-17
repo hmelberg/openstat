@@ -803,6 +803,17 @@ test('scanTagBlock preambel: gjentatt #tag.import gir FLERE entries (repeterbar,
   assert.deepStrictEqual(s.warnings, []); // 'import' er unntatt duplikat-varselet (repeterbar med vilje)
 });
 
+test('parseCells: #tag.import i preambelen blir ALDRI cell-attributt; andre defaults (f.eks. slide) blir det', () => {
+  // Preambelens #tag.import skal IKKE bli dokumentdefault → ingen cell får
+  // attrs.import. Men andre #tag.*-direktiver (som slide) skal bli defaults.
+  const p = C.parseCells('#tag.import = shoelace\n#tag.import = pico\n#tag.slide = 2\n#%% python\nx = 1\n#%% python\ny = 2');
+  const [preamble, cell1, cell2] = p.cells;
+  assert.strictEqual(cell1.attrs.import, undefined, 'cell1 skal ikke ha import-attributt');
+  assert.strictEqual(cell2.attrs.import, undefined, 'cell2 skal ikke ha import-attributt');
+  assert.strictEqual(cell1.attrs.slide, '2', 'cell1 skal arve slide-default fra preambel');
+  assert.strictEqual(cell2.attrs.slide, '2', 'cell2 skal arve slide-default fra preambel');
+});
+
 test('parseCells sniffing: lone-string """-celle → md; docstring + kode forblir kode', () => {
   const md = C.parseCells('#%%\n"""\n# Overskrift\ntekst\n"""');
   assert.strictEqual(md.cells[0].type, 'md');

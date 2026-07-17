@@ -1151,6 +1151,32 @@ def test_generic_namespace_via_lib_has_no_accepts_validation(monkeypatch):
     assert creates[-1][1] == "acme-select"
 
 
+def test_lib_pico_returns_preinstantiated_namespace(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, imports={"pico": True})
+    ns = mod.lib("pico")
+    # Should return the pre-instantiated pico namespace, not a new instance
+    assert ns is mod.pico
+    assert isinstance(ns, mod._PicoNamespace)
+    # Verify it works the same way
+    button = ns.button("Click")
+    creates = [c for c in fake.el_calls if c[0] == "elCreate"]
+    assert creates[-1][1] == "button"
+    assert creates[-1][2]["attrs"]["class"] == "btn"
+
+
+def test_lib_sl_returns_preinstantiated_namespace(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, imports={"sl": True})
+    ns = mod.lib("sl")
+    # Should return the pre-instantiated sl namespace, not a new instance
+    assert ns is mod.sl
+    assert isinstance(ns, mod._LibNamespace)
+    # Verify it works the same way
+    button = ns.button("Click", variant="primary")
+    creates = [c for c in fake.el_calls if c[0] == "elCreate"]
+    assert creates[-1][1] == "sl-button"
+    assert creates[-1][2]["props"]["variant"] == "primary"
+
+
 def test_pico_button_gets_btn_class(monkeypatch):
     mod, fake = _load_ui(monkeypatch, imports={"pico": True})
     mod.pico.button("Ok")

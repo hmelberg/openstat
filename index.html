@@ -8847,8 +8847,12 @@ json.dumps(out)
       if (m) {
         var url = m[1], navn = m[2];
         if (!TAG_IMPORT_NAME_RE.test(navn)) return null;
+        // Custom-element names er lowercase — normalisér navn og varsle om endring
+        var originalNavn = navn;
+        navn = navn.toLowerCase();
+        var normalized = (originalNavn !== navn); // spor om normalisering skjedde
         if (/\.css(\?.*)?$/i.test(url)) return { js: [], css: [url], ns: null };
-        return { js: [url], css: [], ns: navn };
+        return { js: [url], css: [], ns: navn, originalNavn: originalNavn, normalized: normalized };
       }
       if (!/\s/.test(spec) && /\.css(\?.*)?$/i.test(spec)) {
         return { js: [], css: [spec], ns: null };
@@ -8915,7 +8919,13 @@ json.dumps(out)
         try {
           for (var j = 0; j < parsed.css.length; j++) await _loadImportCss(parsed.css[j]);
           for (var k = 0; k < parsed.js.length; k++) await _loadImportScript(parsed.js[k]);
-          if (parsed.ns) window.__uiImports[parsed.ns] = true;
+          if (parsed.ns) {
+            window.__uiImports[parsed.ns] = true;
+            // Varsle hvis importnavn var normalisert til småbokstaver
+            if (parsed.normalized && statusEl) {
+              setStatus(statusEl, t('#tag.import: importnavn normalisert til småbokstaver: {original} → {normalized}', { original: parsed.originalNavn, normalized: parsed.ns }), false);
+            }
+          }
         } catch (e) {
           if (statusEl) setStatus(statusEl, t('#tag.import: kunne ikke laste {spec} ({feil})', { spec: raw, feil: (e && e.message) || String(e) }), true);
           console.warn('#tag.import:', raw, e);
