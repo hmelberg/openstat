@@ -6222,8 +6222,11 @@ json.dumps(out)
         // finnes ikke i dagens markup (se erklæringen over: "kan være null
         // etter layoutendring"), så grenen er reelt død i dag. Delegerer nå
         // til clearOutput() (Task 3b) for å arve Cells.active()-grenen der,
-        // i tilfelle en fremtidig layout gjenbruker id-en.
-        clearOutput();
+        // i tilfelle en fremtidig layout gjenbruker id-en. window.-prefiks:
+        // clearOutput er deklarert INNE i meny-IIFE-en — et bart kall herfra
+        // ville kastet ReferenceError (samme scoping-klasse som exit gate-
+        // funnet på clearOutputAreaUnlessDoc).
+        window.mdClearOutput();
         setStatus(rightStatus, '');
       });
     }
