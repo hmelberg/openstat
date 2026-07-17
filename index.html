@@ -2928,6 +2928,14 @@
       } catch(e) {}
       return true;
     }
+    // «Kun output» er rapport-/dashboardvisningen: der er standard å IKKE
+    // ekkoe kommandoene (brukeravgjørelse 2026-07-17). Eksplisitt
+    // '#options.show_commands' vinner fortsatt — kallstedene sjekker
+    // direktivet FØR de faller tilbake hit.
+    function getShowCommandsEffectiveDefault() {
+      if (window.mdIsInputHidden && window.mdIsInputHidden()) return false;
+      return getShowCommandsDefault();
+    }
 
     (function initSettings() {
       var overlay   = document.getElementById('settingsOverlay');
@@ -9675,7 +9683,7 @@ async def _m2py_run_segment(_seg_json):
       var effectiveScript = rawScript.replace(/^[ \t]*(?:#|\/\/)[ \t]*options\.[A-Za-z_]\w*[ \t]*=.*$\n?/gm, '');
       var _showCmds = (typeof _scriptOpts.show_commands === 'boolean')
         ? _scriptOpts.show_commands
-        : getShowCommandsDefault();
+        : getShowCommandsEffectiveDefault();
       var _result = await bootNotebookSession({
         py: py,
         activeEditorMode: _mode,
@@ -10515,7 +10523,7 @@ async def _m2py_run_segment(_seg_json):
         effectiveScript = effectiveScript.replace(/^[ \t]*(?:#|\/\/)[ \t]*options\.[A-Za-z_]\w*[ \t]*=.*$\n?/gm, '');
         var _showCmds = (typeof _scriptOpts.show_commands === 'boolean')
           ? _scriptOpts.show_commands
-          : getShowCommandsDefault();
+          : getShowCommandsEffectiveDefault();
         // Eskapeluke (spec §4): '#options.display = all' slår av notatbok-
         // visningspolicyen igjen (vis alt, echo følger _showCmds som vanlig).
         var _displayAll = String(_scriptOpts.display || '').toLowerCase() === 'all';
