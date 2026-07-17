@@ -202,6 +202,13 @@ function freshEnv() {
   const inputHiddenCalls = [];
   global.mdSetLayoutMode = (mode) => { layoutModeCalls.push(mode); };
   global.mdSetInputHidden = (hidden) => { inputHiddenCalls.push(hidden); };
+  // Task 4-review-fiks (Critical): presentStart/presentExit synker view-
+  // dropdownen ('present' ved start, prevLayout-verdien ved exit) — call-
+  // recorder slik at meny-bypass-regresjonstesten kan se AT dropdownen
+  // faktisk synkes til 'output' (ikke 'columns') når prevLayout ble fanget
+  // fra live appLayout() mens brukeren stod i «Kun output».
+  const syncViewDropdownCalls = [];
+  global.mdSyncViewDropdown = (mode) => { syncViewDropdownCalls.push(mode); };
   global.requestAnimationFrame = () => {};
   global.purgePlots = undefined;
   // B2-review-fiks 2: verktøylinje-handlerne sjekker nå mdIsScriptRunning()
@@ -226,6 +233,7 @@ function freshEnv() {
     getBtnRunClicks: () => btnRunClicks,
     getLayoutModeCalls: () => layoutModeCalls.slice(),
     getInputHiddenCalls: () => inputHiddenCalls.slice(),
+    getSyncViewDropdownCalls: () => syncViewDropdownCalls.slice(),
     tick() { fakeNow += 1000; if (intervalCallback) intervalCallback(); },
     typeInput(newValue) {
       scriptInputEl.value = newValue;
@@ -1481,6 +1489,36 @@ test('presentStart: body.present-active lander (skjuler panel-left/#resizer via 
   // visningsmenyen selv bruker (setLayout-delegasjonstesten over).
   assert.deepStrictEqual(getInputHiddenCalls(), [false]);
   assert.deepStrictEqual(getLayoutModeCalls(), ['columns']);
+});
+
+// Critical (Task 4-review, commit 9aa3e82): visningsmenyens håndterer driver
+// mdSetInputHidden/mdSetLayoutMode DIREKTE (meny-bypass, se index.html) uten
+// om C.setLayout — NB.layout blir dermed stale når brukeren bytter visning
+// via menyen. presentStart fanget tidligere prevLayout FRA NB.layout, altså
+// den stale verdien fra dokument-lastingstidspunktet — Esc etter presentasjon
+// startet fra «Kun output» avdekket dette ved å gjenopprette 'columns'
+// (avsløre editoren) i stedet for å bli i «Kun output». Fikset ved å lese
+// prevLayout fra appLayout() (live avlesning av app-primitivene) i stedet.
+test('presentStart: prevLayout fanges fra live appLayout(), ikke stale NB.layout (meny-bypass-regresjon)', () => {
+  const { C, scriptInputEl, getLayoutModeCalls, getInputHiddenCalls, getSyncViewDropdownCalls } = freshEnv();
+  scriptInputEl.value = '#%% md slide=1\nA\n#%% md slide=2\nB\n';
+  C.init('python');
+  // C.init/enter satte NB.layout = 'columns' (appLayout() sin default DA,
+  // siden mdIsInputHidden var udefinert). Simuler deretter visningsmenyens
+  // direkte primitiv-kall («Kun output» valgt via menyen, ETTER dokument-
+  // lasting): mdIsInputHidden() begynner å returnere true, men NB.layout
+  // rører ingen ved denne veien og forblir 'columns' — akkurat den stale
+  // tilstanden som utløste bugen.
+  global.mdIsInputHidden = () => true;
+  assert.strictEqual(C.presentStart(), true);
+  C.presentExit();
+  assert.strictEqual(C.presenting(), false);
+  assert.deepStrictEqual(getInputHiddenCalls(), [true],
+    'Esc gjenoppretter «Kun output» (mdSetInputHidden(true)) — IKKE default false fra stale NB.layout');
+  assert.deepStrictEqual(getLayoutModeCalls(), [],
+    'output-gjenoppretting kaller aldri mdSetLayoutMode (samme kontrakt som setLayout("output"))');
+  assert.deepStrictEqual(getSyncViewDropdownCalls(), ['present', 'output'],
+    'view-dropdown synkes til "output" ved exit (fra appLayout()-fanget prevLayout), ikke "columns"');
 });
 
 // ---------- Task 3b (spec 2026-07-17 §1): outputArea-tømming er doc-bevisst ----------

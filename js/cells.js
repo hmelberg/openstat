@@ -985,8 +985,12 @@
     // kolonner/stables mot, se docCellNode), så "layout" betyr nå det samme
     // for et notatbok-aktivt dokument som for et vanlig skript: appens egne
     // primitiver (mdSetLayoutMode/mdSetInputHidden på .container). NB.layout
-    // beholdes likevel (presentExit sin prevLayout-gjenoppretting leser den,
-    // se C.presentStart under). Dobbelt-guardet — globalene kan mangle i
+    // oppdateres her, men er IKKE kilden presentStart leser prevLayout fra —
+    // visningsmenyens "Kun output"/"Stables" bruker mdSetInputHidden/
+    // mdSetLayoutMode direkte (meny-bypass) uten om denne funksjonen, så
+    // NB.layout kan være stale ved presentStart-tidspunktet. appLayout()
+    // (live avlesning av app-primitivene) er den faktiske kilden, se
+    // C.presentStart under. Dobbelt-guardet — globalene kan mangle i
     // stub-DOM-testene, samme mønster som resten av fila.
     C.setLayout = function (layout) {
       NB.layout = layout;
@@ -1073,8 +1077,15 @@
       if (NB.present) return true;                       // idempotent
       var plan = C.slidePlan(NB.cells);
       if (!plan.slides.length) return false;
+      // prevLayout fanges fra LIVE app-tilstand (appLayout()), ikke NB.layout:
+      // visningsmenyens direkte primitiv-kall (mdSetInputHidden/
+      // mdSetLayoutMode) er en meny-bypass som ikke oppdaterer NB.layout, så
+      // NB.layout kan være stale her (f.eks. fortsatt 'columns' fra dokument-
+      // lastingstidspunktet selv om brukeren siden valgte «Kun output» via
+      // menyen). presentExit sin C.setLayout(prevLayout) re-synker NB.layout
+      // ved avslutning, så ingenting ekstra trengs her.
       NB.present = { slides: plan.slides, byCell: plan.byCell, cur: 0,
-                     prevLayout: NB.layout, counter: null, navEls: [] };
+                     prevLayout: appLayout(), counter: null, navEls: [] };
       NB.root.classList.add('nb-present');
       if (document.body && document.body.classList) document.body.classList.add('present-active');
       presentBuildNav();
