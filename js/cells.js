@@ -1363,6 +1363,20 @@
       }
     }
 
+    // Delt forsonings-sti (spec 4b Task 1 — 4a-sluttreview Important 1):
+    // NØYAKTIG samme gren tick() alltid har brukt for "#scriptInput har
+    // endret seg siden sist serialisert/rendret" — faktorert ut hit slik at
+    // C.updateCellSource() (under) kan kjøre AKKURAT samme forsoning FØR sin
+    // egen splice, i stedet for å duplisere (og dermed potensielt avvike
+    // fra) tick() sin logikk. Markører fortsatt der → docReconcile (untouched
+    // cellers slots/outputs overlever); markørene borte → C.exit() (samme
+    // som tick() alltid har gjort for en tekst som ikke lenger er en
+    // notatbok).
+    function reconcileScriptInput(v) {
+      if (C.hasMarkers(v)) docReconcile(C.parseCells(v));
+      else C.exit();
+    }
+
     // refreshFromScript() sitt dobbelt-modus (Task 3): "uendret siden sist
     // rendret" (`ta.value === NB.lastSerialized`) → full ærlig reset
     // (docRender); "endret siden sist" → forsoning (docReconcile — outputs
@@ -2005,10 +2019,45 @@
     // in-place-grenen, som re-kaller ParamForms.decorate for DENNE cellIdx-
     // en (source endret) — se docReconcile over for hvorfor et re-kall mot
     // samme, fortsatt tilkoblede c._wrap er trygt.
+    //
+    // Stale-span-racet (4a-sluttreview, Important 1 — spec 4b Task 1): idx
+    // og c.startLine/c.endLine kommer fra NB.cells sist gang DOKUMENTET ble
+    // forsonet/rendret — men brukeren kan ha skrevet direkte i #scriptInput
+    // (lagt til/fjernet linjer) i INNEVÆRENDE ett-sekunds tikk-vindu UTEN at
+    // den skrivingen enda er forsonet inn i NB.cells. En splice mot #script-
+    // Input.value (som ALLEREDE reflekterer brukerens ferske tekst) basert
+    // på disse FORELDEDE linjenumrene ville da enten treffe feil linjespenn
+    // i en NABOcelle (korrumpert tekst) eller regne feil deleteCount for
+    // DENNE cellen (sletter/overskriver brukerens nettopp skrevne linjer).
+    // Forson derfor FØRST — nøyaktig samme sti (reconcileScriptInput) tick()
+    // selv bruker for AKKURAT denne "endret siden sist"-oppdagelsen — slik
+    // at c/NB.cells alltid er ferske FØR selve spennet under regnes ut.
     C.updateCellSource = function (idx, newSource) {
-      var c = NB.cells[idx];
-      if (!c) return;
       var ta = $('scriptInput');
+      if (!ta) return null;
+      if (ta.value !== NB.lastSerialized) {
+        var rootBefore = NB.root;
+        reconcileScriptInput(ta.value);
+        // Indeks-identitet-forbeholdet (spec 4b Task 1c): reconcileScript-
+        // Input over kan ha tatt docRender-grenen (celletall/header endret,
+        // ELLER en sniffet effektiv-type-endring, se docReconcile) — HELE
+        // notatboken (og med den, ParamForms sine skjema-striper) ble da
+        // rebygget fra bunnen, og cellIdx-en kalleren (ParamForms._commit)
+        // fanget ved dekoreringstidspunktet kan nå peke på en ANNEN celle
+        // enn den brukeren faktisk endret — eller C.exit() kan ha kjørt
+        // (ingen markører igjen, NB.root null). En full rebuild bytter
+        // ALLTID NB.root sin node-identitet (docRender bygger en helt ny
+        // 'doc-root'-node hver gang, se der); en in-place-forsoning rører
+        // aldri NB.root. Sammenlikningen under er dermed en billig, presis
+        // detektor for "ble stripa allerede rebygget under oss?" — i så
+        // fall: dropp splicingen fremfor å gjette/korrumpere feil celle.
+        // ParamForms sin egen strip er uansett allerede fersk (bygget av
+        // den rebyggingen); brukerens ENE kontroll-interaksjon er langt å
+        // foretrekke å miste fremfor å risikere tekst-korrupsjon.
+        if (NB.root !== rootBefore) return null;
+      }
+      var c = NB.cells[idx];
+      if (!c) return null;
       var lines = String(ta.value).split('\n');
       var bodyStart = c.headerRaw === null ? c.startLine : c.startLine + 1;
       var deleteCount = c.hasBody ? (c.endLine - bodyStart + 1) : 0;
@@ -2018,6 +2067,14 @@
       ta.value = lines.join('\n');
       C.syncTickBaseline();
       docReconcile(C.parseCells(ta.value));
+      // Returner den FERSKE kildeteksten (spec 4b Task 1b): ParamForms sin
+      // egen st.source-cache kan ellers holde på den PRE-splice-kopien den
+      // selv beregnet newSource fra — se js/param-forms.js sin _commit, som
+      // bruker nettopp denne returverdien (når den er en streng) til å
+      // resynke seg selv i stedet for blindt å stole på sin egen closure-
+      // fangede kopi.
+      var fresh = NB.cells[idx];
+      return fresh ? fresh.source : null;
     };
 
     // Kjør cellens ventende redigering (250ms debounce) SYNKRONT — kalt fra
@@ -2043,10 +2100,7 @@
       if (!ta) return;
       var v = ta.value;
       if (NB.activeFlag) {
-        if (v !== NB.lastSerialized) {
-          if (C.hasMarkers(v)) docReconcile(C.parseCells(v));
-          else C.exit();
-        }
+        if (v !== NB.lastSerialized) reconcileScriptInput(v);
       } else if (v !== NB.lastTickValue && NB.lastUserInput < NB.lastTickTime &&
                  C.hasMarkers(v) && C.supportedMode(NB.docMode) && !NB.rawOverride) {
         // Per-tikk-attribusjon: verdien endret seg siden forrige tikk UTEN at

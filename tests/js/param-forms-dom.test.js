@@ -864,3 +864,50 @@ test('Kjør-chip: resetDocument glemmer chip-tilstanden — en fersk decorate fo
   const strip2 = outEl2.children[0];
   assert.strictEqual(strip2.children.length, 1, 'ingen chip i den ferske stripa etter resetDocument');
 });
+
+// ---------- spec 4b Task 1b (4a-sluttreview Important 1): stale-span-racet ----------
+//
+// Cells.updateCellSource forsoner nå FØRST og returnerer cellens FERSKE
+// kildetekst (js/cells.js) — _commit skal bruke DEN til å resynke st.source
+// i stedet for å stole blindt på den newSource den selv beregnet fra sin
+// egen (potensielt foreldede) closure-fangede kopi. Denne stubben ER
+// feasible for å teste akkurat dette: global.Cells slås opp FERSKT av
+// _commit ved HVER commit (ikke fanget ved decorate-tid), så testen kan
+// overstyre stubbens returverdi MELLOM to commits og observere at den ANDRE
+// commiten splicer mot den overstyrte (ferske), ikke den opprinnelig
+// beregnede, kilden.
+test('_commit: bruker Cells.updateCellSource sin returnerte FERSKE kilde til å resynke st.source, ikke den lokalt beregnede kopien', () => {
+  const { ParamForms, cellEl, outEl, updateCellSourceCalls } = freshEnv();
+  ParamForms.decorate(3, cellEl, 'n = 3  #@param\nm = 5  #@param', 'python');
+  const strip = outEl.children[0];
+  const nInput = strip.children[0].children[1];
+  const mInput = strip.children[1].children[1];
+
+  // Overstyr stubben (ETTER decorate — _commit slår opp global.Cells ferskt
+  // ved hvert kall, se der): simuler at Cells.updateCellSource forsonet
+  // #scriptInput FØRST (spec 4b Task 1a) og fant en usforsonet linje lagt
+  // til ØVERST i cellen — den ferske kilden den returnerer har derfor én
+  // ekstra linje foran, som flytter "m" sin lineIdx (1 → 2).
+  global.Cells.updateCellSource = (idx, newSource) => {
+    updateCellSourceCalls.push([idx, newSource]);
+    return '# reconciled\n' + newSource;
+  };
+
+  nInput.value = '9';
+  nInput.dispatchEvent({ type: 'change' });
+
+  // Andre kontroll (m) endres nå: _freshEntryFor MÅ finne "m" i de
+  // RESYNKEDE entries (lineIdx flyttet til 2 pga. den forsonede linja), og
+  // writeValue MÅ splice mot den RESYNKEDE (3-linjers) st.source — ikke mot
+  // den lokalt beregnede 2-linjers newSource fra forrige commit, som ville
+  // mistet "# reconciled"-linja og feilplassert m sin nye verdi.
+  mInput.value = '42';
+  mInput.dispatchEvent({ type: 'change' });
+
+  assert.strictEqual(updateCellSourceCalls.length, 2);
+  assert.deepStrictEqual(
+    updateCellSourceCalls[1],
+    [3, '# reconciled\nn = 9  #@param\nm = 42  #@param'],
+    'den andre commiten splicer mot den RETURNERTE ferske kilden (med den forsonede linja intakt)'
+  );
+});

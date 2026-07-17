@@ -744,7 +744,26 @@
       // korrekt også i isolasjon.
       st.entries = ParamForms.parse(newSource, st.lang);
       if (global.Cells && typeof global.Cells.updateCellSource === 'function') {
-        global.Cells.updateCellSource(cellIdx, newSource);
+        var freshSource = global.Cells.updateCellSource(cellIdx, newSource);
+        // Stale-span-racet (4a-sluttreview, Important 1 — spec 4b Task 1b):
+        // newSource over ble beregnet mot VÅR closure-fangede st.source, som
+        // kan predatere en samtidig, ikke-forsonet #scriptInput-redigering
+        // (linjer forskjøvet/lagt til). Cells.updateCellSource forsoner nå
+        // FØRST og returnerer cellens FERSKE kildetekst — bruk DEN som
+        // fasit for st (fremfor å stole på den optimistiske pre-edit-kopien
+        // vi selv nettopp skrev over til linja over), samme "aldri stol på
+        // en foreldet lokal kopi"-prinsipp som _freshEntryFor/syncSource
+        // allerede følger i resten av denne fila. En returnert null/
+        // undefined (abortert splice — se Cells.updateCellSource sin
+        // indeks-identitet-vakt — eller en test-stub uten returverdi)
+        // beholder st uendret: notatboken er da uansett allerede rebygget
+        // (ParamForms.decorate ga _forms[cellIdx] en HELT NY oppføring),
+        // så denne `st`-referansen er foreldet/orphanet uansett, og et
+        // videre skriv til den er et ufarlig no-op.
+        if (typeof freshSource === 'string') {
+          st.source = freshSource;
+          st.entries = ParamForms.parse(freshSource, st.lang);
+        }
       }
       if (entry.meta.runAuto) {
         _scheduleRun(cellIdx, entry, entry.meta.type === 'slider');

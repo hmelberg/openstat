@@ -1744,3 +1744,66 @@ test('updateCellSource: .nb-stale lander på .doc-cell-wrapperen for en tidliger
   C.updateCellSource(0, 'x = 2');
   assert.strictEqual(C.cellElementAt(0).classList.contains('nb-stale'), true);
 });
+
+// ---------- spec 4b Task 1 (4a-sluttreview Important 1): stale-span-racet ----------
+//
+// Race: brukeren skriver direkte i #scriptInput (linjer forskjøvet) i
+// INNEVÆRENDE ett-sekunds tikk-vindu — NB.cells sine spenn (startLine/
+// endLine) er da FORELDET helt til neste tikk/forsoning. Skjer en
+// #@param-kontrolls commit (Cells.updateCellSource) INNENFOR akkurat dette
+// vinduet, ville en splice mot de forelede spennene enten korrumpere
+// naboteksten eller slette/overskrive brukerens ferske linje. Fiksen
+// forsoner FØRST (nøyaktig samme sti som tick() selv bruker) — se
+// reconcileScriptInput i js/cells.js.
+
+test('updateCellSource: usforsonet linje lagt til FØR cellen (spenn forskjøvet) korrumperer ikke — begge endringer overlever', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '# preamble\n#%% python\nn = 3 #@param\n#%% md\nA\n';
+  C.init('python');
+
+  // USFORSONET brukerredigering: en ny linje lagt til i preambelen, FØR
+  // python-cellen — samme struktur (samme headerRaw-sekvens/celletall,
+  // C.sameStructure), men python-cellens linjespenn FORSKYVES med én. Satt
+  // direkte på .value (ingen tick()/refreshFromScript()) — NB.cells vet
+  // ennå ingenting om denne redigeringen når updateCellSource kalles.
+  scriptInputEl.value = '# preamble\n# ny linje\n#%% python\nn = 3 #@param\n#%% md\nA\n';
+
+  // Speiler en kontrolls egen commit (ParamForms._commit, cellIdx=1 uendret
+  // — kun spennet, ikke indeksen, er foreldet her).
+  const fresh = C.updateCellSource(1, 'n = 7 #@param');
+
+  assert.strictEqual(
+    scriptInputEl.value,
+    '# preamble\n# ny linje\n#%% python\nn = 7 #@param\n#%% md\nA\n',
+    'brukerens ferske linje OG den nye param-verdien er begge til stede — ingen korrupsjon, ingen reverterte tastetrykk'
+  );
+  assert.strictEqual(fresh, 'n = 7 #@param', 'returnerer cellens ferske kilde (spec 4b Task 1b)');
+  assert.strictEqual(C.parseCells(scriptInputEl.value).cells[2].source, 'A\n', 'md-cellen er urørt');
+});
+
+// Indeks-identitet-forbeholdet (spec 4b Task 1c): en usforsonet redigering
+// som LEGGER TIL en #%%-celle endrer STRUKTUREN (celletall/headerRaw-
+// sekvens) — docReconcile sin egen "sameStructure"-port tar da IKKE
+// in-place-grenen, men en full docRender() (hele notatboken, ParamForms
+// sine striper inkludert, rebygges fra bunnen). cellIdx-en en kontroll
+// fanget ved DEKORERINGSTIDSPUNKTET (predaterer redigeringen) er da ikke
+// lenger trygg å splice mot — updateCellSource må droppe splicingen
+// (return null) fremfor å gjette/korrumpere feil celle.
+test('updateCellSource: usforsonet redigering som legger til en #%%-celle → full rebuild → splice droppes (null), brukerens redigering overlever uendret', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python\nn = 3 #@param\n#%% md\nA\n';
+  C.init('python');
+
+  // USFORSONET redigering: en HELT NY '#%% skip'-celle satt inn FØRST —
+  // strukturen endrer seg (2 → 3 celler). idx=0 var python-cellen FØR denne
+  // redigeringen (dekoreringstidspunktets indeks) — men peker nå på den nye
+  // skip-cellen i den ferske parsen.
+  const edited = '#%% skip\nz = 1\n#%% python\nn = 3 #@param\n#%% md\nA\n';
+  scriptInputEl.value = edited;
+
+  const result = C.updateCellSource(0, 'n = 7 #@param');
+
+  assert.strictEqual(result, null, 'strukturell forsoning → splicingen droppes, ikke gjettes');
+  assert.strictEqual(scriptInputEl.value, edited, 'brukerens redigering står urørt — ingen korrupsjon fra en feilrettet splice');
+  assert.strictEqual(C.parseCells(scriptInputEl.value).cells[1].source, 'n = 3 #@param', 'param-verdien er UENDRET — kontroll-interaksjonen ble droppet, ikke feilrettet inn i feil celle');
+});
