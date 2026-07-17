@@ -1939,6 +1939,7 @@
         document.getElementById('outputArea').innerHTML = '';
         return true;
       }
+      window.mdClearOutputAreaUnlessDoc = clearOutputAreaUnlessDoc;
 
       function clearOutput() {
         lastOutput = '';
@@ -3239,7 +3240,7 @@
           // ALDRI når denne grenen (Cells.runCell fanger dem tidligere) — men
           // clearOutputAreaUnlessDoc() gir en belte-og-seler-garanti uten kost
           // (ren no-op) om den antagelsen noensinne skulle vise seg feil.
-          clearOutputAreaUnlessDoc();
+          window.mdClearOutputAreaUnlessDoc();
           // ui-widgets (fase 3, spec 2026-07-16-plain-script-widgets): denne
           // grenen kjører hele scriptet i ett — Cells.active()-notatbøker for
           // brython/micropython går ALDRI hit (btnRun sin egen Fase C-gren
@@ -3287,7 +3288,7 @@
           // Konvergert dokument (Task 3b): samme belte-og-seler-garanti som
           // Brython-raden over — clearOutputAreaUnlessDoc() no-op'er trygt om
           // en notatbok mot formodning skulle være aktiv her.
-          clearOutputAreaUnlessDoc();
+          window.mdClearOutputAreaUnlessDoc();
           // ui-widgets (fase 3): samme begrunnelse som Brython-raden over —
           // Cells.active()-notatbøker går aldri hit (Fase C-grenen i
           // btnRun fanger dem via Cells.runCell/runNotebookEngineCell, som
@@ -8896,7 +8897,7 @@ has and "int" in (m.get_microdata_functions() or {})
         // notatbokvakten øverst i funksjonen (Task 3b-funn 2) returnerer FØR
         // dette punktet mens Cells.active(). Kallet står igjen som ren
         // forsvarskode (samme signatur/atferd som overalt ellers).
-        if (clearOutputAreaUnlessDoc()) outputArea.appendChild(pre);
+        if (window.mdClearOutputAreaUnlessDoc()) outputArea.appendChild(pre);
       } catch (e) {
         const msg = String(e && e.message ? e.message : e);
         const hint = (backend === 'polars' && /polars/i.test(msg))
@@ -9885,7 +9886,7 @@ async def _m2py_run_segment(_seg_json):
         // uavhengig av notatbok-tilstand) må doc-bevisses: helperen no-op'er
         // trygt når notatboken er aktiv (samme mønster som Kjør alle sin egen
         // ubetingede purge, ~10186 under).
-        clearOutputAreaUnlessDoc();
+        window.mdClearOutputAreaUnlessDoc();
         if (window.Dash && typeof window.Dash.sweepDisconnected === 'function') window.Dash.sweepDisconnected();
         if (isMicrodataReplay) {
           // ── Kjør fra toppen GJENNOM målcellen (spec §4-unntaket) ──────────
@@ -10252,7 +10253,7 @@ async def _m2py_run_segment(_seg_json):
         // per-celle-stien over, ~9823) — clearOutputAreaUnlessDoc() no-op'er
         // tømmingen når en notatbok er aktiv; segmentløkkens _nbActive-gren
         // under ruter da output til slots via sinks i stedet.
-        clearOutputAreaUnlessDoc();
+        window.mdClearOutputAreaUnlessDoc();
         incrementalStarted = true;
         // Notatbok aktiv (Task 6/9): per-celle output-slots for segmentløkken.
         // beginRun får segment-KINDENE (ikke bare antallet, Task 9 bug (a)):
@@ -10353,7 +10354,7 @@ async def _m2py_run_segment(_seg_json):
         // til under (speiler remote-adferden: delresultater + feil).
         // Konvergert dokument (Task 3b): samme doc-bevisste tømming som
         // ovenfor — no-op når notatboken er aktiv.
-        if (!incrementalStarted) clearOutputAreaUnlessDoc();
+        if (!incrementalStarted) window.mdClearOutputAreaUnlessDoc();
         const pre = document.createElement('pre');
         pre.className = 'error';
         pre.textContent = lastOutput;
