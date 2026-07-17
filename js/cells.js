@@ -866,7 +866,13 @@
                // ENKELT closure-singleton (samme mønster som chip/sessionChip
                // over) — en ny sletting FØR forrige toasts 2s er omme erstatter
                // (ikke stabler) forrige toast, se showUndoToast.
-               undoToast: null, undoTimer: null };
+               undoToast: null, undoTimer: null,
+               // Editor-konvergens (plan 4b Task 3): markør↔slot-koblingens
+               // "hvilken celle er aktiv" — satt av C.setActiveCell (index.html
+               // sin cursor-tracker kaller denne), lest av applyActiveCellClass
+               // for å reapplisere .doc-active etter en docRender-rebygging
+               // (nye DOM-noder — se applyActiveCellClass sin egen kommentar).
+               activeCellIdx: null };
 
     function $(id) { return document.getElementById(id); }
     function el(tag, cls, text) {
@@ -988,6 +994,12 @@
       C.presentExit();
       if (opts && opts.raw) NB.rawOverride = true;
       NB.activeFlag = false;
+      // Markør↔slot-kobling (plan 4b Task 3): en inaktiv notatbok har ingen
+      // aktiv celle — NB.root fjernes rett under uansett (klassen forsvinner
+      // med noden), men NB.activeCellIdx-TILSTANDEN må også nullstilles, slik
+      // at en senere re-inngang (docRender/enter) ikke reapplisérer .doc-active
+      // mot en indeks som hørte til et helt annet dokument-øyeblikk.
+      NB.activeCellIdx = null;
       // Flush en ventende celle-redigerings-debounce FØR vi bytter til Rå
       // tekst (B2 Task 4-fiks, speiler toolbarGate over): en ren clearTimeout
       // her ville DROPPET siste <250ms med utaste tekst (skrevet, aldri
@@ -1207,6 +1219,35 @@
       }
     }
 
+    // Slot→markør (spec §5, plan 4b Task 3): klikk på selve cellekroppen
+    // hopper editor-markøren dit (window.mdJumpToCell, tverr-IIFE-bro — se
+    // filens "Cross-IIFE only via window.md*"-begrensning, index.html eier
+    // #scriptInput). Klikk på et INTERAKTIVT element INNI sloten (en
+    // #@param-/ui.*-kontroll, en lenke, et dashboard, presentasjons-pilene)
+    // skal derimot IKKE hoppe markøren — det ville stjålet klikket fra selve
+    // kontrollen (f.eks. avbrutt en slider-dra) som en overraskende
+    // sideeffekt. Ekte browser-DOM har Element.prototype.closest; test-
+    // harnessets FakeEl har den ikke (samme "utestbar uten en manuell
+    // forelder-vandring"-situasjon som resten av filen løser med egne
+    // hjelpere i stedet for DOM-native APIer) — egen forelder-vandring
+    // fungerer identisk i begge miljøer.
+    var CLICK_IGNORE_TAGS = { input: 1, button: 1, select: 1, textarea: 1, a: 1 };
+    var CLICK_IGNORE_CLASSES = ['ui-controls', 'param-form', 'dash', 'nb-present-nav'];
+    function isIgnorableClickTarget(node, stopAt) {
+      var n = node;
+      while (n && n !== stopAt) {
+        var tag = (n.tagName || n.tag || '').toLowerCase();
+        if (CLICK_IGNORE_TAGS[tag]) return true;
+        if (n.classList) {
+          for (var i = 0; i < CLICK_IGNORE_CLASSES.length; i++) {
+            if (n.classList.contains(CLICK_IGNORE_CLASSES[i])) return true;
+          }
+        }
+        n = n.parentNode;
+      }
+      return false;
+    }
+
     // Output-only cellenode (spec §1): ETTERFØLGER av cellNode under, men
     // uten .nb-input/textarea/head/toolbar — kun .nb-output → .nb-output-body
     // (identisk klassenavn/struktur, så ParamForms/Ui/dash/ipywidgets sine
@@ -1236,6 +1277,20 @@
       if (paramLang && global.ParamForms && typeof global.ParamForms.decorate === 'function') {
         global.ParamForms.decorate(idx, wrap, c.source, paramLang);
       }
+      // Slot→markør-klikk (se isIgnorableClickTarget over) — leser idx LEVENDE
+      // av wrap.dataset.idx i stedet for å stole på den lukningsfangede
+      // parameteren, samme "levende tilstand"-preferanse resten av filen
+      // bruker (cellElementAt/cellIndexById): wrap-noden lever videre
+      // gjennom en docReconcile, og selv om en strukturell endring alltid
+      // gir en helt FERSK wrap (docRender), er det billigere å lese den
+      // samme dataset-attributten enn å holde styr på om lukningen kan bli
+      // stale.
+      wrap.addEventListener('click', function (e) {
+        var target = (e && e.target) || wrap;
+        if (isIgnorableClickTarget(target, wrap)) return;
+        if (typeof global.mdJumpToCell !== 'function') return;
+        global.mdJumpToCell(parseInt(wrap.dataset.idx, 10));
+      });
       return wrap;
     }
 
@@ -1276,6 +1331,15 @@
         if (type === 'skip') continue;               // spec §1: skip rendres ikke
         NB.root.appendChild(docCellNode(NB.cells[i], i));
       }
+      // Markør↔slot-kobling (plan 4b Task 3): docRender bygger FERSKE
+      // wrap-noder (host.innerHTML = '' over) — enhver tidligere .doc-active
+      // ble kastet sammen med den gamle noden. Reapplisér mot NB.activeCellIdx
+      // hvis indeksen fortsatt er gyldig i det (evt. nye) celletallet, ellers
+      // klarer (struktur-endring kan ha fjernet cellen markøren stod i).
+      // INGEN scrollIntoView her — dette er en rebygging, ikke en faktisk
+      // markørflytting (se applyActiveCellClass sin egen kommentar).
+      if (NB.activeCellIdx !== null && NB.activeCellIdx >= NB.cells.length) NB.activeCellIdx = null;
+      applyActiveCellClass();
       // Render-tidens engangs-sjekk (poll-fri per Task 5-kontrakten, se
       // gamle render()): fanger et Kjør alle/Forklar-løp som allerede er i
       // gang idet dokumentet (re-)rendres.
@@ -2555,6 +2619,44 @@
       var type = C.resolveType(c, NB.docMode);
       if (C.isCodeType(type)) return;
       renderNonCode(c._out, type, C.renderContent(c.source, type, c.sniffed));
+    };
+
+    // ---- markør↔slot-kobling (spec §5, plan 4b Task 3) ----
+    // Speiler NB.activeCellIdx mot .doc-active på de rendrede cellenes
+    // wrap-noder — samme "kun ett om gangen"-idempotens som nb-stale/
+    // nb-running (fjern fra alle, legg til på den ene). Kalt BÅDE fra
+    // C.setActiveCell (under, en tilstandsENDRING) OG fra docRender (en
+    // REBYGGING — NB.cells' _wrap-referanser er da FERSKE noder som aldri
+    // har hatt klassen, se docRender sitt eget reapply-kall) — derfor egen
+    // funksjon, uten scrollIntoView (den hører kun til den faktiske
+    // markørflyttingen, ikke til enhver rebygging som tilfeldigvis lander på
+    // samme indeks).
+    function applyActiveCellClass() {
+      for (var i = 0; i < NB.cells.length; i++) {
+        var c = NB.cells[i];
+        if (!c || !c._wrap || !c._wrap.classList) continue;
+        if (i === NB.activeCellIdx) c._wrap.classList.add('doc-active');
+        else c._wrap.classList.remove('doc-active');
+      }
+    }
+
+    // idx: celleindeks eller null/undefined (klarer aktiv celle). Idempotent
+    // — samme idx to ganger endrer ingen klasser og scroller ikke på nytt
+    // (scrollIntoView kjører KUN når idx faktisk endrer seg, task-brief: "on
+    // CHANGE only"). scrollIntoView er guardet med typeof — stub-DOM-testenes
+    // FakeEl har den ikke, samme mønster som resten av filen bruker for
+    // browser-only DOM-metoder.
+    C.setActiveCell = function (idx) {
+      var next = (idx === null || idx === undefined) ? null : idx;
+      var changed = next !== NB.activeCellIdx;
+      NB.activeCellIdx = next;
+      applyActiveCellClass();
+      if (changed && next !== null) {
+        var c = NB.cells[next];
+        if (c && c._wrap && typeof c._wrap.scrollIntoView === 'function') {
+          c._wrap.scrollIntoView({ block: 'nearest' });
+        }
+      }
     };
 
     function markStaleIfRan(idx) {

@@ -278,6 +278,14 @@
     .line-numbers span { display: block; height: var(--line-h); line-height: var(--line-h); cursor: pointer; padding-right: 4px; text-decoration: none; border: none; border-bottom: none; }
     .line-numbers span.breakpoint { position: relative; }
     .line-numbers span.breakpoint::before { content: ''; position: absolute; right: -2px; top: 50%; transform: translateY(-50%); width: 12px; height: 12px; background: #e11d48; border-radius: 50%; }
+    /* Markør↔slot-kobling (plan 4b Task 3): ▶ ved den aktive cellens
+       FØRSTE linje (kun kjørbare kodeceller — se window.mdSetActiveCellLine
+       i index.html). ::after (i normal flyt, IKKE absolutt posisjonert) i
+       stedet for et ekstra ::before-lag som ville kollidert med
+       stoppunkt-prikken over — de to kan derfor stå på samme span uten å
+       overlappe visuelt (prikken sitter absolutt utenfor høyre kant, ▶
+       flyter rett etter selve tallet). */
+    .line-numbers span.gutter-run::after { content: '▶'; margin-left: 2px; font-size: 9px; color: var(--accent); cursor: pointer; }
     .code-input-wrap { flex: 1; position: relative; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
     body.forklar-session .code-input-wrap { overflow: visible; }
     /* Halvtransparent lag oppå textarea: jevn tone over hele rektangelet (tekst + tomrom); ligger etter textarea i DOM */
@@ -1462,3 +1470,8 @@ body.present-active .panel-left, body.present-active #resizer { display: none; }
 .doc-cell { padding: 2px 0; }
 .doc-cell.nb-running { outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent); }
 .doc-cell.nb-stale { opacity: .75; }
+/* Markør↔slot-kobling (plan 4b Task 3): cellen editor-markøren står i,
+   uansett celletype (kode/md/html) — venstre aksentkant, samme mønster
+   .nb-cell:focus-within allerede bruker for kant-farge alene (uten layout-
+   skiftende border-bredde-endring, se den kommentaren lenger opp i fila). */
+.doc-cell.doc-active { box-shadow: inset 3px 0 0 var(--accent); }

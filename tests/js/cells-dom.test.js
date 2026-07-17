@@ -218,6 +218,10 @@ function freshEnv() {
   // andre md*-globalene over.
   global.mdIsScriptRunning = undefined;
   global.mdRunNotebookCell = undefined;
+  // Editor-konvergens (plan 4b Task 3): slot→markør-broen — samme
+  // reset-mønster som mdRunNotebookCell over, forhindrer lekkasje mellom
+  // tester som stubber den.
+  global.mdJumpToCell = undefined;
 
   delete require.cache[require.resolve(CELLS_PATH)];
   const C = require(CELLS_PATH);
@@ -1962,4 +1966,174 @@ test('rerenderCell: no-op for en kode-celle og for en ugyldig indeks', () => {
   assert.doesNotThrow(() => C.rerenderCell(0));
   assert.strictEqual(cellParts(containerEl, 0).out.textContent, before, 'kode-celle: ingen re-rendring');
   assert.doesNotThrow(() => C.rerenderCell(99), 'ugyldig indeks krasjer ikke');
+});
+
+// ---- C.setActiveCell / docCellNode slot→markør (plan 4b Task 3: gutter ▶ +
+// markør↔slot-kobling) ----
+
+test('setActiveCell: .doc-active på riktig celle, kun én om gangen; null klarer', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 1\n#%% md\nA\n#%% python\nb = 2\n';
+  C.init('python');
+  const cell0 = C.cellElementAt(0);
+  const cell1 = C.cellElementAt(1);
+  const cell2 = C.cellElementAt(2);
+
+  C.setActiveCell(1);
+  assert.strictEqual(cell0.classList.contains('doc-active'), false);
+  assert.strictEqual(cell1.classList.contains('doc-active'), true);
+  assert.strictEqual(cell2.classList.contains('doc-active'), false, 'kun én celle aktiv om gangen');
+
+  // Idempotent: samme indeks igjen endrer ingen klasser.
+  C.setActiveCell(1);
+  assert.strictEqual(cell1.classList.contains('doc-active'), true);
+
+  C.setActiveCell(2);
+  assert.strictEqual(cell1.classList.contains('doc-active'), false, 'forrige aktiv celle mister klassen');
+  assert.strictEqual(cell2.classList.contains('doc-active'), true);
+
+  C.setActiveCell(null);
+  assert.strictEqual(cell2.classList.contains('doc-active'), false, 'null klarer aktiv celle');
+});
+
+test('setActiveCell: scrollIntoView({block:"nearest"}) kun ved en FAKTISK endring, guardet — stub-DOM uten metoden krasjer ikke', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 1\n#%% python\nb = 2\n';
+  C.init('python');
+
+  // FakeEl har ingen scrollIntoView i det hele tatt (samme "browser-only
+  // DOM-metode"-situasjon som resten av filen guarder med typeof) — dette
+  // kallet skal ikke kaste.
+  assert.doesNotThrow(() => C.setActiveCell(1));
+
+  const cell0 = C.cellElementAt(0);
+  const cell1 = C.cellElementAt(1);
+  let scrollCalls = [];
+  cell0.scrollIntoView = (opts) => scrollCalls.push(opts);
+  cell1.scrollIntoView = (opts) => scrollCalls.push(opts);
+
+  C.setActiveCell(0);
+  assert.deepStrictEqual(scrollCalls, [{ block: 'nearest' }]);
+
+  // Samme indeks igjen: INGEN ny scroll.
+  C.setActiveCell(0);
+  assert.strictEqual(scrollCalls.length, 1, 'uendret idx scroller ikke på nytt');
+
+  C.setActiveCell(1);
+  assert.strictEqual(scrollCalls.length, 2, 'faktisk endring scroller');
+});
+
+test('setActiveCell: overlever docRender (strukturendring gir FERSKE noder) — .doc-active reapplisert på samme indeks', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 1\n#%% python\nb = 2\n';
+  C.init('python');
+  C.setActiveCell(1);
+  const oldCell1 = C.cellElementAt(1);
+  assert.strictEqual(oldCell1.classList.contains('doc-active'), true);
+
+  // Strukturendring (ny celle lagt til) → docReconcile ser ulik struktur og
+  // faller tilbake til en full docRender (ferske wrap-noder, se
+  // js/cells.js sin egen kommentar der).
+  scriptInputEl.value = '#%% python\na = 1\n#%% python\nb = 2\n#%% python\nc = 3\n';
+  C.refreshFromScript();
+
+  const newCell1 = C.cellElementAt(1);
+  assert.notStrictEqual(newCell1, oldCell1, 'strukturendring bygger en NY node for indeks 1');
+  assert.strictEqual(newCell1.classList.contains('doc-active'), true,
+    '.doc-active reapplisert på indeks 1 uten et eksplisitt setActiveCell-kall');
+});
+
+test('setActiveCell: aktiv indeks utenfor det nye celletallet klarer stille etter docRender', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 1\n#%% python\nb = 2\n';
+  C.init('python');
+  C.setActiveCell(1);
+
+  scriptInputEl.value = '#%% python\na = 1\n';
+  C.refreshFromScript();
+  assert.strictEqual(C.cellElementAt(1), null, 'celle 1 finnes ikke lenger');
+
+  // Ingen gjenværende stale tilstand — en senere setActiveCell(0) fungerer
+  // normalt (og scroller, siden 1 !== 0 fortsatt telles som en endring).
+  C.setActiveCell(0);
+  assert.strictEqual(C.cellElementAt(0).classList.contains('doc-active'), true);
+});
+
+test('exit(): nullstiller aktiv-celle-tilstanden — spøker ikke inn i et senere, urelatert dokument', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 1\n#%% python\nb = 2\n';
+  C.init('python');
+  C.setActiveCell(1);
+  C.exit();
+
+  scriptInputEl.value = '#%% md\nA\n'; // helt annet, kortere dokument
+  C.contentLoaded({});
+  assert.strictEqual(C.active(), true);
+  const cell0 = C.cellElementAt(0);
+  assert.strictEqual(cell0.classList.contains('doc-active'), false,
+    'gammel indeks 1 fra FORRIGE dokument skal ikke reapplisere .doc-active på celle 0 i det nye');
+});
+
+test('docCellNode: klikk på cellekroppen kaller window.mdJumpToCell(idx)', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 1\n#%% python\nb = 2\n';
+  const jumpCalls = [];
+  global.mdJumpToCell = (idx) => jumpCalls.push(idx);
+  C.init('python');
+
+  const wrap1 = C.cellElementAt(1);
+  wrap1.dispatchEvent({ type: 'click', target: wrap1 });
+  assert.deepStrictEqual(jumpCalls, [1]);
+
+  const wrap0 = C.cellElementAt(0);
+  wrap0.dispatchEvent({ type: 'click', target: wrap0 });
+  assert.deepStrictEqual(jumpCalls, [1, 0]);
+});
+
+test('docCellNode: klikk på en kontroll (eller en etterkommer AV en) inni sloten hopper IKKE markøren', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 1 #@param\n';
+  const jumpCalls = [];
+  global.mdJumpToCell = (idx) => jumpCalls.push(idx);
+  C.init('python');
+
+  const wrap0 = C.cellElementAt(0);
+
+  const btn = global.document.createElement('button');
+  wrap0.appendChild(btn);
+  wrap0.dispatchEvent({ type: 'click', target: btn });
+  assert.deepStrictEqual(jumpCalls, [], 'klikk på en <button> hopper ikke');
+
+  // Et barn AV knappen (flernivås forelder-vandring, ikke bare direkte-barn-sjekk).
+  const span = global.document.createElement('span');
+  btn.appendChild(span);
+  wrap0.dispatchEvent({ type: 'click', target: span });
+  assert.deepStrictEqual(jumpCalls, [], 'klikk på et barn av en knapp hopper heller ikke');
+
+  const uiControls = global.document.createElement('div');
+  uiControls.className = 'ui-controls';
+  wrap0.appendChild(uiControls);
+  wrap0.dispatchEvent({ type: 'click', target: uiControls });
+  assert.deepStrictEqual(jumpCalls, [], 'klikk på .ui-controls hopper ikke');
+
+  const dash = global.document.createElement('div');
+  dash.className = 'dash';
+  wrap0.appendChild(dash);
+  wrap0.dispatchEvent({ type: 'click', target: dash });
+  assert.deepStrictEqual(jumpCalls, [], 'klikk på .dash hopper ikke');
+
+  // Klikk på sloten selv (ingen ignorerbar forelder mellom target og wrap)
+  // hopper fortsatt normalt — filteret er spesifikt, ikke en generell
+  // klikk-blokkering.
+  wrap0.dispatchEvent({ type: 'click', target: wrap0 });
+  assert.deepStrictEqual(jumpCalls, [0]);
+});
+
+test('docCellNode: klikk-lytteren krasjer ikke uten en window.mdJumpToCell (guardet tverr-IIFE-bro)', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 1\n';
+  global.mdJumpToCell = undefined;
+  C.init('python');
+  const wrap0 = C.cellElementAt(0);
+  assert.doesNotThrow(() => wrap0.dispatchEvent({ type: 'click', target: wrap0 }));
 });

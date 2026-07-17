@@ -1371,6 +1371,20 @@
       lineNumbers.addEventListener('click', function (e) {
         const span = e.target.closest && e.target.closest('span[data-line]');
         if (!span || !lineNumbers.contains(span)) return;
+        // Editor-konvergens (spec 2026-07-17 §5, plan 4b Task 3): et klikk på
+        // ▶-linjen (gutter-run — satt av nbActiveCellIdx-sporeren lenger ned
+        // i denne samme <script>-blokka, se window.mdSetActiveCellLine) kjører
+        // den aktive cellen i stedet for å slå av/på et stoppunkt der.
+        // nbActiveCellIdx er en delt var (hoisting — se sporer-kommentaren
+        // ved definisjonen) som ALLTID peker på cellen ▶ nettopp ble tegnet
+        // for, så et gutter-run-treff trenger ikke slå opp cellen på nytt.
+        if (span.classList.contains('gutter-run')) {
+          if (window.Cells && typeof window.Cells.runCell === 'function' &&
+              typeof nbActiveCellIdx === 'number') {
+            window.Cells.runCell(nbActiveCellIdx);
+          }
+          return;
+        }
         const line = parseInt(span.dataset.line, 10);
         const hadThis = breakpoints.has(line);
         // Kun ett stoppunkt om gangen: fjern alle eksisterende
@@ -1387,6 +1401,19 @@
       });
 
       function updateLineNumbers() {
+        // Editor-konvergens (plan 4b Task 3): en inaktiv notatbok (Rå tekst,
+        // eller et vanlig skript) har ingen aktiv celle. updateLineNumbers()
+        // kalles fra js/cells.js sin C.exit() (uansett hva som utløste
+        // exit — ikke bare markørflytting), så dette er stedet der en
+        // gjenværende ▶ fra FØR exit garantert ryddes, selv når den delegerte
+        // markørsporeren (selectionchange/keyup/klikk) aldri rekker å fyre
+        // igjen. nbClearActiveCell/nbActiveCellIdx defineres LENGER NED i
+        // samme <script>-blokk — trygt her via var-hoisting/function-
+        // hoisting (ingen TDZ), samme begrunnelse som ved sporerens egen
+        // definisjon.
+        if (window.Cells && !window.Cells.active() && typeof nbClearActiveCell === 'function') {
+          nbClearActiveCell();
+        }
         const n = Math.max(scriptInput.value.split('\n').length, 1);
         // Add/remove only the trailing spans to match the line count — don't
         // rebuild the whole gutter (and its listeners) on every keystroke.
@@ -5508,6 +5535,115 @@ json.dumps(out)
         acceptSelection();
       }
     });
+
+    // Editor-konvergens (spec 2026-07-17 §5, plan 4b Task 3): gutter ▶ for
+    // aktiv celle + markør↔slot-kobling. Gjenbruker Task 2 sine
+    // nbCellAtCursor/nbCharOffsetForLine/nbMoveCursorToLine/nbFirstBodyLine
+    // hjelpere over (samme "reparse #scriptInput.value direkte for
+    // cellemetadata"-mønster, se nbCellAtCursor sin egen kommentar).
+    //
+    // nbActiveCellIdx er delt (via var-hoisting i denne ENE store
+    // <script>-blokka — ingen TDZ for var, ulikt let/const, se
+    // activeEditorMode sin egen forklarende kommentar over ved linje ~3610)
+    // med den delegerte #lineNumbers-klikkhandleren i
+    // initLineNumbersAndBreakpoints (definert TIDLIGERE i samme skript,
+    // ~linje 1371) — den handleren leser variabelen ved klikk-tidspunkt
+    // (lenge etter at HELE skriptet er ferdig kjørt én gang), så
+    // definisjonsrekkefølgen her spiller ingen rolle.
+    var nbActiveCellIdx = null;
+    var _nbGutterSpan = null;
+    var _nbCursorDebounce = null;
+
+    function nbClearActiveCell() {
+      if (_nbGutterSpan) {
+        _nbGutterSpan.classList.remove('gutter-run');
+        _nbGutterSpan = null;
+      }
+      nbActiveCellIdx = null;
+      if (window.Cells && typeof window.Cells.setActiveCell === 'function') window.Cells.setActiveCell(null);
+    }
+
+    // idx/firstLine null|undefined → ingen ▶ (men aktiv-celle-tilstanden i
+    // js/cells.js oppdateres likevel til idx — se kallerne under: ▶ vises
+    // KUN for kjørbare kodeceller, mens .doc-active-fremhevingen skal følge
+    // markøren inn i ENHVER celletype, jf. task-brief punkt 1a/1b).
+    // firstLine er cellens FØRSTE linje (header-linjen for merkede celler,
+    // dokumentets linje 0 for preambelen — cell.startLine, se parseCells sin
+    // egen kommentar), IKKE første KROPPS-linje (nbFirstBodyLine, brukt av
+    // Shift+Enter/mdJumpToCell) — ▶ skal stå ved SELVE '#%% python'-linjen.
+    window.mdSetActiveCellLine = function (idx, firstLine) {
+      if (_nbGutterSpan) {
+        _nbGutterSpan.classList.remove('gutter-run');
+        _nbGutterSpan = null;
+      }
+      if (firstLine !== null && firstLine !== undefined) {
+        var ln = document.getElementById('lineNumbers');
+        var span = ln && ln.querySelector('span[data-line="' + (firstLine + 1) + '"]');
+        if (span) {
+          span.classList.add('gutter-run');
+          _nbGutterSpan = span;
+        }
+      }
+      nbActiveCellIdx = (idx === null || idx === undefined) ? null : idx;
+      if (window.Cells && typeof window.Cells.setActiveCell === 'function') window.Cells.setActiveCell(nbActiveCellIdx);
+    };
+
+    // Klassifiserer cellen markøren står i og oppdaterer ▶/.doc-active
+    // deretter. Kalt fra den debouncede sporeren under OG synkront fra
+    // mdJumpToCell (slot-klikk skal oppdatere UMIDDELBART, ikke vente på
+    // debouncen). Ikke-fokusert #scriptInput (fokus flyttet et annet sted
+    // midt i den ventende 100ms-debouncen) lar forrige tilstand stå urørt i
+    // stedet for å klare den — et blur er ikke det samme som "markøren står
+    // utenfor cellene".
+    function nbUpdateActiveCellFromCursor() {
+      if (!window.Cells || !window.Cells.active()) { nbClearActiveCell(); return; }
+      var ta = scriptInput;
+      if (document.activeElement !== ta) return;
+      var at = nbCellAtCursor(ta);
+      if (at.idx === -1) { nbClearActiveCell(); return; }
+      // ▶ kun for en FAKTISK kjørbar kode-celle i gjeldende modus (spec:
+      // "md/html/skip/foreign → no ▶") — samme preambel-unntak
+      // (segmentPlan[0] === 0) som Ctrl/Cmd+Enter-grenen over bruker for å
+      // avgjøre om preambelen selv er kjørbar.
+      var showArrow = at.code;
+      if (showArrow && at.cell.headerRaw === null) {
+        var plan = window.Cells.segmentPlan(ta.value, activeEditorMode);
+        showArrow = !!(plan.length && plan[0] === 0);
+      }
+      window.mdSetActiveCellLine(at.idx, showArrow ? at.cell.startLine : null);
+    }
+
+    function nbScheduleActiveCellUpdate() {
+      if (_nbCursorDebounce) clearTimeout(_nbCursorDebounce);
+      _nbCursorDebounce = setTimeout(function () {
+        _nbCursorDebounce = null;
+        nbUpdateActiveCellFromCursor();
+      }, 100);
+    }
+    document.addEventListener('selectionchange', function () {
+      if (document.activeElement === scriptInput) nbScheduleActiveCellUpdate();
+    });
+    scriptInput.addEventListener('keyup', nbScheduleActiveCellUpdate);
+    scriptInput.addEventListener('click', nbScheduleActiveCellUpdate);
+
+    // Slot→markør (kalt av docCellNode sin klikk-lytter i js/cells.js —
+    // tverr-IIFE-bro, plan 4b sin "Cross-IIFE only via window.md*"-
+    // begrensning). Hopper til cellens FØRSTE KROPPS-linje (nbFirstBodyLine),
+    // men faller tilbake til selve header-linjen for en TOM merket celle:
+    // en tom celle har INGEN kroppslinje — startLine+1 ville da landet
+    // markøren på NESTE celles header i stedet (parseCells: en celle uten
+    // kroppslinjer har endLine === startLine, linje startLine+1 tilhører
+    // allerede den etterfølgende cellen). Preambelen trenger aldri
+    // fallbacken (nbFirstBodyLine returnerer alt startLine for den).
+    window.mdJumpToCell = function (idx) {
+      if (!window.Cells || !window.Cells.active()) return;
+      var ta = scriptInput;
+      var cell = window.Cells.parseCells(ta.value).cells[idx];
+      if (!cell) return;
+      var lineIdx = (cell.hasBody || cell.headerRaw === null) ? nbFirstBodyLine(cell) : cell.startLine;
+      nbMoveCursorToLine(ta, lineIdx);
+      nbUpdateActiveCellFromCursor();
+    };
 
     var TABLE_BLOCK_RE = /^\s*---\s+(.+?)\s*---\s*$/;
     function splitOnTwoOrMoreSpaces(line) {
