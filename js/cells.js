@@ -1109,7 +1109,16 @@
 
     function docBar(parsed) {
       var bar = el('div', 'doc-bar');
-      if (parsed.warnings.length) bar.appendChild(el('span', 'nb-warnings', parsed.warnings.join(' · ')));
+      NB.docBarEl = bar;
+      // Varsel-spanet holdes referert på NB (samme mønster som
+      // NB.sessionChip/NB.restartBtn under) slik at docReconcile sin
+      // updateWarnings() (Task 3-review-funn 4) kan finne/oppdatere/fjerne
+      // AKKURAT denne noden senere uten et querySelector-oppslag.
+      NB.warningsEl = null;
+      if (parsed.warnings.length) {
+        NB.warningsEl = el('span', 'nb-warnings', parsed.warnings.join(' · '));
+        bar.appendChild(NB.warningsEl);
+      }
       var sessionChip = el('span', 'nb-session-chip');
       NB.sessionChip = sessionChip;
       bar.appendChild(sessionChip);
@@ -1120,6 +1129,32 @@
       NB.restartBtn = restartBtn;
       bar.appendChild(restartBtn);
       return bar;
+    }
+
+    // Doc-bar-varsler holdes ferske gjennom en forsoning (Task 3-review-funn
+    // 4, Minor): docReconcile sin in-place-gren rørte tidligere ALDRI baren —
+    // en kroppsredigering som endret et #tag-varsel (duplisert nøkkel,
+    // ugyldig verdi, …) uten å røre strukturen lot baren stå med et foreldet
+    // varselsett helt til neste strukturendring eller eksplisitt docRender().
+    // Speiler docBar() sin egen opprinnelige bygging (varsel-spanet FØRST i
+    // .doc-bar, foran sesjonschippen) — oppretter/fjerner spanet etter behov,
+    // oppdaterer kun teksten når både et ferskt varselsett og et eksisterende
+    // span finnes fra før.
+    function updateWarnings(warnings) {
+      var bar = NB.docBarEl;
+      if (!bar) return;
+      if (warnings.length) {
+        var text = warnings.join(' · ');
+        if (NB.warningsEl) {
+          NB.warningsEl.textContent = text;
+        } else {
+          NB.warningsEl = el('span', 'nb-warnings', text);
+          bar.insertBefore(NB.warningsEl, bar.children[0] || null);
+        }
+      } else if (NB.warningsEl) {
+        NB.warningsEl.remove();
+        NB.warningsEl = null;
+      }
     }
 
     // Output-only cellenode (spec §1): ETTERFØLGER av cellNode under, men
@@ -1228,12 +1263,32 @@
     // docReconcile parser aldri på nytt.
     function docReconcile(parsed) {
       if (!NB.root || !C.sameStructure(NB.cells, parsed.cells)) { docRender(); return; }
+      // Sniffet/effektiv TYPE-endring (Task 3-review-funn 1, Important):
+      // sameStructure over sammenlikner KUN headerRaw — en UMERKET celle
+      // (ingen type-token på '#%%'-linjen) kan bytte SNIFFET effektiv type
+      // ved en REN kroppsendring (f.eks. '"""md"""' → 'x = 1', eller
+      // omvendt) uten at headeren rører seg i det hele tatt. Uten denne
+      // ekstra porten ville in-place-grenen under beholde DOM-noden som ble
+      // bygget for den GAMLE typen — en stale 'output-markdown' (fortsatt
+      // 'nb-rendered-only', aldri renset til et kode-sluk) eller omvendt en
+      // manglende 'nb-rendered-only' for en celle som nettopp ble sniffet
+      // til md/html. Enhver effektiv-type-endring krever derfor akkurat
+      // samme ærlige full rebuild som en header-omskriving allerede utløser.
+      for (var gi = 0; gi < parsed.cells.length; gi++) {
+        if (C.resolveType(NB.cells[gi], NB.docMode) !== C.resolveType(parsed.cells[gi], NB.docMode)) {
+          docRender();
+          return;
+        }
+      }
       var ta = $('scriptInput');
       var oldCells = NB.cells;
       var newCells = parsed.cells;
       NB.cells = newCells;
       NB.lastSerialized = ta.value;
       NB.plan = C.segmentPlan(ta.value, NB.docMode);
+      // Task 3-review-funn 4 (Minor): doc-baren sine parse-varsler holdes
+      // ferske gjennom in-place-grenen — se updateWarnings sin egen kommentar.
+      updateWarnings(parsed.warnings);
       for (var i = 0; i < newCells.length; i++) {
         var oldC = oldCells[i], c = newCells[i];
         // Slot-identitet overlever (spec §1 "leave untouched cells' slots
@@ -1253,35 +1308,74 @@
           // sluket (samme byggeklosser som docCellNode selv brukte).
           renderNonCode(c._out, type, C.renderContent(c.source, type, c.sniffed));
         }
-        // #@param-stripa må følge den endrede kildeteksten (ny linje lagt
-        // til/fjernet/verdi endret av en manuell redigering) — decorate
-        // fjerner eksisterende striper for DENNE cellIdx FØRST (se _build i
-        // js/param-forms.js), så et re-kall mot samme, fortsatt tilkoblede
-        // c._wrap er trygt (ingen duplikat-stripe).
+        // #@param-stripa må følge den endrede kildeteksten, men UTEN å rive
+        // ned/bygge kontroll-DOM-en på nytt her (Task 3-review-funn 2,
+        // Important): en levende slider-drag committer PER 'input'-hendelse
+        // via Cells.updateCellSource → docReconcile (se _buildSlider i
+        // js/param-forms.js) — et ParamForms.decorate-kall her ville da
+        // full-ombygd stripa på HVER pikselbevegelse og drept selve
+        // dra-gesten (fokus/pointer-capture mistet midt i draget). Den GAMLE
+        // (pre-4a) modellens per-redigerings-søm var nettopp
+        // ParamForms.syncSource — en billig, DOM-fri kildesynk (kun
+        // st.source/st.entries oppdateres, se der) kalt ved AKKURAT denne
+        // kadensen (js/cells.js sin daværende onEdit, per tastetrykk), mens
+        // en FULL ombygging (decorate/_build) kun skjedde ved en hel
+        // dokument-(re)rendring (cellNode/nå docCellNode). Mirrorer det
+        // her — decorate lever nå UTELUKKENDE i docCellNode.
+        //
+        // Residual (bevisst, dokumentert per review-funn 2): syncSource
+        // rører ALDRI DOM-en, så en #@param-LINJE lagt til/fjernet ved en
+        // kroppsredigering (ikke via en kontrolls egen commit) gir IKKE en
+        // ny/fjernet fysisk stripe her — kun neste strukturelle rendring
+        // (docRender) bygger stripa på nytt. Den gamle modellen hadde samme
+        // begrensning ved AKKURAT denne kadensen (dens egen per-tastetrykk-
+        // syncSource var like DOM-fri); der fantes riktignok en ekstra,
+        // separat 250ms-debounce-hale (ParamForms.refresh, kalt fra
+        // doFlush) som til slutt tok seg av strukturelle ADD/REMOVE — den
+        // halen hører til det fjernede cellNode/onEdit-maskineriet og har
+        // ingen motpart i den konvergerte editoren, så et forsonings-
+        // trigget syncSource-kall her ombygger aldri selv.
         var paramLang = C.paramLangForType(type);
-        if (paramLang && c._wrap && global.ParamForms && typeof global.ParamForms.decorate === 'function') {
-          global.ParamForms.decorate(i, c._wrap, c.source, paramLang);
+        if (paramLang && global.ParamForms && typeof global.ParamForms.syncSource === 'function') {
+          global.ParamForms.syncSource(i, c.source);
         }
       }
     }
 
-    // refreshFromScript() dobbeltjobber (Task 3b + Task 3): index.html sin
-    // clearOutput() kaller den som en EKSPLISITT "nullstill output"-handling
-    // (Task 3b) — den skal ALLTID tømme slots, selv når #scriptInput ikke er
-    // rørt siden sist rendret. tick() (under) kaller den samme funksjonen
-    // implisitt når #scriptInput FAKTISK har endret seg siden sist (en
-    // programmatisk endring — AI/eksempel/#@param-kontroll utenom
-    // updateCellSource). Samme skillelinje som tick() selv allerede bruker
-    // (`ta.value !== NB.lastSerialized`) avgjør hvilken av de to brukeren
-    // mente: uendret siden sist → full ærlig reset (docRender, Task 3b-
-    // kontrakten); endret siden sist → forsoning (docReconcile, Task 3-
-    // kontrakten — outputs for UENDREDE celler overlever).
+    // refreshFromScript() sitt dobbelt-modus (Task 3): "uendret siden sist
+    // rendret" (`ta.value === NB.lastSerialized`) → full ærlig reset
+    // (docRender); "endret siden sist" → forsoning (docReconcile — outputs
+    // for UENDREDE celler overlever). Samme skillelinje som tick() selv
+    // allerede bruker.
+    //
+    // index.html sin clearOutput() kalte tidligere DENNE funksjonen som sin
+    // "nullstill output"-handling (Task 3b), men det var en race (Task 3-
+    // review-funn 3, Minor): dual-mode-porten over ville FORSONE (og dermed
+    // BEHOLDE utdata) i stedet for å tømme, hvis brukeren rakk å redigere
+    // #scriptInput i samme sekund som "Tøm output" ble trykket (ta.value !==
+    // NB.lastSerialized på det tidspunktet). clearOutput() kaller nå i
+    // stedet C.rebuildDocument() under — en ubetinget docRender(), uansett
+    // NB.lastSerialized-tilstand. refreshFromScript() beholdes UENDRET som
+    // offentlig API (dual-mode-kontrakten er fortsatt dekket av "forsoning:
+    // …"-testene) — tick() (under) kaller for øvrig ALLEREDE docReconcile
+    // direkte, ikke via denne, og har aldri gjort det.
     C.refreshFromScript = function () {
       if (!NB.activeFlag) { updateChip(); return; }
       var ta = $('scriptInput');
       if (!ta) return;
       if (ta.value === NB.lastSerialized) { docRender(); return; }
       docReconcile(C.parseCells(ta.value));
+    };
+
+    // Eksplisitt "nullstill output"-handling (Task 3-review-funn 3, Minor —
+    // adskilt fra refreshFromScript() sin dual-mode-forsoning over): ALLTID
+    // en ærlig full docRender(), uansett om #scriptInput har endret seg
+    // siden sist rendret. index.html sin clearOutput() (notatbok-aktiv-
+    // grenen) kaller denne i stedet for refreshFromScript() — se kommentaren
+    // over for raceen dette lukker. No-op når notatboken ikke er aktiv
+    // (speiler refreshFromScript() sin egen guard).
+    C.rebuildDocument = function () {
+      if (NB.activeFlag) docRender();
     };
 
     // DØD ETTER 4a — fjernes i plan 4b (spec §5). cellNode/buildToolbar og

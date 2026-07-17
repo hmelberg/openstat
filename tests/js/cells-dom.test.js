@@ -1420,16 +1420,19 @@ test('contentLoaded: #options.view = present auto-starter presentasjonen', () =>
 
 // ---------- Task 3b (spec 2026-07-17 §1): outputArea-tømming er doc-bevisst ----------
 //
-// index.html sin clearOutput()/mdClearOutput() kaller window.Cells.refreshFromScript()
+// index.html sin clearOutput()/mdClearOutput() kaller window.Cells.rebuildDocument()
 // i stedet for å tømme #outputArea når en notatbok er aktiv (se index.html sin
-// clearOutput()-funksjon) — refreshFromScript() re-rendrer dokumentet fra scratch,
-// som gir tomme output-slots (den "ærlige nullstillingen"). index.html selv er ikke
-// kjørbar i denne stub-DOM-en (for mange globaler), så kontrakten testes her på
-// cells.js-nivå: refreshFromScript() etterlater dokumentet aktivt med tomme slots,
-// aldri en slettet .doc-root. Run-stedene i index.html som ble gjort doc-bevisste
-// (clearOutputAreaUnlessDoc()) er dekket ved lesing + exit-garantiene dokumentert i
-// Task 3b-rapporten (.superpowers/sdd/task-3b-report.md), ikke av en egen stub her.
-test('Task 3b: refreshFromScript() etter en kjøring rebygger dokumentet med TOMME slots (ikke sletter det)', async () => {
+// clearOutput()-funksjon) — rebuildDocument() re-rendrer dokumentet fra scratch
+// UBETINGET (Task 3-review-funn 3, Minor: refreshFromScript() sitt dual-mode-gate
+// kunne race'e mot en fersk redigering og FORSONE — altså BEHOLDE utdata — i stedet
+// for å tømme), som gir tomme output-slots (den "ærlige nullstillingen"). index.html
+// selv er ikke kjørbar i denne stub-DOM-en (for mange globaler), så kontrakten
+// testes her på cells.js-nivå: rebuildDocument() etterlater dokumentet aktivt med
+// tomme slots, aldri en slettet .doc-root. Run-stedene i index.html som ble gjort
+// doc-bevisste (clearOutputAreaUnlessDoc()) er dekket ved lesing + exit-garantiene
+// dokumentert i Task 3b-rapporten (.superpowers/sdd/task-3b-report.md), ikke av en
+// egen stub her.
+test('Task 3b/3-review-funn 3: rebuildDocument() etter en kjøring rebygger dokumentet med TOMME slots (ikke sletter det)', async () => {
   const { C, scriptInputEl, containerEl } = freshEnv();
   scriptInputEl.value = '#%% python\na = 2\n#%% python\na + 3\n';
   C.init('python');
@@ -1441,16 +1444,45 @@ test('Task 3b: refreshFromScript() etter en kjøring rebygger dokumentet med TOM
   assert.strictEqual(cellParts(containerEl, 1).out.textContent, '5', 'sanity: output ligger i slot 1 før refresh');
 
   // Speiler clearOutput() sin Cells.active()-gren i index.html: kall
-  // refreshFromScript() i stedet for å tømme #outputArea direkte.
-  C.refreshFromScript();
+  // rebuildDocument() i stedet for å tømme #outputArea direkte.
+  C.rebuildDocument();
 
-  assert.strictEqual(C.active(), true, 'dokumentet forblir aktivt — refreshFromScript() er ikke exit()');
+  assert.strictEqual(C.active(), true, 'dokumentet forblir aktivt — rebuildDocument() er ikke exit()');
   assert.ok(nbRoot(containerEl), '.doc-root finnes fortsatt (ikke slettet)');
   const cell0 = cellParts(containerEl, 0);
   const cell1 = cellParts(containerEl, 1);
   assert.strictEqual(cell0.out.textContent, '', 'slot 0 er tom etter rebygging');
   assert.strictEqual(cell1.out.textContent, '', 'slot 1 sitt forrige resultat er borte — rebygd tomt, ikke bevart');
 });
+
+// Task 3-review-funn 3 (race): rebuildDocument() må tømme UBETINGET selv når
+// #scriptInput FAKTISK har endret seg siden sist rendret (motsatt av
+// refreshFromScript() sitt dual-mode-gate, som ville tatt forsonings-grenen
+// og BEHOLDT den overlevende cellens output her — se docReconcile). Dette er
+// nøyaktig raceen brukeren kunne trigge ved å redigere i samme sekund som
+// "Tøm output" ble trykket.
+test('Task 3-review-funn 3: rebuildDocument() tømmer selv når #scriptInput ble endret siden sist rendret (ikke en forsoning)', async () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 2\n#%% python\na + 3\n';
+  C.init('python');
+  global.mdIsScriptRunning = () => false;
+  global.mdRunNotebookCell = () => Promise.resolve({ text: '5' });
+  await C.runCell(1);
+
+  // "Uendret celle 0, redigert celle 1" — akkurat mønsteret som ville
+  // forsonet (og dermed bevart celle 1 sin output) via refreshFromScript().
+  scriptInputEl.value = '#%% python\na = 2\n#%% python\na + 4\n';
+  C.rebuildDocument();
+
+  const cell1 = cellParts(containerEl, 1);
+  assert.strictEqual(cell1.out.textContent, '', 'ubetinget tømming — ikke forsonet/bevart, selv om teksten endret seg');
+});
+
+// refreshFromScript() sin egen forsonings-kontrakt (Task 3) beholdes UENDRET
+// og dekkes fortsatt her: kalt ETTER at #scriptInput faktisk har endret seg
+// tar den reconcile-grenen (docReconcile) — se "forsoning: …"-testene under
+// for full dekning av den (kropps-endring overlever/kode blir stale/
+// strukturendring rebygger).
 
 // ---------- Task 3 (spec 2026-07-17 §1): forsonings-policy + updateCellSource ----------
 //
@@ -1490,6 +1522,99 @@ test('forsoning: strukturendring → full rebuild (output borte, stale nullstilt
   const cell0 = collectNodes(outputAreaEl, []).find((n) => n.classList && n.classList.contains('doc-cell') && n.dataset.idx === '0');
   const body0 = collectNodes(cell0, []).find((n) => n.classList && n.classList.contains('nb-output-body'));
   assert.strictEqual(body0.textContent, '', 'rebuild tømmer slots (ærlig reset)');
+});
+
+// Task 3-review-funn 1 (Important): sameStructure sammenlikner KUN
+// headerRaw — en UMERKET celle ('#%%' uten type-token) kan bytte SNIFFET
+// effektiv type ved en ren kroppsendring uten at headeren rører seg.
+// Reprodusert her: en celle som sniffes til 'md' (lone-triple-quote-
+// mønsteret) redigeres om til vanlig python-kode — samme headerRaw ('#%%')
+// begge veier, så uten typegaten ville in-place-grenen feilaktig beholde den
+// gamle 'nb-rendered-only'/'output-markdown'-noden.
+test('forsoning: sniffet type-flip på umerket celle (md-kropp → python-kropp) tvinger full rebuild, ikke in-place', () => {
+  const { C, scriptInputEl, outputAreaEl } = freshEnv();
+  scriptInputEl.value = '#%%\n"""md"""\n';
+  C.init('python');
+
+  let nodes = collectNodes(outputAreaEl, []);
+  let cell0 = nodes.find((n) => n.classList && n.classList.contains('doc-cell') && n.dataset.idx === '0');
+  assert.ok(cell0.classList.contains('nb-rendered-only'), 'sniffet til md — rendret direkte, ingen kode-affordance');
+  assert.ok(collectNodes(cell0, []).some((n) => n.classList && n.classList.contains('output-markdown')),
+    'md-innhold rendret inn i sluket');
+
+  scriptInputEl.value = '#%%\nx = 1\n';
+  C.refreshFromScript();
+
+  nodes = collectNodes(outputAreaEl, []);
+  cell0 = nodes.find((n) => n.classList && n.classList.contains('doc-cell') && n.dataset.idx === '0');
+  assert.ok(cell0, 'cellen finnes fortsatt etter forsoningen');
+  assert.ok(!cell0.classList.contains('nb-rendered-only'), 'sniffet til python nå — ikke lenger rendered-only');
+  const body0 = collectNodes(cell0, []).find((n) => n.classList && n.classList.contains('nb-output-body'));
+  assert.ok(body0, 'kode-cellen har et output-body-sluk');
+  assert.strictEqual(body0.textContent, '', 'friskt, tomt kode-sluk — ingen gjenværende md-DOM');
+});
+
+// Task 3-review-funn 2 (Important): docReconcile kalte tidligere
+// ParamForms.decorate (full stripe-ombygging) for HVER endret celle — en
+// levende slider-drag committer per 'input'-hendelse via updateCellSource →
+// docReconcile, så decorate der ville rive ned/bygge kontroll-DOM-en på nytt
+// på HVER pikselbevegelse (dreper draget). Fiksen kaller ParamForms.syncSource
+// (DOM-fri kildesynk) i stedet; decorate skal KUN kalles ved cellens
+// opprinnelige bygging (docCellNode, via C.init/docRender).
+test('forsoning: endret param-celle kaller ParamForms.syncSource (ikke decorate) — stripa ombygges ALDRI av docReconcile', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python\nn = 3 #@param\n';
+  let decorateCalls = 0;
+  const syncSourceCalls = [];
+  global.ParamForms = {
+    decorate: function () { decorateCalls++; },
+    syncSource: function (idx, source) { syncSourceCalls.push([idx, source]); },
+  };
+  C.init('python');
+  assert.strictEqual(decorateCalls, 1, 'initial docCellNode-bygging kaller decorate én gang');
+
+  // Speiler en kontrolls egen commit (ParamForms._commit → Cells.updateCellSource
+  // → docReconcile) — den frekvensen decorate der ville drept en slider-drag.
+  C.updateCellSource(0, 'n = 9 #@param');
+
+  assert.strictEqual(decorateCalls, 1, 'docReconcile skal ALDRI kalle decorate for en endret celle');
+  assert.strictEqual(syncSourceCalls.length, 1, 'docReconcile kaller syncSource i stedet');
+  assert.deepStrictEqual(syncSourceCalls[0], [0, 'n = 9 #@param']);
+
+  delete global.ParamForms;
+});
+
+// Task 3-review-funn 4 (Minor): docReconcile sin in-place-gren rørte
+// tidligere ALDRI doc-baren — et #tag-varsel som endret seg ved en
+// kroppsredigering (samme struktur, kun kildetekst) ble stående til neste
+// strukturendring eller eksplisitt docRender(). updateWarnings() skal nå
+// oppdatere/opprette/fjerne .nb-warnings-spanet i .doc-bar direkte i
+// in-place-grenen.
+test('forsoning: doc-bar sine parse-varsler oppdateres av in-place-grenen (opprettes/oppdateres/fjernes)', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  // '#tag.style' med en ugyldig verdi gir et varsel uten å endre strukturen
+  // (samme headerRaw begge veier — se sameStructure).
+  scriptInputEl.value = '#%% python\n#tag.style = "rar"\nx = 1\n';
+  C.init('python');
+  let bar = nbBar(containerEl);
+  let warn = bar.children.find((n) => n.classList && n.classList.contains('nb-warnings'));
+  assert.ok(warn, 'varsel-span finnes ved initial rendring');
+  assert.ok(warn.textContent.indexOf('style') !== -1);
+
+  // Fjern varselet (gyldig style) — samme struktur (headerRaw uendret).
+  scriptInputEl.value = '#%% python\n#tag.style = "note"\nx = 1\n';
+  C.refreshFromScript();
+  bar = nbBar(containerEl);
+  warn = bar.children.find((n) => n.classList && n.classList.contains('nb-warnings'));
+  assert.strictEqual(warn, undefined, 'varsel-spanet fjernes når varselsettet blir tomt');
+
+  // Sett et NYTT varsel (ugyldig #tag-nøkkel) — spanet skal opprettes på nytt.
+  scriptInputEl.value = '#%% python\n#tag.ukjentnokkel = "x"\nx = 1\n';
+  C.refreshFromScript();
+  bar = nbBar(containerEl);
+  warn = bar.children.find((n) => n.classList && n.classList.contains('nb-warnings'));
+  assert.ok(warn, 'varsel-spanet opprettes på nytt når et nytt varsel dukker opp');
+  assert.ok(warn.textContent.indexOf('ukjentnokkel') !== -1);
 });
 
 test('updateCellSource: splicer #scriptInput, forsoner, bevarer resten av dokumentet', () => {

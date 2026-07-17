@@ -1946,10 +1946,15 @@
         if (window.Cells && window.Cells.active && window.Cells.active()) {
           // Notatbok aktiv: dokumentet ER #outputArea sitt innhold
           // (.doc-root) — en full tømming ville slettet HELE dokumentet, ikke
-          // bare outputene. refreshFromScript() re-rendrer fra scratch, som
+          // bare outputene. rebuildDocument() re-rendrer fra scratch, som
           // gir tomme slots: den ærlige "nullstill output"-handlingen for et
-          // konvergert dokument (Task 3b).
-          window.Cells.refreshFromScript();
+          // konvergert dokument (Task 3b). rebuildDocument() (ikke
+          // refreshFromScript()) — Task 3-review-funn 3, Minor: en
+          // refreshFromScript()-race kunne FORSONE (og dermed BEHOLDE utdata)
+          // i stedet for å tømme, hvis brukeren rakk å redigere #scriptInput
+          // i samme sekund som knappen ble trykket; rebuildDocument() tømmer
+          // ubetinget, uansett NB.lastSerialized-tilstand.
+          window.Cells.rebuildDocument();
           if (rightStatus) rightStatus.textContent = '';
           return;
         }
