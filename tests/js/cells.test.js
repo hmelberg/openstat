@@ -592,6 +592,52 @@ test('isRunnableType: kode-type OG en kjent KIND_FOR_TYPE-mapping kreves — sta
   assert.equal(C.isRunnableType('skip'), false);
 });
 
+// Sluttreview Important (task ec4b-5): Shift+Enter-avanseringen i index.html
+// (~5459-5470) plukket tidligere "neste celle" fra Cells.segmentPlan — som
+// EKSKLUDERER motorceller med design (SEG_MARKER har ingen brython/
+// micropython-oppføringer, se KIND_FOR_TYPE-testen over). I en ren
+// motor-notatbok ga segmentPlan derfor [] (eller kun [0] via preambelen),
+// så "neste kjørbare celle > gjeldende" fantes aldri — markøren stod stille
+// og Shift+Enter kjørte samme celle om og om igjen. Fikset ved å skanne et
+// FERSKT parseCells-resultat med isRunnableType∘resolveType — samme kilde
+// til sannhet som ▶-pilen (nbUpdateActiveCellFromCursor) alt bruker. Denne
+// testen speiler den rene uttrykket index.html sin advance() nå bruker.
+test('fase C: segmentPlan ekskluderer motorceller i et micropython-dokument (regresjonsdokumentasjon for bug)', function () {
+  var doc = '#%% micropython\nprint(1)\n#%% micropython\nprint(2)\n#%% micropython\nprint(3)';
+  // Ren feil-demonstrasjon: segmentPlan ser INGEN kjørbare segmenter — dette
+  // var roten til at Shift+Enter aldri fant "neste celle" i en motor-notatbok.
+  assert.deepStrictEqual(C.segmentPlan(doc, 'micropython'), []);
+});
+
+test('advance-uttrykket (isRunnableType∘resolveType-skann) finner neste kjørbare celle i et micropython-dokument', function () {
+  var doc = '#%% micropython\nprint(1)\n#%% micropython\nprint(2)\n#%% micropython\nprint(3)';
+  var cells = C.parseCells(doc).cells;
+  // Ekvivalent til index.html sin advance(): "neste celleindeks > gjeldende
+  // hvis isRunnableType(resolveType(cell, docMode)) er sann".
+  function nextRunnableIdx(fromIdx) {
+    for (var i = fromIdx + 1; i < cells.length; i++) {
+      if (C.isRunnableType(C.resolveType(cells[i], 'micropython'))) return i;
+    }
+    return null;
+  }
+  assert.strictEqual(nextRunnableIdx(0), 1);
+  assert.strictEqual(nextRunnableIdx(1), 2);
+  assert.strictEqual(nextRunnableIdx(2), null); // siste celle — markøren blir stående
+});
+
+test('advance-uttrykket (isRunnableType∘resolveType-skann) hopper over md-celler i et python-dokument (ingen regresjon)', function () {
+  var doc = '#%% python\n1\n#%% md\nhei\n#%% python\n2';
+  var cells = C.parseCells(doc).cells;
+  function nextRunnableIdx(fromIdx) {
+    for (var i = fromIdx + 1; i < cells.length; i++) {
+      if (C.isRunnableType(C.resolveType(cells[i], 'python'))) return i;
+    }
+    return null;
+  }
+  assert.strictEqual(nextRunnableIdx(0), 2); // hopper over md-cellen (idx 1)
+  assert.strictEqual(nextRunnableIdx(2), null);
+});
+
 test('fase C: executableSource blanker fortsatt brython-celler (invariant)', function () {
   var doc = '# load x as y\n#%% brython\nprint(1)\n#%% md\nhei';
   var out = C.executableSource(doc, 'brython');

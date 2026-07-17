@@ -5457,13 +5457,25 @@ json.dumps(out)
           return;
         }
         var advance = function () {
-          var plan = window.Cells.segmentPlan(sTa.value, activeEditorMode);
-          var nextIdx = null;
-          for (var i = 0; i < plan.length; i++) {
-            if (plan[i] > sAt.idx) { nextIdx = plan[i]; break; }
+          // NB: Cells.segmentPlan EKSKLUDERER motorceller (brython/
+          // micropython) med design — SEG_MARKER (cells.js) har ingen
+          // engine-oppføringer (fase C). I en motor-notatbok ble plan derfor
+          // [] eller [0]-med-preambel, nextIdx forble null, og markøren stod
+          // stille — Shift+Enter kjørte samme celle om og om igjen. Skann i
+          // stedet et FERSKT parse etter neste celleindeks > gjeldende der
+          // isRunnableType(resolveType(...)) er sann: samme kilde til
+          // sannhet som ▶-pilen (nbUpdateActiveCellFromCursor over) alt
+          // bruker, uavhengig av segmentPlan sin motor-blindsone.
+          var freshCells = window.Cells.parseCells(sTa.value).cells;
+          var nextCell = null;
+          for (var i = sAt.idx + 1; i < freshCells.length; i++) {
+            var c = freshCells[i];
+            if (window.Cells.isRunnableType(window.Cells.resolveType(c, activeEditorMode))) {
+              nextCell = c;
+              break;
+            }
           }
-          if (nextIdx === null) return; // siste (kjørbare) celle — markøren blir stående
-          var nextCell = window.Cells.parseCells(sTa.value).cells[nextIdx];
+          if (!nextCell) return; // siste (kjørbare) celle — markøren blir stående
           nbMoveCursorToLine(sTa, nbFirstBodyLine(nextCell));
         };
         if (sAt.code) {
