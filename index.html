@@ -8169,7 +8169,7 @@ json.dumps(out)
     // FORHÅNDS-INJISERT `.ui_values` - se webr/ui.R sin filhode-kommentar.
     // UI_R_REGEX gater ALT arbeidet under (både her og i runNotebookRCell/
     // runHybridR) - vanlige R-kjøringer uten ui_*-kall betaler ingenting.
-    var UI_R_REGEX = /\bui_(slider|dropdown|checkbox|switch|number|text|button)\s*\(/;
+    var UI_R_REGEX = /\bui_(slider|dropdown|checkbox|switch|number|text|button|html|sl|pico|value)\s*\(/;
 
     // fase 3-fiks: husker at forrige rene R-kjøring rendret doc-kontroller,
     // så en kjøring UTEN ui_-tekst fortsatt får én opprydningssweep.
