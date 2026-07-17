@@ -83,7 +83,7 @@
         <div class="export-dropdown-title" data-i18n>Eksporter skriptresultatene</div>
         <button type="button" id="exportCopy" data-i18n>Kopier til utklippstavlen</button>
         <button type="button" id="exportPrint" data-i18n>Skriv ut</button>
-        <button type="button" id="exportPublish" data-mode-only="brython micropython" data-i18n-title title="Last ned en HTML-fil med dette scriptet forhåndsutfylt og satt til å kjøre automatisk — data hentet via # load er bakt inn i fila, så dashboardet ikke trenger datakildene. Fila må likevel ligge i/serveres fra samme app-mappe (f.eks. GitHub Pages) for å fungere; den virker ikke åpnet direkte fra disk (file://) eller kopiert alene til en annen host." data-i18n>Publiser dashboard (HTML)</button>
+        <button type="button" id="exportPublish" data-mode-only="brython micropython" data-i18n-title title="Last ned en HTML-fil med dette scriptet forhåndsutfylt og satt til å kjøre automatisk — data hentet via # load er bakt inn i fila, så dokumentet ikke trenger datakildene. Fila må likevel ligge i/serveres fra samme app-mappe (f.eks. GitHub Pages) for å fungere; den virker ikke åpnet direkte fra disk (file://) eller kopiert alene til en annen host." data-i18n>Publiser dokument (HTML)</button>
       </div>
     </div>
     <div class="topbar-theme-wrap">
@@ -2105,18 +2105,24 @@
         exportDropdown.classList.remove('open');
       });
 
-      // «Publiser dashboard (HTML)» — Brython/MicroPython (data-mode-only, se
-      // applyModeVisibility()). Laster ned en kopi av denne siden med (1) det
-      // aktive scriptet forhåndsutfylt og satt til å kjøre automatisk ved
-      // åpning, og (2) data som scriptets «# load»-linjer hentet i siste
-      // kjøring baked inn som <script type="application/json"
+      // «Publiser dokument (HTML)» — Brython/MicroPython (data-mode-only, se
+      // applyModeVisibility()). Generalisert (plan 5a Task 5) fra ren
+      // dashboard-publisering til ethvert brython/mpy-dokument, INKLUDERT
+      // #%%-notatbøker — pyodide/R er fortsatt utenfor (tunge/worker-bundne
+      // motorer, dokumentert i spec §5). Laster ned en kopi av denne siden
+      // med (1) det aktive scriptet forhåndsutfylt og satt til å kjøre
+      // automatisk ved åpning, og (2) data som scriptets «# load»-linjer
+      // hentet i siste kjøring baked inn som <script type="application/json"
       // id="brythondata_<navn>"|"mpydata_<navn>">-tags. «# load»-linjene
       // fjernes fra det publiserte scriptet slik at siden ikke prøver å
       // hente dataene på nytt over nett — men filen refererer fortsatt
-      // js/dash.js, micropython/*.py, pyodide/brython wasm osv. via
-      // relative/CDN-stier, så den må ligge i/serveres fra samme app-mappe
-      // (f.eks. GitHub Pages); den virker IKKE fra file:// eller kopiert
-      // alene til en fremmed host.
+      // js/dash.js (dash er ikke fjernet før plan 5b), micropython/*.py,
+      // pyodide/brython wasm osv. via relative/CDN-stier, så den må ligge
+      // i/serveres fra samme app-mappe (f.eks. GitHub Pages); den virker
+      // IKKE fra file:// eller kopiert alene til en fremmed host. Mangler
+      // scriptet en «#options.view»-linje, injiseres «#options.view =
+      // output-only» øverst i det publiserte scriptet (se lenger ned) slik
+      // at siden åpner som en ferdig rapport i stedet for redigerbar kode.
       //
       // Embed-tag-format (lest av buildDatasetSpec() i
       // js/brython-engine.js og js/micropython-engine.js):
@@ -2133,7 +2139,7 @@
         var mode = (typeof activeEditorMode !== 'undefined') ? activeEditorMode
           : (window.M2PY && window.M2PY.currentMode && window.M2PY.currentMode().id);
         if (mode !== 'brython' && mode !== 'micropython') {
-          alert(t('Publisering av dashboard (HTML) støtter bare Brython- og MicroPython-modus.'));
+          alert(t('Publisering av dokument (HTML) støtter bare Brython- og MicroPython-modus.'));
           return;
         }
         var engine = mode === 'brython' ? window.BrythonEngine : window.MicroPythonEngine;
@@ -2172,6 +2178,15 @@
         var publishedScript = rawScript.replace(/^[ \t]*#[ \t]*load\b.*$/gmi,
           '# ' + t('(fjernet ved publisering — data er baked inn som «{prefix}<navn>»-tag)', { prefix: prefix }));
 
+        // Output-only-injeksjon (spec §5): et publisert dokument skal åpne som
+        // en ferdig rapport, ikke redigerbar kode — MEN kun når scriptet ikke
+        // allerede har tatt et eksplisitt standpunkt (f.eks. «#options.view =
+        // split» eller «= present»). Samme regex-form som extractScriptOptions
+        // over (~6627) bruker for å kjenne igjen «#options.view = ...»-linjer.
+        if (!/^[ \t]*(?:#|\/\/)[ \t]*options\.view[ \t]*=/mi.test(publishedScript)) {
+          publishedScript = '#options.view = output-only\n' + publishedScript;
+        }
+
         var pageResp = await fetch(location.pathname || 'index.html');
         if (!pageResp.ok) { alert(t('Kunne ikke hente siden for publisering (HTTP {code}).', { code: pageResp.status })); return; }
         var html = await pageResp.text();
@@ -2196,6 +2211,14 @@
           '      if (triesLeft > 0) setTimeout(function () { tryRun(triesLeft - 1); }, 300);\n' +
           '      return;\n' +
           '    }\n' +
+          // Notatbøker (#%%) auto-åpnes normalt av en 1s tikk-heuristikk
+          // (js/cells.js sin tick()) — for treg til å garantert vinne mot
+          // klikket under, som ellers ville kjørt scriptet UTENFOR
+          // motor-notatbok-løkka (btnRun sin Cells.active()-gren, ~10657).
+          // Tving synkron notatbok-inngang FØR klikket, akkurat som
+          // eksempler/Last-menyen gjør ved dokumentlasting. Trygt/betrodd:
+          // dette ER brukerens eget publiserte dokument.
+          '    if (window.Cells && window.Cells.contentLoaded) window.Cells.contentLoaded();\n' +
           '    btn.click();\n' +
           '  }\n' +
           '  function boot() { tryRun(150); }\n' +
@@ -10675,6 +10698,25 @@ async def _m2py_run_segment(_seg_json):
             catch (e) { console.warn('motor-reset (Kjør alle) feilet:', e); }
           }
           if (window.Cells.grantHtmlTrust) window.Cells.grantHtmlTrust();
+          // #options.view = output-only | split | present (spec §5, plan 5a
+          // Task 5): samme direktiv-lesing som den generiske grenen lenger
+          // ned (~10800) — men motor-notatbøker (brython/micropython)
+          // returnerer ALDRI dit (se retur nederst i denne blokken), så uten
+          // denne dupliserte lesingen her ville et publisert dokuments
+          // «#options.view = output-only»-linje (satt av
+          // publishStandaloneDashboard sin output-only-injeksjon) blitt
+          // lest av extractScriptOptions, men aldri hatt noen synlig effekt.
+          var _engScriptOpts = extractScriptOptions(scriptInput.value);
+          if (_engScriptOpts.view !== undefined && window.mdSetInputHidden) {
+            var _engVw = String(_engScriptOpts.view).toLowerCase().replace(/[\s_]+/g, '-');
+            if (_engVw === 'present' || _engVw === 'presentasjon') {
+              if (window.Cells.presentStart) window.Cells.presentStart();
+            } else {
+              var _engHide = (_engVw === 'output-only' || _engVw === 'output' || _engVw === 'results-only');
+              window.mdSetInputHidden(_engHide);
+              if (window.mdOnInputToggle) window.mdOnInputToggle(_engHide);
+            }
+          }
           var _engPlan = window.Cells.engineRunPlan() || [];
           for (var _ei = 0; _ei < _engPlan.length; _ei++) {
             await window.Cells.runCell(_engPlan[_ei]);

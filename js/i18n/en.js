@@ -77,7 +77,7 @@ window.M2PY_I18N.en = {
   "Eksporter skriptresultatene": "Export the script results",
   "Kopier til utklippstavlen": "Copy to clipboard",
   "Skriv ut": "Print",
-  "Publiser dashboard (HTML)": "Publish dashboard (HTML)",
+  "Publiser dokument (HTML)": "Publish document (HTML)",
   "Tema": "Theme",
   "Tema og innstillinger": "Theme and settings",
   "Lys": "Light",
@@ -725,9 +725,9 @@ window.M2PY_I18N.en = {
   "Kunne ikke hente kjøringslogg (status {status}).": "Could not fetch the run log (status {status}).",
   "Feil ved henting av kjøringslogg:\n{msg}": "Error fetching the run log:\n{msg}",
 
-  // ── Publiser dashboard (HTML) ──
-  "Last ned en HTML-fil med dette scriptet forhåndsutfylt og satt til å kjøre automatisk — data hentet via # load er bakt inn i fila, så dashboardet ikke trenger datakildene. Fila må likevel ligge i/serveres fra samme app-mappe (f.eks. GitHub Pages) for å fungere; den virker ikke åpnet direkte fra disk (file://) eller kopiert alene til en annen host.": "Download an HTML file with this script pre-filled and set to run automatically — data fetched via # load is baked into the file, so the dashboard doesn't need the data sources. The file still needs to live in/be served from the same app folder (e.g. GitHub Pages) to work; it will not work opened directly from disk (file://) or copied alone to another host.",
-  "Publisering av dashboard (HTML) støtter bare Brython- og MicroPython-modus.": "Publishing dashboard (HTML) is only supported in Brython and MicroPython mode.",
+  // ── Publiser dokument (HTML) ──
+  "Last ned en HTML-fil med dette scriptet forhåndsutfylt og satt til å kjøre automatisk — data hentet via # load er bakt inn i fila, så dokumentet ikke trenger datakildene. Fila må likevel ligge i/serveres fra samme app-mappe (f.eks. GitHub Pages) for å fungere; den virker ikke åpnet direkte fra disk (file://) eller kopiert alene til en annen host.": "Download an HTML file with this script pre-filled and set to run automatically — data fetched via # load is baked into the file, so the document doesn't need the data sources. The file still needs to live in/be served from the same app folder (e.g. GitHub Pages) to work; it will not work opened directly from disk (file://) or copied alone to another host.",
+  "Publisering av dokument (HTML) støtter bare Brython- og MicroPython-modus.": "Publishing document (HTML) is only supported in Brython and MicroPython mode.",
   "Motoren er ikke lastet ennå — kjør scriptet minst én gang først.": "The engine is not loaded yet — run the script at least once first.",
   "Editoren er tom — ingenting å publisere.": "The editor is empty — nothing to publish.",
   "Scriptet har «# load»-linjer, men ingen data er hentet ennå i denne økten (kjør scriptet først for å bake dem inn). Publisere uten data likevel?": "The script has «# load» lines, but no data has been fetched in this session yet (run the script first to bake them in). Publish without data anyway?",
