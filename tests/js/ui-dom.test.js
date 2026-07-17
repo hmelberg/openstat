@@ -147,9 +147,11 @@ function freshEnv(opts) {
   // kontroll-halvdelen gjorde — en EventTarget-lignende
   // addEventListener/dispatchEvent-pardans for den delegerte lytteren
   // (Ui.bindEvent/bindRunCell installerer ÉN document-lytter per
-  // eventType), getElementById (target-oppslag i Ui.renderEventResult) og
-  // et `head`-element (script-injeksjon i _renderFigure sin dash.js-
-  // lasting).
+  // eventType) og getElementById (target-oppslag i Ui.renderEventResult).
+  // `head` er ikke lenger i bruk av figur-rendringen (dash-absorpsjon 5a
+  // Task 1 fjernet _renderFigure/_loadDash sin script-injeksjon — figuren
+  // er nå native), men beholdes i stubben i tilfelle andre fremtidige
+  // tester trenger den.
   global.document = {
     createElement: (tag) => new FakeEl(tag),
     // Task 1 (element-motoren): Ui.elAppend sin {"text": "…"}-gren bruker
@@ -1186,14 +1188,22 @@ test('W5.2: renderEventResult — text/error/table-kinds rendres i celle-slot (i
   Ui.renderEventResult(b, JSON.stringify({ kind: 'text', text: 'hallo' }));
   assert.strictEqual(bodyEl.children.length, 1);
   assert.strictEqual(bodyEl.children[0].tag, 'pre');
+  assert.strictEqual(bodyEl.children[0].className, 'ui-text');
   assert.strictEqual(bodyEl.children[0].textContent, 'hallo');
 
+  // dash-absorpsjon 5a Task 1: 'error' rendres nå av Ui.renderPayload sin
+  // egen delte gren — en boks (div.ui-error) med strong+span-barn (samme
+  // DOM-form som dash-kortenes feilvisning FØR flyttingen), ikke lenger en
+  // bar <pre class="error">.
   Ui.renderEventResult(b, JSON.stringify({ kind: 'error', text: 'oi' }));
-  assert.strictEqual(bodyEl.children[1].className, 'error');
-  assert.strictEqual(bodyEl.children[1].textContent, 'oi');
+  const errNode = bodyEl.children[1];
+  assert.strictEqual(errNode.tag, 'div');
+  assert.strictEqual(errNode.className, 'ui-error');
+  assert.strictEqual(errNode.children[1].textContent, 'oi');
 
   Ui.renderEventResult(b, JSON.stringify({ kind: 'table', html: '<table></table>' }));
   assert.strictEqual(bodyEl.children[2].tag, 'div');
+  assert.strictEqual(bodyEl.children[2].className, 'ui-table-wrap');
   assert.strictEqual(bodyEl.children[2].innerHTML, '<table></table>');
 });
 
@@ -1235,35 +1245,206 @@ test('W5.2: renderEventResult — cellIdx null (plain-script) faller tilbake til
   assert.strictEqual(outputArea.children[0].textContent, 'plain');
 });
 
-test('W5.2: renderEventResult figur — Dash allerede lastet: bruker Dash.renderPayload direkte', () => {
+// dash-absorpsjon 5a Task 1: figuren er nå NATIV i js/ui.js — ingen lazy
+// js/dash.js-lasting lenger (_loadDash/_renderFigure er fjernet). Plotly
+// tegnes deferred (setTimeout 0) med en isConnected-vakt, akkurat som
+// dash.js sin gamle figur-gren gjorde (nå flyttet, ikke duplisert).
+test('W5.2: renderEventResult figur — native rendring: Plotly.newPlot kalles deferred, ikke synkront', async () => {
   const { Ui, bodyEl } = freshEnv({ cellIdx: 0 });
-  const figNode = new FakeEl('div');
-  figNode.className = 'dash-figure';
-  global.Dash = {
-    renderPayload: (p) => {
-      assert.strictEqual(p.kind, 'figure');
-      assert.deepStrictEqual(p.spec, { data: [] });
-      return figNode;
-    },
-  };
-  Ui.renderEventResult({ cellIdx: 0, target: null }, JSON.stringify({ kind: 'figure', spec: { data: [] } }));
-  assert.strictEqual(bodyEl.children[0], figNode);
+  const calls = [];
+  global.Plotly = { newPlot: (...args) => calls.push(args) };
+
+  Ui.renderEventResult({ cellIdx: 0, target: null },
+    JSON.stringify({ kind: 'figure', spec: { data: [{ y: [1, 2] }], layout: { title: 'x' } } }));
+
+  assert.strictEqual(bodyEl.children.length, 1);
+  const figEl = bodyEl.children[0];
+  assert.strictEqual(figEl.className, 'ui-figure');
+  assert.strictEqual(calls.length, 0, 'Plotly.newPlot kalles IKKE synkront (setTimeout 0)');
+
+  await wait(10);
+  assert.strictEqual(calls.length, 1);
+  assert.strictEqual(calls[0][0], figEl);
+  assert.deepStrictEqual(calls[0][1], [{ y: [1, 2] }]);
+  assert.strictEqual(calls[0][2].title, 'x');
 });
 
-test('W5.2: renderEventResult figur — Dash mangler: laster js/dash.js lazy (memoized <script>), feil ved lasting gir tekstnotis', async () => {
+test('W5.2: renderEventResult figur — frakoblet FØR deferred-tick → Plotly.newPlot kalles aldri (isConnected-vakt)', async () => {
   const { Ui, bodyEl } = freshEnv({ cellIdx: 0 });
+  const calls = [];
+  global.Plotly = { newPlot: (...args) => calls.push(args) };
 
-  Ui.renderEventResult({ cellIdx: 0, target: null }, JSON.stringify({ kind: 'figure', spec: {} }));
+  Ui.renderEventResult({ cellIdx: 0, target: null }, JSON.stringify({ kind: 'figure', spec: { data: [] } }));
+  const figEl = bodyEl.children[0];
+  bodyEl.removeChild(figEl); // koblet fra FØR setTimeout(0) rekker å fyre
 
-  const script = global.document.head.children.find((c) => c.tag === 'script');
-  assert.ok(script, 'js/dash.js injisert som <script> i <head>');
-  assert.strictEqual(script.src, 'js/dash.js');
+  await wait(10);
+  assert.strictEqual(calls.length, 0);
+});
 
-  script.onerror();
-  await wait(10); // flush .then/.catch-kjeden
+test('W5.2: renderEventResult figur — ingen global.Plotly: figur-div opprettes likevel, kaster aldri', async () => {
+  const { Ui, bodyEl } = freshEnv({ cellIdx: 0 });
+  delete global.Plotly;
 
-  const notice = bodyEl.children.find((c) => c.tag === 'pre' && c.className === 'error');
-  assert.ok(notice, 'feil ved lasting av dash.js gir en synlig tekstnotis');
+  Ui.renderEventResult({ cellIdx: 0, target: null }, JSON.stringify({ kind: 'figure', spec: { data: [] } }));
+  assert.strictEqual(bodyEl.children[0].className, 'ui-figure');
+  await wait(10); // deferred setTimeout skal ikke kaste selv uten Plotly
+});
+
+// ── dash-absorpsjon 5a Task 1: Ui.renderPayload sitt fulle vokabular, kalt
+// DIREKTE (ikke via renderEventResult) — kpi/markdown/image/table/ukjent.
+// Figur og text/error/table-via-renderEventResult er allerede dekket over;
+// disse fyller ut kpi/markdown/image/den strukturerte tabellvarianten samt
+// unknown-kind-kontrakten (console.warn, ingenting rendret).
+
+test('Ui.renderPayload: kpi — value/unit/fmt formatert, delta fra ref+bra med retningsklasse', () => {
+  const { Ui } = freshEnv({ cellIdx: 0 });
+  const host = new FakeEl('div');
+
+  const node = Ui.renderPayload({ kind: 'kpi', value: 120, unit: 'kr', ref: 100, bra: 'opp' }, host);
+  assert.strictEqual(node.className, 'ui-kpi');
+  assert.strictEqual(host.children[0], node, 'noden er lagt inn i hostEl');
+  const valueEl = node.children.find((c) => c.className === 'ui-kpi-value');
+  const unitEl = node.children.find((c) => c.className === 'ui-kpi-unit');
+  const deltaEl = node.children.find((c) => c.className && c.className.indexOf('ui-kpi-delta') === 0);
+  assert.strictEqual(valueEl.textContent, '120');
+  assert.strictEqual(unitEl.textContent, 'kr');
+  assert.strictEqual(deltaEl.className, 'ui-kpi-delta ui-kpi-delta--up');
+  assert.strictEqual(deltaEl.textContent, '▲ +20');
+
+  // ref under value + bra='opp' → nedgang → --down
+  const down = Ui.renderPayload({ kind: 'kpi', value: 80, ref: 100, bra: 'opp' }, new FakeEl('div'));
+  const downDelta = down.children.find((c) => c.className && c.className.indexOf('ui-kpi-delta') === 0);
+  assert.strictEqual(downDelta.className, 'ui-kpi-delta ui-kpi-delta--down');
+});
+
+test('Ui.renderPayload: kpi — delta= direkte (Task 3-forberedelse) har forrang over ref/bra', () => {
+  const { Ui } = freshEnv({ cellIdx: 0 });
+  const node = Ui.renderPayload({ kind: 'kpi', value: 5, delta: -3, ref: 100, bra: 'opp' }, new FakeEl('div'));
+  const deltaEl = node.children.find((c) => c.className && c.className.indexOf('ui-kpi-delta') === 0);
+  assert.strictEqual(deltaEl.textContent, '▼ −3');
+  assert.strictEqual(deltaEl.className, 'ui-kpi-delta ui-kpi-delta--down');
+});
+
+test('Ui.renderPayload: kpi — label rendres som eget element når satt, utelates ellers', () => {
+  const { Ui } = freshEnv({ cellIdx: 0 });
+  const withLabel = Ui.renderPayload({ kind: 'kpi', value: 1, label: 'Salg' }, new FakeEl('div'));
+  assert.strictEqual(withLabel.children[0].className, 'ui-kpi-label');
+  assert.strictEqual(withLabel.children[0].textContent, 'Salg');
+
+  const noLabel = Ui.renderPayload({ kind: 'kpi', value: 1 }, new FakeEl('div'));
+  assert.ok(!noLabel.children.some((c) => c.className === 'ui-kpi-label'));
+});
+
+test('Ui.renderPayload: markdown — mdToHtml (markdownit til stede) rendrer HTML inn i .ui-md', () => {
+  const { Ui } = freshEnv({ cellIdx: 0 });
+  global.markdownit = () => ({ render: (s) => '<p>' + s + '</p>' });
+  try {
+    const node = Ui.renderPayload({ kind: 'markdown', text: 'hei **du**' }, new FakeEl('div'));
+    assert.strictEqual(node.tag, 'div');
+    assert.strictEqual(node.className, 'ui-md');
+    assert.strictEqual(node.innerHTML, '<p>hei **du**</p>');
+  } finally {
+    delete global.markdownit;
+  }
+});
+
+test('Ui.renderPayload: markdown — uten markdownit faller tilbake til ren <pre class="ui-text">', () => {
+  const { Ui } = freshEnv({ cellIdx: 0 });
+  delete global.markdownit;
+  const node = Ui.renderPayload({ kind: 'markdown', text: 'rå tekst' }, new FakeEl('div'));
+  assert.strictEqual(node.tag, 'pre');
+  assert.strictEqual(node.className, 'ui-text');
+  assert.strictEqual(node.textContent, 'rå tekst');
+});
+
+test('Ui.renderPayload: image — src, dataUri-fallback og valgfri alt', () => {
+  const { Ui } = freshEnv({ cellIdx: 0 });
+  const bySrc = Ui.renderPayload({ kind: 'image', src: 'foo.png', alt: 'et bilde' }, new FakeEl('div'));
+  assert.strictEqual(bySrc.tag, 'img');
+  assert.strictEqual(bySrc.className, 'ui-img');
+  assert.strictEqual(bySrc.src, 'foo.png');
+  assert.strictEqual(bySrc.alt, 'et bilde');
+
+  const byDataUri = Ui.renderPayload({ kind: 'image', dataUri: 'data:image/png;base64,xx' }, new FakeEl('div'));
+  assert.strictEqual(byDataUri.src, 'data:image/png;base64,xx');
+});
+
+test('Ui.renderPayload: table — strukturert variant bygges med textContent (aldri innerHTML)', () => {
+  const { Ui } = freshEnv({ cellIdx: 0 });
+  const node = Ui.renderPayload({ kind: 'table', columns: ['a', '<b>'], rows: [[1, null], ['<x>', 2]] }, new FakeEl('div'));
+  assert.strictEqual(node.className, 'ui-table-wrap');
+  assert.strictEqual(node.innerHTML, '', 'ingen innerHTML-bruk for strukturert data');
+  const table = node.children[0];
+  const th = table.children[0].children[0].children; // thead > tr > [th...]
+  assert.strictEqual(th[1].textContent, '<b>', 'kolonnenavn escapes ikke — textContent, ingen markup-tolkning');
+  const firstRowCells = table.children[1].children[0].children; // tbody > tr > [td...]
+  assert.strictEqual(firstRowCells[0].textContent, '1');
+  assert.strictEqual(firstRowCells[1].textContent, '', 'null-celle blir tom streng');
+});
+
+test('Ui.renderPayload: ukjent kind → console.warn, ingenting rendret, hostEl urørt', () => {
+  const { Ui } = freshEnv({ cellIdx: 0 });
+  const host = new FakeEl('div');
+  const warns = [];
+  const origWarn = console.warn;
+  console.warn = (msg) => warns.push(msg);
+  try {
+    const result = Ui.renderPayload({ kind: 'noe-rart' }, host);
+    assert.strictEqual(result, null);
+    assert.strictEqual(host.children.length, 0);
+    assert.ok(warns.some((m) => m.includes('noe-rart')));
+  } finally {
+    console.warn = origWarn;
+  }
+});
+
+test("Ui.renderPayload: kind 'node' er IKKE en del av Ui sitt vokabular (dash-only — treffer unknown-grenen)", () => {
+  const { Ui } = freshEnv({ cellIdx: 0 });
+  const origWarn = console.warn;
+  console.warn = () => {};
+  try {
+    const result = Ui.renderPayload({ kind: 'node' }, new FakeEl('div'));
+    assert.strictEqual(result, null, 'dash.js sin D.renderPayload MÅ avskjære kind node selv, FØR delegering');
+  } finally {
+    console.warn = origWarn;
+  }
+});
+
+// Tema-observeren (flyttet fra js/dash.js — se js/ui.js sin
+// installThemeObserver) er MutationObserver-gatet (typeof-sjekk) — Node
+// mangler MutationObserver, så en minimal fake trengs for å teste selve
+// registeret/relayout-logikken uten browser. Fullt teater (faktisk
+// data-theme-attributt-endring via ekte DOM) er browser-smoke-territorium
+// (task-rapporten); dette pinner KUN at figurer registreres og at
+// frakoblede figurer lukes ut i stedet for å krasje/lekke.
+class FakeMutationObserver {
+  constructor(cb) { this.cb = cb; FakeMutationObserver.instances.push(this); }
+  observe(target) { this.target = target; }
+}
+FakeMutationObserver.instances = [];
+
+test('Ui.renderPayload figur: registrerer figuren i tema-registeret; observeren relayouter tilkoblede og luker frakoblede', () => {
+  const { Ui, bodyEl } = freshEnv({ cellIdx: 0 });
+  global.document.body = new FakeEl('body');
+  FakeMutationObserver.instances.length = 0;
+  global.MutationObserver = FakeMutationObserver;
+  const relayoutCalls = [];
+  global.Plotly = { relayout: (el, opts) => relayoutCalls.push([el, opts]), newPlot: () => {} };
+
+  const fig1 = Ui.renderPayload({ kind: 'figure', spec: {} }, bodyEl);
+  const looseHost = new FakeEl('div'); // ALDRI koblet til dokument-treet
+  const fig2 = Ui.renderPayload({ kind: 'figure', spec: {} }, looseHost);
+
+  assert.strictEqual(FakeMutationObserver.instances.length, 1, 'observeren installeres kun ÉN gang (idempotent guard)');
+  assert.strictEqual(FakeMutationObserver.instances[0].target, global.document.body);
+
+  FakeMutationObserver.instances[0].cb(); // simuler data-theme-mutasjon
+  assert.strictEqual(relayoutCalls.length, 1, 'kun den TILKOBLEDE figuren relayoutes');
+  assert.strictEqual(relayoutCalls[0][0], fig1);
+  assert.ok('font.color' in relayoutCalls[0][1]);
+
+  delete global.MutationObserver;
 });
 
 test('W5.2: bindRunCell dispatcher til Cells.runCell via cellIndexById', () => {
@@ -2212,8 +2393,8 @@ test('Task 1: bindControlHandler — feilkastende handler rendres som error-payl
   input.value = 'b';
   input.dispatchEvent({ type: 'change' });
 
-  assert.strictEqual(bodyEl.children[0].className, 'error');
-  assert.strictEqual(bodyEl.children[0].textContent, 'oi');
+  assert.strictEqual(bodyEl.children[0].className, 'ui-error');
+  assert.strictEqual(bodyEl.children[0].children[1].textContent, 'oi');
 });
 
 test('Task 1: bindControlHandler — erstatning: ny handler på samme nøkkel destruerer den forrige', () => {

@@ -242,6 +242,58 @@
     return cellKey + '::' + name;
   };
 
+  // ---------- payload-vokabular: tallformat (flyttet fra js/dash.js, dash-
+  // absorpsjon 5a Task 1 — SAMME implementasjon, ikke en gaffel; dash.js
+  // delegerer nå til Ui.formatNumber/Ui.computeDelta i stedet for å eie
+  // dem selv). Number-payload v3 (spec 2026-07-12 §3.1): adapterne sender
+  // rå {value, unit, fmt, ref, bra}; motoren formaterer. Én implementasjon
+  // av norsk tallformat — U+202F tusenskille, komma-desimal, U+2212-minus.
+  var NNBSP = '\u202f';
+  var MINUS = '\u2212';
+
+  function groupInt(intStr) {
+    return intStr.replace(/\B(?=(\d{3})+(?!\d))/g, NNBSP);
+  }
+
+  // fmt: python-format-spec-delmengden [,][.N][f|%]. Ukjent spec → default
+  // (rund til 2 desimaler, strip etternuller, grupper). Kaster aldri.
+  Ui.formatNumber = function (value, fmt) {
+    if (typeof value !== 'number' || !isFinite(value)) return String(value);
+    var m = (typeof fmt === 'string' && fmt) ? fmt.match(/^(,)?(?:\.(\d+))?(f|%)?$/) : null;
+    var known = !!(m && (m[1] || m[2] != null || m[3]));
+    var group = known ? !!m[1] : true;
+    var pct = known && m[3] === '%';
+    var v = pct ? value * 100 : value;
+    var abs = Math.abs(v);
+    var s;
+    if (known) {
+      var decimals = (m[2] != null) ? +m[2] : (m[3] ? 6 : null); // som pythons format()
+      s = (decimals != null) ? abs.toFixed(decimals) : String(abs);
+    } else {
+      s = String(Math.abs(+v.toFixed(2)));
+    }
+    var parts = s.split('.');
+    if (group) parts[0] = groupInt(parts[0]);
+    s = parts[0] + (parts[1] ? ',' + parts[1] : '');
+    return (v < 0 ? MINUS : '') + s + (pct ? '%' : '');
+  };
+
+  // Delt av Ui.computeDelta (diff = value - ref) og ui.kpi sin direkte
+  // delta= (diff = den rå delta-verdien, ingen ref/value involvert) — se
+  // Ui.renderPayload sin kpi-gren.
+  function deltaFromDiff(diff, fmt, bra) {
+    var dir = diff > 0 ? 'opp' : (diff < 0 ? 'ned' : 'flat');
+    var good = dir === 'flat' || dir === (bra || 'opp');
+    return { text: (diff >= 0 ? '+' : MINUS) + Ui.formatNumber(Math.abs(diff), fmt),
+             dir: dir, good: good };
+  }
+
+  Ui.computeDelta = function (value, ref, fmt, bra) {
+    if (typeof value !== 'number' || !isFinite(value)) return null;
+    if (typeof ref !== 'number' || !isFinite(ref)) return null;
+    return deltaFromDiff(value - ref, fmt, bra);
+  };
+
   // Eksporter til global og CommonJS
   global.Ui = Ui;
   if (typeof module !== 'undefined' && module.exports) {
@@ -1117,7 +1169,6 @@
     // destroy og er da en no-op.
     var _bindings = {};      // "cellKey::selector::event" -> binding
     var _delegated = {};     // eventType -> true når dokument-lytteren er satt
-    var _dashLoadPromise = null; // memoized dash.js-lasting, se _renderFigure
 
     function _destroyHandler(b) {
       if (b && b.handler && typeof b.handler.destroy === 'function') {
@@ -1304,47 +1355,163 @@
         ? document.getElementById('outputArea') : null;
     }
 
-    // Lazy-laster js/dash.js (memoized promise — speiler engine-modulenes
-    // (js/brython-engine.js, js/micropython-engine.js) egen addScript-
-    // idiom) og tegner {kind:'figure', spec} via Dash.renderPayload — SAMME
-    // figur-rendering som dashboard()-kortene, ingen egen Plotly-
-    // integrasjon her.
-    function _loadDash() {
-      if (global.Dash) return Promise.resolve(global.Dash);
-      if (_dashLoadPromise) return _dashLoadPromise;
-      _dashLoadPromise = new Promise(function (resolve, reject) {
-        var s = document.createElement('script');
-        s.src = 'js/dash.js';
-        s.onload = function () { resolve(global.Dash); };
-        s.onerror = function () { reject(new Error('kunne ikke laste js/dash.js')); };
-        document.head.appendChild(s);
-      });
-      return _dashLoadPromise;
+    // ── payload-vokabular: figur/tema (flyttet fra js/dash.js:183-240+297-
+    // 314, dash-absorpsjon 5a Task 1). Figuren er nå NATIV her — ingen lazy
+    // js/dash.js-lasting lenger (_loadDash/_renderFigure er borte); dash.js
+    // sin egen 'figure'-payload delegerer til Ui.renderPayload akkurat som
+    // alt annet (se D.renderPayload der). _figures er et DELT register (ikke
+    // bare ui-rendrede figurer) — dash.js sine kort registrerer SINE figurer
+    // her også, siden de OGSÅ blir bygget av Ui.renderPayload nå (dash har
+    // ingen egen Plotly-integrasjon igjen) — én temabytte-observer relayouter
+    // ALLE tilkoblede figurer, uansett hvem som ba om rendring.
+    var _md = null;
+    var _figures = [];
+    var _themeObserverInstalled = false;
+
+    function themeColor(name, fallback) {
+      try {
+        var c = getComputedStyle(document.body).getPropertyValue(name).trim();
+        return c || fallback;
+      } catch (e) { return fallback; }
     }
 
-    function _renderFigure(p, node) {
-      if (global.Dash && typeof global.Dash.renderPayload === 'function') {
-        var figEl = global.Dash.renderPayload({ kind: 'figure', spec: p.spec }, null);
-        if (figEl) node.appendChild(figEl);
-        return;
-      }
-      _loadDash().then(function (Dash) {
-        if (!Dash || typeof Dash.renderPayload !== 'function') throw new Error('Dash.renderPayload mangler');
-        var figEl = Dash.renderPayload({ kind: 'figure', spec: p.spec }, null);
-        if (figEl) node.appendChild(figEl);
-      }).catch(function (err) {
-        var pre = document.createElement('pre');
-        pre.className = 'error';
-        pre.textContent = 'Ui.on: kunne ikke tegne figur (' + ((err && err.message) || err) + ')';
-        node.appendChild(pre);
+    function installThemeObserver() {
+      if (_themeObserverInstalled) return;
+      if (typeof document === 'undefined' || typeof MutationObserver === 'undefined') return;
+      _themeObserverInstalled = true;
+      var mo = new MutationObserver(function () {
+        if (!global.Plotly) return;
+        var color = themeColor('--text', '#333');
+        // Luk ut frakoblede figurer i samme slag — enklere enn å holde et
+        // separat sveipe-kall, og observeren fyrer sjelden (kun ved faktisk
+        // temabytte).
+        _figures = _figures.filter(function (f) { return f && f.isConnected; });
+        _figures.forEach(function (f) {
+          try { global.Plotly.relayout(f, { 'font.color': color }); } catch (e) {}
+        });
       });
+      mo.observe(document.body, { attributes: true, attributeFilter: ['data-theme'] });
     }
+
+    function mdToHtml(text) {
+      if (!_md && global.markdownit) _md = global.markdownit({ linkify: true });
+      return _md ? _md.render(String(text)) : null;
+    }
+
+    /**
+     * Ui.renderPayload(p, hostEl) → den opprettede rot-noden (eller null for
+     * '{}'-lignende ukjente/tomme kinds — se under), ALLEREDE lagt inn i
+     * hostEl. Delt rendrings-vokabular (dash-absorpsjon 5a Task 1 — flyttet
+     * hit fra js/dash.js sin D.renderPayload, MED de nye kindene kpi/
+     * markdown/image lagt til): text/error (pre-boks), table (html ELLER
+     * strukturert {columns,rows} — SAMME tillitsnivå som før: strukturert
+     * variant bygges kun med textContent, aldri innerHTML), figure (Plotly,
+     * temadefaults, isConnected-vakt), kpi (dash sin 'number'-payload —
+     * value/unit/fmt/ref/bra formatert her, PLUSS delta= (direkte, for
+     * ui.kpi Task 3) og label), markdown (mdToHtml), image ({src|dataUri,
+     * alt?}). Ukjent kind → console.warn, ingenting tegnes (samme stille
+     * ikke-rendrende oppførsel som Ui.renderEventResult alltid har hatt for
+     * ukjente kinds — generalisert hit).
+     */
+    Ui.renderPayload = function (p, hostEl) {
+      var kind = p && p.kind;
+      var node = null;
+
+      if (kind === 'text' || kind === 'error') {
+        node = _el(kind === 'error' ? 'div' : 'pre', kind === 'error' ? 'ui-error' : 'ui-text');
+        if (kind === 'error') {
+          node.appendChild(_el('strong', null, 'Feil: '));
+          // dash sender p.message, Ui.on-handlere sender p.text — begge
+          // aksepteres (samme tolerante prinsipp som resten av modulen).
+          node.appendChild(_el('span', null, (p.text != null ? p.text : p.message) || ''));
+        } else {
+          node.textContent = p.text || '';
+        }
+      } else if (kind === 'table') {
+        node = _el('div', 'ui-table-wrap');
+        if (p.html != null) {
+          node.innerHTML = p.html; // vår egen to_html-bygger, samme tillitsnivå som før
+        } else {
+          // strukturert variant (spec 2026-07-12 §3.2, flyttet fra dash.js)
+          // — bygget med textContent, aldri innerHTML: celleinnhold kan ikke
+          // smugle markup.
+          var tbl = _el('table');
+          var trh = _el('tr');
+          (p.columns || []).forEach(function (c) { trh.appendChild(_el('th', null, String(c))); });
+          var thead = _el('thead');
+          thead.appendChild(trh);
+          tbl.appendChild(thead);
+          var tbody = _el('tbody');
+          (p.rows || []).forEach(function (row) {
+            var tr = _el('tr');
+            (row || []).forEach(function (cell) {
+              tr.appendChild(_el('td', null, cell == null ? '' : String(cell)));
+            });
+            tbody.appendChild(tr);
+          });
+          tbl.appendChild(tbody);
+          node.appendChild(tbl);
+        }
+      } else if (kind === 'figure') {
+        node = _el('div', 'ui-figure');
+        var spec = p.spec || {};
+        var layout = Object.assign({
+          autosize: true,
+          margin: { t: 28, r: 12, b: 36, l: 44 },
+          paper_bgcolor: 'rgba(0,0,0,0)',
+          plot_bgcolor: 'rgba(0,0,0,0)',
+          font: { color: themeColor('--text', '#333') }
+        }, spec.layout || {});
+        _figures.push(node);
+        installThemeObserver();
+        setTimeout(function () {
+          if (global.Plotly && node.isConnected) {
+            global.Plotly.newPlot(node, spec.data || [], layout,
+              { responsive: true, displayModeBar: false });
+          }
+        }, 0);
+      } else if (kind === 'kpi') {
+        node = _el('div', 'ui-kpi');
+        if (p.label) node.appendChild(_el('div', 'ui-kpi-label', p.label));
+        node.appendChild(_el('span', 'ui-kpi-value', Ui.formatNumber(p.value, p.fmt)));
+        if (p.unit) node.appendChild(_el('span', 'ui-kpi-unit', p.unit));
+        // delta=: direkte tall (ui.kpi Task 3) har forrang; ellers beregnes
+        // den som før fra ref+bra (dash sin 'number'-payload).
+        var delta = null;
+        if (typeof p.delta === 'number' && isFinite(p.delta)) delta = deltaFromDiff(p.delta, p.fmt, p.bra);
+        else if (p.ref != null) delta = Ui.computeDelta(p.value, p.ref, p.fmt, p.bra);
+        if (delta) {
+          var arrow = delta.dir === 'opp' ? '▲' : (delta.dir === 'ned' ? '▼' : '–');
+          var dcls = 'ui-kpi-delta ' + (delta.good ? 'ui-kpi-delta--up' : 'ui-kpi-delta--down');
+          node.appendChild(_el('span', dcls, arrow + ' ' + delta.text));
+        }
+      } else if (kind === 'markdown') {
+        var html = mdToHtml(p.text);
+        if (html != null) {
+          node = _el('div', 'ui-md');
+          node.innerHTML = html;
+        } else {
+          node = _el('pre', 'ui-text', p.text);
+        }
+      } else if (kind === 'image') {
+        node = _el('img', 'ui-img');
+        node.src = p.src != null ? p.src : p.dataUri;
+        if (p.alt) node.alt = p.alt;
+      } else {
+        console.warn('Ui.renderPayload: ukjent payload-kind: ' + kind);
+        return null;
+      }
+
+      if (hostEl) hostEl.appendChild(node);
+      return node;
+    };
 
     /**
      * Ui.renderEventResult(b, payloadJson) — tegner en handler sitt
      * payload-resultat. b er den interne binding-oppføringen (trenger kun
-     * .target og .cellIdx). payload = {"kind":"text"|"error"|"table"|"figure", ...},
-     * eller '{}' (eksplisitt no-op — ingenting tegnes).
+     * .target og .cellIdx). payload = Ui.renderPayload sitt vokabular
+     * (text/error/table/figure/kpi/markdown/image), eller '{}' (eksplisitt
+     * no-op — ingenting tegnes).
      */
     Ui.renderEventResult = function (b, payloadJson) {
       var p;
@@ -1371,20 +1538,7 @@
         node.appendChild(notice);
       }
 
-      if (p.kind === 'text' || p.kind === 'error') {
-        var pre = document.createElement('pre');
-        if (p.kind === 'error') pre.className = 'error';
-        pre.textContent = p.text || '';
-        node.appendChild(pre);
-      } else if (p.kind === 'table') {
-        var div = document.createElement('div');
-        div.innerHTML = p.html || ''; // vår egen to_html-bygger, samme tillitsnivå som dash-kort
-        node.appendChild(div);
-      } else if (p.kind === 'figure') {
-        _renderFigure(p, node);
-      } else {
-        console.warn('Ui.renderEventResult: ukjent payload-kind: ' + p.kind);
-      }
+      Ui.renderPayload(p, node);
     };
 
     // ── Task 1 (fase ui-html, spec 2026-07-17-ui-html-design.md §1-3):

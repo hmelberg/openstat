@@ -223,65 +223,120 @@ test('encodeState/decodeState: tomt objekt rundtur', () => {
   assert.deepStrictEqual(D.decodeState(encoded), {});
 });
 
-// ---------- Number-payload v3: formatNumber + computeDelta ----------
+// ---------- Number-payload v3: formatNumber + computeDelta FLYTTET til
+// js/ui.js (dash-absorpsjon 5a Task 1) — se tests/js/ui.test.js for de samme
+// assertene mot Ui.formatNumber/Ui.computeDelta (repointet, ikke duplisert).
+// D.formatNumber/D.computeDelta finnes ikke lenger på D. ----------
 
-test('formatNumber: default — heltall grupperes med U+202F', () => {
-  assert.strictEqual(D.formatNumber(1234567), '1\u202f234\u202f567');
-});
-
-test('formatNumber: default — 2 desimaler uten etternuller, komma', () => {
-  assert.strictEqual(D.formatNumber(3.14159), '3,14');
-  assert.strictEqual(D.formatNumber(2.5), '2,5');
-  assert.strictEqual(D.formatNumber(2.0), '2');
-});
-
-test('formatNumber: negativ bruker ekte minustegn', () => {
-  assert.strictEqual(D.formatNumber(-1234.5), '\u22121\u202f234,5');
-});
-
-test('formatNumber: fmt ",.1f" — gruppert, 1 desimal', () => {
-  assert.strictEqual(D.formatNumber(12345.678, ',.1f'), '12\u202f345,7');
-});
-
-test('formatNumber: fmt ".0f" — ingen gruppering', () => {
-  assert.strictEqual(D.formatNumber(12345.678, '.0f'), '12346');
-});
-
-test('formatNumber: fmt ".1%" — prosent', () => {
-  assert.strictEqual(D.formatNumber(0.1234, '.1%'), '12,3%');
-});
-
-test('formatNumber: ukjent fmt faller tilbake til default (kaster aldri)', () => {
-  assert.strictEqual(D.formatNumber(1234.5, 'kroner'), '1\u202f234,5');
-});
-
-test('formatNumber: ikke-tall passeres som streng', () => {
-  assert.strictEqual(D.formatNumber(NaN), 'NaN');
-  assert.strictEqual(D.formatNumber(Infinity), 'Infinity');
-});
-
-test('computeDelta: retning, fortegn og god/dårlig', () => {
-  const d = D.computeDelta(120, 100, null, 'opp');
-  assert.deepStrictEqual(d, { text: '+20', dir: 'opp', good: true });
-  const n = D.computeDelta(80, 100, null, 'opp');
-  assert.deepStrictEqual(n, { text: '\u221220', dir: 'ned', good: false });
-  const f = D.computeDelta(100, 100, null, 'ned');
-  assert.deepStrictEqual(f, { text: '+0', dir: 'flat', good: true });
-});
-
-test('computeDelta: null/ikke-endelig ref gir null', () => {
-  assert.strictEqual(D.computeDelta(5, null, null, 'opp'), null);
-  assert.strictEqual(D.computeDelta(5, undefined, null, 'opp'), null);
-  assert.strictEqual(D.computeDelta(5, Infinity, null, 'opp'), null);
-});
-
-test('computeDelta: bruker fmt på differansen', () => {
-  const d = D.computeDelta(0.35, 0.30, '.1%', 'opp');
-  assert.strictEqual(d.text, '+5,0%');
+test('D.formatNumber/D.computeDelta finnes ikke lenger — flyttet til Ui (ingen gaffel)', () => {
+  assert.strictEqual(D.formatNumber, undefined);
+  assert.strictEqual(D.computeDelta, undefined);
 });
 
 test('payloadCols: html-tabell bruker cols, strukturert bruker columns.length', () => {
   assert.strictEqual(D.payloadCols({ kind: 'table', html: '<table/>', cols: 9 }), 9);
   assert.strictEqual(D.payloadCols({ kind: 'table', columns: ['a', 'b'], rows: [] }), 2);
   assert.strictEqual(D.payloadCols({ kind: 'number', value: 1 }), 0);
+});
+
+// ---------- D.renderPayload — tynn delegat til Ui.renderPayload (dash-
+// absorpsjon 5a Task 1). Kun 'node' (dash-only, ingen rendring) og 'number'
+// (mappes til Ui sin 'kpi') er dash-spesifikk logikk igjen — alt annet
+// sendes videre uendret. En minimal document-stub (kun det D.renderPayload
+// sin egen el()-hjelper og wegwerp-beholderen trenger: createElement,
+// className, textContent, appendChild/firstChild) installeres PER test,
+// sammen med en spionert global.Ui, ikke den ekte js/ui.js — selve
+// Ui.renderPayload-innholdet er dekket av tests/js/ui.test.js og
+// tests/js/ui-dom.test.js. ----------
+
+class FakeDashEl {
+  constructor(tag) {
+    this.tag = tag;
+    this.children = [];
+    this._className = '';
+    this._text = '';
+  }
+  set className(v) { this._className = v; }
+  get className() { return this._className; }
+  set textContent(v) { this._text = v; }
+  get textContent() { return this._text; }
+  appendChild(c) { this.children.push(c); return c; }
+  get firstChild() { return this.children[0] || null; }
+}
+
+function withFakeDom(fn) {
+  const savedDocument = global.document;
+  const savedUi = global.Ui;
+  global.document = { createElement: (tag) => new FakeDashEl(tag) };
+  try {
+    fn();
+  } finally {
+    global.document = savedDocument;
+    global.Ui = savedUi;
+  }
+}
+
+test("D.renderPayload: kind 'node' returnerer nodeEl direkte — dash-only, Ui involveres aldri", () => {
+  withFakeDom(() => {
+    let called = false;
+    global.Ui = { renderPayload: () => { called = true; } };
+    const nodeEl = new FakeDashEl('div');
+    const result = D.renderPayload({ kind: 'node' }, nodeEl);
+    assert.strictEqual(result, nodeEl);
+    assert.strictEqual(called, false, 'Ui.renderPayload skal ikke kalles for kind node');
+  });
+});
+
+test("D.renderPayload: kind 'number' mappes til Ui sin 'kpi' FØR delegering, feltene uendret", () => {
+  withFakeDom(() => {
+    let seen = null;
+    global.Ui = {
+      renderPayload: (p, host) => {
+        seen = p;
+        const stub = new FakeDashEl('div');
+        stub.className = 'ui-kpi';
+        host.appendChild(stub);
+        return stub;
+      },
+    };
+    const result = D.renderPayload({ kind: 'number', value: 42, unit: 'kr', fmt: '.1f', ref: 40, bra: 'opp' }, null);
+    assert.deepStrictEqual(seen, { kind: 'kpi', value: 42, unit: 'kr', fmt: '.1f', ref: 40, bra: 'opp' });
+    assert.strictEqual(result.className, 'ui-kpi');
+  });
+});
+
+['markdown', 'text', 'table', 'image', 'figure', 'error'].forEach((kind) => {
+  test('D.renderPayload: kind ' + JSON.stringify(kind) + ' sendes UENDRET videre til Ui.renderPayload (ingen dash-mapping)', () => {
+    withFakeDom(() => {
+      let seenKind = null;
+      global.Ui = {
+        renderPayload: (p, host) => {
+          seenKind = p.kind;
+          const stub = new FakeDashEl('div');
+          host.appendChild(stub);
+          return stub;
+        },
+      };
+      D.renderPayload({ kind: kind, value: 1, text: 'x', message: 'y' }, null);
+      assert.strictEqual(seenKind, kind);
+    });
+  });
+});
+
+test('D.renderPayload: Ui mangler helt → forsiktig tekstfallback, kaster aldri', () => {
+  withFakeDom(() => {
+    delete global.Ui;
+    const result = D.renderPayload({ kind: 'text', text: 'hei' }, null);
+    assert.strictEqual(result.tag, 'pre');
+    assert.match(result.textContent, /Ui\.renderPayload/);
+  });
+});
+
+test('D.renderPayload: Ui.renderPayload rendrer ingenting (sann ukjent kind) → lokal JSON-fallback, appendChild krasjer aldri', () => {
+  withFakeDom(() => {
+    global.Ui = { renderPayload: () => null }; // etterligner Ui sin unknown-gren (host urørt)
+    const result = D.renderPayload({ kind: 'noe-helt-ukjent', x: 1 }, null);
+    assert.strictEqual(result.tag, 'pre');
+    assert.strictEqual(result.textContent, JSON.stringify({ kind: 'noe-helt-ukjent', x: 1 }));
+  });
 });

@@ -55,44 +55,14 @@
 .dash-play-btn:hover { background: color-mix(in srgb, var(--accent) 12%, var(--bg-code)); }
 .dash-play-btn--playing { border-color: var(--accent); color: var(--accent); }
 
-.dash-kpi { display: flex; align-items: baseline; gap: 8px; margin: auto 0; }
-.dash-kpi-value {
-  font-size: 2.2rem; font-weight: 700; line-height: 1.1;
-  font-variant-numeric: tabular-nums; color: var(--text);
-}
-.dash-kpi-unit { font-size: .9rem; color: var(--text-muted); }
-.dash-kpi-delta {
-  font-size: .95rem; font-weight: 600; font-variant-numeric: tabular-nums;
-  display: inline-flex; align-items: center; gap: 2px;
-}
-.dash-kpi-delta--good { color: var(--success); }
-.dash-kpi-delta--bad { color: var(--danger); }
-
-.dash-md { color: var(--text); line-height: 1.55; overflow-wrap: break-word; }
-.dash-md :first-child { margin-top: 0; }
-.dash-text {
-  margin: 0; white-space: pre-wrap; font-size: .85rem;
-  color: var(--text); overflow: auto; max-height: 40vh;
-}
-
-.dash-table-wrap { overflow: auto; max-height: 48vh; }
-.dash-table-wrap table { border-collapse: collapse; width: 100%; font-size: .85rem; color: var(--text); }
-.dash-table-wrap th {
-  position: sticky; top: 0; background: var(--table-header-bg, var(--bg-panel));
-  text-align: left; padding: 6px 8px; border-bottom: 2px solid var(--border);
-}
-.dash-table-wrap td { padding: 4px 8px; border-bottom: 1px solid var(--table-grid, var(--border)); }
-.dash-table-wrap tr:nth-child(even) td { background: color-mix(in srgb, var(--text) 3%, transparent); }
-
-.dash-img { max-width: 100%; display: block; margin: auto; }
-.dash-figure { flex: 1; min-height: 260px; }
-
-.dash-error {
-  padding: 8px 16px; border-radius: 6px; font-size: .85rem;
-  color: var(--text);
-  background: color-mix(in srgb, var(--danger) 10%, var(--bg-panel));
-  border-left: 3px solid color-mix(in srgb, var(--danger) 60%, var(--border));
-}
+/* .dash-kpi/.dash-md/.dash-text/.dash-table-wrap/.dash-img/.dash-figure/
+   .dash-error er FLYTTET til app.css sine .ui-kpi/.ui-md/.ui-text/
+   .ui-table-wrap/.ui-img/.ui-figure/.ui-error (dash-absorpsjon 5a Task 1) —
+   js/dash.js sin D.renderPayload delegerer nå payload-INNHOLDET til
+   js/ui.js sin Ui.renderPayload, som bygger disse klassenavnene. Kort-
+   rammen over (.dash-card/.dash-content/.dash-grid osv.) er uendret og
+   trenger ingen kobling til innholdsklassene — de var allerede frittstående
+   selectorer her, ingen nesting å rydde opp i. */
 
 @media (max-width: 700px) {
   .dash-grid { grid-template-columns: 1fr !important; grid-template-areas: none !important; }

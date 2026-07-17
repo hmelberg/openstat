@@ -64,48 +64,11 @@
     return kind === 'number' ? 0 : 1;
   };
 
-  // Number-payload v3 (spec 2026-07-12 §3.1): adapterne sender rå
-  // {value, unit, fmt, ref, bra}; motoren formaterer. Én implementasjon
-  // av norsk tallformat — U+202F tusenskille, komma-desimal, U+2212-minus.
-  var NNBSP = '\u202f';
-  var MINUS = '\u2212';
-
-  function groupInt(intStr) {
-    return intStr.replace(/\B(?=(\d{3})+(?!\d))/g, NNBSP);
-  }
-
-  // fmt: python-format-spec-delmengden [,][.N][f|%]. Ukjent spec → default
-  // (rund til 2 desimaler, strip etternuller, grupper). Kaster aldri.
-  D.formatNumber = function (value, fmt) {
-    if (typeof value !== 'number' || !isFinite(value)) return String(value);
-    var m = (typeof fmt === 'string' && fmt) ? fmt.match(/^(,)?(?:\.(\d+))?(f|%)?$/) : null;
-    var known = !!(m && (m[1] || m[2] != null || m[3]));
-    var group = known ? !!m[1] : true;
-    var pct = known && m[3] === '%';
-    var v = pct ? value * 100 : value;
-    var abs = Math.abs(v);
-    var s;
-    if (known) {
-      var decimals = (m[2] != null) ? +m[2] : (m[3] ? 6 : null); // som pythons format()
-      s = (decimals != null) ? abs.toFixed(decimals) : String(abs);
-    } else {
-      s = String(Math.abs(+v.toFixed(2)));
-    }
-    var parts = s.split('.');
-    if (group) parts[0] = groupInt(parts[0]);
-    s = parts[0] + (parts[1] ? ',' + parts[1] : '');
-    return (v < 0 ? MINUS : '') + s + (pct ? '%' : '');
-  };
-
-  D.computeDelta = function (value, ref, fmt, bra) {
-    if (typeof value !== 'number' || !isFinite(value)) return null;
-    if (typeof ref !== 'number' || !isFinite(ref)) return null;
-    var diff = value - ref;
-    var dir = diff > 0 ? 'opp' : (diff < 0 ? 'ned' : 'flat');
-    var good = dir === 'flat' || dir === (bra || 'opp');
-    return { text: (diff >= 0 ? '+' : MINUS) + D.formatNumber(Math.abs(diff), fmt),
-             dir: dir, good: good };
-  };
+  // Number-payload v3 (spec 2026-07-12 §3.1): formatNumber/computeDelta er
+  // FLYTTET til js/ui.js (dash-absorpsjon 5a Task 1 — Ui.formatNumber/
+  // Ui.computeDelta, samme implementasjon, ingen gaffel). D.renderPayload
+  // (DOM-halvdelen under) delegerer dit for kind 'number' → 'kpi'; widget-
+  // avlesningen (fmtNumber, også under) gjør det samme.
 
   D.payloadCols = function (p) {
     if (!p) return 0;
@@ -153,18 +116,12 @@
   var _seq = 0;
   var _dashes = {};  // dashId -> {root, grid, overflow, mosaic, used:{}}
   var _cards = {};   // cardId -> {node, content, placed, figEl}
-  var _md = null;
 
   function el(tag, cls, text) {
     var n = document.createElement(tag);
     if (cls) n.className = cls;
     if (text != null) n.textContent = text;
     return n;
-  }
-
-  function mdToHtml(text) {
-    if (!_md && global.markdownit) _md = global.markdownit({ linkify: true });
-    return _md ? _md.render(String(text)) : null;
   }
 
   function debounce(fn, ms) {
@@ -176,15 +133,14 @@
     };
   }
 
+  // Widget-avlesning (slider/play-verdi) — delegerer til Ui.formatNumber
+  // (dash-absorpsjon 5a Task 1: flyttet dit, se kommentaren ved D.payloadCols
+  // over). Ui.js er alltid lastet i praksis (index.html laster begge
+  // scriptene), men en forsiktig fallback (samme still-aldri-kaste-stil som
+  // resten av fila) dekker en teoretisk lastefeil.
   function fmtNumber(v) {
-    return D.formatNumber(v);
-  }
-
-  function themeColor(name, fallback) {
-    try {
-      var c = getComputedStyle(document.body).getPropertyValue(name).trim();
-      return c || fallback;
-    } catch (e) { return fallback; }
+    return (global.Ui && typeof global.Ui.formatNumber === 'function')
+      ? global.Ui.formatNumber(v) : String(v);
   }
 
   // ---- K2: URL-state (ds) — module-lokal, lazy fra window.__DASH_DS_INIT__
@@ -219,107 +175,39 @@
     try { history.replaceState(null, '', url); } catch (e) { /* ignore */ }
   }
 
-  // ---- Point 5: temabytte-observer — oppdaterer font.color på tilkoblede
-  // Plotly-figurer nar body[data-theme] endres (ingen re-kjoring nodvendig) ----
-  var _themeObserverInstalled = false;
-  function installThemeObserver() {
-    if (_themeObserverInstalled) return;
-    if (typeof document === 'undefined' || typeof MutationObserver === 'undefined') return;
-    _themeObserverInstalled = true;
-    var mo = new MutationObserver(function () {
-      if (!global.Plotly) return;
-      var color = themeColor('--text', '#333');
-      for (var cid in _cards) {
-        var rec = _cards[cid];
-        if (rec.figEl && rec.figEl.isConnected) {
-          try { global.Plotly.relayout(rec.figEl, { 'font.color': color }); } catch (e) {}
-        }
-      }
-    });
-    mo.observe(document.body, { attributes: true, attributeFilter: ['data-theme'] });
-  }
-
+  // Tema-observeren (font.color-relayout på temabytte) og selve
+  // figur/tekst/tabell/kpi/markdown/image-rendringen er FLYTTET til
+  // js/ui.js (dash-absorpsjon 5a Task 1 — Ui.renderPayload +
+  // Ui sin egen body[data-theme]-MutationObserver, se der). D.renderPayload
+  // under er nå en TYNN delegat: kind 'node' er dash-only (rå DOM-node fra
+  // adapteren, ingen rendring involvert) og 'number' mappes til Ui sin
+  // 'kpi' — alt annet (markdown/text/table/image/figure/error) sendes
+  // videre UENDRET, siden Ui.renderPayload sitt vokabular allerede dekker
+  // dem (feltnavnene stemmer overens — Ui sin 'error'-gren aksepterer BÅDE
+  // p.text og dash sin p.message).
   D.renderPayload = function (p, nodeEl) {
     var kind = p && p.kind;
-    if (kind === 'markdown') {
-      var html = mdToHtml(p.text);
-      if (html != null) {
-        var d = el('div', 'dash-md');
-        d.innerHTML = html;
-        return d;
-      }
-      return el('pre', 'dash-text', p.text);
+    if (kind === 'node') return nodeEl;
+    if (!global.Ui || typeof global.Ui.renderPayload !== 'function') {
+      // Skal aldri skje i praksis (index.html laster js/ui.js), men kaster
+      // aldri — samme forsiktige stil som resten av fila.
+      return el('pre', null, 'Ui.renderPayload mangler');
     }
-    if (kind === 'text') return el('pre', 'dash-text', p.text);
-    if (kind === 'number') {
-      var k = el('div', 'dash-kpi');
-      k.appendChild(el('span', 'dash-kpi-value', D.formatNumber(p.value, p.fmt)));
-      if (p.unit) k.appendChild(el('span', 'dash-kpi-unit', p.unit));
-      var delta = D.computeDelta(p.value, p.ref, p.fmt, p.bra);
-      if (delta) {
-        var arrow = delta.dir === 'opp' ? '▲' : (delta.dir === 'ned' ? '▼' : '–');
-        var dcls = 'dash-kpi-delta ' + (delta.good ? 'dash-kpi-delta--good' : 'dash-kpi-delta--bad');
-        k.appendChild(el('span', dcls, arrow + ' ' + delta.text));
-      }
-      return k;
-    }
-    if (kind === 'table') {
-      var w = el('div', 'dash-table-wrap');
-      if (p.html != null) {
-        w.innerHTML = p.html;
-        return w;
-      }
-      // strukturert variant (spec 2026-07-12 §3.2) — bygget med textContent,
-      // aldri innerHTML: celleinnhold kan ikke smugle markup.
-      var tbl = el('table');
-      var trh = el('tr');
-      (p.columns || []).forEach(function (c) { trh.appendChild(el('th', null, String(c))); });
-      var thead = el('thead');
-      thead.appendChild(trh);
-      tbl.appendChild(thead);
-      var tbody = el('tbody');
-      (p.rows || []).forEach(function (row) {
-        var tr = el('tr');
-        (row || []).forEach(function (cell) {
-          tr.appendChild(el('td', null, cell == null ? '' : String(cell)));
-        });
-        tbody.appendChild(tr);
-      });
-      tbl.appendChild(tbody);
-      w.appendChild(tbl);
-      return w;
-    }
-    if (kind === 'image') {
-      var img = el('img', 'dash-img');
-      img.src = p.src;
-      return img;
-    }
-    if (kind === 'figure') {
-      var f = el('div', 'dash-figure');
-      var spec = p.spec || {};
-      var layout = Object.assign({
-        autosize: true,
-        margin: { t: 28, r: 12, b: 36, l: 44 },
-        paper_bgcolor: 'rgba(0,0,0,0)',
-        plot_bgcolor: 'rgba(0,0,0,0)',
-        font: { color: themeColor('--text', '#333') }
-      }, spec.layout || {});
-      setTimeout(function () {
-        if (global.Plotly && f.isConnected) {
-          global.Plotly.newPlot(f, spec.data || [], layout,
-            { responsive: true, displayModeBar: false });
-        }
-      }, 0);
-      return f;
-    }
-    if (kind === 'node' && nodeEl) return nodeEl;
-    if (kind === 'error') {
-      var e = el('div', 'dash-error');
-      e.appendChild(el('strong', null, 'Feil: '));
-      e.appendChild(el('span', null, p.message));
-      return e;
-    }
-    return el('pre', 'dash-text', JSON.stringify(p));
+    var mapped = (kind === 'number') ? Object.assign({}, p, { kind: 'kpi' }) : p;
+    // wegwerp-beholder: Ui.renderPayload legger nøyaktig én rot-node i den
+    // (append-kontrakten, se js/ui.js) — vi plukker den ut igjen slik at
+    // D.updateCard sin egen appendChild (uendret) kan flytte den inn i
+    // kortet, akkurat som før delegeringen (samme "detached node"-kontrakt).
+    var host = el('div');
+    global.Ui.renderPayload(mapped, host);
+    // Ui.renderPayload sitt vokabular dekker alt dash sender (kind 'kpi' er
+    // mappingen over, resten er uendret navn) — host.firstChild finnes i
+    // praksis alltid. En sann ukjent kind (adapter-bug/fremtidig kind Ui
+    // ikke kjenner) → Ui.renderPayload varsler og lar host stå tom; D sin
+    // egen appendChild-kaller (D.updateCard) forventer ALLTID en node å
+    // sette inn — samme "kaster aldri, viser i stedet"-garanti som resten
+    // av fila, derfor en lokal fallback her i stedet for å la det krasje.
+    return host.firstChild || el('pre', null, JSON.stringify(p));
   };
 
   // override: gjenopprettet råverdi fra K2 ds-state (eller undefined) — DOM
@@ -563,7 +451,10 @@
     if (opts.layout) {
       var m = D.parseMosaic(opts.layout);
       if (m.error) {
-        root.appendChild(el('div', 'dash-error', m.error));
+        // 'ui-error' — samme feilboks-styling som Ui.renderPayload sin
+        // 'error'-payload (app.css), gjenbrukt her for et layout-parse-
+        // avvik som aldri går via payload-vokabularet i det hele tatt.
+        root.appendChild(el('div', 'ui-error', m.error));
       } else {
         mosaic = m;
       }
@@ -581,7 +472,10 @@
     var id = 'dash' + (++_seq);
     _dashes[id] = { root: root, grid: grid, overflow: null, mosaic: mosaic, used: {},
                      controlCardSeq: 0, controlsBar: null, sharedValues: null };
-    installThemeObserver();
+    // Tema-observeren installeres nå av js/ui.js sin Ui.renderPayload selv,
+    // FØRSTE gang en figur faktisk rendres (dash- eller ui-rendret — samme
+    // observer, samme register, se kommentaren ved D.renderPayload over) —
+    // ikke lenger noe eget kall her.
     return id;
   };
 

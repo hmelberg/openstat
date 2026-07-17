@@ -389,3 +389,63 @@ test('normalizeSpec: has_handler gjelder også button (ingen sync_to-aktig avvis
   assert.strictEqual(r.spec.has_handler, true);
   assert.deepStrictEqual(r.warnings, []);
 });
+
+// ===== Ui.formatNumber / Ui.computeDelta (dash-absorpsjon 5a Task 1:
+// FLYTTET hit fra js/dash.js sin D.formatNumber/D.computeDelta — samme
+// assertioner, repointet til Ui.*, ikke duplisert; dash.js delegerer nå til
+// disse via D.renderPayload sin 'kpi'-mapping, se tests/js/dash.test.js). ====
+
+test('formatNumber: default — heltall grupperes med U+202F', () => {
+  assert.strictEqual(Ui.formatNumber(1234567), '1 234 567');
+});
+
+test('formatNumber: default — 2 desimaler uten etternuller, komma', () => {
+  assert.strictEqual(Ui.formatNumber(3.14159), '3,14');
+  assert.strictEqual(Ui.formatNumber(2.5), '2,5');
+  assert.strictEqual(Ui.formatNumber(2.0), '2');
+});
+
+test('formatNumber: negativ bruker ekte minustegn', () => {
+  assert.strictEqual(Ui.formatNumber(-1234.5), '−1 234,5');
+});
+
+test('formatNumber: fmt ",.1f" — gruppert, 1 desimal', () => {
+  assert.strictEqual(Ui.formatNumber(12345.678, ',.1f'), '12 345,7');
+});
+
+test('formatNumber: fmt ".0f" — ingen gruppering', () => {
+  assert.strictEqual(Ui.formatNumber(12345.678, '.0f'), '12346');
+});
+
+test('formatNumber: fmt ".1%" — prosent', () => {
+  assert.strictEqual(Ui.formatNumber(0.1234, '.1%'), '12,3%');
+});
+
+test('formatNumber: ukjent fmt faller tilbake til default (kaster aldri)', () => {
+  assert.strictEqual(Ui.formatNumber(1234.5, 'kroner'), '1 234,5');
+});
+
+test('formatNumber: ikke-tall passeres som streng', () => {
+  assert.strictEqual(Ui.formatNumber(NaN), 'NaN');
+  assert.strictEqual(Ui.formatNumber(Infinity), 'Infinity');
+});
+
+test('computeDelta: retning, fortegn og god/dårlig', () => {
+  const d = Ui.computeDelta(120, 100, null, 'opp');
+  assert.deepStrictEqual(d, { text: '+20', dir: 'opp', good: true });
+  const n = Ui.computeDelta(80, 100, null, 'opp');
+  assert.deepStrictEqual(n, { text: '−20', dir: 'ned', good: false });
+  const f = Ui.computeDelta(100, 100, null, 'ned');
+  assert.deepStrictEqual(f, { text: '+0', dir: 'flat', good: true });
+});
+
+test('computeDelta: null/ikke-endelig ref gir null', () => {
+  assert.strictEqual(Ui.computeDelta(5, null, null, 'opp'), null);
+  assert.strictEqual(Ui.computeDelta(5, undefined, null, 'opp'), null);
+  assert.strictEqual(Ui.computeDelta(5, Infinity, null, 'opp'), null);
+});
+
+test('computeDelta: bruker fmt på differansen', () => {
+  const d = Ui.computeDelta(0.35, 0.30, '.1%', 'opp');
+  assert.strictEqual(d.text, '+5,0%');
+});

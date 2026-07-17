@@ -1261,6 +1261,53 @@
    dropdown/knapp) — samme oppskrift-familie som Pico bruker for fokusringen. */
 .ui-controls :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
+/* ── payload-vokabular (dash-absorpsjon 5a Task 1): kpi/markdown/text/table/
+   image/figure/error-innhold — FLYTTET fra css/dash.css sine .dash-kpi/
+   .dash-md/.dash-text/.dash-table-wrap/.dash-img/.dash-figure/.dash-error
+   (samme visuelle utseende, nye generiske ui-navn — SAMME regler, ikke en
+   gaffel). js/ui.js sin Ui.renderPayload bygger disse DOM-klassene for BÅDE
+   Ui.on-handlere og (via js/dash.js sin D.renderPayload-delegering) dash
+   sine kort — dash.css beholder kun sine egne kort-/grid-/widget-rammer. */
+.ui-kpi { display: flex; align-items: baseline; gap: 8px; margin: auto 0; flex-wrap: wrap; }
+.ui-kpi-label { flex-basis: 100%; font-size: .8rem; color: var(--text-muted); }
+.ui-kpi-value {
+  font-size: 2.2rem; font-weight: 700; line-height: 1.1;
+  font-variant-numeric: tabular-nums; color: var(--text);
+}
+.ui-kpi-unit { font-size: .9rem; color: var(--text-muted); }
+.ui-kpi-delta {
+  font-size: .95rem; font-weight: 600; font-variant-numeric: tabular-nums;
+  display: inline-flex; align-items: center; gap: 2px;
+}
+.ui-kpi-delta--up { color: var(--success); }
+.ui-kpi-delta--down { color: var(--danger); }
+
+.ui-md { color: var(--text); line-height: 1.55; overflow-wrap: break-word; }
+.ui-md :first-child { margin-top: 0; }
+.ui-text {
+  margin: 0; white-space: pre-wrap; font-size: .85rem;
+  color: var(--text); overflow: auto; max-height: 40vh;
+}
+
+.ui-table-wrap { overflow: auto; max-height: 48vh; }
+.ui-table-wrap table { border-collapse: collapse; width: 100%; font-size: .85rem; color: var(--text); }
+.ui-table-wrap th {
+  position: sticky; top: 0; background: var(--table-header-bg, var(--bg-panel));
+  text-align: left; padding: 6px 8px; border-bottom: 2px solid var(--border);
+}
+.ui-table-wrap td { padding: 4px 8px; border-bottom: 1px solid var(--table-grid, var(--border)); }
+.ui-table-wrap tr:nth-child(even) td { background: color-mix(in srgb, var(--text) 3%, transparent); }
+
+.ui-img { max-width: 100%; display: block; margin: auto; }
+.ui-figure { flex: 1; min-height: 260px; }
+
+.ui-error {
+  padding: 8px 16px; border-radius: 6px; font-size: .85rem;
+  color: var(--text);
+  background: color-mix(in srgb, var(--danger) 10%, var(--bg-panel));
+  border-left: 3px solid color-mix(in srgb, var(--danger) 60%, var(--border));
+}
+
 /* ── #@param-skjemaer (spec 2 W4, Task 2; flyttet inn i .nb-output i widget-
    plassering-fasen): js/param-forms.js DOM-halvdel. .param-form settes inn
    av ParamForms.decorate INNI cellens .nb-output-wrapper, FØR en evt.
