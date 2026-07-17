@@ -1,5 +1,7 @@
 # Editor convergence — one raw editor, one rendered document (design)
 
+**Status 4a:** DELIVERED 2026-07-17 (plan 2026-07-17-editor-convergence-4a.md).
+
 Phase 4 of the unified document model
 (`2026-07-16-unified-document-model-notes.md` §1 and §6.4; decisions 1,
 2, 4, 5 — all resolved by Hans 2026-07-16). The largest phase: it
