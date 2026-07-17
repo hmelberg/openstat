@@ -3245,6 +3245,25 @@
         } },
       r:         { id: 'r',         label: 'R', hlConfig: R_HL_CFG, onActivate: function () { if (!webRReady && !webRLoading) loadWebR(); }, handleTab: handleRTab,
         runSelf: async function (script, ctx) {
+          // Kjør = Restart & kjør alle (Hans' avgjørelse 2026-07-17, se
+          // js/cells.js docBar-kommentaren — doc-barens sesjonschip/Restart-
+          // knapp er fjernet). Notatbok-R (Cells.active()) gjenbruker derfor
+          // window.mdNotebookSession.restart() rett FØR hver kjøring — samme
+          // funksjon den gamle "Restart & kjør alle"-knappen kalte (dens
+          // r-gren: rm(list=ls(envir=globalenv())) + glemme __uiRP-
+          // memoiseringen + DashWebR.invalidateDefs(), se restart() sin egen
+          // kommentar for hvorfor __uiRP må glemmes). Gjenbruk fremfor
+          // duplisering: restart() sin egen webRReady-guard/nbEnsureSession-
+          // hale er allerede riktig for r-modus (ingen Pyodide-boot, se F4-
+          // kommentaren der) — ingen grunn til å holde en andre kopi av den
+          // logikken synkron her. PLAIN R-scripts (ingen #%%-notatbok) er
+          // UBERØRT av vilje — Cells.active()-porten holder dem byte-for-byte
+          // som før, R plain scripts skal fortsatt la .GlobalEnv-datasett
+          // overleve kjøringer.
+          if (window.Cells && window.Cells.active() && window.mdNotebookSession) {
+            try { await window.mdNotebookSession.restart(); }
+            catch (e) { console.warn('R Kjør alle-reset feilet:', e); }
+          }
           await runHybridR(script, ctx.py, { showCommands: ctx.showCommands, profile: ctx.profile });
         } },
       statx: { id: 'statx', label: 'Statx',
@@ -10429,6 +10448,21 @@ async def _m2py_run_segment(_seg_json):
         if (engineNbRunActive) return;
         engineNbRunActive = true;
         try {
+          // Kjør = Restart & kjør alle (Hans' avgjørelse 2026-07-17, se
+          // js/cells.js docBar-kommentaren): gjenbruk window.mdNotebookSession.
+          // restart() FØR celle-løkka — samme funksjon den gamle "Restart &
+          // kjør alle"-knappen kalte (dens brython/micropython-gren: reset()
+          // motorøkta, feilet reset() faller tilbake til invalidate(), minst
+          // en KALD økt fremfor en krasjet Kjør alle). Gjenbruk fremfor
+          // duplisering holder de to logikkene garantert synkrone. Ingen
+          // Pyodide-boot her (bevart garanti): restart() sin brython/
+          // micropython-gren er en ren motor-nivå (Brython/MicroPython)
+          // operasjon som returnerer FØR den generiske nbEnsureSession-halen
+          // (den grenen returnerer tidlig, se restart() sin egen kode).
+          if (window.mdNotebookSession) {
+            try { await window.mdNotebookSession.restart(); }
+            catch (e) { console.warn('motor-reset (Kjør alle) feilet:', e); }
+          }
           if (window.Cells.grantHtmlTrust) window.Cells.grantHtmlTrust();
           var _engPlan = window.Cells.engineRunPlan() || [];
           for (var _ei = 0; _ei < _engPlan.length; _ei++) {

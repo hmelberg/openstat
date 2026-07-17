@@ -1185,22 +1185,12 @@
   line-height: 1.45; white-space: pre-wrap; word-break: break-word; overflow-x: auto; }
 .nb-html-trust-btn { font-size: 12px; padding: 3px 10px; border: 1px solid var(--border);
   border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
-/* ── Fase B1 Task 5: sesjonschip + Restart (plan 2026-07-14). Per-celle
-   kjøreknapp/kjørende-puls flyttet til .doc-cell.nb-running (se § konvergert
-   dokument lenger ned) — den gamle .nb-runbtn/.nb-input.nb-running/
-   .nb-input.nb-stale-tripletten hørte til den fjernede celle-listen (4b §5).
-   Kun eksisterende tema-variabler — ingen nye farger, virker i begge tema
-   uten egne [data-theme]-regler. ── */
-.nb-session-chip { font-size: 12px; opacity: .8; padding: 3px 10px; border: 1px solid var(--border);
-  border-radius: 12px; background: var(--bg-code); color: inherit; white-space: nowrap; }
-.nb-session-chip.nb-session-live { border-color: var(--accent); color: var(--accent); opacity: 1; }
-/* Kald sesjon: ekstra dempet — motstykket til live-regelen over, så begge
-   tilstandsklassene cells.js toggler faktisk har en synlig effekt. */
-.nb-session-chip.nb-session-cold { opacity: .6; }
-.nb-restart-btn { font-size: 12px; padding: 3px 10px; border: 1px solid var(--border);
-  border-radius: 4px; background: transparent; color: inherit; cursor: pointer; margin-left: auto; }
-.nb-restart-btn:hover { border-color: var(--accent); color: var(--accent); }
-.nb-restart-btn:disabled { opacity: .5; cursor: default; }
+/* Fase B1 Task 5 sin sesjonschip + Restart-knapp (.nb-session-chip/
+   .nb-restart-btn) er fjernet (Hans' avgjørelse 2026-07-17): bunnlinjas
+   motus-dropdown viser allerede kjøretids-språket, og Kjør ER NÅ
+   restart-og-kjør-alle (se js/cells.js docBar-kommentaren + index.html
+   btnRun/mdNotebookSession.restart). Per-celle kjørende-puls (.doc-cell.
+   nb-running, se § konvergert dokument lenger ned) er upåvirket.
 
 /* ── ui-widgets (spec 2026-07-15, W1; flyttet inn i .nb-output i widget-
    plassering-fasen): kontrollstripe per celle, js/ui.js. .ui-controls
@@ -1362,7 +1352,7 @@ body.present-active .panel-left, body.present-active #resizer { display: none; }
 .doc-root { padding: 4px 8px; }
 .doc-bar { display: flex; align-items: center; gap: 10px; padding: 2px 0 8px;
   font-size: 12px; color: var(--text-muted); }
-/* Presentasjon: doc-bar (sesjonschip/Restart/varsler) skal ikke vises inni
+/* Presentasjon: doc-bar (nå kun parse-varsler) skal ikke vises inni
    slide-flaten (4b exit gate-funn — gapet task-4-report.md flagget: den
    gamle .nb-present .nb-bar-regelen traff aldri .doc-bar). */
 .nb-present .doc-bar { display: none; }

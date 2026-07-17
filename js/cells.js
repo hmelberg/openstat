@@ -867,10 +867,11 @@
                lastTickValue: null, lastTickTime: 0, htmlTrusted: true,
                // Fase B1 Task 5: per-celle kjøring — "endret siden sist kjørt"
                // (stale) og "har kjørt OK minst én gang" (ranOk), keyet på
-               // celleindeks; sesjonschip/Restart-knapp-referanser og en
-               // engangs-vakt for onStateChange-abonnementet.
-               stale: {}, ranOk: {}, sessionChip: null, restartBtn: null,
-               sessionListenerAttached: false,
+               // celleindeks. Sesjonschip/Restart-knapp (NB.sessionChip/
+               // NB.restartBtn) og deres onStateChange-abonnement er fjernet
+               // (Hans' avgjørelse 2026-07-17, se docBar): doc-baren viser nå
+               // kun parse-varsler.
+               stale: {}, ranOk: {},
                // Editor-konvergens (plan 4b Task 3): markør↔slot-koblingens
                // "hvilken celle er aktiv" — satt av C.setActiveCell (index.html
                // sin cursor-tracker kaller denne), lest av applyActiveCellClass
@@ -1161,27 +1162,33 @@
 
     function docHost() { return document.getElementById('outputArea'); }
 
-    function docBar(parsed) {
+    // Doc-baren viser NÅ KUN parse-varsler (Hans' avgjørelse 2026-07-17):
+    // sesjonschippen («python ● aktiv») og «Restart & kjør alle»-knappen er
+    // fjernet — bunnlinjas motus-dropdown viser allerede kjøretids-språket,
+    // og «Kjør» ER NÅ restart-og-kjør-alle i alle modi. pyodide-familien
+    // (python/duckdb/microdata) bootet allerede en fersk sesjon per Kjør alle
+    // (index.html btnRun → bootNotebookSession, uendret). R- og motor-
+    // notatbøker (brython/micropython) kaller nå window.mdNotebookSession.
+    // restart() (index.html) FØR sin egen kjøreløkke — akkurat samme kall den
+    // gamle Restart-knappen gjorde her i cells.js (onRestartClick, nå
+    // fjernet); restart()-funksjonen selv (index.html) er UENDRET, kun
+    // KALLESTEDET flyttet dit motene sine egne "Kjør alle"-løkker allerede
+    // lever (modeRegistry.r.runSelf / btnRun sin engineNbRunActive-gren).
+    //
+    // Create-on-demand (valgt fremfor "alltid bygg baren, skjul med CSS når
+    // tom"): en tom .doc-bar hadde uansett null synlig innhold og null CSS-
+    // rolle nå som chip/knapp er borte — å aldri sette den inn i DOM-en når
+    // parsed.warnings er tomt er det enkleste som oppfyller kontrakten
+    // ("kun appendes når parsed.warnings.length > 0") uten en ekstra display:
+    // none-regel å holde synkron. docBar() og updateWarnings() (kalt fra
+    // docReconcile sin in-place-gren, Task 3-review-funn 4) deler denne ene
+    // bygge-funksjonen slik at begge veier setter NB.docBarEl/NB.warningsEl
+    // identisk.
+    function docBar(warnings) {
       var bar = el('div', 'doc-bar');
       NB.docBarEl = bar;
-      // Varsel-spanet holdes referert på NB (samme mønster som
-      // NB.sessionChip/NB.restartBtn under) slik at docReconcile sin
-      // updateWarnings() (Task 3-review-funn 4) kan finne/oppdatere/fjerne
-      // AKKURAT denne noden senere uten et querySelector-oppslag.
-      NB.warningsEl = null;
-      if (parsed.warnings.length) {
-        NB.warningsEl = el('span', 'nb-warnings', parsed.warnings.join(' · '));
-        bar.appendChild(NB.warningsEl);
-      }
-      var sessionChip = el('span', 'nb-session-chip');
-      NB.sessionChip = sessionChip;
-      bar.appendChild(sessionChip);
-      var restartBtn = el('button', 'nb-restart-btn', t('Restart & kjør alle'));
-      restartBtn.type = 'button';
-      restartBtn.title = t('Restart & kjør alle');
-      restartBtn.addEventListener('click', onRestartClick);
-      NB.restartBtn = restartBtn;
-      bar.appendChild(restartBtn);
+      NB.warningsEl = el('span', 'nb-warnings', warnings.join(' · '));
+      bar.appendChild(NB.warningsEl);
       return bar;
     }
 
@@ -1190,25 +1197,19 @@
     // en kroppsredigering som endret et #tag-varsel (duplisert nøkkel,
     // ugyldig verdi, …) uten å røre strukturen lot baren stå med et foreldet
     // varselsett helt til neste strukturendring eller eksplisitt docRender().
-    // Speiler docBar() sin egen opprinnelige bygging (varsel-spanet FØRST i
-    // .doc-bar, foran sesjonschippen) — oppretter/fjerner spanet etter behov,
-    // oppdaterer kun teksten når både et ferskt varselsett og et eksisterende
-    // span finnes fra før.
+    // Nå som baren KUN finnes når det er noe å varsle om (create-on-demand,
+    // se docBar over), må denne funksjonen også opprette/fjerne selve
+    // .doc-bar-noden (ikke bare varsel-spanet inni den): tomt → ikke-tomt
+    // setter inn en fersk bar som NB.root sitt FØRSTE barn (samme plassering
+    // som docRender selv bruker); ikke-tomt → tomt fjerner hele baren; begge
+    // ikke-tomme oppdaterer kun teksten på plass.
     function updateWarnings(warnings) {
-      var bar = NB.docBarEl;
-      if (!bar) return;
-      if (warnings.length) {
-        var text = warnings.join(' · ');
-        if (NB.warningsEl) {
-          NB.warningsEl.textContent = text;
-        } else {
-          NB.warningsEl = el('span', 'nb-warnings', text);
-          bar.insertBefore(NB.warningsEl, bar.children[0] || null);
-        }
-      } else if (NB.warningsEl) {
-        NB.warningsEl.remove();
-        NB.warningsEl = null;
+      if (!warnings.length) {
+        if (NB.docBarEl) { NB.docBarEl.remove(); NB.docBarEl = null; NB.warningsEl = null; }
+        return;
       }
+      if (NB.warningsEl) { NB.warningsEl.textContent = warnings.join(' · '); return; }
+      if (NB.root) NB.root.insertBefore(docBar(warnings), NB.root.children[0] || null);
     }
 
     // Slot→markør (spec §5, plan 4b Task 3): klikk på selve cellekroppen
@@ -1327,9 +1328,10 @@
       // MutationObserver her (én ny instans per docRender-kall) var dermed
       // en ren duplikat-forsterkning (samme mdScheduleResultEnhance-kall to
       // ganger per mutasjon) — fjernet i 4b §5 (spec 2026-07-17 §5-sjekklisten).
-      NB.root.appendChild(docBar(parsed));
-      attachSessionListener();
-      updateSessionChip();
+      // Baren er create-on-demand (se docBar/updateWarnings sin egen
+      // kommentar) — kun appendes når det faktisk er noe å varsle om.
+      NB.docBarEl = null; NB.warningsEl = null;
+      if (parsed.warnings.length) NB.root.appendChild(docBar(parsed.warnings));
       for (var i = 0; i < NB.cells.length; i++) {
         var type = C.resolveType(NB.cells[i], NB.docMode);
         if (type === 'skip') continue;               // spec §1: skip rendres ikke
@@ -1356,10 +1358,6 @@
       // riktig ▶ ved neste cursor-hendelse (samme begrunnelse som resten av
       // denne resetten).
       if (typeof global.mdSetActiveCellLine === 'function') global.mdSetActiveCellLine(null, null);
-      // Render-tidens engangs-sjekk (poll-fri per Task 5-kontrakten, se
-      // gamle render()): fanger et Kjør alle/Forklar-løp som allerede er i
-      // gang idet dokumentet (re-)rendres.
-      setNbButtonsDisabled(!!(global.mdIsScriptRunning && global.mdIsScriptRunning()));
       // Presentasjons-overlevelse (spec §2, gjenbruker gamle render() sin
       // hale uendret, mot doc-cellene): host.innerHTML=''-rebyggingen over
       // kastet nav-nodene/synlighetsklassene/nb-present — regn planen på
@@ -1946,10 +1944,11 @@
         nb: { echo: false, last: true },
         cellIdx: idx
       };
-      // Task 5: kjøre-livssyklusen driver BÅDE den kjørende cellens
-      // .nb-running-puls OG deaktivering av ALLE kjøreknapper + Restart —
-      // poll-fritt, symmetrisk start/slutt-par (ingen finally() avhengighet:
-      // begge then-grenene under fullfører alltid uten å kaste videre).
+      // Task 5: kjøre-livssyklusen driver den kjørende cellens .nb-running-
+      // puls — poll-fritt, symmetrisk start/slutt-par (ingen finally()
+      // avhengighet: begge then-grenene under fullfører alltid uten å kaste
+      // videre). Deaktiverte tidligere OGSÅ Restart-knappen (setNbButtonsDisabled)
+      // og oppdaterte sesjonschippen — begge fjernet 2026-07-17.
       setRunningUi(idx, true);
       return global.mdRunNotebookCell(payload).then(function (res) {
         renderCellResult(idx, out, res);
@@ -1959,7 +1958,6 @@
         C._afterCellRun(idx, false);
       }).then(function () {
         setRunningUi(idx, false);
-        updateSessionChip();
         // Skjema-stripe-rekkefølge (widget-plassering-fasen): IKKE lenger en
         // reorder-reassert her — js/param-forms.js og js/ui.js setter nå
         // begge inn sin stripe på en FAST plass inni `.nb-output`
@@ -2067,7 +2065,6 @@
         renderCellResult(idx, out, { error: (err && err.message) || String(err) });
       }).then(function () {
         setRunningUi(idx, false);
-        updateSessionChip();
       });
     };
 
@@ -2138,8 +2135,9 @@
         ranOk[i] = true;
         var c = NB.cells[i];
         if (c && c._wrap) c._wrap.classList.remove('nb-stale');
-        // Kjør-chip: "Kjør alle"/"Restart & kjør alle"/Forklar (Cells.beginRun,
-        // eneste kaller av denne funksjonen) regner — akkurat som for
+        // Kjør-chip: "Kjør alle" (nå alltid restart-og-kjør-alle, se docBar)/
+        // Forklar (Cells.beginRun, eneste kaller av denne funksjonen) regner
+        // — akkurat som for
         // .nb-stale over — HELE kjøringen som frisk FØR selve løkka starter
         // (bevisst forenkling, se beginRun sin kommentar) — chippen for
         // enhver celle som måtte ha en, skjules derfor her, samtidig med
@@ -2152,75 +2150,14 @@
       NB.ranOk = ranOk;
     }
 
-    // Poll-fri knappe-deaktivering (Task 5): flippes fra selve kjøre-
-    // livssyklusen (setRunningUi, kalt av runCell) i tillegg til docRender()-
-    // tidens engangs-sjekk av mdIsScriptRunning() — Kjør alle/Forklar sin
-    // egen kjøreløkke har ingen tilbakekalls-hake inn i cells.js sin DOM-
-    // halvdel underveis, så et allerede-rendret notatbok-visning som IKKE
-    // re-rendres midt i et Kjør alle-løp forblir uendret (akseptert scope,
-    // se brief). 4b §5: c._runBtn/c._toolEls (per-celle kjøreknapp +
-    // verktøylinje) hørte til den fjernede celle-listen (cellNode/
-    // buildToolbar) — docCellNode setter ALDRI disse referansene, så den
-    // gamle løkka over var unåbar død kode. Restart-knappen (docBar) er
-    // fortsatt den eneste faktiske deaktiveringen her.
-    function setNbButtonsDisabled(disabled) {
-      if (NB.restartBtn) NB.restartBtn.disabled = disabled;
-    }
-
+    // Kjørende-puls (Task 5, forenklet 2026-07-17): NB.restartBtn-
+    // deaktiveringen setNbButtonsDisabled tidligere drev herfra (og fra
+    // docRender()-tidens engangs-sjekk av mdIsScriptRunning()) er fjernet
+    // sammen med Restart-knappen selv (se docBar) — .nb-running-klassen på
+    // selve celle-wrapperen er igjen det eneste denne funksjonen gjør.
     function setRunningUi(idx, running) {
       var c = NB.cells[idx];
       if (c && c._wrap) c._wrap.classList.toggle('nb-running', running);
-      setNbButtonsDisabled(running);
-    }
-
-    // Sesjonschip (Task 5): kjøretid + levende/kald fra mdNotebookSession.
-    // Globalen mangler i stub-DOM-testene og kan i prinsippet mangle i
-    // browseren også (defensivt) — vis dokumentmodus og "kald" i stedet for
-    // å kaste.
-    function updateSessionChip() {
-      if (!NB.sessionChip) return;
-      var sess = global.mdNotebookSession;
-      var rt = (sess && typeof sess.runtime === 'function') ? sess.runtime() : null;
-      var live = !!(sess && typeof sess.isLive === 'function' && sess.isLive());
-      var label = rt || NB.docMode;
-      NB.sessionChip.textContent = label + ' ' + (live ? ('● ' + t('aktiv')) : ('○ ' + t('kald')));
-      NB.sessionChip.classList.toggle('nb-session-live', live);
-      NB.sessionChip.classList.toggle('nb-session-cold', !live);
-    }
-
-    // Abonner PRESIS ÉN gang på hele modulets levetid (NB.sessionListenerAttached
-    // er et closure-singleton, som resten av NB) — render() kan kalles mange
-    // ganger (strukturendringer), men mdNotebookSession.onStateChange skal
-    // ikke få flere callbacks stablet opp for hver re-rendring.
-    function attachSessionListener() {
-      if (NB.sessionListenerAttached) return;
-      var sess = global.mdNotebookSession;
-      if (!sess || typeof sess.onStateChange !== 'function') return;
-      NB.sessionListenerAttached = true;
-      sess.onStateChange(function () { updateSessionChip(); });
-    }
-
-    // "Restart & kjør alle": tving en frisk sesjon, deretter samme "Kjør
-    // alle"-knapp som index.html allerede driver (btnRun) — ingen ny
-    // kjørelogikk duplisert her. Guard for window.mdNotebookSession sitt
-    // fravær (stub-DOM-tester, og defensivt i browseren).
-    function onRestartClick() {
-      // Guard mot en pågående Kjør alle/Forklar (final-review F3, speiler
-      // C.runCell sin egen sjekk): uten denne kunne Restart rive vekk
-      // e/_g under føttene på en kjøring som allerede er i gang.
-      if (global.mdIsScriptRunning && global.mdIsScriptRunning()) return;
-      var sess = global.mdNotebookSession;
-      if (!sess || typeof sess.restart !== 'function') return;
-      setNbButtonsDisabled(true);
-      sess.restart().then(function () {
-        updateSessionChip();
-        setNbButtonsDisabled(!!(global.mdIsScriptRunning && global.mdIsScriptRunning()));
-        var btn = $('btnRun');
-        if (btn) btn.click();
-      }, function () {
-        updateSessionChip();
-        setNbButtonsDisabled(!!(global.mdIsScriptRunning && global.mdIsScriptRunning()));
-      });
     }
 
     // Rendrer mdRunNotebookCell sitt resultat inn i ÉN celles output-node:

@@ -154,12 +154,6 @@ function freshEnv() {
   containerEl.appendChild(outputAreaEl);
   const wrapEl = new FakeEl('div');
   wrapEl.className = 'code-input-wrap';
-  // Stub for "Restart & kjør alle" (Task 5): klikk-mål index.html eier i det
-  // ekte dokumentet (btnRun) — her bare en klikkbar knapp vi kan observere.
-  const btnRunEl = new FakeEl('button');
-  btnRunEl.id = 'btnRun';
-  let btnRunClicks = 0;
-  btnRunEl.click = () => { btnRunClicks++; };
 
   global.document = {
     // Task 4 (spec 2026-07-17 §3): presentStart/presentExit dytter/fjerner
@@ -170,7 +164,6 @@ function freshEnv() {
     body: bodyEl,
     getElementById: (id) => {
       if (id === 'scriptInput') return scriptInputEl;
-      if (id === 'btnRun') return btnRunEl;
       if (id === 'outputArea') return outputAreaEl;
       return null;
     },
@@ -232,9 +225,7 @@ function freshEnv() {
     containerEl,
     outputAreaEl,
     wrapEl,
-    btnRunEl,
     bodyEl,
-    getBtnRunClicks: () => btnRunClicks,
     getLayoutModeCalls: () => layoutModeCalls.slice(),
     getInputHiddenCalls: () => inputHiddenCalls.slice(),
     getSyncViewDropdownCalls: () => syncViewDropdownCalls.slice(),
@@ -725,20 +716,15 @@ function cellParts(containerEl, idx) {
 }
 function click(node) { node.dispatchEvent({ type: 'click' }); }
 
-// .doc-bar (4a, tidligere .nb-bar): sesjonschip + Restart-knapp lever der,
-// ikke inni en celle. Rå tekst-knappen som levde i den gamle .nb-bar er
-// borte (docBar, spec §1: «Rå tekst» dør sammen med nb-bar).
+// .doc-bar (4a, tidligere .nb-bar): NÅ KUN parse-varsler (Hans' avgjørelse
+// 2026-07-17 — sesjonschip/Restart-knapp fjernet, se js/cells.js docBar) —
+// og create-on-demand (finnes IKKE i DOM-en når parsed.warnings er tomt, se
+// samme kommentar), så nbBar() kan returnere undefined selv etter en vellykket
+// rendring. Rå tekst-knappen som levde i den gamle .nb-bar er også borte
+// (docBar, spec §1: «Rå tekst» dør sammen med nb-bar).
 function nbBar(containerEl) {
   const root = nbRoot(containerEl);
   return root.children.find((n) => n.classList && n.classList.contains('doc-bar'));
-}
-function sessionChipEl(containerEl) {
-  const bar = nbBar(containerEl);
-  return bar && bar.children.find((n) => n.classList && n.classList.contains('nb-session-chip'));
-}
-function restartBtnEl(containerEl) {
-  const bar = nbBar(containerEl);
-  return bar && bar.children.find((n) => n.tag === 'button' && n.classList && n.classList.contains('nb-restart-btn'));
 }
 
 test('runCell: eksplisitt python-celle → riktig payload (kind/cellIdx/nb), rendrer kun i egen slot', async () => {
@@ -992,13 +978,13 @@ test('strip (.param-form) overlever renderCellResult sin purge by construction �
 
 // 4a: den gamle testen sjekket OGSÅ per-celle ▶-knapper (cell0.runBtn/
 // cell1.runBtn) og .nb-running på .nb-input (cell.input) — begge er borte
-// (docCellNode har verken kjøreknapp eller editor-halvdel, spec §1). Restart-
-// knappen (docBar) og .nb-running-tinten (nå på selve doc-cell-wrapperen,
-// c._wrap — se setRunningUi/js/cells.js) er de eneste overlevende
-// UI-observerbare delene av denne kontrakten; resten dekkes av
-// setNbButtonsDisabled sin interne c._runBtn/c._toolEls-løkke, som er
-// dødt kode inntil 4b (ingen slike noder finnes lenger å deaktivere).
-test('kjøreknapper + Restart deaktiveres mens en celle-kjøring pågår, gjenopprettes etter fullført kjøring', async () => {
+// (docCellNode har verken kjøreknapp eller editor-halvdel, spec §1).
+// Sesjonschip/Restart-knappen (docBar) er fjernet 2026-07-17 (Hans'
+// avgjørelse — «Kjør» ER NÅ restart-og-kjør-alle i alle modi, se js/cells.js
+// docBar-kommentaren) — .nb-running-tinten på selve doc-cell-wrapperen
+// (c._wrap, se setRunningUi) er nå den eneste UI-observerbare delen av
+// denne kontrakten.
+test('celle-kjøring: kun den kjørende cellen får .nb-running, fjernes etter fullført kjøring', async () => {
   const { C, scriptInputEl } = freshEnv();
   scriptInputEl.value = '#%% python\na = 1\n#%% python\na + 1\n';
   C.init('python');
@@ -1009,109 +995,17 @@ test('kjøreknapper + Restart deaktiveres mens en celle-kjøring pågår, gjenop
 
   const cell0 = C.cellElementAt(0);
   const cell1 = C.cellElementAt(1);
-  const restartBtn = restartBtnEl();
 
   const p = C.runCell(0);
-  assert.strictEqual(restartBtn.disabled, true, 'Restart-knappen deaktiveres under kjøring');
   assert.strictEqual(cell0.classList.contains('nb-running'), true, 'kjørende celle får .nb-running');
   assert.strictEqual(cell1.classList.contains('nb-running'), false, 'kun den kjørende cellen får .nb-running');
 
   resolveRun({ text: '2' });
   await p;
 
-  assert.strictEqual(restartBtn.disabled, false, 'Restart-knappen re-aktiveres etter fullført kjøring');
   assert.strictEqual(cell0.classList.contains('nb-running'), false, '.nb-running fjernes i finally');
 });
 
-test('docRender() setter Restart-knappen som disabled fra start hvis mdIsScriptRunning() allerede er true', () => {
-  const { C, scriptInputEl } = freshEnv();
-  global.mdIsScriptRunning = () => true;
-  scriptInputEl.value = '#%% python\n1\n';
-  C.init('python');
-
-  const restartBtn = restartBtnEl();
-  assert.strictEqual(restartBtn.disabled, true, 'docRender-tidens sjekk av mdIsScriptRunning() deaktiverer Restart');
-});
-
-test('sesjonschip: viser kjøretid + kald/aktiv fra mdNotebookSession, oppdateres via onStateChange', () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
-  let live = false;
-  let stateCb = null;
-  global.mdNotebookSession = {
-    runtime: () => 'python',
-    isLive: () => live,
-    onStateChange: (cb) => { stateCb = cb; },
-    restart: () => Promise.resolve(),
-  };
-  scriptInputEl.value = '#%% python\n1\n';
-  C.init('python');
-
-  const chip = sessionChipEl(containerEl);
-  assert.ok(chip.textContent.indexOf('python') !== -1, 'chip viser kjøretidsnavn');
-  assert.ok(chip.textContent.indexOf('kald') !== -1, 'kald ved isLive()===false');
-  assert.strictEqual(chip.classList.contains('nb-session-live'), false);
-
-  live = true;
-  assert.ok(typeof stateCb === 'function', 'onStateChange skal ha registrert en callback');
-  stateCb(true);
-
-  assert.ok(chip.textContent.indexOf('aktiv') !== -1, 'chip oppdateres til aktiv via onStateChange-kallet');
-  assert.strictEqual(chip.classList.contains('nb-session-live'), true);
-
-  delete global.mdNotebookSession;
-});
-
-test('sesjonschip: window.mdNotebookSession fraværende (stub-DOM) → viser dokumentmodus, ingen krasj', () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
-  delete global.mdNotebookSession;
-  scriptInputEl.value = '#%% python\n1\n';
-  C.init('python');
-
-  const chip = sessionChipEl(containerEl);
-  assert.ok(chip, 'chip-elementet finnes selv uten mdNotebookSession');
-  assert.ok(chip.textContent.indexOf('python') !== -1, 'faller tilbake til dokumentmodus som kjøretidsnavn');
-});
-
-test('Restart & kjør alle: kaller mdNotebookSession.restart() og deretter btnRun.click()', async () => {
-  const { C, scriptInputEl, containerEl, getBtnRunClicks } = freshEnv();
-  let restarted = false;
-  global.mdNotebookSession = {
-    runtime: () => 'python',
-    isLive: () => true,
-    onStateChange: () => {},
-    restart: () => { restarted = true; return Promise.resolve(); },
-  };
-  // final-review F3: onRestartClick guarder nå mot mdIsScriptRunning() —
-  // eksplisitt false her (i stedet for å stole på forrige tests globale
-  // stub) siden en foregående test bevisst lot den stå på true.
-  global.mdIsScriptRunning = () => false;
-  scriptInputEl.value = '#%% python\n1\n';
-  C.init('python');
-
-  const restartBtn = restartBtnEl(containerEl);
-  restartBtn.dispatchEvent({ type: 'click' });
-  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
-
-  assert.strictEqual(restarted, true, 'mdNotebookSession.restart() skal ha blitt kalt');
-  assert.strictEqual(getBtnRunClicks(), 1, 'btnRun.click() skal kalles ETTER restart()');
-
-  delete global.mdNotebookSession;
-});
-
-test('Restart & kjør alle: window.mdNotebookSession fraværende → klikk gjør ingenting, ingen krasj (stub-DOM-guard)', () => {
-  const { C, scriptInputEl, containerEl, getBtnRunClicks } = freshEnv();
-  delete global.mdNotebookSession;
-  scriptInputEl.value = '#%% python\n1\n';
-  C.init('python');
-
-  const restartBtn = restartBtnEl(containerEl);
-  assert.doesNotThrow(() => restartBtn.dispatchEvent({ type: 'click' }));
-  assert.strictEqual(getBtnRunClicks(), 0, 'uten sesjon skal btnRun aldri klikkes');
-});
-
-// final-review F3: Restart & kjør alle skal IKKE virke mens en Kjør alle/
-// Forklar-kjøring allerede pågår — uten denne guarden kunne Restart rive
-// vekk e/_g under føttene på den pågående kjøringen.
 // ---- Task 2 (ui-widgets W1): cellIndexById / cellElementAt / contentLoaded→Ui.resetDocument ----
 
 test('cellIndexById: finner celle med gitt id', () => {
@@ -1238,28 +1132,6 @@ test('contentLoaded(): window.Ui fraværende (ikke lastet ennå) → ingen krasj
   assert.doesNotThrow(() => C.contentLoaded());
 });
 
-test('Restart & kjør alle: nekter mens mdIsScriptRunning() er true (kaller ikke mdNotebookSession.restart())', async () => {
-  const { C, scriptInputEl, containerEl, getBtnRunClicks } = freshEnv();
-  let restarted = false;
-  global.mdNotebookSession = {
-    runtime: () => 'python',
-    isLive: () => true,
-    onStateChange: () => {},
-    restart: () => { restarted = true; return Promise.resolve(); },
-  };
-  global.mdIsScriptRunning = () => true;
-  scriptInputEl.value = '#%% python\n1\n';
-  C.init('python');
-
-  const restartBtn = restartBtnEl(containerEl);
-  restartBtn.dispatchEvent({ type: 'click' });
-  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
-
-  assert.strictEqual(restarted, false, 'mdNotebookSession.restart() skal IKKE kalles mens en kjøring pågår');
-  assert.strictEqual(getBtnRunClicks(), 0, 'btnRun skal heller ikke klikkes');
-
-  delete global.mdNotebookSession;
-});
 // ---- #tag-direktiver (spec 2026-07-16-tag-directives-design.md, Task 4) ----
 
 // 4a: den gamle testen sjekket ekstra at CELLENS TEXTAREA (c._ta, editor-
@@ -1691,7 +1563,11 @@ test('forsoning: endret param-celle kaller ParamForms.syncSource (ikke decorate)
 // kroppsredigering (samme struktur, kun kildetekst) ble stående til neste
 // strukturendring eller eksplisitt docRender(). updateWarnings() skal nå
 // oppdatere/opprette/fjerne .nb-warnings-spanet i .doc-bar direkte i
-// in-place-grenen.
+// in-place-grenen. 2026-07-17 (Hans' avgjørelse, create-on-demand — se
+// js/cells.js docBar-kommentaren): «fjernes» betyr nå at HELE .doc-bar-noden
+// forsvinner fra DOM-en (ikke bare varsel-spanet inni den, siden baren ikke
+// har noe annet innhold igjen) — nbBar(containerEl) returnerer derfor
+// undefined, ikke en tom bar, når varselsettet er tomt.
 test('forsoning: doc-bar sine parse-varsler oppdateres av in-place-grenen (opprettes/oppdateres/fjernes)', () => {
   const { C, scriptInputEl, containerEl } = freshEnv();
   // '#tag.style' med en ugyldig verdi gir et varsel uten å endre strukturen
@@ -1699,7 +1575,7 @@ test('forsoning: doc-bar sine parse-varsler oppdateres av in-place-grenen (oppre
   scriptInputEl.value = '#%% python\n#tag.style = "rar"\nx = 1\n';
   C.init('python');
   let bar = nbBar(containerEl);
-  let warn = bar.children.find((n) => n.classList && n.classList.contains('nb-warnings'));
+  let warn = bar && bar.children.find((n) => n.classList && n.classList.contains('nb-warnings'));
   assert.ok(warn, 'varsel-span finnes ved initial rendring');
   assert.ok(warn.textContent.indexOf('style') !== -1);
 
@@ -1707,15 +1583,14 @@ test('forsoning: doc-bar sine parse-varsler oppdateres av in-place-grenen (oppre
   scriptInputEl.value = '#%% python\n#tag.style = "note"\nx = 1\n';
   C.refreshFromScript();
   bar = nbBar(containerEl);
-  warn = bar.children.find((n) => n.classList && n.classList.contains('nb-warnings'));
-  assert.strictEqual(warn, undefined, 'varsel-spanet fjernes når varselsettet blir tomt');
+  assert.strictEqual(bar, undefined, 'HELE .doc-bar-noden fjernes når varselsettet blir tomt (create-on-demand)');
 
-  // Sett et NYTT varsel (ugyldig #tag-nøkkel) — spanet skal opprettes på nytt.
+  // Sett et NYTT varsel (ugyldig #tag-nøkkel) — baren skal opprettes på nytt.
   scriptInputEl.value = '#%% python\n#tag.ukjentnokkel = "x"\nx = 1\n';
   C.refreshFromScript();
   bar = nbBar(containerEl);
-  warn = bar.children.find((n) => n.classList && n.classList.contains('nb-warnings'));
-  assert.ok(warn, 'varsel-spanet opprettes på nytt når et nytt varsel dukker opp');
+  warn = bar && bar.children.find((n) => n.classList && n.classList.contains('nb-warnings'));
+  assert.ok(warn, 'doc-baren og varsel-spanet opprettes på nytt når et nytt varsel dukker opp');
   assert.ok(warn.textContent.indexOf('ukjentnokkel') !== -1);
 });
 
