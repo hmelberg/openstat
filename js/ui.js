@@ -33,7 +33,8 @@
     options: 1,
     rerun: 1,
     placement: 1,
-    sync_to: 1
+    sync_to: 1,
+    has_handler: 1
   };
 
   // Gyldige placement-verdier (per-kontroll plassering, Task 3) — samme
@@ -98,6 +99,17 @@
       } else {
         warnings.push('ugyldig placement: ' + placementVal);
       }
+    }
+
+    // has_handler (ui-html-fasen, Task 1, widget-callable-kanalen): fasaden
+    // (Task 2) setter denne når on_change=/on_click= er et python-callable
+    // (i motsetning til et cellenavn-strengalias) — DOM-halvdelens
+    // Ui.registerControl leser flagget for å pakke returverdien inn i
+    // {value,key} (se der) slik fasaden får nøkkelen å binde
+    // Ui.bindControlHandler mot. Ren boolsk kopiering, ingen validering
+    // utover det (enhver "sannferdig" verdi normaliseres til ekte boolsk).
+    if (raw.has_handler !== undefined) {
+      spec.has_handler = !!raw.has_handler;
     }
 
     // sync_to (fase 3, spec §3): push av verdien inn i en navngitt sesjons-
@@ -266,6 +278,14 @@
     // DOM-referansene for gjeldende, LEVENDE kontroller (oppdateres i
     // registerControl, fjernes i endCellRun/resetDocument).
     var _controls = {};
+    // controlKey → handler-funksjon (ui-html-fasen, Task 1: widget-callable-
+    // kanalen). Satt av Ui.bindControlHandler (kalt av fasaden RETT ETTER
+    // registerControl når spec.has_handler er sann), lest av _wireChange/
+    // knappe-klikk i stedet for å fyre en rerun. Samme guardede .destroy-
+    // livssyklus som _bindings (fjernes i endCellRun/resetDocument/ved
+    // erstatning) — pyodide-proxier destrueres, brython/mpy-funksjoner er
+    // en no-op der.
+    var _controlHandlers = {};
     // cellIdx → { top?, bottom?, left? } — cellens .ui-controls-noder PER
     // POSISJON (Task 3, per-kontroll plassering; tidligere én enkelt node
     // per celle) for lazy gjenbruk mellom kall.
@@ -391,14 +411,45 @@
       catch (e) { console.warn('Ui sync_to: ' + ((e && e.message) || e)); }
     }
 
+    // Widget-callable-kanalen (ui-html-fasen, Task 1): fyrer den bundne
+    // handleren for `key` (om noen finnes) i stedet for en rerun. Samme
+    // nekt-mens-kjøring-pågår-filosofi og feil-innpakning som
+    // _dispatchBinding (W5.2, under) bruker for element-event-bindinger —
+    // duplisert her fremfor delt fordi payload-formen og mål-cellen
+    // (ctrl.cellIdx, ikke en binding sitt cellIdx) er kontroll-spesifikk.
+    // Returnerer true når EN handler fantes (uansett om den ble droppet) —
+    // "en kontroll med et callable rerunner aldri", så _wireChange skal
+    // ALDRI falle videre til fireDebounced() når dette er tilfellet.
+    function _fireControlHandler(key, value) {
+      var handler = _controlHandlers[key];
+      if (!handler) return false;
+      if (global.mdIsScriptRunning && global.mdIsScriptRunning()) {
+        console.debug('Ui: kontroll-handler droppet (kjøring pågår)');
+        return true;
+      }
+      var payloadJson;
+      try {
+        payloadJson = handler(JSON.stringify({ value: value }));
+      } catch (err) {
+        payloadJson = JSON.stringify({ kind: 'error', text: String((err && err.message) || err) });
+      }
+      var ctrl = _controls[key];
+      Ui.renderEventResult({ cellIdx: ctrl ? ctrl.cellIdx : null, target: null }, payloadJson);
+      return true;
+    }
+
     // Felles endrings-håndterer: lagrer verdien UMIDDELBART (getValue()),
-    // debouncer selve rerun-kallet 150ms.
+    // debouncer selve rerun-kallet 150ms — MED MINDRE en handler er bundet
+    // (widget-callable-kanalen, Task 1): da fyres handleren i stedet, og
+    // reruen droppes helt (dokumentert: en kontroll med et callable
+    // rerunner aldri). _syncPush kjører uansett FØRST, uendret.
     function _wireChange(key, getValue) {
       var fireDebounced = _debounce(function () { _rerunFor(key); }, 150);
       return function () {
         _values[key] = getValue();
         var ctrl = _controls[key];
         if (ctrl) _syncPush(ctrl.spec, _values[key]);
+        if (_fireControlHandler(key, _values[key])) return;
         fireDebounced();
       };
     }
@@ -491,8 +542,14 @@
       var label = spec.label || (typeof t === 'function' ? t('Kjør') : 'Kjør');
       var btn = _el('button', 'ui-widget ui-widget--button', label);
       btn.type = 'button';
-      // Ingen debounce: et knappeklikk skal rerunne UMIDDELBART.
-      btn.addEventListener('click', function () { _rerunFor(key); });
+      // Ingen debounce: et knappeklikk skal rerunne UMIDDELBART — MED
+      // MINDRE en handler er bundet (widget-callable-kanalen, Task 1): da
+      // fyres handleren i stedet (knapper har ingen lagret verdi, se
+      // over — value-argumentet til handleren er derfor alltid null).
+      btn.addEventListener('click', function () {
+        if (_controlHandlers[key]) { _fireControlHandler(key, null); return; }
+        _rerunFor(key);
+      });
       return { wrap: btn, input: btn };
     }
 
@@ -691,8 +748,11 @@
     }
 
     /**
-     * _registerInto(cellIdx, cellEl, spec) → gjeldende verdi (rå JS-verdi,
-     * ikke JSON-streng), eller null for button. Delt kjerne mellom
+     * _registerInto(cellIdx, cellEl, spec) → {value, key} — value er
+     * gjeldende verdi (rå JS-verdi, ikke JSON-streng; null for button), key
+     * er kontrollens stabile controlKey (ui-html-fasen, Task 1: fasaden
+     * trenger nøkkelen for å binde Ui.bindControlHandler når
+     * spec.has_handler er sann — se Ui.registerControl). Delt kjerne mellom
      * Ui.registerControl (ctx-drevet, ett spec om gangen) og
      * Ui.registerFromRegistry (eksplisitt cellIdx, et helt array om gangen) —
      * begge kaller inn HIT for selve registrerings-/ombyggingslogikken; de er
@@ -768,6 +828,17 @@
         if (existing.wrap && typeof existing.wrap.remove === 'function') existing.wrap.remove();
         delete _controls[key];
         delete _values[key];
+        // ui-html-fasen (Task 1): en type-endret kontroll er en HELT NY
+        // identitet under samme nøkkel — en gammel bundet handler (om noen)
+        // hører til den forrige typens semantikk og må ikke henge igjen.
+        // Fasaden re-binder (Ui.bindControlHandler) uansett på nytt i SAMME
+        // registrerings-runde dersom den nye specen også har has_handler,
+        // så denne sletting-med-destroy er ren hygiene mot lekkasje for
+        // tilfellet der den IKKE har det lenger.
+        if (_controlHandlers[key]) {
+          _destroyHandler({ handler: _controlHandlers[key] });
+          delete _controlHandlers[key];
+        }
         existing = undefined;
       } else if (placementChanged) {
         if (existing.wrap && typeof existing.wrap.remove === 'function') existing.wrap.remove();
@@ -778,13 +849,14 @@
       if (spec.type === 'button') {
         if (!existing) {
           var builtBtn = _buildButton(key, cellIdx, spec);
+          if (builtBtn.input && typeof builtBtn.input.setAttribute === 'function') builtBtn.input.setAttribute('data-ui-key', key);
           strip.insertBefore(builtBtn.wrap, reinsertBefore);
           _controls[key] = { key: key, cellIdx: cellIdx, spec: spec, wrap: builtBtn.wrap, input: builtBtn.input, type: 'button', placement: pos };
         } else {
           existing.spec = spec;
           existing.wrap.textContent = spec.label || (typeof t === 'function' ? t('Kjør') : 'Kjør');
         }
-        return null;
+        return { value: null, key: key };
       }
 
       var value;
@@ -794,6 +866,11 @@
         var stored = _values.hasOwnProperty(key) ? _values[key] : spec.value;
         var builder = _BUILDERS[spec.type];
         var built = builder(key, cellIdx, spec, stored);
+        // data-ui-key (spec-krav, ui-html-fasen Task 1): stabil DOM-identitet
+        // for kontrollen — bygges kun ved fersk node (nøkkelen er stabil på
+        // tvers av re-registreringer av SAMME kontroll, ingen grunn til å
+        // re-sette den ved en ren _updateControlSpec-oppdatering over).
+        if (built.input && typeof built.input.setAttribute === 'function') built.input.setAttribute('data-ui-key', key);
         strip.insertBefore(built.wrap, reinsertBefore);
         _controls[key] = {
           key: key, cellIdx: cellIdx, spec: spec, wrap: built.wrap, input: built.input,
@@ -803,7 +880,7 @@
       }
       _values[key] = value;
       _syncPush(spec, value);
-      return value;
+      return { value: value, key: key };
     }
 
     /**
@@ -811,6 +888,13 @@
      * null (ingen aktiv kjørekontekst — "plain script"-fallback, spec §krav).
      * Ctx-drevet tynn wrapper rundt _registerInto: løser (cellIdx, cellEl) via
      * window.mdUiRunCtx() og parser/normaliserer ÉN spec, deretter delegerer.
+     *
+     * Widget-callable-kanalen (ui-html-fasen, Task 1): når spec.has_handler
+     * er sann UTVIDES returen til et JSON-OBJEKT `{value, key}` (nøkkelen
+     * fasaden trenger for det påfølgende Ui.bindControlHandler-kallet) —
+     * ALLE andre specs (has_handler fraværende/usann) beholder den gamle,
+     * enkle verdi-returen UENDRET (bakoverkompatibelt med pyodide/brython/
+     * mpy/R-fasadene slik de er i dag).
      */
     Ui.registerControl = function (specJson) {
       var ctx = (typeof global.mdUiRunCtx === 'function') ? global.mdUiRunCtx() : null;
@@ -833,9 +917,12 @@
       var spec = result.spec;
       if (!spec) return null;
 
-      var value = _registerInto(ctx.doc === true ? null : ctx.cellIdx,
-                                ctx.doc === true ? null : ctx.cellEl, spec);
-      return JSON.stringify(value);
+      var reg = _registerInto(ctx.doc === true ? null : ctx.cellIdx,
+                              ctx.doc === true ? null : ctx.cellEl, spec);
+      if (spec.has_handler) {
+        return JSON.stringify({ value: reg.value, key: reg.key });
+      }
+      return JSON.stringify(reg.value);
     };
 
     /**
@@ -954,6 +1041,51 @@
       return JSON.stringify(out);
     };
 
+    /**
+     * Ui.value(name) → gjeldende (rå JS-)verdi til kontrollen hvis nøkkel
+     * SLUTTER på "::<name>", uansett hvilken celle/dokument den ble
+     * registrert i (spec §3: "navnet interpoleres i kodestrenger" — navn
+     * skal være unike, men er de IKKE, vinner den SIST REGISTRERTE (siste
+     * innsatte nøkkel i _values, se Object.keys-rekkefølgen under) + ETT
+     * console.warn. Ukjent navn → null (JSON-vennlig, speiler
+     * registerControl sin null-for-"ingen kjørekontekst"-konvensjon).
+     * Synkront rent oppslag i dokument-verdilageret — kjører ingenting.
+     */
+    Ui.value = function (name) {
+      var suffix = '::' + name;
+      var found;
+      var hits = 0;
+      Object.keys(_values).forEach(function (key) {
+        if (key.length >= suffix.length && key.slice(-suffix.length) === suffix) {
+          found = _values[key];
+          hits++;
+        }
+      });
+      if (hits > 1) {
+        console.warn('Ui.value: flere kontroller med navnet "' + name + '" — bruker sist registrerte');
+      }
+      return found === undefined ? null : found;
+    };
+
+    /**
+     * Ui.bindControlHandler(key, handler) — widget-callable-kanalen
+     * (ui-html-fasen, Task 1): binder `handler` (en JS-funksjon — pyodide-
+     * fasaden sender en create_proxy-innpakket python-callable, brython/mpy
+     * en ren funksjon) til kontrollen med controlKey `key`, slik at
+     * _wireChange/knappe-klikk fyrer DENNE i stedet for en rerun (se der).
+     * En eksisterende handler på samme nøkkel destrueres (guardet) FØR
+     * erstatning — samme mønster som _registerBinding (W5.2, under) bruker
+     * ved re-deklarasjon av samme binding-nøkkel. `key` kommer fra
+     * Ui.registerControl sin {value,key}-retur (kun for has_handler-specs).
+     */
+    Ui.bindControlHandler = function (key, handler) {
+      if (!key) { console.warn('Ui.bindControlHandler: mangler nøkkel'); return; }
+      if (typeof handler !== 'function') { console.warn('Ui.bindControlHandler: handler er ikke en funksjon'); return; }
+      var old = _controlHandlers[key];
+      if (old) _destroyHandler({ handler: old });
+      _controlHandlers[key] = handler;
+    };
+
     // ── W5.2: element-events (spec 2026-07-16-notebook-widget-events) ────
     // Delegerte dokument-lyttere + bindingsregister. En binding deklareres
     // under en cellekjøring (ui.on()/ui.run_cell() i fasadene, Task 3-4) og
@@ -985,7 +1117,12 @@
           if (!_bindings.hasOwnProperty(key)) continue;
           var b = _bindings[key];
           if (b.event !== eventType) continue;
-          var hit = (e.target && typeof e.target.closest === 'function') ? e.target.closest(b.selector) : null;
+          // ui-html-fasen (Task 1): el-scopede bindinger (Ui.elOn) har ingen
+          // CSS-selector — de matcher via elementets EGEN data-ui-el-
+          // markering (satt av _registerElBinding) i stedet for et
+          // selector-treff mot en ANNEN, forhåndskjent node.
+          var sel = b.elId ? '[data-ui-el="' + b.elId + '"]' : b.selector;
+          var hit = (e.target && typeof e.target.closest === 'function') ? e.target.closest(sel) : null;
           if (hit) _dispatchBinding(b, e, hit);
         }
       });
@@ -1027,8 +1164,11 @@
     // samme kjøring) og hadde da manglet dette feltet.
     function _bindingsRunFor(cellIdx) {
       var run = _cellRuns[cellIdx];
-      if (!run || run.closed) run = _cellRuns[cellIdx] = { ordinal: 0, registered: {}, bindingsRegistered: {} };
+      if (!run || run.closed) run = _cellRuns[cellIdx] = { ordinal: 0, registered: {}, bindingsRegistered: {}, showsRegistered: {} };
       if (!run.bindingsRegistered) run.bindingsRegistered = {};
+      // ui-html-fasen (Task 1): showsRegistered er elShow(target=...) sin
+      // tvilling for bindingsRegistered — samme lat-init-begrunnelse.
+      if (!run.showsRegistered) run.showsRegistered = {};
       return run;
     }
 
@@ -1228,6 +1368,317 @@
       }
     };
 
+    // ── Task 1 (fase ui-html, spec 2026-07-17-ui-html-design.md §1-3):
+    // element-motoren. `ui.html.*`-byggerne (Task 2-3-fasadene) er en tynn
+    // python-innpakning rundt EN elId (streng) — selve DOM-noden EIES og
+    // leves her, JSON over broen begge veier (samme window.Ui.*-mønster som
+    // registerControl/bindEvent). _els er id-registeret; elOn gjenbruker
+    // W5.2 sin _bindings/_installDelegate/_dispatchBinding-maskin (over)
+    // fremfor å bygge en egen — samme mark-og-sopp, samme guardede destroy.
+    var _els = {};            // elId → node
+    var _elCounter = 1;       // neste elId er 'el' + _elCounter
+    var _elShowTargets = {};  // "cellKey::target" -> { elId, cellIdx, target }
+
+    // Delt props-application for Ui.elCreate/Ui.elSetProps: DOM-egenskap når
+    // `navn in node`, ellers setAttribute (se _setAttrValue for dict/list/
+    // boolsk-håndteringen der). Hver enkelt navn er sin EGEN try/catch —
+    // én ugyldig verdi skal aldri hindre resten av props-settet fra å
+    // appliseres (spec: "console.warn on failure, never throw").
+    function _applyOneElProp(node, name, value) {
+      try {
+        if (name in node) {
+          node[name] = value;
+        } else {
+          _setAttrValue(node, name, value);
+        }
+      } catch (e) {
+        console.warn('Ui.el: klarte ikke å sette egenskapen "' + name + '": ' + ((e && e.message) || e));
+      }
+    }
+
+    // setAttribute-grenen sin verdi-normalisering: boolsk → tom-attributt
+    // til stede (true) / fjernet (false) — IKKE "true"/"false"-strenger
+    // (en setAttribute(name,'false') hadde vært til stede og dermed
+    // "sann" for enhver CSS-/JS-sjekk på attributt-eksistens, feil for et
+    // web-komponent-boolsk flagg). dict/list → JSON-kodet streng (web-
+    // komponent-konvensjonen spec-en selv nevner). Alt annet → String().
+    function _setAttrValue(node, name, value) {
+      try {
+        if (typeof value === 'boolean') {
+          if (value) node.setAttribute(name, '');
+          else node.removeAttribute(name);
+        } else if (value !== null && typeof value === 'object') {
+          node.setAttribute(name, JSON.stringify(value));
+        } else {
+          node.setAttribute(name, String(value));
+        }
+      } catch (e) {
+        console.warn('Ui.el: klarte ikke å sette attributtet "' + name + '": ' + ((e && e.message) || e));
+      }
+    }
+
+    // style: streng → cssText (rått, som HTML-attributtet); objekt → én
+    // node.style[navn]=verdi-tildeling per nøkkel (nøklene er ALLEREDE
+    // camelCase — python-siden normaliserer snake_case→camelCase FØR broen,
+    // se spec §1 "unified kwargs standard").
+    function _applyElStyle(node, style) {
+      if (!node.style) return; // stub/node uten style-objekt — stille no-op
+      try {
+        if (typeof style === 'string') {
+          node.style.cssText = style;
+        } else if (style && typeof style === 'object') {
+          Object.keys(style).forEach(function (k) {
+            try { node.style[k] = style[k]; }
+            catch (e) { console.warn('Ui.el: klarte ikke å sette style."' + k + '": ' + ((e && e.message) || e)); }
+          });
+        }
+      } catch (e) {
+        console.warn('Ui.el: feil ved stilsetting: ' + ((e && e.message) || e));
+      }
+    }
+
+    // opts = {"props": {...}, "style": {...}|"...", "attrs": {...}, "events": [...]}
+    // "events" er reservert for python-fasaden (kwarg-samling av
+    // on_click=/on_change=-callables) — selve BINDINGEN skjer alltid via et
+    // eget Ui.elOn-kall (handlere kan ikke JSON-serialiseres over broen),
+    // så nøkkelen er en stille no-op her.
+    function _applyElProps(node, opts) {
+      if (!opts || typeof opts !== 'object') return;
+      if (opts.props && typeof opts.props === 'object') {
+        Object.keys(opts.props).forEach(function (name) { _applyOneElProp(node, name, opts.props[name]); });
+      }
+      if (opts.attrs && typeof opts.attrs === 'object') {
+        Object.keys(opts.attrs).forEach(function (name) { _setAttrValue(node, name, opts.attrs[name]); });
+      }
+      if (opts.style !== undefined) _applyElStyle(node, opts.style);
+    }
+
+    /**
+     * Ui.elCreate(tag, propsJson) → elId (streng, "el<n>") eller null ved
+     * ugyldig tag/JSON. Oppretter en EKTE DOM-node (document.createElement)
+     * og registrerer den under en fersk, monotont voksende id — python-
+     * wrapperen (Task 2-3) holder KUN denne strengen, aldri noden selv.
+     */
+    Ui.elCreate = function (tag, propsJson) {
+      var opts = null;
+      if (propsJson) {
+        try { opts = JSON.parse(propsJson); }
+        catch (e) { console.warn('Ui.elCreate: ugyldig JSON-props: ' + ((e && e.message) || e)); }
+      }
+      var node;
+      try {
+        node = document.createElement(tag);
+      } catch (e) {
+        console.warn('Ui.elCreate: klarte ikke å opprette <' + tag + '>: ' + ((e && e.message) || e));
+        return null;
+      }
+      if (opts) _applyElProps(node, opts);
+      var id = 'el' + (_elCounter++);
+      _els[id] = node;
+      return id;
+    };
+
+    /**
+     * Ui.elSetProps(elId, propsJson) — samme props-applisering som
+     * elCreate, på en EKSISTERENDE node. Ukjent elId/ugyldig JSON → warn,
+     * no-op.
+     */
+    Ui.elSetProps = function (elId, propsJson) {
+      var node = _els[elId];
+      if (!node) { console.warn('Ui.elSetProps: ukjent elId ' + elId); return; }
+      var opts;
+      try {
+        opts = JSON.parse(propsJson);
+      } catch (e) {
+        console.warn('Ui.elSetProps: ugyldig JSON-props: ' + ((e && e.message) || e));
+        return;
+      }
+      _applyElProps(node, opts);
+    };
+
+    /**
+     * Ui.elAppend(parentId, childJson) — childJson er ENTEN {"el": elId}
+     * (en annen, allerede opprettet el-node) ELLER {"text": "…"} (en
+     * ekte tekst-node via document.createTextNode). Ukjent parentId/el-id
+     * eller manglende felt → warn, no-op.
+     */
+    Ui.elAppend = function (parentId, childJson) {
+      var parent = _els[parentId];
+      if (!parent) { console.warn('Ui.elAppend: ukjent parentId ' + parentId); return; }
+      var child;
+      try {
+        child = JSON.parse(childJson);
+      } catch (e) {
+        console.warn('Ui.elAppend: ugyldig JSON-child: ' + ((e && e.message) || e));
+        return;
+      }
+      if (!child || typeof child !== 'object') { console.warn('Ui.elAppend: ugyldig childJson'); return; }
+      try {
+        if (child.el !== undefined) {
+          var childNode = _els[child.el];
+          if (!childNode) { console.warn('Ui.elAppend: ukjent el-id ' + child.el); return; }
+          parent.appendChild(childNode);
+        } else if (child.text !== undefined) {
+          var textNode = document.createTextNode(String(child.text));
+          parent.appendChild(textNode);
+        } else {
+          console.warn('Ui.elAppend: childJson mangler "el" eller "text"');
+        }
+      } catch (e) {
+        console.warn('Ui.elAppend: klarte ikke å legge til barn: ' + ((e && e.message) || e));
+      }
+    };
+
+    /**
+     * Ui.elClear(elId) — fjerner ALLE barn av noden (tømmer den, rører
+     * ikke selve noden eller dens plass i EGEN forelder).
+     */
+    Ui.elClear = function (elId) {
+      var node = _els[elId];
+      if (!node) { console.warn('Ui.elClear: ukjent elId ' + elId); return; }
+      try {
+        while (node.firstChild) node.removeChild(node.firstChild);
+      } catch (e) {
+        console.warn('Ui.elClear: klarte ikke å tømme elementet: ' + ((e && e.message) || e));
+      }
+    };
+
+    /**
+     * Ui.elNode(elId) → den rå DOM-noden, eller null. Fasadenes `.el`-
+     * eskapeluke (spec §1) — ALDRI sendt over JSON-broen selv, kun brukt
+     * JS-internt (f.eks. andre js/*.js-moduler som trenger direkte
+     * DOM-tilgang til et ui.html-bygget element).
+     */
+    Ui.elNode = function (elId) {
+      return _els[elId] || null;
+    };
+
+    // Delt registreringskjerne for Ui.elOn — el-scopet variant av
+    // _registerBinding (over): nøkkelen er 'el::<elId>::<event>' (INGEN
+    // cellKey-prefiks — elId er allerede globalt unik i _els), og treffet
+    // matches ikke via en CSS-selector mot en FORHÅNDSKJENT node, men via
+    // elementets EGEN data-ui-el-markering (satt her, idempotent) — se
+    // _installDelegate sin sel = b.elId ? '[data-ui-el="..."]' : b.selector
+    // -gren (over). Ellers BYTE-FOR-BYTE samme livssyklus som
+    // _registerBinding: samme kjørekontekst-oppløsning, samme
+    // erstatning-destruerer-forrige-handler, samme bindingsRegistered-
+    // sporing (mark-og-sopp i Ui.endCellRun, uendret — den løkka er
+    // generisk over _bindings og bryr seg ikke om selector- eller
+    // elId-formen på nøkkelen).
+    function _registerElBinding(elId, event, handler) {
+      var cellIdx = _resolveCellIdx();
+      if (cellIdx === undefined) return null; // ingen kjørekontekst-mekanisme i det hele tatt
+
+      var node = _els[elId];
+      if (!node) { console.warn('Ui.elOn: ukjent elId ' + elId); return null; }
+
+      var key = 'el::' + elId + '::' + event;
+
+      if (cellIdx != null) {
+        var run = _bindingsRunFor(cellIdx);
+        run.bindingsRegistered[key] = true;
+      }
+
+      var old = _bindings[key];
+      if (old) _destroyHandler(old); // erstatning — samme guardede destroy som sveip/reset
+
+      try { node.setAttribute('data-ui-el', elId); }
+      catch (e) { console.warn('Ui.elOn: klarte ikke å merke elementet: ' + ((e && e.message) || e)); }
+
+      var binding = { key: key, cellIdx: cellIdx, kind: 'fn', elId: elId, event: event, target: null, handler: handler };
+      _bindings[key] = binding;
+      _installDelegate(event);
+      return true;
+    }
+
+    /**
+     * Ui.elOn(elId, event, handler) → true/null. Element-scopet variant av
+     * Ui.bindEvent (over) — handler kalles med samme JSON event-payload
+     * ({type,value,checked,targetId}) og MÅ returnere en JSON-payload-
+     * streng, tegnet via Ui.renderEventResult (binding.target er alltid
+     * null her → slot-fallback, se _slotFor).
+     */
+    Ui.elOn = function (elId, event, handler) {
+      if (!elId || !event) { console.warn('Ui.elOn: elId og event er påkrevd'); return null; }
+      if (typeof handler !== 'function') { console.warn('Ui.elOn: handler er ikke en funksjon'); return null; }
+      return _registerElBinding(elId, event, handler);
+    };
+
+    // Finn den KJØRENDE kontekstens monteringssted for elShow(target=null):
+    // mdUiRunCtx() sin cellEl → .nb-output-body (samme oppslag som
+    // _slotFor over, men UAVHENGIG av en binding-struktur — elShow kalles
+    // direkte fra fasaden, ikke via en handler-dispatch); doc-ctx → hele
+    // #outputArea (fase 3-presedens); ingen ctx i det hele tatt → null
+    // (kalleren varsler).
+    function _runningSlot() {
+      var ctx = (typeof global.mdUiRunCtx === 'function') ? global.mdUiRunCtx() : null;
+      if (!ctx) return null;
+      if (ctx.doc === true) {
+        return (typeof document !== 'undefined' && document.getElementById) ? document.getElementById('outputArea') : null;
+      }
+      if (ctx.cellEl) {
+        var outEl = _findChild(ctx.cellEl, 'nb-output');
+        var body = outEl ? _findChild(outEl, 'nb-output-body') : null;
+        return body || null;
+      }
+      return null;
+    }
+
+    /**
+     * Ui.elShow(elId, optsJson) — optsJson = {"target": "dom-id"|null}.
+     *
+     * target null: append noden til DEN KJØRENDE cellens/dokumentets slot
+     * (se _runningSlot) — flere .show()-kall i samme celle monterer flere
+     * ganger, som spec-en krever (ingen dedup).
+     *
+     * target satt: erstatt innholdet i #target-noden med DENNE noden,
+     * sporet PER (cellKey,target) i _elShowTargets slik at en re-kjøring av
+     * DEN DEKLARERENDE cellen erstatter forrige visning i stedet for å
+     * stable duplikater — samme livssyklus-mønster (mark-og-sopp i
+     * Ui.endCellRun, glem-alt i Ui.resetDocument) som resten av
+     * kjørebrakett-registrene i denne fila.
+     */
+    Ui.elShow = function (elId, optsJson) {
+      var node = _els[elId];
+      if (!node) { console.warn('Ui.elShow: ukjent elId ' + elId); return; }
+      var opts = {};
+      if (optsJson) {
+        try { opts = JSON.parse(optsJson) || {}; }
+        catch (e) { console.warn('Ui.elShow: ugyldig JSON-opts: ' + ((e && e.message) || e)); }
+      }
+      var target = opts.target || null;
+
+      if (!target) {
+        var slot = _runningSlot();
+        if (!slot) { console.warn('Ui.elShow: ingen aktiv kjørekontekst å vise elementet i'); return; }
+        try { slot.appendChild(node); }
+        catch (e) { console.warn('Ui.elShow: klarte ikke å legge til elementet: ' + ((e && e.message) || e)); }
+        return;
+      }
+
+      var cellIdx = _resolveCellIdx();
+      var cellKey = cellIdx != null ? _cellKeyAt(cellIdx) : 'doc';
+      var showKey = cellKey + '::' + target;
+
+      if (cellIdx != null) {
+        var run = _bindingsRunFor(cellIdx);
+        run.showsRegistered[showKey] = true;
+      }
+      _elShowTargets[showKey] = { elId: elId, cellIdx: cellIdx, target: target };
+
+      var host = (typeof document !== 'undefined' && document.getElementById) ? document.getElementById(target) : null;
+      if (!host) {
+        console.warn('Ui.elShow: fant ikke target-element #' + target);
+        return;
+      }
+      try {
+        while (host.firstChild) host.removeChild(host.firstChild);
+        host.appendChild(node);
+      } catch (e) {
+        console.warn('Ui.elShow: klarte ikke å erstatte innholdet i #' + target + ': ' + ((e && e.message) || e));
+      }
+    };
+
     /**
      * Ui.resetBindings() — sesjons-scoped livssyklus (index.html sine
      * restart()/invalidate()-braketter, samme sted som IpwBridge.reset()):
@@ -1255,8 +1706,9 @@
     Ui.beginCellRun = function (cellIdx) {
       // W5.2: bindingsRegistered er kontrollenes registered-sett sin
       // tvilling for element-event-bindinger — nullstilt her på nøyaktig
-      // samme måte, av samme grunn (se docstringen over).
-      _cellRuns[cellIdx] = { ordinal: 0, registered: {}, bindingsRegistered: {} };
+      // samme måte, av samme grunn (se docstringen over). ui-html-fasen
+      // (Task 1): showsRegistered er DENS tvilling for elShow(target=...).
+      _cellRuns[cellIdx] = { ordinal: 0, registered: {}, bindingsRegistered: {}, showsRegistered: {} };
     };
 
     /**
@@ -1277,6 +1729,12 @@
           if (ctrl.wrap && typeof ctrl.wrap.remove === 'function') ctrl.wrap.remove();
           delete _controls[key];
           delete _values[key];
+          // ui-html-fasen (Task 1): en sopt kontroll sin bundne handler (om
+          // noen) skal ikke leve videre uten en synlig kontroll å tilhøre.
+          if (_controlHandlers[key]) {
+            _destroyHandler({ handler: _controlHandlers[key] });
+            delete _controlHandlers[key];
+          }
         }
       });
       // W5.2: samme mark-og-sopp-skjema for element-event-bindinger —
@@ -1288,6 +1746,32 @@
           _destroyHandler(b);
           delete _bindings[key];
         }
+      });
+      // ui-html-fasen (Task 1): elShow(target=...) sin mark-og-sopp — en
+      // deklarerende celle som IKKE re-viser til samme (cellKey,target) i
+      // DENNE kjøringen mister det gamle innholdet i target-noden (samme
+      // "kilden sluttet å produsere dette"-filosofi som kontroller/
+      // bindinger over).
+      var showsRegistered = run ? (run.showsRegistered || {}) : {};
+      Object.keys(_elShowTargets).forEach(function (showKey) {
+        var entry = _elShowTargets[showKey];
+        if (entry.cellIdx === cellIdx && !showsRegistered[showKey]) {
+          var host = (typeof document !== 'undefined' && document.getElementById)
+            ? document.getElementById(entry.target) : null;
+          if (host) { while (host.firstChild) host.removeChild(host.firstChild); }
+          delete _elShowTargets[showKey];
+        }
+      });
+      // ui-html-fasen (Task 1): _els-registeret må ikke lekke løsrevne
+      // noder — en (billig) isConnected-sveip fjerner oppføringer for
+      // elementer som ikke lenger henger i dokumentet (sloten deres ble
+      // tømt av en F6-omrendring, eller elementet ble aldri vist). Ikke
+      // cellIdx-skopet (registeret selv holder ikke styr på hvilken celle
+      // som BYGGET et gitt element) — kjøres likevel her, samme rytme som
+      // resten av sveipe-logikken over.
+      Object.keys(_els).forEach(function (id) {
+        var node = _els[id];
+        if (node && node.isConnected === false) delete _els[id];
       });
       if (run) run.closed = true;
     };
@@ -1308,10 +1792,23 @@
           if (strip && typeof strip.remove === 'function') strip.remove();
         });
       });
+      // ui-html-fasen (Task 1): destruer ALLE bundne kontroll-handlere
+      // (guardet .destroy, samme mønster som Ui.resetBindings under) FØR
+      // registeret glemmes.
+      Object.keys(_controlHandlers).forEach(function (key) {
+        _destroyHandler({ handler: _controlHandlers[key] });
+      });
+      _controlHandlers = {};
       _values = {};
       _controls = {};
       _strips = {};
       _cellRuns = {};
+      // ui-html-fasen (Task 1): glem hele element-registeret og alle
+      // target-monterte elShow-oppføringer — et nytt dokument har ingen
+      // gamle elId-er å referere til lenger.
+      _els = {};
+      _elCounter = 1;
+      _elShowTargets = {};
       // W5.2: et helt nytt dokument invaliderer også alle element-event-
       // bindinger fra det forrige (samme "glem ALT"-hensikt som resten av
       // denne funksjonen) — guardet Ui.resetBindings finnes alltid her

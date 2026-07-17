@@ -355,3 +355,37 @@ test('normalizeSpec: rerun="all" aksepteres uendret', () => {
   assert.strictEqual(r.spec.rerun, 'all');
   assert.deepStrictEqual(r.warnings, []);
 });
+
+// ===== has_handler (ui-html-fasen, Task 1: widget-callable-kanalen) =====
+// Fasaden (Task 2) setter has_handler=true på specen når on_change=/
+// on_click= er et python-callable — DOM-halvdelens Ui.registerControl leser
+// flagget for å pakke returverdien inn i {value,key} (se ui-dom.test.js).
+// Denne rene halvdelen tester KUN at normalizeSpec kopierer/validerer
+// nøkkelen korrekt — ingen DOM involvert.
+
+test('normalizeSpec: has_handler:true kopieres inn i spec, ingen "ukjent nøkkel"-advarsel', () => {
+  const r = Ui.normalizeSpec({ type: 'slider', name: 'x', has_handler: true });
+  assert.strictEqual(r.spec.has_handler, true);
+  assert.deepStrictEqual(r.warnings, []);
+});
+
+test('normalizeSpec: has_handler fraværende → spec.has_handler forblir udefinert', () => {
+  const r = Ui.normalizeSpec({ type: 'slider', name: 'x' });
+  assert.strictEqual(r.spec.has_handler, undefined);
+});
+
+test('normalizeSpec: has_handler:false kopieres inn som ekte boolsk false', () => {
+  const r = Ui.normalizeSpec({ type: 'text', name: 'x', has_handler: false });
+  assert.strictEqual(r.spec.has_handler, false);
+});
+
+test('normalizeSpec: has_handler normaliseres til ekte boolsk (sannferdig verdi → true)', () => {
+  const r = Ui.normalizeSpec({ type: 'number', name: 'x', has_handler: 1 });
+  assert.strictEqual(r.spec.has_handler, true);
+});
+
+test('normalizeSpec: has_handler gjelder også button (ingen sync_to-aktig avvisning)', () => {
+  const r = Ui.normalizeSpec({ type: 'button', has_handler: true });
+  assert.strictEqual(r.spec.has_handler, true);
+  assert.deepStrictEqual(r.warnings, []);
+});

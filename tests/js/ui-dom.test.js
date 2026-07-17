@@ -28,6 +28,29 @@ class FakeEl {
     this.step = undefined;
     this.type = '';
     this._text = '';
+    // Task 1 (ui-html-fasen, element-motoren): et enkelt style-objekt —
+    // Ui.elCreate/elSetProps sin _applyElStyle gjør enten
+    // `node.style.cssText = "..."` (streng-formen) eller per-nøkkel
+    // `node.style[navn] = verdi`-tildelinger (objekt-formen); et vanlig
+    // JS-objekt uttrykker begge presist nok for testenes formål (ekte
+    // CSSStyleDeclaration-parsing av cssText er IKKE noe stubben trenger å
+    // late som den gjør — testene som bryr seg om cssText leser strengen
+    // rått tilbake).
+    this.style = {};
+  }
+  // Task 1: real-DOM sin isConnected — "er denne noden (transitivt) en del
+  // av det som vises akkurat nå". Stubben har ingen ekte `document`-node å
+  // teste mot, så et enkelt __docRoot-flagg (satt på et lite knippe
+  // rot-noder i freshEnv: cellEl og outputAreaEl) markerer hva som teller
+  // som "tilkoblet" — en node er tilkoblet hvis parentNode-kjeden når et
+  // slikt flagg, IKKE tilkoblet hvis kjeden ender i null uten å treffe et.
+  get isConnected() {
+    let node = this;
+    while (node) {
+      if (node.__docRoot) return true;
+      node = node.parentNode;
+    }
+    return false;
   }
   set className(v) { this._className = v; }
   get className() { return this._className; }
@@ -101,6 +124,12 @@ function _matchesSelector(node, selector) {
   if (!node || !selector) return false;
   if (selector[0] === '#') return node.id === selector.slice(1);
   if (selector[0] === '.') return !!(node.classList && node.classList.contains(selector.slice(1)));
+  // Task 1 (ui-html-fasen): [attr="verdi"]-attributtselector — MINIMAL
+  // støtte, kun den ENE formen js/ui.js sin _installDelegate faktisk
+  // bygger ('[data-ui-el="<elId>"]', for Ui.elOn-bindinger), ingen ekte
+  // selektor-motor (samme minimalisme-filosofi som resten av stubben).
+  const attrMatch = /^\[([\w-]+)="([^"]*)"\]$/.exec(selector);
+  if (attrMatch) return node.getAttribute && node.getAttribute(attrMatch[1]) === attrMatch[2];
   return node.tag === selector;
 }
 
@@ -123,6 +152,11 @@ function freshEnv(opts) {
   // lasting).
   global.document = {
     createElement: (tag) => new FakeEl(tag),
+    // Task 1 (element-motoren): Ui.elAppend sin {"text": "…"}-gren bruker
+    // ekte document.createTextNode (samme API ekte nettlesere har) — en
+    // FakeEl med tag '#text' uttrykker det presist nok (textContent-setter
+    // finnes allerede på klassen; ingen egne children forventes).
+    createTextNode: (text) => { const n = new FakeEl('#text'); n.textContent = text; return n; },
     head: new FakeEl('head'),
     _idIndex: {},
     getElementById(id) { return this._idIndex[id] || null; },
@@ -133,6 +167,11 @@ function freshEnv(opts) {
 
   const cellEl = new FakeEl('div');
   cellEl.className = 'nb-cell';
+  // Task 1: isConnected-roten for cellens egen undertre (se FakeEl over) —
+  // speiler at en ekte cellEl HENGER i dokumentet gjennom hele testens
+  // levetid (freshEnv bygger den ferdig FØR noen test kjører, akkurat som
+  // js/cells.js sin cellNode alltid setter cellen inn et sted).
+  cellEl.__docRoot = true;
   const inputEl = new FakeEl('div');
   inputEl.className = 'nb-input';
   const outEl = new FakeEl('div');
@@ -153,6 +192,9 @@ function freshEnv(opts) {
   // document.getElementById('outputArea') uten egen oppsett.
   const outputAreaEl = new FakeEl('div');
   outputAreaEl.id = 'outputArea';
+  // Task 1: egen isConnected-rot (se cellEl over) — doc-konteksten sitt
+  // eneste vertsted, uavhengig av cellEl-treet.
+  outputAreaEl.__docRoot = true;
   global.document._idIndex.outputArea = outputAreaEl;
 
   const cellIdx = opts.cellIdx != null ? opts.cellIdx : 0;
@@ -1466,4 +1508,624 @@ test('reattachDocStrips: no-op når notatboken er aktiv (stale plain-script doc-
     'guarden hindrer reattach mens notatboken er aktiv — stripa forblir frakoblet');
   assert.strictEqual(outputAreaEl.children.filter((c) => c.classList.contains('ui-controls')).length, 0,
     'ingen ui-controls-stripe ved siden av .doc-root i #outputArea');
+});
+
+// ============================================================================
+// Task 1 (fase ui-html, spec 2026-07-17-ui-html-design.md §1-3):
+// element-motoren (Ui.el*), Ui.value, widget-callable-kanalen.
+// ============================================================================
+
+// ---- Ui.elCreate/elSetProps: props-applisering ----------------------------
+
+test('Task 1: elCreate — oppretter node, returnerer monotont voksende elId, Ui.elNode henter samme node', () => {
+  const { Ui } = freshEnv();
+  const id1 = Ui.elCreate('div');
+  const id2 = Ui.elCreate('span');
+  assert.strictEqual(id1, 'el1');
+  assert.strictEqual(id2, 'el2');
+  assert.strictEqual(Ui.elNode(id1).tag, 'div');
+  assert.strictEqual(Ui.elNode(id2).tag, 'span');
+  assert.strictEqual(Ui.elNode(id1), Ui.elNode(id1), 'samme node ved gjentatt oppslag');
+  assert.strictEqual(Ui.elNode('el999'), null, 'ukjent elId → null');
+});
+
+test('Task 1: elCreate props — DOM-egenskap når navnet finnes på noden (property-sti)', () => {
+  const { Ui } = freshEnv();
+  const id = Ui.elCreate('input', JSON.stringify({ props: { value: 'hallo', type: 'text' } }));
+  const node = Ui.elNode(id);
+  assert.strictEqual(node.value, 'hallo');
+  assert.strictEqual(node.type, 'text');
+});
+
+test('Task 1: elCreate props — setAttribute når navnet IKKE finnes på noden (attributt-sti)', () => {
+  const { Ui } = freshEnv();
+  const id = Ui.elCreate('input', JSON.stringify({ props: { placeholder: 'skriv her' } }));
+  assert.strictEqual(Ui.elNode(id).getAttribute('placeholder'), 'skriv her');
+});
+
+test('Task 1: elCreate props — boolsk sann/usann via setAttribute-stien: tomt attributt til stede/fjernet', () => {
+  const { Ui } = freshEnv();
+  const idA = Ui.elCreate('div', JSON.stringify({ props: { hidden2: true } }));
+  assert.strictEqual(Ui.elNode(idA).getAttribute('hidden2'), '', 'sann → tomt attributt TIL STEDE');
+  const idB = Ui.elCreate('div', JSON.stringify({ props: { hidden2: false } }));
+  assert.strictEqual(Ui.elNode(idB).getAttribute('hidden2'), undefined, 'usann → attributt aldri satt/fjernet');
+});
+
+test('Task 1: elCreate props — boolsk på en EKSISTERENDE egenskap (property-sti) settes DIREKTE, ikke som tomt attributt', () => {
+  const { Ui } = freshEnv();
+  const id = Ui.elCreate('input', JSON.stringify({ props: { checked: true } }));
+  assert.strictEqual(Ui.elNode(id).checked, true, 'ekte boolsk verdi — property-stien omgår attributt-spesialtilfellet');
+});
+
+test('Task 1: elCreate props — dict/list-verdier JSON-kodes via setAttribute (web-komponent-konvensjonen)', () => {
+  const { Ui } = freshEnv();
+  const id = Ui.elCreate('div', JSON.stringify({ props: { tags: ['a', 'b'], meta: { x: 1 } } }));
+  const node = Ui.elNode(id);
+  assert.strictEqual(node.getAttribute('tags'), '["a","b"]');
+  assert.strictEqual(node.getAttribute('meta'), '{"x":1}');
+});
+
+test('Task 1: elCreate style — strengform settes som cssText', () => {
+  const { Ui } = freshEnv();
+  const id = Ui.elCreate('div', JSON.stringify({ style: 'color: red; font-weight: bold;' }));
+  assert.strictEqual(Ui.elNode(id).style.cssText, 'color: red; font-weight: bold;');
+});
+
+test('Task 1: elCreate style — objektform settes per-egenskap på node.style', () => {
+  const { Ui } = freshEnv();
+  const id = Ui.elCreate('div', JSON.stringify({ style: { backgroundColor: 'blue', fontSize: '12px' } }));
+  const node = Ui.elNode(id);
+  assert.strictEqual(node.style.backgroundColor, 'blue');
+  assert.strictEqual(node.style.fontSize, '12px');
+});
+
+test('Task 1: elCreate attrs — alltid setAttribute, uansett navn (eskapeluke for vilkårlige attributter)', () => {
+  const { Ui } = freshEnv();
+  const id = Ui.elCreate('acme-button', JSON.stringify({ attrs: { 'data-x': '1', 'aria-label': 'hei' } }));
+  const node = Ui.elNode(id);
+  assert.strictEqual(node.getAttribute('data-x'), '1');
+  assert.strictEqual(node.getAttribute('aria-label'), 'hei');
+});
+
+test('Task 1: elCreate — ugyldig JSON-props: console.warn, noden opprettes likevel (tomme props)', () => {
+  const { Ui } = freshEnv();
+  const warns = [];
+  const origWarn = console.warn;
+  console.warn = (m) => warns.push(m);
+  let id;
+  try {
+    id = Ui.elCreate('div', '{ugyldig');
+  } finally {
+    console.warn = origWarn;
+  }
+  assert.ok(id, 'elId returneres likevel — never throw');
+  assert.ok(warns.length >= 1);
+  assert.strictEqual(Ui.elNode(id).tag, 'div');
+});
+
+test('Task 1: elCreate — document.createElement kaster → console.warn, returnerer null (ingen krasj)', () => {
+  const { Ui } = freshEnv();
+  const origCreate = global.document.createElement;
+  global.document.createElement = () => { throw new Error('boom'); };
+  const warns = [];
+  const origWarn = console.warn;
+  console.warn = (m) => warns.push(m);
+  let id;
+  try {
+    id = Ui.elCreate('bad-tag');
+  } finally {
+    console.warn = origWarn;
+    global.document.createElement = origCreate;
+  }
+  assert.strictEqual(id, null);
+  assert.ok(warns.length >= 1);
+});
+
+test('Task 1: elSetProps — samme applisering på en EKSISTERENDE node', () => {
+  const { Ui } = freshEnv();
+  const id = Ui.elCreate('input');
+  Ui.elSetProps(id, JSON.stringify({ props: { value: 'satt i etterkant' } }));
+  assert.strictEqual(Ui.elNode(id).value, 'satt i etterkant');
+});
+
+test('Task 1: elSetProps — ukjent elId → console.warn, ingen krasj', () => {
+  const { Ui } = freshEnv();
+  const warns = [];
+  const origWarn = console.warn;
+  console.warn = (m) => warns.push(m);
+  try { Ui.elSetProps('el999', JSON.stringify({ props: { value: 'x' } })); }
+  finally { console.warn = origWarn; }
+  assert.ok(warns.length >= 1);
+});
+
+// ---- Ui.elAppend/elClear ---------------------------------------------------
+
+test('Task 1: elAppend — {"el": elId} legger en annen el-node til som barn', () => {
+  const { Ui } = freshEnv();
+  const parent = Ui.elCreate('div');
+  const child = Ui.elCreate('span');
+  Ui.elAppend(parent, JSON.stringify({ el: child }));
+  assert.strictEqual(Ui.elNode(parent).children[0], Ui.elNode(child));
+});
+
+test('Task 1: elAppend — {"text": "…"} legger en EKTE tekst-node til (document.createTextNode)', () => {
+  const { Ui } = freshEnv();
+  const parent = Ui.elCreate('div');
+  Ui.elAppend(parent, JSON.stringify({ text: 'hallo verden' }));
+  const textNode = Ui.elNode(parent).children[0];
+  assert.strictEqual(textNode.tag, '#text');
+  assert.strictEqual(textNode.textContent, 'hallo verden');
+});
+
+test('Task 1: elAppend — ukjent parentId/child-elId eller manglende felt → console.warn, ingen krasj', () => {
+  const { Ui } = freshEnv();
+  const parent = Ui.elCreate('div');
+  const warns = [];
+  const origWarn = console.warn;
+  console.warn = (m) => warns.push(m);
+  try {
+    Ui.elAppend('el999', JSON.stringify({ text: 'x' }));
+    Ui.elAppend(parent, JSON.stringify({ el: 'el999' }));
+    Ui.elAppend(parent, JSON.stringify({}));
+  } finally {
+    console.warn = origWarn;
+  }
+  assert.strictEqual(warns.length, 3);
+  assert.strictEqual(Ui.elNode(parent).children.length, 0);
+});
+
+test('Task 1: elClear — tømmer ALLE barn av noden', () => {
+  const { Ui } = freshEnv();
+  const parent = Ui.elCreate('div');
+  Ui.elAppend(parent, JSON.stringify({ text: 'a' }));
+  Ui.elAppend(parent, JSON.stringify({ text: 'b' }));
+  assert.strictEqual(Ui.elNode(parent).children.length, 2);
+  Ui.elClear(parent);
+  assert.strictEqual(Ui.elNode(parent).children.length, 0);
+});
+
+// ---- Ui.elShow (target null: monter i den KJØRENDE kontekstens slot) ------
+
+test('Task 1: elShow — target null, celle-kontekst: appender til cellens .nb-output-body', () => {
+  const { Ui, bodyEl } = freshEnv();
+  const id = Ui.elCreate('div');
+  Ui.elShow(id, JSON.stringify({ target: null }));
+  assert.strictEqual(bodyEl.children[0], Ui.elNode(id));
+});
+
+test('Task 1: elShow — target null, doc-kontekst: appender til #outputArea', () => {
+  const { Ui, outputAreaEl } = freshEnv({ docCtx: true });
+  const id = Ui.elCreate('div');
+  Ui.elShow(id);
+  assert.strictEqual(outputAreaEl.children[0], Ui.elNode(id));
+});
+
+test('Task 1: elShow — ingen kjørekontekst i det hele tatt: console.warn, no-op', () => {
+  const { Ui } = freshEnv({ ctxNull: true });
+  const id = Ui.elCreate('div');
+  const warns = [];
+  const origWarn = console.warn;
+  console.warn = (m) => warns.push(m);
+  try { Ui.elShow(id, JSON.stringify({ target: null })); }
+  finally { console.warn = origWarn; }
+  assert.ok(warns.length >= 1);
+  assert.strictEqual(Ui.elNode(id).parentNode, null);
+});
+
+test('Task 1: elShow — ukjent elId → console.warn, ingen krasj', () => {
+  const { Ui } = freshEnv();
+  const warns = [];
+  const origWarn = console.warn;
+  console.warn = (m) => warns.push(m);
+  try { Ui.elShow('el999', JSON.stringify({ target: null })); }
+  finally { console.warn = origWarn; }
+  assert.ok(warns.length >= 1);
+});
+
+test('Task 1: elShow — flere .show()-kall i samme celle monterer flere ganger (ingen dedup)', () => {
+  const { Ui, bodyEl } = freshEnv();
+  const a = Ui.elCreate('div');
+  const b = Ui.elCreate('span');
+  Ui.elShow(a, JSON.stringify({ target: null }));
+  Ui.elShow(b, JSON.stringify({ target: null }));
+  assert.strictEqual(bodyEl.children.length, 2);
+});
+
+// ---- Ui.elShow (target satt: erstatt-inn-i #target, sporet per cellKey+target) --
+
+test('Task 1: elShow — target satt: erstatter innholdet i #target-noden (ikke celle-slot)', () => {
+  const { Ui, outputAreaEl, bodyEl } = freshEnv();
+  const mal = new FakeEl('div');
+  mal.id = 'mal';
+  outputAreaEl.appendChild(mal); // tilkoblet via outputAreaEl sin __docRoot
+  global.document._idIndex.mal = mal;
+  mal.appendChild(new FakeEl('span')); // gammelt innhold som skal tømmes
+
+  const id = Ui.elCreate('div');
+  Ui.elShow(id, JSON.stringify({ target: 'mal' }));
+
+  assert.strictEqual(mal.children.length, 1, 'gammelt innhold tømt');
+  assert.strictEqual(mal.children[0], Ui.elNode(id));
+  assert.strictEqual(bodyEl.children.length, 0, 'celle-sloten er urørt — target-noden ble brukt');
+});
+
+test('Task 1: elShow — target satt men finnes ikke: console.warn, ingen krasj', () => {
+  const { Ui } = freshEnv();
+  const id = Ui.elCreate('div');
+  const warns = [];
+  const origWarn = console.warn;
+  console.warn = (m) => warns.push(m);
+  try { Ui.elShow(id, JSON.stringify({ target: 'finnes-ikke' })); }
+  finally { console.warn = origWarn; }
+  assert.ok(warns.some((m) => m.includes('finnes-ikke')));
+});
+
+test('Task 1: elShow — to elShow-kall til SAMME target i samme kjøring: siste vinner (replace, ikke stable)', () => {
+  const { Ui, outputAreaEl } = freshEnv();
+  const mal = new FakeEl('div');
+  mal.id = 'mal';
+  outputAreaEl.appendChild(mal);
+  global.document._idIndex.mal = mal;
+
+  const a = Ui.elCreate('div');
+  const b = Ui.elCreate('span');
+  Ui.elShow(a, JSON.stringify({ target: 'mal' }));
+  Ui.elShow(b, JSON.stringify({ target: 'mal' }));
+
+  assert.strictEqual(mal.children.length, 1);
+  assert.strictEqual(mal.children[0], Ui.elNode(b));
+});
+
+test('Task 1: elShow — re-kjøring av DEKLARERENDE celle UTEN re-kall til elShow(target=) sopper det gamle innholdet (mark-og-sopp)', () => {
+  const { Ui, outputAreaEl } = freshEnv();
+  const mal = new FakeEl('div');
+  mal.id = 'mal';
+  outputAreaEl.appendChild(mal);
+  global.document._idIndex.mal = mal;
+
+  Ui.beginCellRun(0);
+  const a = Ui.elCreate('div');
+  Ui.elShow(a, JSON.stringify({ target: 'mal' }));
+  Ui.endCellRun(0);
+  assert.strictEqual(mal.children.length, 1, 'vist etter første brakett');
+
+  Ui.beginCellRun(0);
+  // ingen elShow-kall denne runden
+  Ui.endCellRun(0);
+  assert.strictEqual(mal.children.length, 0, 'sopt — cellen sluttet å vise noe til dette målet');
+});
+
+test('Task 1: elShow — re-kjøring som IGJEN kaller elShow(target=) til samme mål erstatter (ikke sveipes)', () => {
+  const { Ui, outputAreaEl } = freshEnv();
+  const mal = new FakeEl('div');
+  mal.id = 'mal';
+  outputAreaEl.appendChild(mal);
+  global.document._idIndex.mal = mal;
+
+  Ui.beginCellRun(0);
+  const a = Ui.elCreate('div');
+  Ui.elShow(a, JSON.stringify({ target: 'mal' }));
+  Ui.endCellRun(0);
+
+  Ui.beginCellRun(0);
+  const b = Ui.elCreate('span');
+  Ui.elShow(b, JSON.stringify({ target: 'mal' }));
+  Ui.endCellRun(0);
+
+  assert.strictEqual(mal.children.length, 1);
+  assert.strictEqual(mal.children[0], Ui.elNode(b));
+});
+
+test('Task 1: resetDocument — glemmer elShow target-registeret OG hele _els-registeret', () => {
+  const { Ui, outputAreaEl } = freshEnv();
+  const mal = new FakeEl('div');
+  mal.id = 'mal';
+  outputAreaEl.appendChild(mal);
+  global.document._idIndex.mal = mal;
+
+  const a = Ui.elCreate('div');
+  Ui.elShow(a, JSON.stringify({ target: 'mal' }));
+  assert.strictEqual(mal.children.length, 1);
+
+  Ui.resetDocument();
+  assert.strictEqual(Ui.elNode(a), null, '_els-registeret glemt');
+  // Neste elCreate etter reset starter forfra på 'el1' (telleren nullstilt).
+  const b = Ui.elCreate('div');
+  assert.strictEqual(b, 'el1');
+});
+
+// ---- _els-registeret må ikke lekke løsrevne noder (isConnected-sveip) -----
+
+test('Task 1: endCellRun — sveiper _els-oppføringer for noder som ALDRI ble vist (ingen lekkasje)', () => {
+  const { Ui } = freshEnv();
+  Ui.beginCellRun(0);
+  const id = Ui.elCreate('div'); // bygget, men aldri vist noe sted
+  Ui.endCellRun(0);
+  assert.strictEqual(Ui.elNode(id), null, 'løsrevet node sveipet — ingen lekkasje i _els');
+});
+
+test('Task 1: endCellRun — en VIST (tilkoblet) node overlever sveipet', () => {
+  const { Ui, bodyEl } = freshEnv();
+  Ui.beginCellRun(0);
+  const id = Ui.elCreate('div');
+  Ui.elShow(id, JSON.stringify({ target: null }));
+  Ui.endCellRun(0);
+  assert.ok(Ui.elNode(id), 'tilkoblet node (i cellens slot) overlever sveipet');
+  assert.strictEqual(bodyEl.children[0], Ui.elNode(id));
+});
+
+// ---- Ui.elOn: el-scopet variant av Ui.bindEvent ----------------------------
+
+test('Task 1: elOn — fyrer ved treff, tegner handler sitt resultat via renderEventResult (celle-slot, target null)', () => {
+  const { Ui, bodyEl } = freshEnv({ cellIdx: 0 });
+  const id = Ui.elCreate('button');
+  let calls = 0;
+  Ui.elOn(id, 'click', () => {
+    calls++;
+    return JSON.stringify({ kind: 'text', text: 'klikket' });
+  });
+  dispatchDocEvent('click', Ui.elNode(id));
+  assert.strictEqual(calls, 1);
+  assert.strictEqual(bodyEl.children[0].textContent, 'klikket');
+});
+
+test('Task 1: elOn — merker elementet med data-ui-el (identitet for den delegerte matcheren)', () => {
+  const { Ui } = freshEnv();
+  const id = Ui.elCreate('button');
+  Ui.elOn(id, 'click', () => '{}');
+  assert.strictEqual(Ui.elNode(id).getAttribute('data-ui-el'), id);
+});
+
+test('Task 1: elOn — sveipes ved rerun uten re-deklarasjon (samme mark-og-sopp som bindEvent)', () => {
+  const { Ui, bodyEl } = freshEnv({ cellIdx: 0 });
+  const id = Ui.elCreate('button');
+  // MÅ vises (tilkoblet dokumentet) for at et ekte klikk noensinne skulle
+  // nådd den delegerte document-lytteren i en ekte nettleser (en løsrevet
+  // node bobler aldri til document) — OG for å overleve endCellRun sin
+  // isConnected-sveip av _els (se der).
+  Ui.elShow(id, JSON.stringify({ target: null }));
+  assert.strictEqual(bodyEl.children[0], Ui.elNode(id));
+
+  let calls = 0;
+  Ui.beginCellRun(0);
+  Ui.elOn(id, 'click', () => { calls++; return '{}'; });
+  Ui.endCellRun(0);
+
+  dispatchDocEvent('click', Ui.elNode(id));
+  assert.strictEqual(calls, 1);
+
+  Ui.beginCellRun(0);
+  Ui.endCellRun(0); // ingen re-deklarasjon i denne kjøringen
+  dispatchDocEvent('click', Ui.elNode(id));
+  assert.strictEqual(calls, 1, 'sveipet binding mottar ingen flere dispatch');
+});
+
+test('Task 1: elOn — destroy kalles på handleren ved sveip', () => {
+  const { Ui } = freshEnv({ cellIdx: 0 });
+  const id = Ui.elCreate('button');
+  let destroyed = false;
+  const h = () => '{}';
+  h.destroy = () => { destroyed = true; };
+
+  Ui.beginCellRun(0);
+  Ui.elOn(id, 'click', h);
+  Ui.endCellRun(0);
+
+  Ui.beginCellRun(0);
+  Ui.endCellRun(0);
+  assert.strictEqual(destroyed, true);
+});
+
+test('Task 1: elOn — ukjent elId → console.warn, null', () => {
+  const { Ui } = freshEnv();
+  const warns = [];
+  const origWarn = console.warn;
+  console.warn = (m) => warns.push(m);
+  let ok;
+  try { ok = Ui.elOn('el999', 'click', () => '{}'); }
+  finally { console.warn = origWarn; }
+  assert.strictEqual(ok, null);
+  assert.ok(warns.length >= 1);
+});
+
+test('Task 1: elOn — handler er ikke en funksjon → console.warn, null', () => {
+  const { Ui } = freshEnv();
+  const id = Ui.elCreate('button');
+  const ok = Ui.elOn(id, 'click', 'ikke-en-funksjon');
+  assert.strictEqual(ok, null);
+});
+
+test('Task 1: elOn — sameksisterer med en selector-binding (bindEvent) på SAMME eventType uten å forstyrre hverandre', () => {
+  const { Ui, bodyEl } = freshEnv({ cellIdx: 0 });
+  const knapp = new FakeEl('button');
+  knapp.id = 'knapp';
+  const elId = Ui.elCreate('button');
+  let selCalls = 0, elCalls = 0;
+  Ui.bindEvent(JSON.stringify({ selector: '#knapp', event: 'click' }), () => { selCalls++; return '{}'; });
+  Ui.elOn(elId, 'click', () => { elCalls++; return '{}'; });
+
+  dispatchDocEvent('click', knapp);
+  assert.strictEqual(selCalls, 1);
+  assert.strictEqual(elCalls, 0);
+
+  dispatchDocEvent('click', Ui.elNode(elId));
+  assert.strictEqual(selCalls, 1);
+  assert.strictEqual(elCalls, 1);
+  void bodyEl; // (ikke brukt i denne testen — beholdt for destrukturerings-symmetri)
+});
+
+// ---- Ui.value ---------------------------------------------------------------
+
+test('Task 1: Ui.value — leser gjeldende verdi til en kontroll ved navn ALENE, synkront', () => {
+  const { Ui } = freshEnv();
+  Ui.registerControl(JSON.stringify({ type: 'text', name: 'n', value: 'hei' }));
+  assert.strictEqual(Ui.value('n'), 'hei');
+});
+
+test('Task 1: Ui.value — ukjent navn → null', () => {
+  const { Ui } = freshEnv();
+  assert.strictEqual(Ui.value('finnes-ikke'), null);
+});
+
+test('Task 1: Ui.value — duplikate navn på tvers av celler/dokument: SIST REGISTRERTE vinner + ETT console.warn', () => {
+  const env = freshEnv();
+  env.Ui.registerControl(JSON.stringify({ type: 'text', name: 'n', value: 'først' }));
+  env.setCtx({ cellIdx: null, cellEl: null, doc: true });
+  env.Ui.registerControl(JSON.stringify({ type: 'text', name: 'n', value: 'sist' }));
+
+  const warns = [];
+  const origWarn = console.warn;
+  console.warn = (m) => warns.push(m);
+  let v;
+  try { v = env.Ui.value('n'); }
+  finally { console.warn = origWarn; }
+
+  assert.strictEqual(v, 'sist');
+  assert.strictEqual(warns.length, 1);
+});
+
+// ---- data-ui-key (identitet, spec-krav) ------------------------------------
+
+test('Task 1: registerControl — bygde kontroller får data-ui-key = controlKey', () => {
+  const { Ui, outEl } = freshEnv();
+  Ui.registerControl(JSON.stringify({ type: 'slider', name: 'x', value: 5, min: 0, max: 10 }));
+  const strip = outEl.children[0];
+  const input = strip.children[0].children[1];
+  assert.strictEqual(input.getAttribute('data-ui-key'), '0::x');
+});
+
+test('Task 1: registerControl — data-ui-key også på en KNAPP (identitet uavhengig av has_handler)', () => {
+  const { Ui, outEl } = freshEnv();
+  Ui.registerControl(JSON.stringify({ type: 'button', name: 'go' }));
+  const strip = outEl.children[0];
+  const btn = strip.children[0];
+  assert.strictEqual(btn.getAttribute('data-ui-key'), '0::go');
+});
+
+// ---- has_handler / Ui.bindControlHandler / widget-callable-kanalen --------
+
+test('Task 1: registerControl — legacy-retur UENDRET når has_handler mangler/usann', () => {
+  const { Ui } = freshEnv();
+  const res = Ui.registerControl(JSON.stringify({ type: 'slider', name: 'x', value: 5, min: 0, max: 10 }));
+  assert.strictEqual(JSON.parse(res), 5, 'rå verdi, IKKE et {value,key}-objekt');
+});
+
+test('Task 1: registerControl — {value,key}-JSON-objekt når spec.has_handler er sann', () => {
+  const { Ui } = freshEnv();
+  const res = JSON.parse(Ui.registerControl(JSON.stringify({
+    type: 'slider', name: 'x', value: 5, min: 0, max: 10, has_handler: true,
+  })));
+  assert.strictEqual(res.value, 5);
+  assert.strictEqual(res.key, '0::x');
+});
+
+test('Task 1: bindControlHandler + _wireChange — endring fyrer handleren MED verdien, INGEN rerun, sync_to pushes fortsatt', async () => {
+  const { Ui, outEl, runCellCalls } = freshEnv();
+  const syncLog = [];
+  global.mdUiSyncTo = (name, value) => { syncLog.push([name, value]); };
+
+  const res = JSON.parse(Ui.registerControl(JSON.stringify({
+    type: 'slider', name: 'x', value: 5, min: 0, max: 100, has_handler: true, sync_to: 'x',
+  })));
+  const calls = [];
+  Ui.bindControlHandler(res.key, (payloadJson) => {
+    calls.push(JSON.parse(payloadJson));
+    return JSON.stringify({ kind: 'text', text: 'ny verdi: ' + JSON.parse(payloadJson).value });
+  });
+
+  const strip = outEl.children[0];
+  const input = strip.children[0].children[1];
+  input.value = '42';
+  input.dispatchEvent({ type: 'input' });
+
+  assert.deepStrictEqual(calls, [{ value: 42 }], 'handleren fyrte UMIDDELBART (ingen debounce-ventetid)');
+  assert.deepStrictEqual(syncLog[syncLog.length - 1], ['x', 42], 'sync_to pushet (FØR handleren, uendret oppførsel)');
+
+  await wait(200); // ville fyrt en debounced rerun her DERSOM den fantes
+  assert.deepStrictEqual(runCellCalls, [], 'INGEN rerun — en kontroll med callable rerunner aldri');
+});
+
+test('Task 1: bindControlHandler — handler-resultatet rendres via renderEventResult i cellens slot', () => {
+  const { Ui, outEl, bodyEl } = freshEnv();
+  const res = JSON.parse(Ui.registerControl(JSON.stringify({
+    type: 'text', name: 'n', value: 'a', has_handler: true,
+  })));
+  Ui.bindControlHandler(res.key, () => JSON.stringify({ kind: 'text', text: 'svar' }));
+
+  const strip = outEl.children[0];
+  const input = strip.children[0].children[1];
+  input.value = 'b';
+  input.dispatchEvent({ type: 'change' });
+
+  assert.strictEqual(bodyEl.children[0].textContent, 'svar');
+});
+
+test('Task 1: bindControlHandler — knapp: klikk fyrer handleren MED null-verdi i stedet for rerun', () => {
+  const { Ui, outEl, runCellCalls } = freshEnv();
+  const res = JSON.parse(Ui.registerControl(JSON.stringify({ type: 'button', has_handler: true })));
+  const calls = [];
+  Ui.bindControlHandler(res.key, (payloadJson) => {
+    calls.push(JSON.parse(payloadJson));
+    return '{}';
+  });
+
+  const strip = outEl.children[0];
+  const btn = strip.children[0];
+  btn.dispatchEvent({ type: 'click' });
+
+  assert.deepStrictEqual(calls, [{ value: null }]);
+  assert.deepStrictEqual(runCellCalls, []);
+});
+
+test('Task 1: bindControlHandler — feilkastende handler rendres som error-payload (ingen krasj)', () => {
+  const { Ui, outEl, bodyEl } = freshEnv();
+  const res = JSON.parse(Ui.registerControl(JSON.stringify({ type: 'text', name: 'n', value: 'a', has_handler: true })));
+  Ui.bindControlHandler(res.key, () => { throw new Error('oi'); });
+
+  const strip = outEl.children[0];
+  const input = strip.children[0].children[1];
+  input.value = 'b';
+  input.dispatchEvent({ type: 'change' });
+
+  assert.strictEqual(bodyEl.children[0].className, 'error');
+  assert.strictEqual(bodyEl.children[0].textContent, 'oi');
+});
+
+test('Task 1: bindControlHandler — erstatning: ny handler på samme nøkkel destruerer den forrige', () => {
+  const { Ui } = freshEnv();
+  const res = JSON.parse(Ui.registerControl(JSON.stringify({ type: 'text', name: 'n', value: 'a', has_handler: true })));
+  let destroyed = false;
+  const h1 = () => '{}';
+  h1.destroy = () => { destroyed = true; };
+  Ui.bindControlHandler(res.key, h1);
+  Ui.bindControlHandler(res.key, () => '{}');
+  assert.strictEqual(destroyed, true);
+});
+
+test('Task 1: endCellRun — sveiper en stale kontrolls bundne handler (destroy kalt, nøkkelen glemt)', () => {
+  const { Ui } = freshEnv();
+  let destroyed = false;
+  const h = () => '{}';
+  h.destroy = () => { destroyed = true; };
+
+  Ui.beginCellRun(0);
+  const res = JSON.parse(Ui.registerControl(JSON.stringify({ type: 'text', name: 'n', value: 'a', has_handler: true })));
+  Ui.bindControlHandler(res.key, h);
+  Ui.endCellRun(0);
+
+  Ui.beginCellRun(0);
+  // ingen re-registrering denne runden
+  Ui.endCellRun(0);
+  assert.strictEqual(destroyed, true);
+});
+
+test('Task 1: resetDocument — destruerer ALLE bundne kontroll-handlere', () => {
+  const { Ui } = freshEnv();
+  let destroyed = false;
+  const h = () => '{}';
+  h.destroy = () => { destroyed = true; };
+  const res = JSON.parse(Ui.registerControl(JSON.stringify({ type: 'text', name: 'n', value: 'a', has_handler: true })));
+  Ui.bindControlHandler(res.key, h);
+  Ui.resetDocument();
+  assert.strictEqual(destroyed, true);
 });
