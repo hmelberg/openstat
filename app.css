@@ -1217,6 +1217,18 @@
   background: var(--bg-panel); color: var(--text); cursor: pointer; font-size: 12.5px; }
 .ui-widget--button:hover { border-color: var(--accent); color: var(--accent); }
 
+/* ui.play (dash-absorpsjon 5a Task 3) — portert fra css/dash.css sin
+   .dash-play-btn/.dash-play-btn--playing (samme regler, nytt selektornavn;
+   .ui-widget--play arver .ui-widget sin flex/gap/range-styling uendret). */
+.ui-play-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; padding: 0; border-radius: 6px; line-height: 1;
+  border: 1px solid var(--border); background: var(--bg-panel); color: var(--text);
+  font-size: .8rem; cursor: pointer;
+}
+.ui-play-btn:hover { border-color: var(--accent); color: var(--accent); }
+.ui-play-btn--playing { border-color: var(--accent); color: var(--accent); }
+
 /* Tilpasset fra Pico CSS (MIT, picocss.com) — range/switch/fokus-oppskrifter.
    Pico definerer cross-browser utseende for <input type=range> (thumb/track
    via vendor-prefiksede pseudo-element-familier — webkit og moz har INGEN

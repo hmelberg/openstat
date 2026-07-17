@@ -18,7 +18,8 @@
     switch: 1,
     number: 1,
     text: 1,
-    button: 1
+    button: 1,
+    play: 1
   };
 
   // Gyldige nøkler i kontrollspec
@@ -34,7 +35,12 @@
     rerun: 1,
     placement: 1,
     sync_to: 1,
-    has_handler: 1
+    has_handler: 1,
+    // play (dash-absorpsjon 5a Task 3): avspillingsintervall (ms, gulvet
+    // til 200 av normalizeSpec under) + loop-flagg (wrap til min ved max,
+    // fremfor å stoppe).
+    interval: 1,
+    loop: 1
   };
 
   // Gyldige placement-verdier (per-kontroll plassering, Task 3) — samme
@@ -219,6 +225,33 @@
     } else if (type === 'text') {
       var strVal = raw.value !== undefined ? String(raw.value) : '';
       spec.value = strVal;
+    } else if (type === 'play') {
+      // dash-absorpsjon 5a Task 3: som slider (min/max/step/value, samme
+      // NaN-vakter/klamping/min>max-bytte), PLUSS interval (ms, gulvet til
+      // 200 — dash sin play-widget sin egen regel, js/dash.js:309) og loop
+      // (boolsk — wrap til min ved max fremfor å stoppe).
+      var pMin = raw.min !== undefined ? Number(raw.min) : 0;
+      var pMax = raw.max !== undefined ? Number(raw.max) : 100;
+      var pStep = raw.step !== undefined ? Number(raw.step) : 1;
+      if (isNaN(pMin)) { warnings.push('ugyldig min for play: ' + raw.min); pMin = 0; }
+      if (isNaN(pMax)) { warnings.push('ugyldig max for play: ' + raw.max); pMax = 100; }
+      if (isNaN(pStep)) { warnings.push('ugyldig step for play: ' + raw.step); pStep = 1; }
+      if (pMin > pMax) {
+        warnings.push('play: min > max — byttet om');
+        var pTmp = pMin; pMin = pMax; pMax = pTmp;
+      }
+      var pValue = raw.value !== undefined ? Number(raw.value) : pMin;
+      if (isNaN(pValue)) { warnings.push('ugyldig value for play: ' + raw.value); pValue = pMin; }
+      if (pValue < pMin) pValue = pMin;
+      if (pValue > pMax) pValue = pMax;
+      spec.min = pMin;
+      spec.max = pMax;
+      spec.step = pStep;
+      spec.value = pValue;
+      var pInterval = raw.interval !== undefined ? Number(raw.interval) : 600;
+      if (isNaN(pInterval)) { warnings.push('ugyldig interval for play: ' + raw.interval); pInterval = 600; }
+      spec.interval = Math.max(200, pInterval);
+      spec.loop = !!raw.loop;
     } else if (type === 'button') {
       // Button har bare label, ingen value
       // label allerede kopiert ovenfor
@@ -338,6 +371,21 @@
     // erstatning) — pyodide-proxier destrueres, brython/mpy-funksjoner er
     // en no-op der.
     var _controlHandlers = {};
+    // controlKey → setInterval-id (dash-absorpsjon 5a Task 3: ui.play sin
+    // avspillingstimer). EKSPLISITT sporet (i motsetning til bare en
+    // lukking-lokal variabel i _buildPlay) slik enhver kode-sti som fjerner
+    // en kontroll (type-bytte, sveip i endCellRun, resetDocument) kan
+    // klarere ut timeren DETERMINISTISK via clearInterval — uten dette ville
+    // en fjernet/frakoblet play-kontroll latt sin setInterval fortsette å
+    // fyre for alltid (et no-op-tick takket være tick() sin egen
+    // isConnected-sjekk, men fortsatt en ekte, uendelig kjørende timer —
+    // spec §Error handling: "ui.play timer can never leak"). Se
+    // _stopPlayTimer under.
+    var _playTimers = {};
+    function _stopPlayTimer(key) {
+      var t = _playTimers[key];
+      if (t) { clearInterval(t); delete _playTimers[key]; }
+    }
     // cellIdx → { top?, bottom?, left? } — cellens .ui-controls-noder PER
     // POSISJON (Task 3, per-kontroll plassering; tidligere én enkelt node
     // per celle) for lazy gjenbruk mellom kall.
@@ -590,6 +638,75 @@
       return { wrap: wrap, input: input, labelEl: labelEl };
     }
 
+    // dash-absorpsjon 5a Task 3: slider + play/pause-knapp + readout, med
+    // dash sin EKSAKTE tre-veis timerhygiene (js/dash.js:272-324, portert
+    // ordrett hit): timeren ryddes (1) ved pause-klikk, (2) ved manuell
+    // slider-'input' (brukeren tok kontrollen selv), og (3) — sjekket INNI
+    // selve tick-en — når input-noden er koblet fra DOM-et (kontrollen
+    // fjernet/erstattet uten at noen av de to andre veiene fyrte). Ved max:
+    // wrap til min hvis spec.loop, ellers stopp. HVER tick går gjennom
+    // NØYAKTIG samme sti som en brukerendring — samme `change`-lukking
+    // _wireChange returnerer (som _buildSlider bruker for sin 'input'-
+    // lytter): input.value settes FØRST, deretter kalles change(), som
+    // lagrer _values[key] (leser DET NYE input.value), sync_to-pusher, og
+    // enten fyrer en bundet handler eller debouncer en rerun — ingen egen
+    // "tick-payload"-vei. _playTimers[key] (over) er den EKSPLISITTE
+    // timer-sporingen fjernings-stiene (typeChanged/placementChanged/
+    // endCellRun/resetDocument) klarerer ut via _stopPlayTimer.
+    function _buildPlay(key, cellIdx, spec, value) {
+      var wrap = _el('label', 'ui-widget ui-widget--play');
+      var labelEl = _el('span', 'ui-widget-label', _labelText(spec));
+      wrap.appendChild(labelEl);
+      var input = document.createElement('input');
+      input.type = 'range';
+      input.min = spec.min; input.max = spec.max; input.step = spec.step;
+      input.value = value;
+      var readout = _el('span', 'ui-widget-value', String(value));
+      var btn = _el('button', 'ui-play-btn', '▶');
+      btn.type = 'button';
+      btn.setAttribute('aria-label', 'Spill av');
+      var change = _wireChange(key, function () { return Number(input.value); });
+
+      function stopPlay() {
+        _stopPlayTimer(key);
+        btn.textContent = '▶';
+        // className (ikke classList.add/remove — resten av filen bruker
+        // ALDRI classList-mutasjon, kun _el()/className direkte; btn har
+        // uansett bare disse to gjensidig utelukkende tilstandene).
+        btn.className = 'ui-play-btn';
+      }
+      function tick() {
+        if (!input.isConnected) { stopPlay(); return; }
+        var v = Number(input.value) + Number(spec.step);
+        if (v > spec.max) {
+          if (spec.loop) v = spec.min;
+          else { stopPlay(); return; }
+        }
+        input.value = v;
+        readout.textContent = String(v);
+        change();
+      }
+      function startPlay() {
+        if (_playTimers[key]) return;
+        var ms = Math.max(200, Number(spec.interval) || 600);
+        btn.textContent = '⏸';
+        btn.className = 'ui-play-btn ui-play-btn--playing';
+        _playTimers[key] = setInterval(tick, ms);
+      }
+      btn.addEventListener('click', function () {
+        if (_playTimers[key]) stopPlay(); else startPlay();
+      });
+      input.addEventListener('input', function () {
+        stopPlay();
+        readout.textContent = String(input.value);
+        change();
+      });
+      wrap.appendChild(input);
+      wrap.appendChild(readout);
+      wrap.appendChild(btn);
+      return { wrap: wrap, input: input, labelEl: labelEl, readout: readout };
+    }
+
     function _buildButton(key, cellIdx, spec) {
       var label = spec.label || (typeof t === 'function' ? t('Kjør') : 'Kjør');
       var btn = _el('button', 'ui-widget ui-widget--button', label);
@@ -611,7 +728,8 @@
       checkbox: function (key, cellIdx, spec, value) { return _buildCheckbox(key, cellIdx, spec, value, false); },
       switch: function (key, cellIdx, spec, value) { return _buildCheckbox(key, cellIdx, spec, value, true); },
       number: _buildNumber,
-      text: _buildText
+      text: _buildText,
+      play: _buildPlay
     };
 
     // Skriver `v` til kontrollens DOM-node PER TYPE — klampet/koersert mot
@@ -630,7 +748,7 @@
     function _writeControlValue(ctrl, v) {
       var spec = ctrl.spec;
       var value = v;
-      if (spec.type === 'slider') {
+      if (spec.type === 'slider' || spec.type === 'play') {
         value = Number(value);
         if (value < spec.min) value = spec.min;
         if (value > spec.max) value = spec.max;
@@ -666,7 +784,7 @@
       var stored = _values.hasOwnProperty(ctrl.key) ? _values[ctrl.key] : newSpec.value;
       ctrl.spec = newSpec;
       if (ctrl.labelEl) ctrl.labelEl.textContent = _labelText(newSpec);
-      if (newSpec.type === 'slider') {
+      if (newSpec.type === 'slider' || newSpec.type === 'play') {
         ctrl.input.min = newSpec.min; ctrl.input.max = newSpec.max; ctrl.input.step = newSpec.step;
       } else if (newSpec.type === 'dropdown') {
         while (ctrl.input.firstChild) ctrl.input.removeChild(ctrl.input.firstChild);
@@ -912,6 +1030,10 @@
       if (typeChanged) {
         reinsertBefore = existing.wrap ? existing.wrap.nextSibling : null;
         if (existing.wrap && typeof existing.wrap.remove === 'function') existing.wrap.remove();
+        // dash-absorpsjon 5a Task 3: en type-byttet play-kontroll sin
+        // avspillingstimer må dø HER — no-op for enhver annen type (se
+        // _stopPlayTimer).
+        _stopPlayTimer(key);
         delete _controls[key];
         delete _values[key];
         // ui-html-fasen (Task 1): en type-endret kontroll er en HELT NY
@@ -928,6 +1050,10 @@
         existing = undefined;
       } else if (placementChanged) {
         if (existing.wrap && typeof existing.wrap.remove === 'function') existing.wrap.remove();
+        // Samme timer-hygiene som typeChanged over: den GAMLE noden (og
+        // dens ev. løpende timer) forlates for godt — en fersk kontroll
+        // bygges rett under, alltid i pause-tilstand.
+        _stopPlayTimer(key);
         delete _controls[key];
         existing = undefined;
       }
@@ -1881,6 +2007,33 @@
     };
 
     /**
+     * Ui.elPayload(elId, payloadJson) → den rendrede rot-noden (eller null),
+     * dash-absorpsjon 5a Task 3: rendrer et Ui.renderPayload-payload (kpi/
+     * markdown/image/… — samme vokabular som Ui.renderEventResult bruker)
+     * INN i en EKSISTERENDE, JS-eid node — clear-then-render (Ui.elClear
+     * FØRST, deretter Ui.renderPayload inn i den nå tomme noden). Dette er
+     * fasadenes ui.kpi()/ui.markdown()/ui.image() sin eneste JS-avhengighet
+     * utover Ui.elCreate: `elCreate('div', {}) → elPayload(elId, payload) →
+     * Element(elId)` — ÉN rendrings-implementasjon (Ui.renderPayload) delt
+     * mellom event-resultater og disse byggerne. Ukjent elId/ugyldig JSON
+     * → warn, null (samme defensive konvensjon som elSetProps/elClear).
+     */
+    Ui.elPayload = function (elId, payloadJson) {
+      var entry = _els[elId];
+      var node = entry ? entry.node : null;
+      if (!node) { console.warn('Ui.elPayload: ukjent elId ' + elId); return null; }
+      var p;
+      try {
+        p = JSON.parse(payloadJson);
+      } catch (e) {
+        console.warn('Ui.elPayload: ugyldig JSON-payload: ' + ((e && e.message) || e));
+        return null;
+      }
+      while (node.firstChild) node.removeChild(node.firstChild);
+      return Ui.renderPayload(p, node);
+    };
+
+    /**
      * Ui.elNode(elId) → den rå DOM-noden, eller null. Fasadenes `.el`-
      * eskapeluke (spec §1) — ALDRI sendt over JSON-broen selv, kun brukt
      * JS-internt (f.eks. andre js/*.js-moduler som trenger direkte
@@ -1982,7 +2135,7 @@
      * Ui.widgetBind(key, event, handler) → true/null. Kontroll-scopet
      * variant av Ui.bindEvent/Ui.elOn (dash-absorpsjon 5a Task 2) —
      * fasadens WidgetHandle.on(event, fn): en EKSTRA lytter på kontrollens
-     * input-node, ALGSIDE en ev. on_change=/on_click= gitt ved selve
+     * input-node, VED SIDEN AV en ev. on_change=/on_click= gitt ved selve
      * deklarasjonen (egen kanal/nøkkel — forstyrrer ikke
      * _controlHandlers/has_handler-kanalen _fireControlHandler bruker).
      * handler kalles med samme JSON event-payload ({type,value,checked,
@@ -2171,6 +2324,11 @@
         var ctrl = _controls[key];
         if (ctrl.cellIdx === cellIdx && !registered[key]) {
           if (ctrl.wrap && typeof ctrl.wrap.remove === 'function') ctrl.wrap.remove();
+          // dash-absorpsjon 5a Task 3: en sopt play-kontroll sin timer må
+          // dø HER — ellers tikker den videre for alltid mot en frakoblet
+          // node (no-op takket være tick() sin egen isConnected-sjekk, men
+          // fortsatt en ekte lekkasje av selve timer-handle-et).
+          _stopPlayTimer(key);
           delete _controls[key];
           delete _values[key];
           // ui-html-fasen (Task 1): en sopt kontroll sin bundne handler (om
@@ -2259,6 +2417,13 @@
         _destroyHandler({ handler: _controlHandlers[key] });
       });
       _controlHandlers = {};
+      // dash-absorpsjon 5a Task 3: klarer ut ALLE ennå-løpende play-timere
+      // FØR registeret glemmes — et nytt dokument har ingen gamle
+      // kontroller å tikke videre for (samme "glem ALT"-hensikt som resten
+      // av funksjonen; clearInterval, ikke bare et blankt objekt-bytte, ellers
+      // ville selve nettleser-timeren fortsatt løpt uavhengig av registeret).
+      Object.keys(_playTimers).forEach(function (key) { clearInterval(_playTimers[key]); });
+      _playTimers = {};
       _values = {};
       _controls = {};
       _strips = {};

@@ -92,6 +92,15 @@ class FakeUiJs:
     def elClear(self, el_id):
         self.el_calls.append(("elClear", el_id))
 
+    def elPayload(self, el_id, payload_json):
+        # dash-absorpsjon 5a Task 3: speiler js/ui.js sin Ui.elPayload —
+        # tar imot (elId, payloadJson) og returnerer en (her: rå dict, den
+        # PYTHONske fasadens kpi/markdown/image-byggere bryr seg aldri om
+        # returverdien - se _payload_element).
+        payload = json.loads(payload_json)
+        self.el_calls.append(("elPayload", el_id, payload))
+        return payload
+
     def elOn(self, el_id, event, handler):
         self.el_calls.append(("elOn", el_id, event, handler))
         return True
@@ -1332,3 +1341,253 @@ def test_element_show_returns_none(monkeypatch):
     el = mod.html.div()
     assert el.show() is None
     assert el.show(target="slot1") is None
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Task 3 (dash-absorpsjon 5a): ui.play(...) + ui.kpi/ui.markdown/ui.image
+# ══════════════════════════════════════════════════════════════════════════
+
+# ---- ui.play: fallback + spec-form ----
+
+def test_play_fallback_default_er_min(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=None)
+    assert mod.play(0, 10) == 0
+    assert fake.calls[-1]["min"] == 0
+
+
+def test_play_fallback_bruker_gitt_value(monkeypatch):
+    mod, _ = _load_ui(monkeypatch, next_result=None)
+    assert mod.play(0, 10, value=4) == 4
+
+
+def test_play_spec_inneholder_forventede_nokler_inkl_interval_og_loop(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=None)
+    mod.play(0, 20, value=5, step=2, interval=300, loop=True, label="Tid",
+              name="t", rerun="plot")
+    spec = fake.calls[-1]
+    assert spec["type"] == "play"
+    assert spec["min"] == 0
+    assert spec["max"] == 20
+    assert spec["step"] == 2
+    assert spec["value"] == 5
+    assert spec["interval"] == 300
+    assert spec["loop"] is True
+    assert spec["label"] == "Tid"
+    assert spec["name"] == "t"
+    assert spec["rerun"] == "plot"
+
+
+def test_play_default_interval_og_loop(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=None)
+    mod.play(0, 10)
+    spec = fake.calls[-1]
+    assert spec["interval"] == 600
+    assert spec["loop"] is False
+
+
+def test_play_returnerer_registrert_verdi_koersert_som_slider(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result="7")
+    assert mod.play(0, 10) == 7
+    assert isinstance(mod.play(0, 10), int)
+
+
+def test_play_on_change_alias_for_rerun(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=None)
+    mod.play(0, 10, rerun="self", on_change="andre_celle")
+    assert fake.calls[-1]["rerun"] == "andre_celle"
+
+
+def test_play_on_change_callable_dispatch_speiler_de_andre_kontrollene(monkeypatch):
+    # Samme callable-dispatch-mønster som slider/number/osv. (spec §3:
+    # "callable dispatch like the other controls") — has_handler satt,
+    # bindControlHandler kalt med den returnerte nøkkelen, rerun= UENDRET
+    # (aldri satt til et callable-objekt).
+    mod, fake = _load_ui(monkeypatch, next_result='3', next_key="pk1")
+    calls = []
+    mod.play(0, 10, on_change=lambda v: calls.append(v))
+    spec = fake.calls[-1]
+    assert spec["has_handler"] is True
+    assert spec["rerun"] == "self"
+    assert "pk1" in fake.bound_handlers
+
+
+def test_play_sync_to_gjennomstroms(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=None)
+    mod.play(0, 10, sync_to="x.y")
+    assert fake.calls[-1]["sync_to"] == "x.y"
+
+
+# ---- ui.kpi/ui.markdown/ui.image: elCreate('div', {}) → elPayload → Element ----
+
+def test_kpi_builds_via_elcreate_div_then_elpayload(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    el = mod.kpi(120, unit="kr", fmt=".0f", label="Salg")
+    create_calls = [c for c in fake.el_calls if c[0] == "elCreate"]
+    assert len(create_calls) == 1
+    assert create_calls[0][1] == "div"
+    payload_calls = [c for c in fake.el_calls if c[0] == "elPayload"]
+    assert len(payload_calls) == 1
+    _, el_id, payload = payload_calls[0]
+    assert el_id == el._openstat_el_id == "el1"
+    assert payload == {"kind": "kpi", "value": 120, "unit": "kr", "fmt": ".0f",
+                        "label": "Salg", "bra": "opp"}
+    assert isinstance(el, mod.Element)
+
+
+def test_kpi_delta_direkte_har_forrang_over_ref(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    mod.kpi(5, delta=-3, ref=100, bra="ned")
+    payload = [c for c in fake.el_calls if c[0] == "elPayload"][0][2]
+    assert payload["delta"] == -3
+    assert "ref" not in payload
+    assert payload["bra"] == "ned"
+
+
+def test_kpi_ref_uten_delta_sendes_som_ref(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    mod.kpi(120, ref=100)
+    payload = [c for c in fake.el_calls if c[0] == "elPayload"][0][2]
+    assert payload["ref"] == 100
+    assert "delta" not in payload
+
+
+def test_kpi_minimal_uten_unit_fmt_label_delta_ref(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    mod.kpi(1)
+    payload = [c for c in fake.el_calls if c[0] == "elPayload"][0][2]
+    assert payload == {"kind": "kpi", "value": 1, "bra": "opp"}
+
+
+def test_kpi_nan_og_inf_saniteres_til_none_for_value_delta_ref(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    mod.kpi(float("nan"), delta=float("inf"))
+    payload = [c for c in fake.el_calls if c[0] == "elPayload"][0][2]
+    assert payload["value"] is None
+    assert payload["delta"] is None
+
+    mod.kpi(1, ref=float("-inf"))
+    payload2 = [c for c in fake.el_calls if c[0] == "elPayload"][-1][2]
+    assert payload2["ref"] is None
+
+
+def test_markdown_builds_via_elcreate_div_then_elpayload(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    el = mod.markdown("hei **du**")
+    create_calls = [c for c in fake.el_calls if c[0] == "elCreate"]
+    assert create_calls[0][1] == "div"
+    payload = [c for c in fake.el_calls if c[0] == "elPayload"][0][2]
+    assert payload == {"kind": "markdown", "text": "hei **du**"}
+    assert isinstance(el, mod.Element)
+
+
+def test_markdown_coerces_non_string_to_str(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    mod.markdown(123)
+    payload = [c for c in fake.el_calls if c[0] == "elPayload"][0][2]
+    assert payload["text"] == "123"
+
+
+def test_image_string_src_passes_through_unchanged(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    el = mod.image("https://example.com/x.png", alt="et bilde")
+    create_calls = [c for c in fake.el_calls if c[0] == "elCreate"]
+    assert create_calls[0][1] == "div"
+    payload = [c for c in fake.el_calls if c[0] == "elPayload"][0][2]
+    assert payload == {"kind": "image", "src": "https://example.com/x.png", "alt": "et bilde"}
+    assert isinstance(el, mod.Element)
+
+
+def test_image_string_src_uten_alt(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    mod.image("data:image/png;base64,xx")
+    payload = [c for c in fake.el_calls if c[0] == "elPayload"][0][2]
+    assert payload == {"kind": "image", "src": "data:image/png;base64,xx"}
+
+
+class _FakeMplFigure:
+    """Duck-typer en ekte matplotlib.figure.Figure akkurat nok for
+    pyodide/ui.py sin _mpl_image (portert fra dash.py:175): savefig/
+    set_size_inches/set_dpi. savefig skriver en kjenneligbar bytestreng
+    til bufferet slik testen kan bevise base64-innholdet stemmer."""
+
+    def __init__(self):
+        self.size = None
+        self.dpi = None
+        self.saved_kwargs = None
+
+    def set_size_inches(self, w, h):
+        self.size = (w, h)
+
+    def set_dpi(self, d):
+        self.dpi = d
+
+    def savefig(self, buf, format=None, bbox_inches=None):
+        self.saved_kwargs = {"format": format, "bbox_inches": bbox_inches}
+        buf.write(b"PNGDATA")
+
+
+def _install_fake_matplotlib(monkeypatch):
+    """sys.modules-injeksjon av en minimal matplotlib/matplotlib.pyplot —
+    _mpl_image sin `if "matplotlib" not in sys.modules` + `import
+    matplotlib.pyplot as plt` trenger begge oppføringene, uansett om ekte
+    matplotlib er installert i test-miljøet eller ikke."""
+    closed = []
+    mpl_mod = types.ModuleType("matplotlib")
+    plt_mod = types.ModuleType("matplotlib.pyplot")
+    plt_mod.close = lambda fig: closed.append(fig)
+    monkeypatch.setitem(sys.modules, "matplotlib", mpl_mod)
+    monkeypatch.setitem(sys.modules, "matplotlib.pyplot", plt_mod)
+    return closed
+
+
+def test_image_matplotlib_figure_konverteres_til_png_data_uri(monkeypatch):
+    closed = _install_fake_matplotlib(monkeypatch)
+    mod, fake = _load_ui(monkeypatch)
+    fig = _FakeMplFigure()
+    el = mod.image(fig, alt="graf")
+    payload = [c for c in fake.el_calls if c[0] == "elPayload"][0][2]
+    assert payload["src"].startswith("data:image/png;base64,")
+    import base64
+    encoded = payload["src"].split(",", 1)[1]
+    assert base64.b64decode(encoded) == b"PNGDATA"
+    assert payload["alt"] == "graf"
+    assert fig.size == (7.2, 4.4)
+    assert fig.dpi == 100
+    assert fig.saved_kwargs == {"format": "png", "bbox_inches": "tight"}
+    assert closed == [fig]
+    assert isinstance(el, mod.Element)
+
+
+def test_image_matplotlib_axes_via_figure_attribute(monkeypatch):
+    # df.plot()-varianten: en Axes med .figure, ikke .savefig direkte
+    # (samme dispatch som dash.py:180: "fig = x if hasattr(x, 'savefig')
+    # else getattr(x, 'figure', None)").
+    _install_fake_matplotlib(monkeypatch)
+    mod, fake = _load_ui(monkeypatch)
+    fig = _FakeMplFigure()
+    axes = types.SimpleNamespace(figure=fig)
+    mod.image(axes)
+    payload = [c for c in fake.el_calls if c[0] == "elPayload"][0][2]
+    assert payload["src"].startswith("data:image/png;base64,")
+
+
+def test_image_uten_matplotlib_importert_faller_tilbake_til_str(monkeypatch):
+    # "matplotlib" ikke i sys.modules i det hele tatt → _mpl_image gir
+    # None umiddelbart → image() faller tilbake til str(src) (aldri en
+    # krasj for et objekt som verken er en streng eller en gjenkjennelig
+    # matplotlib-figur).
+    monkeypatch.delitem(sys.modules, "matplotlib", raising=False)
+    monkeypatch.delitem(sys.modules, "matplotlib.pyplot", raising=False)
+    mod, fake = _load_ui(monkeypatch)
+    obj = object()
+    mod.image(obj)
+    payload = [c for c in fake.el_calls if c[0] == "elPayload"][0][2]
+    assert payload["src"] == str(obj)
+
+
+def test_kpi_markdown_image_uten_ui_returnerer_inert_element(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    monkeypatch.setattr(mod, "window", None)
+    assert mod.kpi(1)._openstat_el_id is None
+    assert mod.markdown("x")._openstat_el_id is None
+    assert mod.image("x.png")._openstat_el_id is None

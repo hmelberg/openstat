@@ -1,7 +1,10 @@
 # ui - widget-fasade for webR (R-modus notatbøker, spec 2 ui-widgets, W2).
 # Offentlig API: ui_slider, ui_dropdown, ui_checkbox, ui_switch, ui_number,
-# ui_text, ui_button (funksjonerer; W5.1 on_change=/on_click=-aliaser),
-# ui_html/ui_sl/ui_pico (høflige notiser), ui_value (per-run-snapshot-leser).
+# ui_text, ui_button, ui_play (funksjonerer; W5.1 on_change=/on_click=-
+# aliaser; ui_play: dash-absorpsjon 5a Task 3 - registry-spec only, INGEN
+# payload-byggere (kpi/markdown/image) i R - se ui_play sin egen docstring),
+# ui_html/ui_sl/ui_pico/ui_widget (høflige notiser), ui_value
+# (per-run-snapshot-leser).
 #
 # Speiler pyodide/ui.py sitt vokabular og fallback-semantikk, men bruker
 # DEKLARER-OG-INJISER-MODELLEN i stedet for pyodide sin PULL-modell:
@@ -231,6 +234,32 @@ ui_button <- function(label, rerun = "self", on_click = NULL, name = NULL,
   .ui_register(list(type = "button", name = key, label = label, rerun = rerun,
                     placement = placement))
   invisible(NULL)
+}
+
+#' Avspillings-glidebryter (dash-absorpsjon 5a Task 3, spec §3 - dash sin
+#' play()-widget, absorbert): som ui_slider, men med en innebygd play/pause-
+#' knapp (js/ui.js sin _buildPlay) som stepper verdien med `step` per
+#' `interval` ms, med dash sin EKSAKTE tre-veis timerhygiene (pause-klikk/
+#' manuell slider-endring/frakoblet-i-selve-tick-en). `interval` gulves til
+#' 200ms (js/ui.js sin normalizeSpec); `loop = TRUE` wrapper til `min` ved
+#' `max` i stedet for å stoppe. R-motoren har INGEN payload-byggere (kpi/
+#' markdown/image) - dokumentert (spec §3): R-eksemplene bruker plots/
+#' tabeller nativt i stedet. Fallback (ingen notatbok/verdi ikke injisert):
+#' value hvis gitt, ellers min - samme regel som ui_slider. `on_change` er
+#' kanonisk alias for `rerun` (W5.1) - aliaset vinner naar begge er satt.
+ui_play <- function(min, max, value = NULL, step = 1, interval = 600,
+                    loop = FALSE, label = NULL, name = NULL, rerun = "self",
+                    on_change = NULL, placement = NULL, sync_to = NULL) {
+  if (!is.null(on_change)) rerun <- on_change
+  key <- .ui_next_key(name)
+  default <- if (is.null(value)) min else value
+  .ui_register(list(type = "play", name = key, label = label, min = min,
+                    max = max, step = step, value = default,
+                    interval = interval, loop = isTRUE(loop), rerun = rerun,
+                    placement = placement, sync_to = sync_to))
+  raw <- .ui_get_value(key)
+  if (is.null(raw)) return(default)
+  as.numeric(raw)
 }
 
 #' HTML-elementer. Task 5: Ikke støttet i R-modus ennå - bruk python-modusene.

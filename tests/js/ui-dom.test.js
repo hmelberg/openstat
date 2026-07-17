@@ -1865,6 +1865,68 @@ test('Task 1: elClear — tømmer ALLE barn av noden', () => {
   assert.strictEqual(Ui.elNode(parent).children.length, 0);
 });
 
+// ---- Ui.elPayload (dash-absorpsjon 5a Task 3): rendrer et
+// Ui.renderPayload-payload INN i en eksisterende, JS-eid node
+// (clear-then-render) — facadenes ui.kpi()/ui.markdown()/ui.image() sin
+// eneste JS-avhengighet utover elCreate. ------------------------------------
+
+test('Task 3: elPayload — rendrer payloaden inn i noden og returnerer rot-noden', () => {
+  const { Ui } = freshEnv();
+  global.markdownit = () => ({ render: (s) => '<p>' + s + '</p>' });
+  let node;
+  try {
+    const id = Ui.elCreate('div');
+    node = Ui.elPayload(id, JSON.stringify({ kind: 'markdown', text: 'hei **du**' }));
+    assert.strictEqual(node.className, 'ui-md');
+    assert.strictEqual(Ui.elNode(id).children[0], node, 'rendret INN i host-noden');
+  } finally {
+    delete global.markdownit;
+  }
+});
+
+test('Task 3: elPayload — clear-then-render: en andre gangs kall tømmer det forrige innholdet', () => {
+  const { Ui } = freshEnv();
+  const id = Ui.elCreate('div');
+  Ui.elPayload(id, JSON.stringify({ kind: 'text', text: 'først' }));
+  assert.strictEqual(Ui.elNode(id).children.length, 1);
+  Ui.elPayload(id, JSON.stringify({ kind: 'text', text: 'så' }));
+  assert.strictEqual(Ui.elNode(id).children.length, 1, 'gammelt innhold erstattet, ikke stablet');
+  assert.strictEqual(Ui.elNode(id).children[0].textContent, 'så');
+});
+
+test('Task 3: elPayload — ukjent elId → console.warn, null', () => {
+  const { Ui } = freshEnv();
+  const warns = [];
+  const origWarn = console.warn;
+  console.warn = (m) => warns.push(m);
+  let result;
+  try { result = Ui.elPayload('el999', JSON.stringify({ kind: 'text', text: 'x' })); }
+  finally { console.warn = origWarn; }
+  assert.strictEqual(result, null);
+  assert.ok(warns.length >= 1);
+});
+
+test('Task 3: elPayload — ugyldig JSON-payload → console.warn, null (node urørt)', () => {
+  const { Ui } = freshEnv();
+  const id = Ui.elCreate('div');
+  const warns = [];
+  const origWarn = console.warn;
+  console.warn = (m) => warns.push(m);
+  let result;
+  try { result = Ui.elPayload(id, '{ugyldig'); }
+  finally { console.warn = origWarn; }
+  assert.strictEqual(result, null);
+  assert.ok(warns.length >= 1);
+  assert.strictEqual(Ui.elNode(id).children.length, 0);
+});
+
+test('Task 3: elPayload — kpi-payload rendres via samme vokabular som Ui.renderPayload', () => {
+  const { Ui } = freshEnv();
+  const id = Ui.elCreate('div');
+  const node = Ui.elPayload(id, JSON.stringify({ kind: 'kpi', value: 42, unit: 'kr', label: 'Salg' }));
+  assert.strictEqual(node.className, 'ui-kpi');
+});
+
 // ---- Ui.elShow (target null: monter i den KJØRENDE kontekstens slot) ------
 
 test('Task 1: elShow — target null, celle-kontekst: appender til cellens .nb-output-body', () => {
@@ -2658,4 +2720,205 @@ test('Task 2: widgetBind — handler er ikke en funksjon → console.warn, null'
   const key = Ui.widgetLookup('x');
   const ok = Ui.widgetBind(key, 'input', 'ikke-en-funksjon');
   assert.strictEqual(ok, null);
+});
+
+// ---- Task 3 (dash-absorpsjon 5a): ui.play — slider + play/pause-knapp med
+// dash sin EKSAKTE tre-veis timerhygiene (js/dash.js:272-324, portert til
+// _buildPlay). Hver tick går gjennom SAMME endrings-sti (_wireChange sin
+// `change`-lukking) som en brukerendring: store → sync_to → handler-eller-
+// debounced-rerun. Testene bruker EKTE Node-timere (interval-gulvet er
+// 200ms, samme oppskrift som resten av filens debounce-tester som venter
+// forbi 150ms) — clearInterval spionert direkte der en test kun trenger å
+// BEVISE at timer-registeret ble ryddet, ikke observere en faktisk tick,
+// for å holde testene raske og ikke-flakete.
+
+function _playWrapParts(Ui, key) {
+  const wrap = Ui.widgetNode(key, 'wrap');
+  const input = Ui.widgetNode(key, 'input');
+  // wrap sin barnerekkefølge (se _buildPlay): [labelEl, input, readout, btn]
+  const btn = wrap.children[wrap.children.length - 1];
+  return { wrap, input, btn };
+}
+
+test('Task 3: ui.play — tick avanserer verdien og går gjennom SAMME endrings-sti som en brukerendring (store + debounced rerun)', async () => {
+  const { Ui, runCellCalls } = freshEnv({ cellIdx: 0 });
+  Ui.registerControl(JSON.stringify({ type: 'play', name: 'p', min: 0, max: 5, step: 1, interval: 200, value: 0 }));
+  const key = Ui.widgetLookup('p');
+  const { input, btn } = _playWrapParts(Ui, key);
+  assert.strictEqual(Number(input.value), 0);
+  btn.dispatchEvent({ type: 'click' });
+  assert.strictEqual(btn.textContent, '⏸', 'play-knappen viser pause-symbol mens den spiller');
+  await wait(260); // > 200ms gulvet interval: minst én tick har fyrt
+  assert.strictEqual(Number(input.value), 1, 'tick skrev DOM-en (input.value)');
+  await wait(200); // > 150ms debounce-vinduet _wireChange sin change() bruker
+  assert.deepStrictEqual(runCellCalls, [0], 'debounced rerun fyrt via SAMME change()-sti som en brukerendring');
+  btn.dispatchEvent({ type: 'click' }); // pause — rydder timeren før testen avsluttes
+});
+
+test('Task 3: ui.play — pause-klikk stopper timeren (ingen flere ticks etterpå)', async () => {
+  const { Ui } = freshEnv({ cellIdx: 0 });
+  Ui.registerControl(JSON.stringify({ type: 'play', name: 'p', min: 0, max: 5, step: 1, interval: 200, value: 0 }));
+  const key = Ui.widgetLookup('p');
+  const { input, btn } = _playWrapParts(Ui, key);
+  btn.dispatchEvent({ type: 'click' }); // start
+  btn.dispatchEvent({ type: 'click' }); // pause — FØR første tick rekker å fyre
+  assert.strictEqual(btn.textContent, '▶', 'play-knappen tilbake til play-symbol');
+  await wait(260); // ville sett value=1 her om timeren IKKE var stoppet
+  assert.strictEqual(Number(input.value), 0, 'verdien uendret — ingen tick fyrte etter pause');
+});
+
+test('Task 3: ui.play — manuell slider-"input" stopper timeren', async () => {
+  const { Ui, runCellCalls } = freshEnv({ cellIdx: 0 });
+  Ui.registerControl(JSON.stringify({ type: 'play', name: 'p', min: 0, max: 5, step: 1, interval: 200, value: 0 }));
+  const key = Ui.widgetLookup('p');
+  const { input, btn } = _playWrapParts(Ui, key);
+  btn.dispatchEvent({ type: 'click' }); // start
+  input.value = 4;
+  input.dispatchEvent({ type: 'input' }); // brukeren tok kontrollen selv
+  assert.strictEqual(btn.textContent, '▶', 'timeren markert stoppet (knapp-tilstand)');
+  await wait(260); // ville avansert til 5 her om timeren IKKE var stoppet av manuell input
+  assert.strictEqual(Number(input.value), 4, 'manuell verdi står urørt — ingen tick overskrev den');
+  await wait(200);
+  assert.deepStrictEqual(runCellCalls, [0], 'den manuelle endringen selv gikk gjennom SAMME change()-sti (én rerun, ikke flere)');
+});
+
+test('Task 3: ui.play — disconnect-i-tick (tredje hygiene-benet): en frakoblet input stopper seg selv på neste tick', async () => {
+  const { Ui } = freshEnv({ cellIdx: 0 });
+  Ui.registerControl(JSON.stringify({ type: 'play', name: 'p', min: 0, max: 5, step: 1, interval: 200, value: 0 }));
+  const key = Ui.widgetLookup('p');
+  const { wrap, input, btn } = _playWrapParts(Ui, key);
+  btn.dispatchEvent({ type: 'click' }); // start
+  // Simuler en STRUKTURELL DOM-utskiftning UTENOM ui.js sine egne
+  // fjernings-API-er (F6-mønsteret) — wrap.remove() kobler fra treet uten
+  // at Ui.endCellRun/typeChanged-stien noensinne kalles, akkurat som en
+  // ekstern innerHTML-utskiftning ville gjort.
+  wrap.remove();
+  assert.strictEqual(input.isConnected, false);
+  const realClearInterval = global.clearInterval;
+  let clearCalls = 0;
+  global.clearInterval = (id) => { clearCalls++; return realClearInterval(id); };
+  try {
+    await wait(260); // > 200ms: neste tick fyrer, ser isConnected===false, stopper seg selv
+  } finally {
+    global.clearInterval = realClearInterval;
+  }
+  assert.ok(clearCalls >= 1, 'tick sin egen isConnected-sjekk kalte clearInterval (tredje hygiene-benet)');
+});
+
+test('Task 3: ui.play — loop:true wrapper til min ved max i stedet for å stoppe', async () => {
+  const { Ui } = freshEnv({ cellIdx: 0 });
+  Ui.registerControl(JSON.stringify({ type: 'play', name: 'p', min: 0, max: 1, step: 1, interval: 200, value: 0, loop: true }));
+  const key = Ui.widgetLookup('p');
+  const { input, btn } = _playWrapParts(Ui, key);
+  btn.dispatchEvent({ type: 'click' });
+  await wait(260);
+  assert.strictEqual(Number(input.value), 1, 'første tick: 0 → 1 (ikke over max ennå)');
+  await wait(200);
+  assert.strictEqual(Number(input.value), 0, 'andre tick: 1+1=2 > max → wrap til min (0), IKKE stoppet');
+  assert.strictEqual(btn.textContent, '⏸', 'fortsatt spiller (loop stopper aldri av seg selv)');
+  btn.dispatchEvent({ type: 'click' }); // rydd opp
+});
+
+test('Task 3: ui.play — loop:false (default) stopper VED max i stedet for å wrappe', async () => {
+  const { Ui } = freshEnv({ cellIdx: 0 });
+  Ui.registerControl(JSON.stringify({ type: 'play', name: 'p', min: 0, max: 1, step: 1, interval: 200, value: 0 }));
+  const key = Ui.widgetLookup('p');
+  const { input, btn } = _playWrapParts(Ui, key);
+  btn.dispatchEvent({ type: 'click' });
+  await wait(260);
+  assert.strictEqual(Number(input.value), 1);
+  await wait(300);
+  assert.strictEqual(Number(input.value), 1, 'stoppet ved max, ikke wrappet');
+  assert.strictEqual(btn.textContent, '▶', 'knappen tilbake til play-symbol — timeren stoppet seg selv');
+});
+
+test('Task 3: ui.play — Ui.endCellRun sveiper en ikke-re-deklarert play-kontroll og kaller EKSPLISITT clearInterval (ikke bare self-heal)', () => {
+  const { Ui } = freshEnv({ cellIdx: 0 });
+  // Første run-syklus: kontrollen DEKLARERES og runden lukkes normalt —
+  // registered[key] er satt i DENNE runden, så den overlever sin egen
+  // endCellRun (mark-og-sopp-mønsteret, se Ui.endCellRun sin docstring).
+  Ui.beginCellRun(0);
+  Ui.registerControl(JSON.stringify({ type: 'play', name: 'p', min: 0, max: 5, step: 1, interval: 200, value: 0 }));
+  Ui.endCellRun(0);
+  const key = Ui.widgetLookup('p');
+  const { btn } = _playWrapParts(Ui, key);
+  btn.dispatchEvent({ type: 'click' }); // timer løper
+
+  const realClearInterval = global.clearInterval;
+  let clearCalls = 0;
+  global.clearInterval = (id) => { clearCalls++; return realClearInterval(id); };
+  try {
+    // Andre run-syklus: kilden sluttet å kalle ui.play(...) for denne
+    // nøkkelen — ingen re-registrering denne runden, så DENNE endCellRun
+    // sveiper den.
+    Ui.beginCellRun(0);
+    Ui.endCellRun(0);
+  } finally {
+    global.clearInterval = realClearInterval;
+  }
+  assert.ok(clearCalls >= 1, 'endCellRun klarerte ut play-timeren eksplisitt');
+  assert.strictEqual(Ui.widgetLookup('p'), null, 'kontrollen er borte etter sveip');
+});
+
+test('Task 3: ui.play — type-bytte under SAMME nøkkel (play→slider) klarerer ut den gamle timeren', () => {
+  const { Ui } = freshEnv({ cellIdx: 0 });
+  Ui.registerControl(JSON.stringify({ type: 'play', name: 'p', min: 0, max: 5, step: 1, interval: 200, value: 0 }));
+  const key1 = Ui.widgetLookup('p');
+  const { btn } = _playWrapParts(Ui, key1);
+  btn.dispatchEvent({ type: 'click' }); // timer løper
+
+  const realClearInterval = global.clearInterval;
+  let clearCalls = 0;
+  global.clearInterval = (id) => { clearCalls++; return realClearInterval(id); };
+  try {
+    Ui.registerControl(JSON.stringify({ type: 'slider', name: 'p', min: 0, max: 5, value: 2 }));
+  } finally {
+    global.clearInterval = realClearInterval;
+  }
+  assert.ok(clearCalls >= 1, 'type-byttet klarerte ut den gamle play-timeren');
+});
+
+test('Task 3: ui.play — Ui.resetDocument klarerer ut ALLE løpende play-timere', () => {
+  const { Ui } = freshEnv({ cellIdx: 0 });
+  Ui.registerControl(JSON.stringify({ type: 'play', name: 'p', min: 0, max: 5, step: 1, interval: 200, value: 0 }));
+  const key = Ui.widgetLookup('p');
+  const { btn } = _playWrapParts(Ui, key);
+  btn.dispatchEvent({ type: 'click' }); // timer løper
+
+  const realClearInterval = global.clearInterval;
+  let clearCalls = 0;
+  global.clearInterval = (id) => { clearCalls++; return realClearInterval(id); };
+  try {
+    Ui.resetDocument();
+  } finally {
+    global.clearInterval = realClearInterval;
+  }
+  assert.ok(clearCalls >= 1, 'resetDocument klarerte ut play-timeren');
+});
+
+test('Task 3: ui.play — re-registrering av SAMME kontroll (self-rerun) gjenbruker DOM-noden/timeren, oppretter ALDRI en ny setInterval (ingen dobbel-timer)', () => {
+  const { Ui } = freshEnv({ cellIdx: 0 });
+  Ui.registerControl(JSON.stringify({ type: 'play', name: 'p', min: 0, max: 5, step: 1, interval: 200, value: 0 }));
+  const key = Ui.widgetLookup('p');
+  const { btn } = _playWrapParts(Ui, key);
+  btn.dispatchEvent({ type: 'click' }); // timer løper (1 setInterval-kall)
+
+  const realSetInterval = global.setInterval;
+  let intervalCalls = 0;
+  global.setInterval = (fn, ms) => { intervalCalls++; return realSetInterval(fn, ms); };
+  try {
+    // Selv-rerun: cellen deklarerer SAMME kontroll på nytt (samme navn,
+    // samme cellIdx, samme type/plassering) — dette er PRESIS hva en
+    // rerun av en play-tick sin egen cellIdx gjør (_rerunFor → Cells.runCell
+    // → cellens kode kjører fra toppen igjen, kaller ui.play(...) igjen).
+    Ui.registerControl(JSON.stringify({ type: 'play', name: 'p', min: 0, max: 5, step: 1, interval: 200, value: 0 }));
+    Ui.registerControl(JSON.stringify({ type: 'play', name: 'p', min: 0, max: 5, step: 1, interval: 200, value: 0 }));
+    Ui.registerControl(JSON.stringify({ type: 'play', name: 'p', min: 0, max: 5, step: 1, interval: 200, value: 0 }));
+  } finally {
+    global.setInterval = realSetInterval;
+  }
+  assert.strictEqual(intervalCalls, 0, 'ingen NYE setInterval-kall — samme node/timer gjenbrukt på tvers av 3 reruns');
+  const key2 = Ui.widgetLookup('p');
+  assert.strictEqual(key2, key, 'samme controlKey (samme DOM-node) etter reruns');
+  Ui.widgetNode(key, 'wrap').children[3].dispatchEvent({ type: 'click' }); // pause, rydd opp
 });

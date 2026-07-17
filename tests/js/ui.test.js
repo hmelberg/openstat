@@ -197,6 +197,75 @@ test('normalizeSpec: button without label', () => {
   assert.strictEqual(res.spec.label, undefined);
 });
 
+// ===== normalizeSpec: play (dash-absorpsjon 5a Task 3) — som slider
+// (min/max/step/value NaN-vakter/klamping/min>max-bytte), pluss interval
+// (gulvet til 200ms) og loop (boolsk). =====
+
+test('normalizeSpec: play defaults min/max/step/interval/loop', () => {
+  const res = Ui.normalizeSpec({ type: 'play' });
+  assert.strictEqual(res.spec.type, 'play');
+  assert.strictEqual(res.spec.min, 0);
+  assert.strictEqual(res.spec.max, 100);
+  assert.strictEqual(res.spec.step, 1);
+  assert.strictEqual(res.spec.value, 0);
+  assert.strictEqual(res.spec.interval, 600);
+  assert.strictEqual(res.spec.loop, false);
+});
+
+test('normalizeSpec: play — interval under 200 gulves til 200', () => {
+  const res = Ui.normalizeSpec({ type: 'play', interval: 50 });
+  assert.strictEqual(res.spec.interval, 200);
+});
+
+test('normalizeSpec: play — interval over gulvet beholdes uendret', () => {
+  const res = Ui.normalizeSpec({ type: 'play', interval: 1000 });
+  assert.strictEqual(res.spec.interval, 1000);
+});
+
+test('normalizeSpec: play — ugyldig interval → 600 + advarsel', () => {
+  const res = Ui.normalizeSpec({ type: 'play', interval: 'abc' });
+  assert.strictEqual(res.spec.interval, 600);
+  assert.ok(res.warnings.some((w) => /ugyldig interval/.test(w)));
+});
+
+test('normalizeSpec: play — loop koerseres til ekte boolsk', () => {
+  assert.strictEqual(Ui.normalizeSpec({ type: 'play' }).spec.loop, false);
+  assert.strictEqual(Ui.normalizeSpec({ type: 'play', loop: true }).spec.loop, true);
+  assert.strictEqual(Ui.normalizeSpec({ type: 'play', loop: 1 }).spec.loop, true);
+  assert.strictEqual(Ui.normalizeSpec({ type: 'play', loop: 0 }).spec.loop, false);
+});
+
+test('normalizeSpec: play — value klampes til [min,max]', () => {
+  const overMax = Ui.normalizeSpec({ type: 'play', min: 0, max: 10, value: 99 });
+  assert.strictEqual(overMax.spec.value, 10);
+  const underMin = Ui.normalizeSpec({ type: 'play', min: 5, max: 10, value: 0 });
+  assert.strictEqual(underMin.spec.value, 5);
+});
+
+test('normalizeSpec: play — min > max byttes om + advarsel', () => {
+  const res = Ui.normalizeSpec({ type: 'play', min: 100, max: 0 });
+  assert.strictEqual(res.spec.min, 0);
+  assert.strictEqual(res.spec.max, 100);
+  assert.ok(res.warnings.some((w) => /min > max/.test(w)));
+});
+
+test('normalizeSpec: play — NaN min/max/step/value → defaults + advarsler', () => {
+  const res = Ui.normalizeSpec({ type: 'play', min: 'x', max: 'y', step: 'z', value: 'w' });
+  assert.strictEqual(res.spec.min, 0);
+  assert.strictEqual(res.spec.max, 100);
+  assert.strictEqual(res.spec.step, 1);
+  assert.strictEqual(res.spec.value, 0);
+  assert.ok(res.warnings.some((w) => /ugyldig min for play/.test(w)));
+  assert.ok(res.warnings.some((w) => /ugyldig max for play/.test(w)));
+  assert.ok(res.warnings.some((w) => /ugyldig step for play/.test(w)));
+  assert.ok(res.warnings.some((w) => /ugyldig value for play/.test(w)));
+});
+
+test('normalizeSpec: play — interval/loop er gyldige nøkler (ingen "ukjent nøkkel"-advarsel)', () => {
+  const res = Ui.normalizeSpec({ type: 'play', interval: 300, loop: true });
+  assert.ok(!res.warnings.some((w) => /ukjent nøkkel/.test(w)));
+});
+
 test('normalizeSpec: unknown type → null + warning', () => {
   const res = Ui.normalizeSpec({ type: 'unknowntype' });
   assert.strictEqual(res.spec, null);

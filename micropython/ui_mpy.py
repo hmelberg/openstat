@@ -445,6 +445,34 @@ def button(label, *, rerun='self', on_click=None, name=None, placement=None):
     return None
 
 
+def play(min, max, *, value=None, step=1, interval=600, loop=False, label=None,
+         name=None, rerun='self', on_change=None, placement=None, sync_to=None):
+    """Avspillings-glidebryter (dash-absorpsjon 5a Task 3, spec §3 - dash sin
+    play()-widget, absorbert): som slider, men med en innebygd play/pause-
+    knapp (js/ui.js sin _buildPlay) som stepper value+step per interval-ms,
+    med dash sin EKSAKTE tre-veis timerhygiene (pause-klikk/manuell slider-
+    endring/frakoblet-i-selve-tick-en - se der). interval gulves til 200ms;
+    loop=True wrapper til min ved max i stedet for å stoppe.
+
+    Fallback (ingen notatbok): value hvis gitt, ellers min - samme regel som
+    slider(). on_change= er kanonisk alias for rerun= (W5.1) - aliaset
+    vinner. on_change= kan OGSÅ være en python-callable: da bindes den som
+    en handler (kontrollen rerunner ALDRI via rerun=) - men HVER tick fyrer
+    likevel handleren, akkurat som en manuell brukerendring ville gjort
+    (js/ui.js sin _wireChange/_buildPlay: "hver tick går gjennom SAMME sti
+    som en brukerendring").
+    sync_to= pusher verdien inn i live-sesjonsvariabelen ved hver
+    endring/tick, uten rerun."""
+    rerun = _alias_rerun(rerun, on_change)
+    spec = _spec("play", min=min, max=max, value=value, step=step,
+                 interval=interval, loop=bool(loop), label=label, name=name,
+                 rerun=rerun, placement=placement, sync_to=sync_to)
+    result = _register_value(spec, on_change)
+    if result is None:
+        return _scalar(value) if value is not None else _scalar(min)
+    return _num(result)
+
+
 def on(selector, event, handler, *, target=None):
     """Bind en python-funksjon til en HTML-event på et vilkårlig
     DOM-element (typisk i en #%% html-celle). handler(evt) kalles med
@@ -578,9 +606,12 @@ class WidgetHandle:
 
     def on(self, event, handler):
         """Bind en EKSTRA python-callable til en DOM-event på kontrollens
-        input-node (Ui.widgetBind) - ALGSIDE en ev. on_change=/on_click=
+        input-node (Ui.widgetBind) - VED SIDEN AV en ev. on_change=/on_click=
         gitt VED DEKLARASJONEN (egen kanal/nøkkel - forstyrrer ikke
-        has_handler-kanalen _fireControlHandler bruker).
+        has_handler-kanalen _fireControlHandler bruker). handler mottar
+        HELE event-dicten (som Element.on), IKKE bare verdien - til
+        forskjell fra on_change= sin enklere handler(value)-signatur (se
+        _bind_handler_if_callable).
 
         INGEN create_proxy her (dialektavvik fra pyodide/ui.py) -
         MicroPython-funksjoner er jsffi-kallbare direkte."""
@@ -937,6 +968,143 @@ class Element:
             return u.elNode(self._openstat_el_id)
         except Exception:
             return None
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# ui.kpi/ui.markdown/ui.image - Element-byggere for det delte payload-
+# vokabularet (dash-absorpsjon 5a Task 3, spec §2). Speiler pyodide/ui.py
+# sitt API NØYAKTIG. Ui.renderPayload (js/ui.js, Task 1) er ÉN rendrings-
+# implementasjon delt mellom event-resultater (ui.on()-handlere sin
+# returverdi) OG disse byggerne. Mekanikken: elCreate('div', {}) → en tom
+# vert-node, elPayload(elId, payload) → Ui.renderPayload sitt resultat
+# rendret INN i den (clear-then-render), Element(elId) → det vanlige
+# ui.html-håndtaket.
+# ══════════════════════════════════════════════════════════════════════════
+
+def _payload_element(payload):
+    """Felles kjerne for ui.kpi/ui.markdown/ui.image: en tom vert-div
+    (Ui.elCreate) med `payload` rendret INN i den (Ui.elPayload, Task 3).
+    Ingen window/Ui (ikke i nettleser/ikke lastet ennå) → et Element med
+    el_id=None (samme "eskapelukene blir None"-fallback som resten av
+    ui-html-fasen)."""
+    u = _ui()
+    el_id = None
+    if u is not None:
+        try:
+            el_id = u.elCreate('div', json.dumps({}))
+        except Exception:
+            el_id = None
+        if el_id is not None:
+            try:
+                u.elPayload(el_id, json.dumps(payload))
+            except Exception:
+                pass
+    return Element(el_id)
+
+
+def _clean_num(v):
+    """_scalar(v), MEN NaN/±Infinity → None (samme regel som
+    micropython/dash.py sin _number_payload: json.dumps av NaN/Infinity gir
+    literal NaN/Infinity-tokens som knekker JSON.parse i JS - ui.kpi sine
+    value=/delta=/ref= er alle DIREKTE brukerverdier, ikke forhånds-sjekket
+    av noen add()-dispatch slik dash sin _payload() gjorde det)."""
+    v = _scalar(v)
+    if isinstance(v, float) and (v != v or abs(v) == float("inf")):
+        return None
+    return v
+
+
+def kpi(value, delta=None, *, unit=None, fmt=None, ref=None, bra="opp", label=None):
+    """ui.kpi(...) -> Element (dash-absorpsjon 5a Task 3, spec §2 - dash sin
+    'number'-payload/dashboard.add(tall)-kort, som en EGEN Element-bygger i
+    stedet for en add()-dispatch): kort-node med verdi/enhet/delta.
+
+    delta= er DIREKTE-formen (forrang når gitt); ref= beregner delta MOT en
+    referanseverdi (dash sin regel: diff = value - ref). bra= ("opp"/"ned")
+    avgjør hvilken retning som fargelegges "god" (js/ui.js sin
+    deltaFromDiff). Bygget via Ui.elPayload (kind "kpi") - SAMME
+    rendrings-vokabular som en ui.on()-handler sin returverdi (et tall)
+    rendres med."""
+    payload = {"kind": "kpi", "value": _clean_num(value)}
+    if unit is not None:
+        payload["unit"] = str(unit)
+    if fmt is not None:
+        payload["fmt"] = str(fmt)
+    if label is not None:
+        payload["label"] = str(label)
+    if delta is not None:
+        payload["delta"] = _clean_num(delta)
+    elif ref is not None:
+        payload["ref"] = _clean_num(ref)
+    if bra is not None:
+        payload["bra"] = str(bra)
+    return _payload_element(payload)
+
+
+def markdown(text):
+    """ui.markdown(text) -> Element (<div class="ui-md"> via mdToHtml,
+    JS-side - samme markdown-renderer ui.on()-handlere sin markdown-
+    payload bruker; uten markdown-it lastet faller Ui.renderPayload
+    tilbake til ren <pre>, se der)."""
+    return _payload_element({"kind": "markdown", "text": str(text)})
+
+
+def _figure_spec(x):
+    """Duck-typet plotly-figur-gjenkjenning - PORTERT ORDRETT fra
+    micropython/dash.py sin _figure_spec (samme presedens/rekkefølge, se
+    der for hvorfor to_plotly_json_str() sjekkes FØRST:
+    plotly_express_mpy.PlotlyFigure har VERKEN to_plotly_json() NOR
+    to_dict(), bare to_plotly_json_str())."""
+    if hasattr(x, "to_plotly_json_str"):
+        try:
+            d = json.loads(x.to_plotly_json_str())
+            if isinstance(d, dict) and "data" in d:
+                return d
+        except Exception:
+            pass
+    for m in ("to_plotly_json", "to_dict"):
+        if hasattr(x, m):
+            try:
+                d = getattr(x, m)()
+                if isinstance(d, dict) and "data" in d and "layout" in d:
+                    return d
+            except Exception:
+                pass
+    if isinstance(x, dict) and "data" in x and "layout" in x:
+        return x
+    if hasattr(x, "data") and hasattr(x, "layout") and not hasattr(x, "to_html"):
+        try:
+            return {"data": list(x.data), "layout": dict(x.layout)}
+        except Exception:
+            pass
+    return None
+
+
+def image(src, alt=None):
+    """ui.image(src, alt=None) -> Element (<img class="ui-img">, ELLER en
+    native <div class="ui-figure">-plotly-graf - se under). `src`
+    aksepterer ENTEN en streng (URL eller data-URI, sendt uendret) ELLER en
+    matplotlib-figur.
+
+    DIALEKTAVVIK fra pyodide/ui.py sin _mpl_image (PNG-data-URI via ekte
+    matplotlib.savefig): denne motoren har INGEN ekte matplotlib -
+    plotly_express_mpy sin figur-shim rasteriserer aldri noe - PORTERT fra
+    micropython/dash.py sin egen håndtering: en slik figur duck-typet via
+    _figure_spec (over, samme funksjon dash.py bruker) rendres i stedet
+    NATIVT som en plotly-figur (kind "figure"), ikke en PNG-data-URI (kind
+    "image") - samme underliggende Ui.elPayload-rendringshus, bare en
+    annen payload-kind. `alt` brukes ikke i figur-grenen (ingen alt-tekst-
+    konsept for plotly-figurer i vokabularet). En ikke-streng som IKKE er
+    en gjenkjennelig figur faller tilbake til str(src) (aldri en krasj)."""
+    if isinstance(src, str):
+        payload = {"kind": "image", "src": src}
+        if alt is not None:
+            payload["alt"] = str(alt)
+        return _payload_element(payload)
+    fig = _figure_spec(src)
+    if fig is not None:
+        return _payload_element({"kind": "figure", "spec": fig})
+    return _payload_element({"kind": "image", "src": str(src)})
 
 
 def _tag_builder(tag):
