@@ -1288,13 +1288,13 @@
    dropdown/knapp) — samme oppskrift-familie som Pico bruker for fokusringen. */
 .ui-controls :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-/* ── payload-vokabular (dash-absorpsjon 5a Task 1): kpi/markdown/text/table/
-   image/figure/error-innhold — FLYTTET fra css/dash.css sine .dash-kpi/
-   .dash-md/.dash-text/.dash-table-wrap/.dash-img/.dash-figure/.dash-error
-   (samme visuelle utseende, nye generiske ui-navn — SAMME regler, ikke en
-   gaffel). js/ui.js sin Ui.renderPayload bygger disse DOM-klassene for BÅDE
-   Ui.on-handlere og (via js/dash.js sin D.renderPayload-delegering) dash
-   sine kort — dash.css beholder kun sine egne kort-/grid-/widget-rammer. */
+/* ── payload-vokabular (dash-absorpsjon 5a Task 1, fullført 5b): kpi/
+   markdown/text/table/image/figure/error-innhold — FLYTTET fra det nå
+   slettede css/dash.css sine .dash-kpi/.dash-md/.dash-text/.dash-table-wrap/
+   .dash-img/.dash-figure/.dash-error (samme visuelle utseende, nye
+   generiske ui-navn — SAMME regler, ikke en gaffel). js/ui.js sin
+   Ui.renderPayload bygger disse DOM-klassene for Ui.on-handlere — kort-/
+   grid-/widget-rammene bor nå her alene (dash.css er borte). */
 .ui-kpi { display: flex; align-items: baseline; gap: 8px; margin: auto 0; flex-wrap: wrap; }
 .ui-kpi-label { flex-basis: 100%; font-size: .8rem; color: var(--text-muted); }
 .ui-kpi-value {

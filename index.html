@@ -8892,7 +8892,7 @@ json.dumps(out)
     //       micropip-løkke (som ellers ville installert UPINNET ipywidgets).
     //       ~10 MB første gang — statusEl (hvis gitt) viser fremdrift.
     //   (2) hent + exec pyodide/ipw_setup.py som modulen `ipw_setup` (samme
-    //       spec_from_loader-mønster som __ensureUi/__ensurePyDash over) —
+    //       spec_from_loader-mønster som __ensureUi over) —
     //       den erstatter comm.create_comm med OpenstatComm (kernel→frontend-
     //       retningen: publish_msg → window.IpwBridge.fromKernel).
     //   (3) await window.IpwBridge.ensure() — lazy-last de pinnede AMD-

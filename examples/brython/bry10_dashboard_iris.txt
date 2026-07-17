@@ -33,14 +33,36 @@ min_lengde = ui.slider(4, 8, value=4, step=1, label="Min. sepal-lengde", name="m
 #%% brython id=kpi cols=2
 import ui
 
-show(ui.kpi(len(utvalg(art, min_lengde)), unit="stk", label="Antall blomster"),
-     ui.kpi(round(utvalg(art, min_lengde)["sepal_length"].mean(), 2),
-            unit="cm", label="Snitt sepal-lengde"))
+u = utvalg(art, min_lengde)
+if len(u) == 0:
+    show(ui.kpi("–", unit="stk", label="Antall blomster"),
+         ui.kpi("–", unit="cm", label="Snitt sepal-lengde"))
+else:
+    show(ui.kpi(len(u), unit="stk", label="Antall blomster"),
+         ui.kpi(round(u["sepal_length"].mean(), 2),
+                unit="cm", label="Snitt sepal-lengde"))
 
 #%% brython id=plott
 import plotly_express_brython as pe
 
-pe.histogram(utvalg(art, min_lengde), x="sepal_length", title=art)
+# Tom-utvalg-vaktpost: drar min. sepal-lengde til 8 (maks) sammen med f.eks.
+# "setosa" (som aldri når 8) og utvalget blir tomt — mean() på en tom
+# brython-pandas-frame kaster IndexError (brython sin pandas-kvirk, ikke en
+# ekte pandas-feil). Samme mønster som kpi-cellen over: sjekk len() FØR vi
+# rører frame-innholdet, og gi en vennlig tekst-melding i stedet for en
+# krasjet celle — et lite undervisningsmoment om kantsaker. MERK: en ren
+# streng her (IKKE ui.markdown(...)) med vilje — begge grener skal gå
+# gjennom SAMME visningsvei (tekst/figur-innebygging via show(), aldri
+# ui.*-elementets .show()/data-ui-shown-montering) slik at et rerun ALLTID
+# tømmer forrige kjørings figur/tekst før den nye vises (blandede
+# visningsveier mellom to reruns av samme celle etterlot ellers en
+# gjenværende, utdatert figur bak den nye teksten — funnet under 5b-4-
+# regresjonen).
+u = utvalg(art, min_lengde)
+if len(u) == 0:
+    show("Ingen blomster matcher utvalget — prøv en lavere minstegrense.")
+else:
+    show(pe.histogram(u, x="sepal_length", title=art))
 
 #%% brython id=tabell
 utvalg(art, min_lengde).head(8)
