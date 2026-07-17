@@ -2632,7 +2632,7 @@ test('Task 2: widgetNode — "wrap"/"input" gir de RÅ DOM-nodene; ukjent which/
   assert.strictEqual(Ui.widgetNode('finnes::ikke', 'wrap'), null);
 });
 
-test('Task 2: widgetBind — fyrer på kontrollens EGEN input-node (delegert via data-ui-key), ALGSIDE en has_handler on_change ved SAMME fysiske hendelse', () => {
+test('Task 2: widgetBind — fyrer på kontrollens EGEN input-node (delegert via data-ui-key), VED SIDEN AV en has_handler on_change ved SAMME fysiske hendelse', () => {
   const { Ui, outEl } = freshEnv({ cellIdx: 0 });
   let onChangeCalls = 0;
   let onCalls = 0;
@@ -2921,4 +2921,77 @@ test('Task 3: ui.play — re-registrering av SAMME kontroll (self-rerun) gjenbru
   const key2 = Ui.widgetLookup('p');
   assert.strictEqual(key2, key, 'samme controlKey (samme DOM-node) etter reruns');
   Ui.widgetNode(key, 'wrap').children[3].dispatchEvent({ type: 'click' }); // pause, rydd opp
+});
+
+test('Task 3: ui.play — plassering-bytte under SAMME nøkkel (top→left) klarerer ut den gamle timeren (mirror av type-bytte-testen over)', () => {
+  const { Ui } = freshEnv({ cellIdx: 0 });
+  Ui.registerControl(JSON.stringify({ type: 'play', name: 'p', min: 0, max: 5, step: 1, interval: 200, value: 0 }));
+  const key1 = Ui.widgetLookup('p');
+  const { btn } = _playWrapParts(Ui, key1);
+  btn.dispatchEvent({ type: 'click' }); // timer løper
+
+  const realClearInterval = global.clearInterval;
+  let clearCalls = 0;
+  global.clearInterval = (id) => { clearCalls++; return realClearInterval(id); };
+  try {
+    // Samme kontrolltype (play), men effektiv plassering endret (top → left)
+    // — _registerInto sin placementChanged-gren (~1051-1059), IKKE
+    // typeChanged-grenen testet over. Den gamle noden fjernes/re-parenteres
+    // og en fersk bygges i den nye stripa — den GAMLE timeren må dø her,
+    // akkurat som ved et type-bytte.
+    Ui.registerControl(JSON.stringify({ type: 'play', name: 'p', min: 0, max: 5, step: 1, interval: 200, value: 0, placement: 'left' }));
+  } finally {
+    global.clearInterval = realClearInterval;
+  }
+  assert.ok(clearCalls >= 1, 'plassering-byttet klarerte ut den gamle play-timeren');
+});
+
+// ---- Review-fiks (Task 3-oppfølging): tick()/startPlay() leser LEVENDE
+// spec (_controls[key].spec) i stedet for den FROSNE closure-en `spec` fra
+// _buildPlay-kallet — se kommentaren over tick() i js/ui.js. Testene under
+// bruker EKSAKT reviewens to repro-former: (a) loop true→false MENS
+// kontrollen spiller skal stoppe ved max i stedet for å fortsette å
+// wrappe, (b) max hevet MENS kontrollen spiller skal la den avansere forbi
+// den gamle grensen. Samme ekte-timer-konvensjon (200ms interval-gulv,
+// wait() forbi det) som resten av Task 3-blokken over.
+
+test('Task 3 review-fiks: re-registrert MENS den spiller, loop true→false → stopper VED max i stedet for å fortsette å wrappe', async () => {
+  const { Ui } = freshEnv({ cellIdx: 0 });
+  Ui.registerControl(JSON.stringify({ type: 'play', name: 'p', min: 0, max: 1, step: 1, interval: 200, value: 0, loop: true }));
+  const key = Ui.widgetLookup('p');
+  const { input, btn } = _playWrapParts(Ui, key);
+  btn.dispatchEvent({ type: 'click' }); // start MENS loop:true
+
+  // Selv-rerun-mønster: SAMME kontroll re-registreres MENS timeren løper,
+  // nå med loop:false. Før fiksen leste tick() fortsatt den ORIGINALE
+  // (loop:true) closure-en for alltid — reviewens repro.
+  Ui.registerControl(JSON.stringify({ type: 'play', name: 'p', min: 0, max: 1, step: 1, interval: 200, value: 0, loop: false }));
+
+  await wait(260);
+  assert.strictEqual(Number(input.value), 1, 'tick 1: 0 → 1 (ikke over max ennå)');
+  await wait(200);
+  assert.strictEqual(Number(input.value), 1, 'tick 2: 1+1=2 > max → stoppet (NY loop:false), IKKE wrappet til min');
+  assert.strictEqual(btn.textContent, '▶', 'knappen tilbake til play-symbol — timeren stoppet seg selv på den NYE grensen');
+});
+
+test('Task 3 review-fiks: re-registrert MENS den spiller, max 2→10 → avanserer forbi den GAMLE grensen opp mot den NYE', async () => {
+  const { Ui } = freshEnv({ cellIdx: 0 });
+  Ui.registerControl(JSON.stringify({ type: 'play', name: 'p', min: 0, max: 2, step: 1, interval: 200, value: 0 }));
+  const key = Ui.widgetLookup('p');
+  const { input, btn } = _playWrapParts(Ui, key);
+  btn.dispatchEvent({ type: 'click' }); // start MENS max:2
+
+  // Selv-rerun-mønster: SAMME kontroll re-registreres MENS timeren løper,
+  // nå med max hevet til 10. Før fiksen leste tick() fortsatt den
+  // ORIGINALE (max:2) closure-en for alltid — reviewens repro.
+  Ui.registerControl(JSON.stringify({ type: 'play', name: 'p', min: 0, max: 10, step: 1, interval: 200, value: 0 }));
+
+  await wait(260);
+  assert.strictEqual(Number(input.value), 1, 'tick 1: 0 → 1');
+  await wait(200);
+  assert.strictEqual(Number(input.value), 2, 'tick 2: 1 → 2 (den GAMLE grensen — men IKKE stoppet der lenger)');
+  await wait(200);
+  assert.strictEqual(Number(input.value), 3, 'tick 3: 2 → 3 — forbi den GAMLE grensen (2), beviser levende spec brukes');
+  assert.strictEqual(btn.textContent, '⏸', 'fortsatt spiller — ikke stoppet ved den gamle max');
+  btn.dispatchEvent({ type: 'click' }); // pause, rydd opp
 });

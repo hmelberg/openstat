@@ -677,9 +677,19 @@
       }
       function tick() {
         if (!input.isConnected) { stopPlay(); return; }
-        var v = Number(input.value) + Number(spec.step);
-        if (v > spec.max) {
-          if (spec.loop) v = spec.min;
+        // Review-fiks (Task 3-oppfølging, repro bekreftet kjørbart): les
+        // LEVENDE spec fra _controls[key] her — IKKE den FROSNE closure-en
+        // `spec` fra _buildPlay-kallet som bygde denne noden. Når kontrollen
+        // re-registreres MENS timeren løper (_updateControlSpec skriver
+        // ctrl.spec = newSpec), fortsetter en tick som leser `spec` direkte
+        // å bruke de OPPRINNELIGE grensene for alltid: loop true→false
+        // wrappet fortsatt ved max, og max 2→10 stoppet fortsatt ved 2.
+        // Speiler hvordan _wireChange (~550) allerede leser _controls[key]
+        // i stedet for en frosset spec-referanse.
+        var liveSpec = (_controls[key] && _controls[key].spec) || spec;
+        var v = Number(input.value) + Number(liveSpec.step);
+        if (v > liveSpec.max) {
+          if (liveSpec.loop) v = liveSpec.min;
           else { stopPlay(); return; }
         }
         input.value = v;
@@ -688,7 +698,14 @@
       }
       function startPlay() {
         if (_playTimers[key]) return;
-        var ms = Math.max(200, Number(spec.interval) || 600);
+        // Samme levende-spec-lesing som tick() (over). MERK: en ALLEREDE
+        // løpende setInterval kan ikke "retimes" av en spec-endring
+        // underveis (ingen clearInterval-fri måte å bytte periode på en
+        // levende timer) — en interval-endring får derfor først effekt fra
+        // NESTE play-trykk (stopp+start), ikke på en kontroll som allerede
+        // spiller.
+        var liveSpec = (_controls[key] && _controls[key].spec) || spec;
+        var ms = Math.max(200, Number(liveSpec.interval) || 600);
         btn.textContent = '⏸';
         btn.className = 'ui-play-btn ui-play-btn--playing';
         _playTimers[key] = setInterval(tick, ms);
@@ -1320,7 +1337,8 @@
      * avgjørelsen) — en on_change-handler som selv kaller .set() skal
      * aldri kunne trigge seg selv i en løkke. Knapper (ingen lagret verdi
      * å skrive/klampe, se _writeControlValue) behandles som ukjente nøkler
-     * her.
+     * her. Doc-gap (review): en kjørende play-timer overlever .set —
+     * programmatisk verdi stopper ikke avspillingen.
      */
     Ui.widgetSet = function (key, valueJson) {
       var ctrl = _controls[key];
