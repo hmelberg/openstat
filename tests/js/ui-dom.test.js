@@ -1767,6 +1767,13 @@ test('Task 1: elShow — target satt men finnes ikke: W5-fallback (revidert ette
   const notice = bodyEl.children[0];
   assert.strictEqual(notice.className, 'error');
   assert.ok(notice.textContent.includes('finnes-ikke') && notice.textContent.includes('viser her i stedet'));
+  // Fallback-fasen: både notice og node må få data-ui-shown markøren, ellers
+  // blir de visket vekk av renderCellResult sin post-run purge (gatet på
+  // .dash/[data-ui-shown]) når brython/mpy kjører der etter (sluttreview-funn).
+  assert.strictEqual(notice.getAttribute('data-ui-shown'), '1',
+    'notice-elementet har data-ui-shown markør — overlever render-purgingen');
+  assert.strictEqual(Ui.elNode(id).getAttribute('data-ui-shown'), '1',
+    'den monterte noden har data-ui-shown markør — overlever render-purgingen');
   // INGEN _elShowTargets-oppføring for et treff som aldri skjedde — bevis
   // konkret, ikke bare indirekte: la '#finnes-ikke' faktisk DUKKE OPP i
   // dokumentet senere (simulerer en helt urelatert node som får samme id

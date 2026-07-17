@@ -1752,7 +1752,9 @@
           var notice = document.createElement('pre');
           notice.className = 'error';
           notice.textContent = 'Ui.elShow: fant ikke target-element #' + target + ' — viser her i stedet';
+          try { notice.setAttribute('data-ui-shown', '1'); } catch (e2) {}
           fallbackSlot.appendChild(notice);
+          try { node.setAttribute('data-ui-shown', '1'); } catch (e2) {}
           fallbackSlot.appendChild(node);
         } catch (e) {
           console.warn('Ui.elShow: klarte ikke å legge til elementet: ' + ((e && e.message) || e));
