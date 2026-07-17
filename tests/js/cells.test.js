@@ -574,6 +574,24 @@ test('fase C: KIND_FOR_TYPE har brython/micropython, SEG_MARKER har dem IKKE', f
   assert.equal(C.SEG_MARKER.micropython, undefined);
 });
 
+// Review Minor 3: isRunnableType er ÉN kilde til sannhet for "kan denne
+// cellen faktisk kjøres" — delt av C.runCell sin egen guard og index.html
+// sin ▶-synlighetssjekk (mdSetActiveCellLine-kalleren, tverr-IIFE). Kode-
+// type ALENE er ikke nok: statx er isCodeType men har ingen KIND_FOR_TYPE-
+// mapping (parse-only, ingen runtime), og ville tidligere feilaktig vist ▶.
+test('isRunnableType: kode-type OG en kjent KIND_FOR_TYPE-mapping kreves — statx er kode men IKKE kjørbar', function () {
+  assert.equal(C.isRunnableType('python'), true);
+  assert.equal(C.isRunnableType('r'), true);
+  assert.equal(C.isRunnableType('duckdb'), true);
+  assert.equal(C.isRunnableType('microdata'), true);
+  assert.equal(C.isRunnableType('brython'), true);
+  assert.equal(C.isRunnableType('micropython'), true);
+  assert.equal(C.isRunnableType('statx'), false, 'statx er isCodeType men mangler KIND_FOR_TYPE');
+  assert.equal(C.isRunnableType('md'), false);
+  assert.equal(C.isRunnableType('html'), false);
+  assert.equal(C.isRunnableType('skip'), false);
+});
+
 test('fase C: executableSource blanker fortsatt brython-celler (invariant)', function () {
   var doc = '# load x as y\n#%% brython\nprint(1)\n#%% md\nhei';
   var out = C.executableSource(doc, 'brython');

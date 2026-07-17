@@ -2023,7 +2023,15 @@ test('setActiveCell: scrollIntoView({block:"nearest"}) kun ved en FAKTISK endrin
   assert.strictEqual(scrollCalls.length, 2, 'faktisk endring scroller');
 });
 
-test('setActiveCell: overlever docRender (strukturendring gir FERSKE noder) — .doc-active reapplisert på samme indeks', () => {
+// Review Important 1: docRender sin strukturelle rebuild nullstiller
+// NB.activeCellIdx UBETINGET nå (samme "ærlig reset" som NB.stale/NB.ranOk
+// får noen linjer over i js/cells.js) — den forrige "reapplisér på samme
+// indeks hvis fortsatt gyldig"-oppførselen var feil: en FERSK celle på
+// samme indeks etter en strukturendring er ikke nødvendigvis "samme celle"
+// markøren stod i. Markørens tracker (nbUpdateActiveCellFromCursor,
+// index.html) reetablerer riktig aktiv celle ved neste cursor-hendelse —
+// se den funksjonens egen kommentar.
+test('setActiveCell: strukturendring (docRender) nullstiller aktiv celle ubetinget — reetableres ikke automatisk på samme indeks', () => {
   const { C, scriptInputEl } = freshEnv();
   scriptInputEl.value = '#%% python\na = 1\n#%% python\nb = 2\n';
   C.init('python');
@@ -2039,8 +2047,32 @@ test('setActiveCell: overlever docRender (strukturendring gir FERSKE noder) — 
 
   const newCell1 = C.cellElementAt(1);
   assert.notStrictEqual(newCell1, oldCell1, 'strukturendring bygger en NY node for indeks 1');
-  assert.strictEqual(newCell1.classList.contains('doc-active'), true,
-    '.doc-active reapplisert på indeks 1 uten et eksplisitt setActiveCell-kall');
+  assert.strictEqual(newCell1.classList.contains('doc-active'), false,
+    'ingen celle er lenger markert aktiv etter en strukturell rebuild');
+  assert.strictEqual(C.cellElementAt(0).classList.contains('doc-active'), false);
+});
+
+// Reconcile-in-place-motstykket til testen over: SAMME struktur (samme
+// celletall + headerRaw-sekvens, C.sameStructure) → docReconcile oppdaterer
+// PÅ PLASS (samme wrap-noder, se docReconcile sin egen kommentar) — aktiv
+// celle er da fortsatt gyldig og skal IKKE klares.
+test('setActiveCell: overlever docReconcile (samme struktur, in-place-oppdatering) — .doc-active urørt', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 1\n#%% python\nb = 2\n';
+  C.init('python');
+  C.setActiveCell(1);
+  const cell1 = C.cellElementAt(1);
+  assert.strictEqual(cell1.classList.contains('doc-active'), true);
+
+  // Kun kroppen til celle 1 endres — samme headerRaw-sekvens som før, så
+  // sameStructure holder og docReconcile tar in-place-grenen (ikke docRender).
+  scriptInputEl.value = '#%% python\na = 1\n#%% python\nb = 99\n';
+  C.refreshFromScript();
+
+  const sameCell1 = C.cellElementAt(1);
+  assert.strictEqual(sameCell1, cell1, 'in-place-forsoning gjenbruker samme wrap-node');
+  assert.strictEqual(sameCell1.classList.contains('doc-active'), true,
+    'aktiv celle overlever en in-place-forsoning uendret');
 });
 
 test('setActiveCell: aktiv indeks utenfor det nye celletallet klarer stille etter docRender', () => {
@@ -2125,6 +2157,57 @@ test('docCellNode: klikk på en kontroll (eller en etterkommer AV en) inni slote
   // Klikk på sloten selv (ingen ignorerbar forelder mellom target og wrap)
   // hopper fortsatt normalt — filteret er spesifikt, ikke en generell
   // klikk-blokkering.
+  wrap0.dispatchEvent({ type: 'click', target: wrap0 });
+  assert.deepStrictEqual(jumpCalls, [0]);
+});
+
+// Review Important 2: plot/chart-flater (Plotly/matplotlib-aktige resultater)
+// manglet fra ignore-listen — et klikk/dra INNI et diagram (zoom, hover,
+// legend-toggle) stjal editor-fokus via mdJumpToCell, en overraskende
+// sideeffekt identisk med den .ui-controls/.dash allerede var fikset mot.
+test('docCellNode: klikk på en plot/chart-flate (svg/canvas/.js-plotly-plot) inni sloten hopper IKKE markøren', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python\nplot()\n';
+  const jumpCalls = [];
+  global.mdJumpToCell = (idx) => jumpCalls.push(idx);
+  C.init('python');
+
+  const wrap0 = C.cellElementAt(0);
+
+  // Plotlys egen rot-container-klasse — treffer selv om roten er en <div>.
+  const plotlyRoot = global.document.createElement('div');
+  plotlyRoot.className = 'js-plotly-plot';
+  wrap0.appendChild(plotlyRoot);
+  wrap0.dispatchEvent({ type: 'click', target: plotlyRoot });
+  assert.deepStrictEqual(jumpCalls, [], 'klikk på .js-plotly-plot hopper ikke');
+
+  // svg-tegneflaten selv (Plotlys interne <svg>, matplotlib-SVG-eksport).
+  const svg = global.document.createElement('svg');
+  plotlyRoot.appendChild(svg);
+  wrap0.dispatchEvent({ type: 'click', target: svg });
+  assert.deepStrictEqual(jumpCalls, [], 'klikk på <svg> hopper ikke');
+
+  // Et barn AV svg-en (flernivås forelder-vandring, samme mønster som
+  // knapp/span-sjekken over) — f.eks. en <path> eller <g> i et faktisk plot.
+  const path = global.document.createElement('path');
+  svg.appendChild(path);
+  wrap0.dispatchEvent({ type: 'click', target: path });
+  assert.deepStrictEqual(jumpCalls, [], 'klikk på et barn av <svg> hopper heller ikke');
+
+  // canvas-tegneflaten (matplotlib/Plotly kan begge rendre til <canvas>).
+  const canvas = global.document.createElement('canvas');
+  wrap0.appendChild(canvas);
+  wrap0.dispatchEvent({ type: 'click', target: canvas });
+  assert.deepStrictEqual(jumpCalls, [], 'klikk på <canvas> hopper ikke');
+
+  // Tag-navnet er case-insensitivt sammenliknet (samme toLowerCase() som
+  // resten av isIgnorableClickTarget bruker på input/button/select/...).
+  const svgUpper = global.document.createElement('SVG');
+  wrap0.appendChild(svgUpper);
+  wrap0.dispatchEvent({ type: 'click', target: svgUpper });
+  assert.deepStrictEqual(jumpCalls, [], 'SVG med stor forbokstav hopper heller ikke');
+
+  // Klikk på sloten selv fortsatt normalt — filteret er spesifikt.
   wrap0.dispatchEvent({ type: 'click', target: wrap0 });
   assert.deepStrictEqual(jumpCalls, [0]);
 });

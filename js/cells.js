@@ -541,6 +541,16 @@
                         brython: 'brython', micropython: 'micropython' };
   C.KIND_FOR_TYPE = KIND_FOR_TYPE;
 
+  // Ren avledning av "er denne cellen faktisk kjørbar" (review Minor 3):
+  // kode-type OG en kjent runtime-kind i KIND_FOR_TYPE over (statx/md/html/
+  // skip/duckdb/microdata uten mapping → false, samme "null → inert"-
+  // prinsipp som paramLangForType bruker). ÉN kilde til sannhet delt av
+  // C.runCell sin egen guard (se kommentaren der) OG index.html sin
+  // ▶-synlighetssjekk (nbUpdateActiveCellFromCursor, tverr-IIFE) — uten
+  // denne måtte begge steder holde en duplisert "isCodeType && kind"-sjekk
+  // manuelt i synk.
+  C.isRunnableType = function (type) { return C.isCodeType(type) && !!KIND_FOR_TYPE[type]; };
+
   // Celletype → #@param-språk (spec 2 W4, Task 2): python-familien (python +
   // aliasene pyodide/py normalisert til 'python' av resolveType, samt
   // brython/micropython som deler python-literal-syntaks: True/False,
@@ -1226,13 +1236,18 @@
     // #@param-/ui.*-kontroll, en lenke, et dashboard, presentasjons-pilene)
     // skal derimot IKKE hoppe markøren — det ville stjålet klikket fra selve
     // kontrollen (f.eks. avbrutt en slider-dra) som en overraskende
-    // sideeffekt. Ekte browser-DOM har Element.prototype.closest; test-
-    // harnessets FakeEl har den ikke (samme "utestbar uten en manuell
-    // forelder-vandring"-situasjon som resten av filen løser med egne
-    // hjelpere i stedet for DOM-native APIer) — egen forelder-vandring
-    // fungerer identisk i begge miljøer.
-    var CLICK_IGNORE_TAGS = { input: 1, button: 1, select: 1, textarea: 1, a: 1 };
-    var CLICK_IGNORE_CLASSES = ['ui-controls', 'param-form', 'dash', 'nb-present-nav'];
+    // sideeffekt. Samme resonnement dekker plot/chart-flater (review
+    // Important 2): svg/canvas er tegne-overflater for Plotly/matplotlib-
+    // aktige resultater, og js-plotly-plot er Plotlys egen rot-container —
+    // et klikk/dra INNI et diagram (zoom, hover, legend-toggle) skal IKKE
+    // stjele fokus til editoren, akkurat som en slider ikke skal. Ekte
+    // browser-DOM har Element.prototype.closest; test-harnessets FakeEl har
+    // den ikke (samme "utestbar uten en manuell forelder-vandring"-
+    // situasjon som resten av filen løser med egne hjelpere i stedet for
+    // DOM-native APIer) — egen forelder-vandring fungerer identisk i begge
+    // miljøer.
+    var CLICK_IGNORE_TAGS = { input: 1, button: 1, select: 1, textarea: 1, a: 1, svg: 1, canvas: 1 };
+    var CLICK_IGNORE_CLASSES = ['ui-controls', 'param-form', 'dash', 'nb-present-nav', 'js-plotly-plot'];
     function isIgnorableClickTarget(node, stopAt) {
       var n = node;
       while (n && n !== stopAt) {
@@ -1303,8 +1318,17 @@
       NB.runSinks = null; NB.runPlan = null; NB.trailing = null;
       // Struktur-(re)rendring er en ærlig reset av stale/ranOk (samme
       // begrunnelse som gamle render()): friskt parsede celleobjekter kan
-      // ikke arve forrige generasjons indeks-keyede stempler.
+      // ikke arve forrige generasjons indeks-keyede stempler. NB.activeCellIdx
+      // reset følger SAMME resonnement, UBETINGET (review Important 1: en
+      // "hvis utenfor grensen"-sjekk var util å ha — en strukturell rebuild
+      // gir alltid FERSKE wrap-noder uten .doc-active, se docCellNode/
+      // applyActiveCellClass, så en "fortsatt gyldig indeks"-idx fra forrige
+      // generasjon peker på en tilfeldig ANNEN celle i den nye, ikke
+      // nødvendigvis "samme" markørposisjon). Markørens tracker
+      // (nbUpdateActiveCellFromCursor, index.html) reetablerer den riktige
+      // aktive cellen ved neste cursor-hendelse likevel.
       NB.stale = {}; NB.ranOk = {};
+      NB.activeCellIdx = null;
       var host = docHost();
       if (!host) return;
       if (NB.root) { purge(NB.root); NB.root.remove(); }
@@ -1331,15 +1355,27 @@
         if (type === 'skip') continue;               // spec §1: skip rendres ikke
         NB.root.appendChild(docCellNode(NB.cells[i], i));
       }
-      // Markør↔slot-kobling (plan 4b Task 3): docRender bygger FERSKE
-      // wrap-noder (host.innerHTML = '' over) — enhver tidligere .doc-active
-      // ble kastet sammen med den gamle noden. Reapplisér mot NB.activeCellIdx
-      // hvis indeksen fortsatt er gyldig i det (evt. nye) celletallet, ellers
-      // klarer (struktur-endring kan ha fjernet cellen markøren stod i).
+      // Markør↔slot-kobling (plan 4b Task 3, review Important 1): docRender
+      // bygger FERSKE wrap-noder (host.innerHTML = '' over) — enhver
+      // tidligere .doc-active ble kastet sammen med den gamle noden, og
+      // NB.activeCellIdx selv er allerede UBETINGET klart over (samme
+      // "ærlig reset"-linje som NB.stale/NB.ranOk). applyActiveCellClass her
+      // er da et rent no-op-oppgjør (ingen indeks matcher null), men holder
+      // koden IDEMPOTENT hvis reset-linjen over noen gang flyttes.
       // INGEN scrollIntoView her — dette er en rebygging, ikke en faktisk
       // markørflytting (se applyActiveCellClass sin egen kommentar).
-      if (NB.activeCellIdx !== null && NB.activeCellIdx >= NB.cells.length) NB.activeCellIdx = null;
       applyActiveCellClass();
+      // #lineNumbers-▶ og aktiv-celle-sporet i index.html kan ikke nås
+      // direkte herfra (tverr-IIFE — samme "Cross-IIFE only via window.md*"-
+      // begrensning som slot→markør-klikket i docCellNode bruker), så
+      // varsle via den etablerte broen: mdSetActiveCellLine(null, null)
+      // klarer BÅDE gutter-markøren OG kaller Cells.setActiveCell(null) selv
+      // (se index.html sin egen kommentar der) — konsistent med resetten
+      // over i stedet for å la en foreldet ▶ bli stående på en linje som nå
+      // kan tilhøre en helt annen celle. Markørens tracker reetablerer
+      // riktig ▶ ved neste cursor-hendelse (samme begrunnelse som resten av
+      // denne resetten).
+      if (typeof global.mdSetActiveCellLine === 'function') global.mdSetActiveCellLine(null, null);
       // Render-tidens engangs-sjekk (poll-fri per Task 5-kontrakten, se
       // gamle render()): fanger et Kjør alle/Forklar-løp som allerede er i
       // gang idet dokumentet (re-)rendres.
@@ -2437,6 +2473,11 @@
       if (!c) return Promise.resolve();
       if (global.mdIsScriptRunning && global.mdIsScriptRunning()) return Promise.resolve();
       var type = C.resolveType(c, NB.docMode);
+      // Ekvivalent med !C.isRunnableType(type) (se den pure exporten over,
+      // review Minor 3 — samme kilde brukes av index.html sin ▶-synlighet)
+      // — beholdt som et direkte oppslag her fordi vi trenger selve
+      // `kind`-VERDIEN rett under (mdRunNotebookCell-kallet), ikke bare et
+      // boolsk "kan kjøres"-svar.
       var kind = C.isCodeType(type) ? KIND_FOR_TYPE[type] : null;
       if (!kind) {
         flashHint(c._wrap);

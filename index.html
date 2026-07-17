@@ -5602,10 +5602,15 @@ json.dumps(out)
       var at = nbCellAtCursor(ta);
       if (at.idx === -1) { nbClearActiveCell(); return; }
       // ▶ kun for en FAKTISK kjørbar kode-celle i gjeldende modus (spec:
-      // "md/html/skip/foreign → no ▶") — samme preambel-unntak
-      // (segmentPlan[0] === 0) som Ctrl/Cmd+Enter-grenen over bruker for å
-      // avgjøre om preambelen selv er kjørbar.
-      var showArrow = at.code;
+      // "md/html/skip/foreign → no ▶") — speiler runCell sin EGEN
+      // kjørbarhetsvakt (review Minor 3: en tidligere at.code-only sjekk
+      // viste ▶ for typer som er isCodeType men UTEN en KIND_FOR_TYPE-
+      // mapping, f.eks. statx — runCell ville da bare flashHint'et, en ▶
+      // som løy). C.isRunnableType(type) = isCodeType && !!KIND_FOR_TYPE[type],
+      // samme pure export runCell sin guard-kommentar peker til. Samme
+      // preambel-unntak (segmentPlan[0] === 0) som Ctrl/Cmd+Enter-grenen
+      // over bruker for å avgjøre om preambelen selv er kjørbar.
+      var showArrow = window.Cells.isRunnableType(at.type);
       if (showArrow && at.cell.headerRaw === null) {
         var plan = window.Cells.segmentPlan(ta.value, activeEditorMode);
         showArrow = !!(plan.length && plan[0] === 0);
