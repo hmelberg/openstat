@@ -18,10 +18,10 @@ deterministisk default (dokumentert per funksjon under) - ALDRI en feil,
 og ingen widget tegnes.
 
 Widgets krever altså en aktiv notatbok + kjørende pyodide (med js/ui.js
-lastet og en aktiv celle-kjørekontekst). Denne fila lastes lasy av
-__ensureUi (index.html) - speiler pyodide/dash.py sitt mønster: en
-`import ui`/`from ui import ...` i en celle trigger henting av denne fila
-FØR micropip forsøker å installere den fra PyPI.
+lastet og en aktiv celle-kjørekontekst). Denne fila lastes lazy av
+__ensureUi (index.html): en `import ui`/`from ui import ...` i en celle
+trigger henting av denne fila FØR micropip forsøker å installere den fra
+PyPI.
 
 ui-html-fasen (Task 2, spec 2026-07-17-ui-html-design.md): `ui.html.*`
 (ekte DOM-elementer via js/ui.js sin id-baserte element-motor, Task 1),

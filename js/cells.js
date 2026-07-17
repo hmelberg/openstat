@@ -1077,7 +1077,7 @@
     // ruta/panel-left, #resizer) finnes ikke lenger INNI dokumentet (den
     // konvergerte doc-root har ingen .nb-input) — den skjules i stedet av
     // body.present-active .panel-left/#resizer (app.css), satt/fjernet av
-    // presentStart/presentExit under. Widgets/plots/dash blir stående i
+    // presentStart/presentExit under. Widgets/plots blir stående i
     // cellene sine og lever videre på sin slide. Stub-DOM-forbehold:
     // document.body/addEventListener kan mangle i test-harnesset — samme
     // dobbelt-guard som resten av fila bruker for globaler.
@@ -1192,7 +1192,7 @@
     // Dokumentet rendres INN I #outputArea (doc-root); .container beholder
     // sine layoutklasser (nb-hidden-swappen er død). Slots beholder
     // .nb-cell/.nb-output/.nb-output-body-klassene med vilje: ParamForms/
-    // Ui/dash/ipywidgets finner vertene sine uendret via cellElementAt.
+    // Ui/ipywidgets finner vertene sine uendret via cellElementAt.
 
     function docHost() { return document.getElementById('outputArea'); }
 
@@ -1250,7 +1250,7 @@
     // hopper editor-markøren dit (window.mdJumpToCell, tverr-IIFE-bro — se
     // filens "Cross-IIFE only via window.md*"-begrensning, index.html eier
     // #scriptInput). Klikk på et INTERAKTIVT element INNI sloten (en
-    // #@param-/ui.*-kontroll, en lenke, et dashboard, presentasjons-pilene)
+    // #@param-/ui.*-kontroll, en lenke, presentasjons-pilene)
     // skal derimot IKKE hoppe markøren — det ville stjålet klikket fra selve
     // kontrollen (f.eks. avbrutt en slider-dra) som en overraskende
     // sideeffekt. Samme resonnement dekker plot/chart-flater (review
@@ -1264,7 +1264,7 @@
     // DOM-native APIer) — egen forelder-vandring fungerer identisk i begge
     // miljøer.
     var CLICK_IGNORE_TAGS = { input: 1, button: 1, select: 1, textarea: 1, a: 1, svg: 1, canvas: 1 };
-    var CLICK_IGNORE_CLASSES = ['ui-controls', 'param-form', 'dash', 'nb-present-nav', 'js-plotly-plot'];
+    var CLICK_IGNORE_CLASSES = ['ui-controls', 'param-form', 'nb-present-nav', 'js-plotly-plot'];
     function isIgnorableClickTarget(node, stopAt) {
       var n = node;
       while (n && n !== stopAt) {
@@ -1283,7 +1283,7 @@
     // Output-only cellenode (spec §1): ETTERFØLGER av den gamle (nå fjernede,
     // 4b §5) cellNode, men uten .nb-input/textarea/head/toolbar — kun
     // .nb-output → .nb-output-body
-    // (identisk klassenavn/struktur, så ParamForms/Ui/dash/ipywidgets sine
+    // (identisk klassenavn/struktur, så ParamForms/Ui/ipywidgets sine
     // mount-seams via cellElementAt/renderCellResult trenger ingen endring).
     function docCellNode(c, idx) {
       var type = C.resolveType(c, NB.docMode);
@@ -1963,47 +1963,23 @@
       }
       if (typeof global.mdRunNotebookCell !== 'function') return Promise.resolve();
       var out = c._out;
-      // dash mount-to-slot (fase B2 Task 4b, se js/dash.js sin mountContainer()):
-      // en enkelt-celle-rerun kjører KUN mot DENNE cellens .nb-output — ulikt
-      // "Kjør alle" (Cells.beginRun purger ALLE sluk FØR segmentløkka, se over)
-      // tømmes ikke denne sloten før hvert runCell-kall i dag. Hvis forrige
-      // kjøring i AKKURAT denne cellen bygde et dashboard, står den <div
-      // class="dash">-roten fortsatt tilkoblet DOM-en ved rerun-start —
-      // D.create() sin egen lazy sweepDisconnected() ser den derfor som "i
-      // live", og en NY dashboard()-celle ville STAPLE en ny rot oppå den
-      // gamle i samme slot i stedet for å erstatte den (browser-verifisert).
-      // Gated på ".dash"-tilstedeværelse (IKKE et ubetinget purge+clear, slik
-      // mdRunNotebookCell sin #outputArea-tømming er) — #outputArea er aldri
-      // synlig for vanlig tekst-/plott-output, så en ubetinget tømming der er
-      // alltid virkningsløs for andre celletyper; .nb-output er derimot den
-      // SYNLIGE sloten for ALLE celletyper, så en ubetinget tømming her ville
-      // flimret/skjult forrige resultat ved hver rerun av en helt vanlig
-      // (ikke-dashboard) celle. Eksplisitt sweepDisconnected()-kall rett
-      // etter, samme par-begrunnelse som mdRunNotebookCell sin #outputArea-
-      // sweep: uten det ville registeroppføringen henge igjen til et
-      // vilkårlig FREMTIDIG dashboard()-kall et annet sted i dokumentet.
+      // mount-to-slot (fase B2 Task 4b): en enkelt-celle-rerun kjører KUN mot
+      // DENNE cellens .nb-output — ulikt "Kjør alle" (Cells.beginRun purger
+      // ALLE sluk FØR segmentløkka, se over), tømmes ikke denne sloten før
+      // hvert runCell-kall i dag.
       //
-      // data-ui-shown-noder er forrige kjørings monterte ui.html-elementer —
-      // uten denne for-kjøringsrensken akkumulerer reruns duplikater
-      // (review-funn 15ce63c). Commit 15ce63c la til data-ui-shown-merkingen
-      // (Ui.elShow) og speilet KUN post-run-halvdelen av .dash-mønsteret
-      // (renderCellResult sin hasDash-sjekk over, som hindrer AKKURAT DENNE
-      // kjøringens eget resultat fra å tømme sin egen ferske montering) — men
-      // glemte PRE-run-halvdelen her: uten OR-et under sto forrige kjørings
-      // data-ui-shown-node fortsatt tilkoblet ved rerun-start (samme ".dash
-      // fortsatt i live"-problem som dashboard-kommentaren over beskriver),
-      // og en ny .show() i den nye kjøringen STAPLET et nytt element oppå det
-      // gamle i stedet for å erstatte det. Purge+clear her kobler den gamle
-      // noden fra DOM-en (isConnected blir false); den generasjons-skopede
-      // _els-sveipen i Ui.endCellRun (js/ui.js) reklamerer selv
-      // registeroppføringen ved kjøringens slutt — ingen egen
-      // Ui.sweepDisconnected()-analog trengs (ingen slik funksjon finnes;
-      // Dash.sweepDisconnected() under er dash-spesifikk og rører ikke
-      // Ui-registeret).
-      if (out && out.querySelector && (out.querySelector('.dash') || out.querySelector('[data-ui-shown]'))) {
+      // data-ui-shown er den ENESTE preserverte-innhold-kontrakten (dash-
+      // absorpsjon 5b: dash sin ".dash"-halvdel er fjernet) — forrige kjørings
+      // monterte ui.html-elementer (Ui.elShow) er fortsatt tilkoblet DOM-en
+      // ved rerun-start; uten denne for-kjøringsrensken akkumulerer reruns
+      // duplikater (review-funn 15ce63c): en ny .show() i den nye kjøringen
+      // ville STAPLET et nytt element oppå det gamle i stedet for å erstatte
+      // det. Purge+clear her kobler den gamle noden fra DOM-en (isConnected
+      // blir false); den generasjons-skopede _els-sveipen i Ui.endCellRun
+      // (js/ui.js) reklamerer selv registeroppføringen ved kjøringens slutt.
+      if (out && out.querySelector && out.querySelector('[data-ui-shown]')) {
         purge(out);
         out.innerHTML = '';
-        if (global.Dash && typeof global.Dash.sweepDisconnected === 'function') global.Dash.sweepDisconnected();
       }
       var payload = {
         kind: kind,
@@ -2087,20 +2063,18 @@
     // seleksjon). Speiler C.runCell sin struktur (guardene, payload-formen,
     // setRunningUi/renderCellResult-parret) MED TO BEVISSTE AVVIK:
     //
-    //  1. Ingen dash/ui.html mount-to-slot-purge før kjøring (sammenlign
-    //     C.runCell sin egen '.dash'/'[data-ui-shown]'-sjekk rett før payload
+    //  1. Ingen ui.html mount-to-slot-purge før kjøring (sammenlign
+    //     C.runCell sin egen '[data-ui-shown]'-sjekk rett før payload
     //     bygges, review-funn 15ce63c): den purgen eksisterer KUN for å
-    //     hindre at en FULL rerun av SAMME celle stapler et nytt dashboard
-    //     (eller en ny ui.html-montering) oppå en gammel i cellens slot
-    //     (D.create() sin sweepDisconnected() ser den gamle dash-roten som
-    //     "i live" til den ryddes; Ui sin generasjons-skopede _els-sveip i
-    //     Ui.endCellRun ser tilsvarende den gamle data-ui-shown-noden som "i
-    //     live" til den kobles fra). En seleksjonskjøring er per definisjon
-    //     en DELVIS, ikke-kanonisk kjøring av cellen (se avvik 2 rett under)
-    //     — et dashboard/ui.html-element cellens ekte (fulle) kjøring har
-    //     montert i denne sloten hører til DEN kjøringen og skal overleve en
-    //     seleksjonskjøring urørt, akkurat som stale/ranOk-tilstanden skal.
-    //     (Kjører seleksjonen selv en NY dashboard()-linje eller .show(), er
+    //     hindre at en FULL rerun av SAMME celle stapler en ny ui.html-
+    //     montering oppå en gammel i cellens slot (Ui sin generasjons-
+    //     skopede _els-sveip i Ui.endCellRun ser den gamle data-ui-shown-
+    //     noden som "i live" til den kobles fra). En seleksjonskjøring er
+    //     per definisjon en DELVIS, ikke-kanonisk kjøring av cellen (se
+    //     avvik 2 rett under) — et ui.html-element cellens ekte (fulle)
+    //     kjøring har montert i denne sloten hører til DEN kjøringen og skal
+    //     overleve en seleksjonskjøring urørt, akkurat som stale/ranOk-
+    //     tilstanden skal. (Kjører seleksjonen selv en NY .show(), er
     //     utfallet det samme som om C.runCell aldri hadde purge-grenen i det
     //     hele tatt — en akseptert kant, ikke denne funksjonens ansvar å
     //     dekke.) Denne funksjonen deler INGEN kode med C.runCell sin
@@ -2250,9 +2224,8 @@
     // bygger som R-modusens fulle kjøring/Forklar bruker) rett inn i denne
     // cellens EGEN slot (target-parameteren, fase A Task 7).
     // {notice} (Task 4 carry-over-polering): dokumenterte begrensnings-
-    // meldinger (R-celle i ikke-R-modus, microdata-celle i R-modus,
-    // dashboard-celler) er IKKE feil — en rolig info-boks (.nb-notice),
-    // ikke rød pre.error.
+    // meldinger (R-celle i ikke-R-modus, microdata-celle i R-modus) er IKKE
+    // feil — en rolig info-boks (.nb-notice), ikke rød pre.error.
     // {idx} (final-review F6): en strukturell re-rendring (render(), utløst
     // av f.eks. en samtidig contentLoaded/exit) kan skje MENS denne cellens
     // kjøring pågår — c._out fanget ved kjørestart er da en detached node
@@ -2269,32 +2242,25 @@
         }
       }
       if (!out) return;
-      // dash mount-to-slot (fase B2 Task 4b): D.create() (js/dash.js) kan ha
-      // montert et dashboard DIREKTE inn i `out` MENS scriptet nettopp kjørte
-      // (window.mdUiRunCtx() pekte hit under selve kjøringen) — altså FØR
+      // ui-html-fasen (Task 3-browserverifisering 2026-07-17, dash-absorpsjon
+      // 5b: '[data-ui-shown]' er nå den ENESTE preserverte-innhold-
+      // kontrakten): et ui.html.*-element montert via .show() (siste-uttrykk-
+      // display-kroken, spec §2) — Ui.elShow (js/ui.js) merker noden med
+      // data-ui-shown ved nettopp DENNE (target=null, slot-append) grenen —
+      // kan ha blitt satt DIREKTE inn i `out` MENS scriptet nettopp kjørte
+      // (window.mdUiRunCtx() pekte hit under selve kjøringen), altså FØR
       // dette kallet. Uten denne sjekken ville grenene under sitt ubetingede
-      // purge(out); out.innerHTML = '' tømme akkurat den DOM-en dashbordet
-      // nettopp satte inn, idet run-resultatet (tekst/notice/feil) rendres
-      // rett etterpå. Mirror av Brython/MicroPython sin runSelf-sjekk
-      // (index.html ~3218: `outputArea.querySelector('.dash') ? appendOutput
-      // : renderOutput`), her mot cellens EGEN slot i stedet for #outputArea.
-      // R-dashbord havner ikke her fordi R-kjørestiene aldri setter
-      // nbUiRunCtx (mountContainer faller da til #outputArea — se
-      // js/dash.js) — hasDash er derfor alltid false for R-celler,
+      // purge(out); out.innerHTML = '' tømt akkurat den DOM-en som nettopp
+      // ble satt inn, idet run-resultatet (tekst/notice/feil) rendres rett
+      // etterpå (browser-verifisert: pyodide sin "Kjør alle" bruker en
+      // append-only segmentløkke og rammes aldri av dette; brython/
+      // micropython sin per-celle Cells.runCell-vei — DENNE funksjonen —
+      // gjorde det, siden mdRenderOutput/renderOutput sin innerHTML=''-
+      // tømming ikke visste om det ferske .show()-kallet).
+      // R-celler setter aldri nbUiRunCtx (mountContainer-mønsteret gjaldt kun
+      // dash, nå fjernet) — hasUiShown er derfor alltid false for R-celler,
       // res.rparts-grenen er dermed urørt.
-      //
-      // ui-html-fasen (Task 3-browserverifisering 2026-07-17): SAMME
-      // problem/fiks for et ui.html.*-element montert via .show() (siste-
-      // uttrykk-display-kroken, spec §2) — Ui.elShow (js/ui.js) merker
-      // noden med data-ui-shown ved nettopp DENNE (target=null,
-      // slot-append) grenen. Uten dette OR-et forsvant et montert element
-      // idet cellens print-tekst ble rendret rett etter (browser-
-      // verifisert: pyodide sin "Kjør alle" bruker en append-only
-      // segmentløkke og rammes aldri av dette; brython/micropython sin
-      // per-celle Cells.runCell-vei — DENNE funksjonen — gjorde det, siden
-      // mdRenderOutput/renderOutput sin innerHTML=''-tømming ikke visste
-      // om det ferske .show()-kallet).
-      var hasDash = !!(out.querySelector && (out.querySelector('.dash') || out.querySelector('[data-ui-shown]')));
+      var hasUiShown = !!(out.querySelector && out.querySelector('[data-ui-shown]'));
       if (res && res.rparts) {
         if (typeof global.renderROutputParts === 'function') {
           global.renderROutputParts(res.rparts, out);
@@ -2303,21 +2269,22 @@
           out.innerHTML = '';
         }
       } else if (res && res.notice) {
-        if (!hasDash) { purge(out); out.innerHTML = ''; }
+        if (!hasUiShown) { purge(out); out.innerHTML = ''; }
         out.appendChild(el('pre', 'nb-notice', res.notice));
       } else if (res && res.error) {
-        if (!hasDash) { purge(out); out.innerHTML = ''; }
+        if (!hasUiShown) { purge(out); out.innerHTML = ''; }
         out.appendChild(el('pre', 'error', res.error));
       } else if (typeof global.mdRenderOutput === 'function') {
-        if (hasDash && typeof global.mdAppendOutput === 'function') {
+        if (hasUiShown && typeof global.mdAppendOutput === 'function') {
           global.mdAppendOutput((res && res.text) || '', out);
         } else {
           global.mdRenderOutput((res && res.text) || '', out);
         }
-      } else if (hasDash) {
+      } else if (hasUiShown) {
         // Node-testfallback uten global.mdRenderOutput: out.textContent = ''
-        // ville uansett fjernet dash-roten (textContent-setteren tømmer ALLE
-        // barn) — legg til som en tekst-node i stedet for å overskrive.
+        // ville uansett fjernet den monterte noden (textContent-setteren
+        // tømmer ALLE barn) — legg til som en tekst-node i stedet for å
+        // overskrive.
         if (res && res.text) out.appendChild(document.createTextNode(res.text));
       } else {
         purge(out);

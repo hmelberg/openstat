@@ -165,7 +165,6 @@ function freshEnv(opts) {
     _listeners: {},
     addEventListener(type, fn) { (this._listeners[type] = this._listeners[type] || []).push(fn); },
   };
-  delete global.Dash;
 
   const cellEl = new FakeEl('div');
   cellEl.className = 'nb-cell';
@@ -1399,13 +1398,13 @@ test('Ui.renderPayload: ukjent kind → console.warn, ingenting rendret, hostEl 
   }
 });
 
-test("Ui.renderPayload: kind 'node' er IKKE en del av Ui sitt vokabular (dash-only — treffer unknown-grenen)", () => {
+test("Ui.renderPayload: kind 'node' er IKKE en del av Ui sitt vokabular (var dash-only, dash.js fjernet i 5b — treffer unknown-grenen)", () => {
   const { Ui } = freshEnv({ cellIdx: 0 });
   const origWarn = console.warn;
   console.warn = () => {};
   try {
     const result = Ui.renderPayload({ kind: 'node' }, new FakeEl('div'));
-    assert.strictEqual(result, null, 'dash.js sin D.renderPayload MÅ avskjære kind node selv, FØR delegering');
+    assert.strictEqual(result, null, "ukjent kind 'node' skal falle i unknown-grenen og ikke rendre noe");
   } finally {
     console.warn = origWarn;
   }
@@ -2012,7 +2011,7 @@ test('Task 1: elShow — target satt men finnes ikke: W5-fallback (revidert ette
   assert.ok(notice.textContent.includes('finnes-ikke') && notice.textContent.includes('viser her i stedet'));
   // Fallback-fasen: både notice og node må få data-ui-shown markøren, ellers
   // blir de visket vekk av renderCellResult sin post-run purge (gatet på
-  // .dash/[data-ui-shown]) når brython/mpy kjører der etter (sluttreview-funn).
+  // [data-ui-shown]) når brython/mpy kjører der etter (sluttreview-funn).
   assert.strictEqual(notice.getAttribute('data-ui-shown'), '1',
     'notice-elementet har data-ui-shown markør — overlever render-purgingen');
   assert.strictEqual(Ui.elNode(id).getAttribute('data-ui-shown'), '1',

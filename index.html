@@ -8,7 +8,6 @@
   <link rel="preconnect" href="https://cdn.plot.ly" crossorigin>
   <link rel="preload" as="script" href="https://cdn.jsdelivr.net/pyodide/v314.0.2/full/pyodide.js">
   <link rel="stylesheet" href="app.css?v=2026-07-13a">
-  <link rel="stylesheet" href="css/dash.css">
 </head>
 <body data-theme="light">
   <header class="topbar">
@@ -578,12 +577,10 @@
        etter at nettleseren allerede har startet disse to lastingene). -->
   <script src="js/brython-engine.js?v=2026-07-17a"></script>
   <script src="js/micropython-engine.js?v=2026-07-17a"></script>
-  <script src="js/dash.js"></script>
-  <script src="js/cells.js?v=2026-07-17e"></script>
-  <script src="js/ui.js?v=2026-07-17d"></script>
+  <script src="js/cells.js?v=2026-07-18a"></script>
+  <script src="js/ui.js?v=2026-07-18a"></script>
   <script src="js/param-forms.js"></script>
   <script src="js/ipywidgets-bridge.js"></script>
-  <script src="js/dash-webr.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tabulator-tables@6.3.1/dist/js/tabulator.min.js" defer></script>
   <script src="widgets/forklar-widgets.js"></script>
@@ -592,29 +589,6 @@
   <script>window.M2PY_APP = 'openstat';</script>
   <script src="js/notebook-links.js"></script>
   <script src="js/examples-menu.js"></script>
-  <script>
-    // dash v2 URL-state (K2, docs/superpowers/plans/2026-07-11-dash-v2-forbedringer.md):
-    // et evt. ";ds=<base64url>"-suffiks på location.hash må strippes FØR
-    // NotebookLinks.classifyHash (kalt flere steder her og i js/github-storage.js
-    // sin openFromFragment) ser hashen — classifyHash sin output=/url=-gren er
-    // grådig og ville ellers dratt ";ds=..." inn som del av URL-en.
-    // Kjøres synkront her, tidligst mulig under parsing — lenge før 'load'-eventet
-    // som openFromFragment venter på, og før senere inline-skript som selv leser
-    // location.hash. dash.js (lastes eagert siden fase 2 — pyodide/R trenger
-    // den utenom LIB_REGISTRY) leser den avstrippede verdien fra
-    // window.__DASH_DS_INIT__ i stedet for location.hash, siden hashen da alt
-    // er renset for ds-suffikset.
-    (function () {
-      var h = location.hash || '';
-      var m = /;ds=([A-Za-z0-9_-]*)$/.exec(h);
-      if (!m) return;
-      window.__DASH_DS_INIT__ = m[1];
-      var clean = h.slice(0, m.index);
-      try {
-        history.replaceState(null, '', location.pathname + location.search + clean);
-      } catch (e) { /* ignore */ }
-    })();
-  </script>
   <script>
     // Fallback hvis js/i18n.js ikke lastet (404 e.l.): vis norsk uendret.
     window.t = window.t || function (s) { return s; };
@@ -2116,8 +2090,7 @@
       // id="brythondata_<navn>"|"mpydata_<navn>">-tags. «# load»-linjene
       // fjernes fra det publiserte scriptet slik at siden ikke prøver å
       // hente dataene på nytt over nett — men filen refererer fortsatt
-      // js/dash.js (dash er ikke fjernet før plan 5b), micropython/*.py,
-      // pyodide/brython wasm osv. via relative/CDN-stier, så den må ligge
+      // micropython/*.py, pyodide/brython wasm osv. via relative/CDN-stier, så den må ligge
       // i/serveres fra samme app-mappe (f.eks. GitHub Pages); den virker
       // IKKE fra file:// eller kopiert alene til en fremmed host. Mangler
       // scriptet en «#options.view»-linje, injiseres «#options.view =
@@ -3227,12 +3200,7 @@
       python:    { id: 'python',    label: 'Python', hlConfig: PY_HL_CFG, handleTab: handlePythonTab,
         runDefault: 'pyodide',
         preRun: async function (script, ctx) {
-          // dash-import registreres FØR pakke-sjekkene under — se __ensurePyDash.
-          if (/^\s*(?:import|from)\s+dash\b/m.test(script)) {
-            try { await __ensurePyDash(ctx.py); }
-            catch (e) { console.warn('pyodide/dash.py:', e); }
-          }
-          // ui-import likeens (spec 2, ui-widgets W1) — se __ensureUi. Feiler
+          // ui-import (spec 2, ui-widgets W1) — se __ensureUi. Feiler
           // gracefully (console.warn): en 404 (ui.py mangler ennå/Task 4-
           // plassholderen ikke deployet) skal IKKE abortere kjøringen —
           // scriptet feiler naturlig lenger nede når `import ui` ikke finner
@@ -3278,8 +3246,8 @@
           // window.mdNotebookSession.restart() rett FØR hver kjøring — samme
           // funksjon den gamle "Restart & kjør alle"-knappen kalte (dens
           // r-gren: rm(list=ls(envir=globalenv())) + glemme __uiRP-
-          // memoiseringen + DashWebR.invalidateDefs(), se restart() sin egen
-          // kommentar for hvorfor __uiRP må glemmes). Gjenbruk fremfor
+          // memoiseringen, se restart() sin egen kommentar for hvorfor
+          // __uiRP må glemmes). Gjenbruk fremfor
           // duplisering: restart() sin egen webRReady-guard/nbEnsureSession-
           // hale er allerede riktig for r-modus (ingen Pyodide-boot, se F4-
           // kommentaren der) — ingen grunn til å holde en andre kopi av den
@@ -3323,12 +3291,12 @@
           try { await window.mdEnsureTagImports(ctx.rightStatus); }
           catch (e) { console.warn('#tag.import (brython runSelf):', e); }
           setStatus(ctx.rightStatus, t('Kjører…'));
-          // dash v2 (js/dash.js) skriver DOM direkte til #outputArea MENS
-          // scriptet kjører (window.Dash.create/addCard) — helt utenom
-          // renderOutput/buildOutputNodes. Tøm FØR kjøring (fjerner forrige
-          // kjørings dashboard/output), og hopp over renderOutput sin
-          // innerHTML=''-tømming etterpå hvis et dashboard ble bygget — den
-          // ville ellers slettet DOM-treet BrythonEngine.run() nettopp satte inn.
+          // ui.* kan skrive DOM direkte til #outputArea MENS scriptet kjører
+          // (element-builderes .show()), helt utenom renderOutput/
+          // buildOutputNodes. Tøm FØR kjøring (fjerner forrige kjørings
+          // output), og hopp over renderOutput sin innerHTML=''-tømming
+          // etterpå hvis et [data-ui-shown]-element ble montert — den ville
+          // ellers slettet DOM-treet BrythonEngine.run() nettopp satte inn.
           // Konvergert dokument (Task 3b): kommentaren under hevder notatbøker
           // ALDRI når denne grenen (Cells.runCell fanger dem tidligere) — men
           // clearOutputAreaUnlessDoc() gir en belte-og-seler-garanti uten kost
@@ -3352,13 +3320,14 @@
           var _omEl = document.querySelector('input[name="outputMode"]:checked');
           var _asHtml = !_omEl || _omEl.value === 'html';
           var _suppress = (typeof suppressEmbedded !== 'undefined' && suppressEmbedded) ? !!suppressEmbedded.checked : false;
-          // ui-html-fasen (Task 3-browserverifisering 2026-07-17): samme
-          // '.dash'-preserverings-mønster utvidet med '[data-ui-shown]'
-          // (js/ui.js sin Ui.elShow-markør, target=null-grenen) — uten
-          // dette OR-et revet renderOutput sin ubetingede innerHTML=''
-          // ned et element montert via siste-uttrykk-display-kroken (spec
-          // §2) idet scriptets tekstresultat rendres rett etter kjøring.
-          if (outputArea.querySelector('.dash') || outputArea.querySelector('[data-ui-shown]')) {
+          // ui-html-fasen (Task 3-browserverifisering 2026-07-17, dash-
+          // absorpsjon 5b: '[data-ui-shown]' — js/ui.js sin Ui.elShow-markør,
+          // target=null-grenen — er nå den ENESTE preserverings-kontrakten):
+          // uten denne sjekken ville renderOutput sin ubetingede
+          // innerHTML=''-tømming revet ned et element montert via siste-
+          // uttrykk-display-kroken (spec §2) idet scriptets tekstresultat
+          // rendres rett etter kjøring.
+          if (outputArea.querySelector('[data-ui-shown]')) {
             appendOutput(res.text || '', _asHtml, _suppress);
           } else {
             renderOutput(res.text || '', _asHtml, _suppress);
@@ -3386,8 +3355,9 @@
           try { await window.mdEnsureTagImports(ctx.rightStatus); }
           catch (e) { console.warn('#tag.import (micropython runSelf):', e); }
           setStatus(ctx.rightStatus, t('Kjører…'));
-          // Samme dash v2-forbehold som Brython-raden over: js/dash.js skriver
-          // DOM direkte til #outputArea under kjøring — tøm FØR, ikke etter.
+          // Samme ui.*-forbehold som Brython-raden over: element-builderes
+          // .show() skriver DOM direkte til #outputArea under kjøring — tøm
+          // FØR, ikke etter.
           // Konvergert dokument (Task 3b): samme belte-og-seler-garanti som
           // Brython-raden over — clearOutputAreaUnlessDoc() no-op'er trygt om
           // en notatbok mot formodning skulle være aktiv her.
@@ -3409,13 +3379,14 @@
           var _omEl = document.querySelector('input[name="outputMode"]:checked');
           var _asHtml = !_omEl || _omEl.value === 'html';
           var _suppress = (typeof suppressEmbedded !== 'undefined' && suppressEmbedded) ? !!suppressEmbedded.checked : false;
-          // ui-html-fasen (Task 3-browserverifisering 2026-07-17): samme
-          // '.dash'-preserverings-mønster utvidet med '[data-ui-shown]'
-          // (js/ui.js sin Ui.elShow-markør, target=null-grenen) — uten
-          // dette OR-et revet renderOutput sin ubetingede innerHTML=''
-          // ned et element montert via siste-uttrykk-display-kroken (spec
-          // §2) idet scriptets tekstresultat rendres rett etter kjøring.
-          if (outputArea.querySelector('.dash') || outputArea.querySelector('[data-ui-shown]')) {
+          // ui-html-fasen (Task 3-browserverifisering 2026-07-17, dash-
+          // absorpsjon 5b: '[data-ui-shown]' — js/ui.js sin Ui.elShow-markør,
+          // target=null-grenen — er nå den ENESTE preserverings-kontrakten):
+          // uten denne sjekken ville renderOutput sin ubetingede
+          // innerHTML=''-tømming revet ned et element montert via siste-
+          // uttrykk-display-kroken (spec §2) idet scriptets tekstresultat
+          // rendres rett etter kjøring.
+          if (outputArea.querySelector('[data-ui-shown]')) {
             appendOutput(res.text || '', _asHtml, _suppress);
           } else {
             renderOutput(res.text || '', _asHtml, _suppress);
@@ -8198,13 +8169,11 @@ json.dumps(out)
     // så en kjøring UTEN ui_-tekst fortsatt får én opprydningssweep.
     var _rDocUiHadControls = false;
 
-    // __ensureUiR: nøyaktig samme leveringsmønster som DashWebR.ensureDefs
-    // (js/dash-webr.js) - fetch + evalRVoid av kildeteksten, memoisert i et
-    // modulnivå-promise som nullstilles ved feil (neste kall prøver på nytt).
-    // Denne stien er UAVHENGIG av dash-webr.js (kan trigges uten at noe
-    // dashboard() noensinne har kjørt) - jsonlite installeres derfor
-    // defensivt her også, samme oppskrift som runHybridR sin json-load-gren
-    // (~7709-7713) bruker for "# load ... as json".
+    // __ensureUiR: fetch + evalRVoid av webr/ui.R sin kildetekst, memoisert i
+    // et modulnivå-promise som nullstilles ved feil (neste kall prøver på
+    // nytt). jsonlite installeres defensivt her også, samme oppskrift som
+    // runHybridR sin json-load-gren (~7709-7713) bruker for "# load ... as
+    // json".
     var __uiRP = null;
     function __ensureUiR() {
       if (__uiRP) return __uiRP;
@@ -8219,9 +8188,9 @@ json.dumps(out)
       return __uiRP;
     }
 
-    // Nullstill R-side ordinal/register FØR en kjøring (samme idiom som
-    // DashWebR.reset() - no-op hvis defs aldri er lastet denne økten,
-    // gjettet via __uiRP i stedet for en egen loaded-flagg).
+    // Nullstill R-side ordinal/register FØR en kjøring (no-op hvis defs
+    // aldri er lastet denne økten, gjettet via __uiRP i stedet for en egen
+    // loaded-flagg).
     //
     // Verdisemantikk (plassfase Task 2 — review-fiksen dette erstatter var
     // MIDLERTIDIG, fra W2 sin dokumenterte "Kjør alle rendrer ingen
@@ -8257,10 +8226,8 @@ json.dumps(out)
       catch (e) { console.warn('ui: reset (R)', e); }
     }
 
-    // .ui_registry_json()-lesing - speiler dash-webr.js sin evalRString
-    // (samme evalR + toJs + destroy-idiom), men mot DENNE fila sin egen
-    // `webR`-variabel (index.html har den direkte i scope, i motsetning til
-    // dash-webr.js som må hente den via global.M2PY.getWebR()).
+    // .ui_registry_json()-lesing - evalR + toJs + destroy-idiom, mot DENNE
+    // fila sin egen `webR`-variabel (index.html har den direkte i scope).
     async function __uiEvalRString(code) {
       var obj = await webR.evalR(code);
       try {
@@ -8497,23 +8464,6 @@ json.dumps(out)
         }
       }
 
-      // dash v2: definer R-adapteret + nullstill registeret FØR segmentene
-      // kjører (scriptet kaller dashboard()/add() under kjøringen). reset()
-      // kjøres UBETINGET (no-op om defs aldri er lastet, se dash-webr.js) —
-      // ellers står forrige dashboards register igjen R-side når et vanlig
-      // R-script uten dashboard() kjøres etterpå, og mount() bygger opp
-      // forrige dashboard som et fantom-remount under det nye scriptets
-      // output. ensureDefs() gates fortsatt på tekst-sjekken så vanlige
-      // R-kjøringer ikke betaler fetch/eval.
-      if (window.DashWebR) {
-        try {
-          if (/\bdashboard\s*\(/.test(src)) await window.DashWebR.ensureDefs();
-          await window.DashWebR.reset();
-        } catch (e) {
-          outputParts.push({ type: 'error', text: 'dash: ' + ((e && e.message) || e) });
-        }
-      }
-
       // ui-widgets (declare-og-injiser-modellen, spec 2 W2 → plassfase Task 2):
       // "Kjør alle" RENDRER nå kontroller per r-segment (W2 sin "ingen
       // per-celle-integrasjon" er innhentet — se segmentløkka under) —
@@ -8711,12 +8661,6 @@ json.dumps(out)
       // tilbake om den ble frakoblet. Trygg no-op når notatbok er aktiv
       // (target var errorHost, ikke #outputArea — ingen doc-strip der).
       if (window.Ui && window.Ui.reattachDocStrips) window.Ui.reattachDocStrips();
-      // dash v2: bygg dashboardet (om noe) etter at tekst-output er rendret.
-      // mount() venter på førsterenders i egen Shelter, så purgen under er trygg.
-      if (window.DashWebR) {
-        try { await window.DashWebR.mount(); }
-        catch (e) { console.warn('dash-webr mount:', e); }
-      }
       // Frigjør R-objektene captureR allokerte i denne kjøringen — uten purge
       // vokser WebR-minnet monotont for hver kjøring i økten.
       if (webRShelter) { try { await webRShelter.purge(); } catch (e) {} }
@@ -8747,33 +8691,9 @@ json.dumps(out)
       return __duckBridgeP;
     }
 
-    // ── python-modus: registrer pyodide/dash.py som modulen `dash` (lazy) ──
-    // Samme mønster som __ensureDuckBridge. MÅ kjøres FØR micropip-løkka i
-    // python-modusens preRun — ellers feiler find_spec('dash') og micropip
-    // installerer PyPI-pakken `dash` (plotly sin — feil og diger).
-    var __pyDashP = null;
-    function __ensurePyDash(py) {
-      if (__pyDashP) return __pyDashP;
-      var base = window.location.href.replace(/[^/]+$/, '');
-      __pyDashP = fetch(base + 'pyodide/dash.py?v=' + (window.M2PY_VERSION || '1'))
-        .then(function (r) { if (!r.ok) throw new Error('pyodide/dash.py: ' + r.status); return r.text(); })
-        .then(function (code) {
-          return py.runPythonAsync(
-            'import sys, importlib.util\n' +
-            'def _reg_dash(src):\n' +
-            '    spec = importlib.util.spec_from_loader("dash", loader=None)\n' +
-            '    mod = importlib.util.module_from_spec(spec)\n' +
-            '    sys.modules["dash"] = mod\n' +
-            '    exec(compile(src, "dash.py", "exec"), mod.__dict__)\n' +
-            '_reg_dash(' + JSON.stringify(code) + ')');
-        })
-        .catch(function (e) { __pyDashP = null; throw e; });
-      return __pyDashP;
-    }
-
     // ── python-modus: registrer pyodide/ui.py som modulen `ui` (lazy) ──────
-    // Nøyaktig samme mønster som __ensurePyDash (spec 2, ui-widgets W1) —
-    // MÅ kjøres FØR micropip-løkka i python-modusens preRun, samme grunn:
+    // Samme mønster som __ensureDuckBridge — MÅ kjøres FØR micropip-løkka i
+    // python-modusens preRun, samme grunn:
     // ellers feiler find_spec('ui') og micropip prøver å installere en
     // PyPI-pakke `ui` (feil og irrelevant). pyodide/ui.py bygges fullt ut i
     // Task 4 — her ligger kun en minimal plassholder (Task 2) slik at
@@ -9895,8 +9815,8 @@ async def _m2py_run_segment(_seg_json):
       // R-modus (final-review F4, minimal variant): denne sesjonen er en
       // Pyodide-sesjon (e/_g) — R-kjøringer bruker webR direkte og skal ALDRI
       // få "Restart & kjør alle" til å boote Pyodide. Ekte R-sesjonsreset
-      // (rm(list=ls()) + DashWebR.reset + __uiResetR) ved Restart er
-      // implementert i window.mdNotebookSession.restart() rett over dette
+      // (rm(list=ls()) + __uiResetR) ved Restart er implementert i
+      // window.mdNotebookSession.restart() rett over dette
       // objektet (fase B2 Task 3) — IKKE her, siden denne r-modus-grenen
       // også nås idempotent uten noen aktiv restart (ingen annen kjent
       // kallsti i dag, men rm() hører hjemme i restart-viljen, ikke i
@@ -9991,23 +9911,20 @@ async def _m2py_run_segment(_seg_json):
               await webR.evalRVoid('rm(list = ls(envir = globalenv()), envir = globalenv())');
             } catch (e) { console.warn('R restart: rm(list=ls()) feilet', e); }
             // B2 exit-gate fiks: rm(list=ls(envir=globalenv())) over sletter
-            // IKKE bare brukervariabler — webr/ui.R og webr/dash.R sourcer
-            // ui_slider()/dashboard() m.fl. RETT INN i globalenv (samme miljø),
-            // så disse forsvinner i samme slag. (MERK presist: punktum-
-            // prefiksede navn som .dash_reset/.ui_begin OVERLEVER rm-en —
-            // ls() lister dem ikke — det som forsvant var de vanlige API-
-            // funksjonene ui_slider()/dashboard() m.fl.) __uiRP/DashWebR sin
-            // _defsP var fortsatt et LØST promise etter dette (minnet «alt
-            // lastet»), så neste kjørings ui_*()/dashboard()-kall traff
-            // "could not find function" selv om DOKUMENTET var uendret.
-            // Funnet ved sveip: R-widgets sluttet å virke etter «Restart &
-            // kjør alle». Fiksen glemmer memoiseringen i stedet for å late som
-            // reset er meningsfullt — neste kjørings eksisterende, allerede
-            // gatede __ensureUiR()/DashWebR.ensureDefs()-kall (runHybridR/
+            // IKKE bare brukervariabler — webr/ui.R sourcer ui_slider() m.fl.
+            // RETT INN i globalenv (samme miljø), så disse forsvinner i samme
+            // slag. (MERK presist: punktum-prefiksede navn som .ui_begin
+            // OVERLEVER rm-en — ls() lister dem ikke — det som forsvant var de
+            // vanlige API-funksjonene ui_slider() m.fl.) __uiRP sin _defsP var
+            // fortsatt et LØST promise etter dette (minnet «alt lastet»), så
+            // neste kjørings ui_*()-kall traff "could not find function" selv
+            // om DOKUMENTET var uendret. Funnet ved sveip: R-widgets sluttet å
+            // virke etter «Restart & kjør alle». Fiksen glemmer memoiseringen
+            // i stedet for å late som reset er meningsfullt — neste kjørings
+            // eksisterende, allerede gatede __ensureUiR()-kall (runHybridR/
             // per-celle/forklar) sourcer da friskt på nytt, akkurat som første
             // gang denne økten.
             __uiRP = null;
-            if (window.DashWebR && window.DashWebR.invalidateDefs) window.DashWebR.invalidateDefs();
             return nbEnsureSession(true);
           })();
         }
@@ -10062,10 +9979,11 @@ async def _m2py_run_segment(_seg_json):
 
     // Append-variant (fase B2 Task 4b): js/cells.js sin renderCellResult
     // bruker denne i stedet for mdRenderOutput når cellens .nb-output-slot
-    // allerede har et montert dashboard (js/dash.js sin D.create(), mount-to-
-    // slot) — mdRenderOutput/renderOutput sin innerHTML=''-tømming ville
-    // ellers revet ned dashbordet idet run-resultatets tekst rendres rett
-    // etter kjøring. Samme underliggende appendOutput() som "Kjør alle" sin
+    // allerede har et montert [data-ui-shown]-element (ui.*'s element-
+    // builderes .show()) — mdRenderOutput/renderOutput sin innerHTML=''-
+    // tømming ville ellers revet ned det monterte elementet idet run-
+    // resultatets tekst rendres rett etter kjøring. Samme underliggende
+    // appendOutput() som "Kjør alle" sin
     // segmentløkke og Brython/MicroPython sin runSelf allerede bruker for
     // akkurat dette formålet (index.html ~3218/~9783).
     window.mdAppendOutput = function (raw, target) {
@@ -10114,15 +10032,6 @@ async def _m2py_run_segment(_seg_json):
       // utledning som hybrid-familien over), så en selText-override er en
       // enkel prioritering her.
       var cellText = (payload && payload.selText) || (payload && payload.text) || '';
-      // Dashboard-guard (Task 4-kontrakten): dashboard()-celler kan IKKE
-      // kjøres isolert — DashWebR.reset() nullstiller HELE dashboard-
-      // registeret og skal ALDRI kalles fra denne per-celle-stien (i
-      // motsetning til runHybridR sin fulle kjøring, se kommentar der).
-      // Sjekkes FØR webR-beredskap/kjøretilstand — ingen kjøring skjer, så
-      // ingen scriptRunInProgress/knappe-tilstand trengs her.
-      if (/\bdashboard\s*\(/.test(cellText)) {
-        return { notice: t('Dashboard-celler krever Kjør alle (fase B2)') };
-      }
       // Fase-A-mønsteret (btnRun sin R-modus-vakt, ~9255): sjekk beredskap i
       // stedet for å blokkere på en 30-60s lasting her — «r»-modusens
       // onActivate trigger allerede loadWebR() (~3157). Kall den likevel
@@ -10175,10 +10084,8 @@ async def _m2py_run_segment(_seg_json):
         // resetten alltid utført selv om injeksjonen feiler etterpå.
         // Ui.valuesForCell returnerer ALLEREDE en JSON-streng ({"n":7,...})
         // — denne ENE JSON.stringify her pakker den strengen inn som en
-        // trygt escapet R-strengliteral (dobbel-stringify-idiomet:
-        // js/dash-webr.js sin .dash_run()-kode gjør begge stringify-stegene
-        // selv fordi den starter fra et rått JS-objekt, her er steg én
-        // allerede gjort inni Ui.valuesForCell).
+        // trygt escapet R-strengliteral (dobbel-stringify-idiomet: steg én
+        // er allerede gjort inni Ui.valuesForCell).
         if (uiActive) {
           try {
             var _uiValuesJson = (window.Ui && typeof window.Ui.valuesForCell === 'function')
@@ -10339,25 +10246,19 @@ async def _m2py_run_segment(_seg_json):
         var _scriptOpts = extractScriptOptions(rawScript);
         var effectiveScript = rawScript.replace(/^[ \t]*(?:#|\/\/)[ \t]*options\.[A-Za-z_]\w*[ \t]*=.*$\n?/gm, '');
         // B1-fiksen (final-review): python-modusens preRun (~3138) registrerer
-        // pyodide/dash.py og pyodide/ui.py som modulene `dash`/`ui` FØR
-        // kjøring — men preRun kalles KUN fra btnRun sin fulle "Kjør alle"-
-        // sløyfe (~9328), ALDRI herfra. Denne per-celle-stien hoppet derfor
-        // historisk over BEGGE registreringene: et kaldt/ferskt Pyodide-
-        // session-boot (ingen tidligere "Kjør alle" i denne fanen) fulgt av
-        // ▶ på en enkelt widget-celle feilet med ModuleNotFoundError: ui
-        // (og, samme rot-årsak, tilsvarende for `import dash`). Samme
-        // regex-vakt som preRun bruker, men kjørt mot effectiveScript — HELE
-        // dokumentteksten (se kommentaren ved buildDocumentSegments rett
-        // under: cellens egen payload.text er ALDRI autoritativ for
-        // dokument-brede fakta) — fordi importen kan stå i en tidligere
-        // celle enn den som faktisk kjøres nå, i samme levende sesjon.
-        // Feiler gracefully (console.warn), akkurat som preRun: en 404 skal
-        // ikke abortere kjøringen — scriptet feiler naturlig lenger nede
-        // når `import ui`/`import dash` ikke finner modulen.
-        if (/^\s*(?:import|from)\s+dash\b/m.test(effectiveScript)) {
-          try { await __ensurePyDash(py); }
-          catch (e) { console.warn('pyodide/dash.py (per-celle):', e); }
-        }
+        // pyodide/ui.py som modulen `ui` FØR kjøring — men preRun kalles KUN
+        // fra btnRun sin fulle "Kjør alle"-sløyfe (~9328), ALDRI herfra.
+        // Denne per-celle-stien hoppet derfor historisk over registreringen:
+        // et kaldt/ferskt Pyodide-session-boot (ingen tidligere "Kjør alle" i
+        // denne fanen) fulgt av ▶ på en enkelt widget-celle feilet med
+        // ModuleNotFoundError: ui. Samme regex-vakt som preRun bruker, men
+        // kjørt mot effectiveScript — HELE dokumentteksten (se kommentaren
+        // ved buildDocumentSegments rett under: cellens egen payload.text er
+        // ALDRI autoritativ for dokument-brede fakta) — fordi importen kan
+        // stå i en tidligere celle enn den som faktisk kjøres nå, i samme
+        // levende sesjon. Feiler gracefully (console.warn), akkurat som
+        // preRun: en 404 skal ikke abortere kjøringen — scriptet feiler
+        // naturlig lenger nede når `import ui` ikke finner modulen.
         if (/^\s*(?:import|from)\s+ui\b/m.test(effectiveScript)) {
           try { await __ensureUi(py); }
           catch (e) { console.warn('ui-modul kunne ikke lastes:', e); }
@@ -10414,49 +10315,13 @@ async def _m2py_run_segment(_seg_json):
         // microdata-"kjør fra toppen"-replayen rett under (_rseg === targetSeg
         // når _ri === _segIdx i løkka der — ingen duplisert gren trengs).
         if (payload && payload.selText) targetSeg.text = payload.selText;
-        // dash v2 (fase B2 Task 3 — browser-investigert): window.Dash.create()
-        // (js/dash.js, kalt fra pyodide/dash.py sin Dash.__init__) skriver DOM
-        // DIREKTE til #outputArea — HELT UTENOM denne cellens egen .nb-output-
-        // slot (samme forbehold som Brython/MicroPython sin runSelf lenger
-        // oppe, og "Kjør alle" sin egen ubetingede purge rett før segment-
-        // løkka, ~9799). Uten dette ville en per-celle-rerun av en
-        // dashboard()-celle STAPLE en ny <div class="dash"> oppå den forrige
-        // for HVER kjøring: forrige rots DOM-node blir ALDRI frakoblet av
-        // per-celle-stien (ingen outputArea.innerHTML=''-tømming skjedde her
-        // før denne fiksen), så D.create() sin egen lazy `!isConnected`-sweep
-        // aldri fanger den opp — både JS-registeret (_dashes/_cards) og
-        // python-sidens `_live`-proxyliste (pyodide/dash.py sin _reap(), som
-        // kun sjekker isAlive() ved NESTE Dash()-konstruksjon) vokser ett
-        // element per rerun, ubegrenset, helt til brukeren klikker "Kjør
-        // alle" (browser-verifisert: 3 per-celle-reruns av en dashboard()-
-        // celle uten denne fiksen ga 3 `.dash`-noder i #outputArea, ikke 1).
-        // Tømmes UBETINGET (samme idiom som "Kjør alle" — outputArea brukes
-        // aldri til vanlig per-celle tekst-/plott-output, kun dash skriver
-        // direkte dit, så en unødvendig tømming her er alltid virkningsløs
-        // for andre celletyper) + eksplisitt sweep (ikke bare vent på neste
-        // create() — en rerun som IKKE lenger kaller dashboard(), f.eks. etter
-        // redigering, skal likevel rydde forrige runs oppføring NÅ, ikke ved
-        // et vilkårlig FREMTIDIG dashboard()-kall et annet sted i dokumentet).
-        // MERK (oppdatert, Task 3b): påstanden over — at #outputArea sitter
-        // inni `.container` og får `.nb-hidden`, altså usynlig, mens notatbok-
-        // cellevisningen er aktiv — stemmer IKKE lenger. Container-byttet
-        // (.container ↔ .doc-root) er dødt kode etter konvergensen; #outputArea
-        // ER .doc-root sin vert og forblir synlig. Det som faktisk gjør en
-        // per-celle python-dashboard() trygg er at nbUiRunCtx (satt like over,
-        // ~9715) leder js/dash.js sin mountContainer() inn i DENNE cellens
-        // egen `.nb-output-body`, ikke til #outputArea — så .dash-noden havner
-        // i riktig celle-slot, synlig, ikke i den delte sloten. For et
-        // planavvik (ctx/slot mangler mens notatboken likevel er aktiv) faller
-        // mountContainer() ned på Cells.errorHost() (js/dash.js, se kommentaren
-        // der) FØR det rå #outputArea-fallbacket, slik at dashboardroten aldri
-        // havner som en søskennode ved siden av .doc-root.
-        // Konvergert dokument (Task 3b): denne UBETINGEDE tømmingen (se
-        // begrunnelsen over — dash skriver DIREKTE til #outputArea per celle,
-        // uavhengig av notatbok-tilstand) må doc-bevisses: helperen no-op'er
-        // trygt når notatboken er aktiv (samme mønster som Kjør alle sin egen
-        // ubetingede purge, ~10186 under).
+        // ui.*'s element-builderes .show() kan skrive DOM direkte inn i
+        // cellens egen `.nb-output-body` (routet dit av nbUiRunCtx, satt like
+        // under) — helt utenom denne cellens vanlige tekst-/plott-rendring.
+        // Tømmes UBETINGET (samme idiom som "Kjør alle") for symmetri med de
+        // andre run-stiene; no-op'er trygt når notatboken er aktiv
+        // (clearOutputAreaUnlessDoc, se der).
         window.mdClearOutputAreaUnlessDoc();
-        if (window.Dash && typeof window.Dash.sweepDisconnected === 'function') window.Dash.sweepDisconnected();
         if (isMicrodataReplay) {
           // ── Kjør fra toppen GJENNOM målcellen (spec §4-unntaket) ──────────
           // Alle segmenter 0..target kjøres i dokumentrekkefølge mot den

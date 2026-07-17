@@ -460,9 +460,8 @@ test('normalizeSpec: has_handler gjelder også button (ingen sync_to-aktig avvis
 });
 
 // ===== Ui.formatNumber / Ui.computeDelta (dash-absorpsjon 5a Task 1:
-// FLYTTET hit fra js/dash.js sin D.formatNumber/D.computeDelta — samme
-// assertioner, repointet til Ui.*, ikke duplisert; dash.js delegerer nå til
-// disse via D.renderPayload sin 'kpi'-mapping, se tests/js/dash.test.js). ====
+// FLYTTET hit fra js/dash.js sin D.formatNumber/D.computeDelta, dash.js
+// selv fjernet i 5b — samme assertioner, repointet til Ui.*). ====
 
 test('formatNumber: default — heltall grupperes med U+202F', () => {
   assert.strictEqual(Ui.formatNumber(1234567), '1 234 567');

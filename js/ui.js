@@ -1629,14 +1629,10 @@
     }
 
     // ── payload-vokabular: figur/tema (flyttet fra js/dash.js:183-240+297-
-    // 314, dash-absorpsjon 5a Task 1). Figuren er nå NATIV her — ingen lazy
-    // js/dash.js-lasting lenger (_loadDash/_renderFigure er borte); dash.js
-    // sin egen 'figure'-payload delegerer til Ui.renderPayload akkurat som
-    // alt annet (se D.renderPayload der). _figures er et DELT register (ikke
-    // bare ui-rendrede figurer) — dash.js sine kort registrerer SINE figurer
-    // her også, siden de OGSÅ blir bygget av Ui.renderPayload nå (dash har
-    // ingen egen Plotly-integrasjon igjen) — én temabytte-observer relayouter
-    // ALLE tilkoblede figurer, uansett hvem som ba om rendring.
+    // 314, dash-absorpsjon 5a Task 1; dash.js selv fjernet i 5b). Figuren er
+    // NATIV her — _figures er registeret for ALLE ui.renderPayload-rendrede
+    // figurer — én temabytte-observer relayouter ALLE tilkoblede figurer,
+    // uansett hvilken kilde som ba om rendring.
     var _md = null;
     var _figures = [];
     var _themeObserverInstalled = false;
@@ -1735,6 +1731,13 @@
           plot_bgcolor: 'rgba(0,0,0,0)',
           font: { color: themeColor('--text', '#333') }
         }, spec.layout || {});
+        // 5a review Minor (dash-absorpsjon 5b-oppfølging): luk ut frakoblede
+        // oppføringer VED PUSH også, ikke bare inni temabytte-observerens
+        // callback (installThemeObserver over) — uten dette vokser _figures
+        // ubegrenset for et dokument som aldri bytter tema i samme økt (hver
+        // celle-rerun med et nytt figure-payload la til enda en oppføring,
+        // de gamle frakoblede ble aldri luket ut før et faktisk temabytte).
+        _figures = _figures.filter(function (f) { return f && f.isConnected; });
         _figures.push(node);
         installThemeObserver();
         setTimeout(function () {

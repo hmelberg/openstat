@@ -18,7 +18,7 @@
 #      (c_json_floats: OK i både unix- og wasm-bygg, se NOTAT_fase0.md).
 #   3. Repo-spesifikk CPython-testfelle (IKKE en MicroPython-dialektfelle,
 #      men verifisert nødvendig ved `python3 -m pytest ... ` fra repo-roten):
-#      repo-roten har en `js/`-mappe (js/dash.js, js/micropython-engine.js,
+#      repo-roten har en `js/`-mappe (js/ui.js, js/micropython-engine.js,
 #      ...) uten `__init__.py`. Når pytest kjøres via `python3 -m pytest`
 #      legges repo-roten på sys.path, og CPython finner da `js/` som et
 #      TOMT namespace-package — `import js as _js` "lykkes" stille, uten

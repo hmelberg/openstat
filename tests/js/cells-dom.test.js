@@ -927,12 +927,12 @@ test('runCell: {rparts} → rendres via window.renderROutputParts inn i cellens 
   delete global.renderROutputParts;
 });
 
-test('runCell: {notice} → pre.nb-notice (ikke pre.error) i cellens egen slot (dashboard/mixed-mode begrensningsmeldinger)', async () => {
+test('runCell: {notice} → pre.nb-notice (ikke pre.error) i cellens egen slot (mixed-mode begrensningsmeldinger)', async () => {
   const { C, scriptInputEl, containerEl } = freshEnv();
-  scriptInputEl.value = '#%% r\ndashboard(title = "x")\n';
+  scriptInputEl.value = '#%% r\nprint("x")\n';
   C.init('r');
   global.mdIsScriptRunning = () => false;
-  global.mdRunNotebookCell = () => Promise.resolve({ notice: 'Dashboard-celler krever Kjør alle (fase B2)' });
+  global.mdRunNotebookCell = () => Promise.resolve({ notice: 'R-celler i ikke-R-modus-dokumenter kjøres foreløpig kun via Kjør alle' });
 
   await C.runCell(0);
 
@@ -940,7 +940,7 @@ test('runCell: {notice} → pre.nb-notice (ikke pre.error) i cellens egen slot (
   const noticeNode = out.children.find((n) => n.tag === 'pre' && n.classList.contains('nb-notice'));
   const errNode = out.children.find((n) => n.tag === 'pre' && n.classList.contains('error'));
   assert.ok(noticeNode, 'begrensningsmeldingen skal vises som pre.nb-notice');
-  assert.strictEqual(noticeNode.textContent, 'Dashboard-celler krever Kjør alle (fase B2)');
+  assert.strictEqual(noticeNode.textContent, 'R-celler i ikke-R-modus-dokumenter kjøres foreløpig kun via Kjør alle');
   assert.strictEqual(errNode, undefined, 'skal IKKE rendres som pre.error (den er rød/alarmerende, dette er ikke en feil)');
 });
 
@@ -2128,12 +2128,6 @@ test('docCellNode: klikk på en kontroll (eller en etterkommer AV en) inni slote
   wrap0.dispatchEvent({ type: 'click', target: uiControls });
   assert.deepStrictEqual(jumpCalls, [], 'klikk på .ui-controls hopper ikke');
 
-  const dash = global.document.createElement('div');
-  dash.className = 'dash';
-  wrap0.appendChild(dash);
-  wrap0.dispatchEvent({ type: 'click', target: dash });
-  assert.deepStrictEqual(jumpCalls, [], 'klikk på .dash hopper ikke');
-
   // Klikk på sloten selv (ingen ignorerbar forelder mellom target og wrap)
   // hopper fortsatt normalt — filteret er spesifikt, ikke en generell
   // klikk-blokkering.
@@ -2144,7 +2138,7 @@ test('docCellNode: klikk på en kontroll (eller en etterkommer AV en) inni slote
 // Review Important 2: plot/chart-flater (Plotly/matplotlib-aktige resultater)
 // manglet fra ignore-listen — et klikk/dra INNI et diagram (zoom, hover,
 // legend-toggle) stjal editor-fokus via mdJumpToCell, en overraskende
-// sideeffekt identisk med den .ui-controls/.dash allerede var fikset mot.
+// sideeffekt identisk med den .ui-controls allerede var fikset mot.
 test('docCellNode: klikk på en plot/chart-flate (svg/canvas/.js-plotly-plot) inni sloten hopper IKKE markøren', () => {
   const { C, scriptInputEl } = freshEnv();
   scriptInputEl.value = '#%% python\nplot()\n';
