@@ -409,6 +409,153 @@ def value(name):
     return raw
 
 
+# Brython-felle (se brython/matplotlib_brython.py + test_brython_scoping_
+# trap.py): en METODE som refererer en global funksjon med SAMME navn som
+# METODEN blir stille en no-op i Brython (CPython/pyodide er korrekt, men
+# fasadene er byte-mirror-tvillinger - samme alias overalt). WidgetHandle.
+# value (under) kaller derfor denne ikke-kolliderende aliasen i stedet for
+# value(...) direkte.
+_value = value
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# ui.widget("navn") - håndtak til en ALLEREDE DEKLARERT kontroll
+# (dash-absorpsjon 5a Task 2, spec 2026-07-18-dash-absorption-design.md §1,
+# "widgets-vs-elements"-avgjørelsen, Hans 2026-07-18).
+#
+# Ettlinjeregelen: ui.slider(...)/ui.dropdown(...)/osv. DEKLARERER
+# kontrollen og GIR VERDIEN (den primære APIen, UENDRET av dette - se
+# funksjonene over) - ui.widget("navn") GIR HÅNDTAKET til en kontroll som
+# ALLEREDE er deklarert et annet sted (typisk en TIDLIGERE celle), for
+# imperativ styring UTENFOR selve deklarasjonen (en event-handler, en
+# annen celle).
+#
+# .set(v) fyrer ALDRI on_change/rerun: et PROGRAMMATISK sett er ikke en
+# brukerhandling - en on_change-handler som selv kaller .set() på widgeten
+# sin EGEN kontroll (eller en ANNEN) skal ikke kunne trigge seg selv i en
+# løkke (js/ui.js sin Ui.widgetSet - se der - kaller aldri
+# _fireControlHandler/_rerunFor).
+# ══════════════════════════════════════════════════════════════════════════
+
+class WidgetHandle:
+    """ui.widget("navn") sitt håndtak. Holder (_name, _key): _key er
+    controlKey-en Ui.widgetLookup fant VED KONSTRUKSJON (ui.widget(...)
+    slår opp NÅ, ikke lat) - .set()/.on()/.hide()/.show()/.element/.input
+    adresserer DEN NØKKELEN direkte (js/ui.js sitt _controls-register), mens
+    .value fortsatt går via navnet (samme livsløp/robusthet som
+    ui.value(navn) - en re-registrering med samme navn kan bytte
+    UNDERLIGGENDE nøkkel, .value følger da alltid GJELDENDE kontroll)."""
+
+    def __init__(self, name, key):
+        self._name = name
+        self._key = key
+
+    @property
+    def value(self):
+        """Live oppslag - SAMME som ui.value(self._name) (navnet, ikke den
+        FROSSEDE nøkkelen - .value skal alltid følge GJELDENDE kontroll
+        under dette navnet, ikke en potensielt utdatert identitet). Kaller
+        _value (Brython-felle-aliaset over), ikke value(...) direkte."""
+        return _value(self._name)
+
+    def set(self, v):
+        """Skriv en ny verdi til kontrollen (verdilager + DOM + sync_to,
+        Ui.widgetSet) - fyrer ALDRI on_change/rerun (se modulens
+        toppkommentar over). Returnerer den FAKTISK skrevne (koersert/
+        klampede) verdien, eller None ved manglende bro/ukjent nøkkel."""
+        u = _ui()
+        if u is None:
+            return None
+        try:
+            raw = u.widgetSet(self._key, json.dumps(v))
+        except Exception:
+            return None
+        if not raw:
+            return None
+        return json.loads(raw)
+
+    def on(self, event, handler):
+        """Bind en EKSTRA python-callable til en DOM-event på kontrollens
+        input-node (Ui.widgetBind) - ALGSIDE en ev. on_change=/on_click=
+        gitt VED DEKLARASJONEN (egen kanal/nøkkel - forstyrrer ikke
+        has_handler-kanalen _fireControlHandler bruker). Samme
+        wrapper-konvensjon (stdout-fangst, feil->error-payload,
+        create_proxy) som ui.on()/Element.on()."""
+        u = _ui()
+        if u is not None:
+            try:
+                u.widgetBind(self._key, str(event), create_proxy(_make_event_wrapper(handler)))
+            except Exception:
+                pass
+        return self
+
+    def hide(self):
+        """Skjul kontrollen (Ui.widgetVisible(key, False) - display:none
+        på .ui-widget-wrap)."""
+        u = _ui()
+        if u is not None:
+            try:
+                u.widgetVisible(self._key, False)
+            except Exception:
+                pass
+        return self
+
+    def show(self):
+        """Vis kontrollen igjen (Ui.widgetVisible(key, True))."""
+        u = _ui()
+        if u is not None:
+            try:
+                u.widgetVisible(self._key, True)
+            except Exception:
+                pass
+        return self
+
+    @property
+    def element(self):
+        """Eskapeluke: kontrollens wrap-node (Ui.widgetNode(key,'wrap')) -
+        samme "aldri sendt over JSON-broen selv"-kontrakt som Element.el."""
+        u = _ui()
+        if u is None:
+            return None
+        try:
+            return u.widgetNode(self._key, 'wrap')
+        except Exception:
+            return None
+
+    @property
+    def input(self):
+        """Eskapeluke: kontrollens RÅ input-node (Ui.widgetNode(key,
+        'input'))."""
+        u = _ui()
+        if u is None:
+            return None
+        try:
+            return u.widgetNode(self._key, 'input')
+        except Exception:
+            return None
+
+
+def widget(name):
+    """ui.widget("navn") - håndtaket til en ALLEREDE DEKLARERT kontroll
+    (spec §1, dash-absorpsjon 5a Task 2). Ettlinjeregel: ui.slider(...)
+    DEKLARERER kontrollen og gir verdien; ui.widget("navn") gir HÅNDTAKET.
+
+    None ved: ingen window/Ui (ikke i nettleser/ikke lastet ennå), ELLER
+    ukjent navn (console.warn via broen - "aldri en kastet feil for et
+    skrivefeil-navn", speiler resten av fila)."""
+    u = _ui()
+    if u is None:
+        return None
+    try:
+        key = u.widgetLookup(str(name))
+    except Exception:
+        return None
+    if not key:
+        _warn('ui.widget: ukjent navn "' + str(name) + '"')
+        return None
+    return WidgetHandle(str(name), str(key))
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # ui.html - element-byggere (ui-html-fasen, Task 2, spec §1)
 #

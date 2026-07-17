@@ -251,6 +251,17 @@ ui_pico <- function(...) {
   stop("ui.html støttes ikke i R ennå — bruk python-modusene (pyodide/brython/micropython)", call. = FALSE)
 }
 
+#' ui.widget("navn")-håndtak. IKKE støttet i R (dash-absorpsjon 5a Task 2,
+#' spec §1): webR kjører R-koden i en egen worker (declare-og-injiser-
+#' modellen, se filhodet) - et LEVENDE håndtak (.set()/.on()/.hide()/
+#' .element/.input, en direkte referanse til en JS-eid DOM-node/binding)
+#' kan strukturelt ikke krysse worker-grensen slik pyodide/brython/
+#' micropython sitt synkrone window.Ui-oppslag gjør. Høflig melding, ikke
+#' krasj (mirrorer ui_html-notisen over).
+ui_widget <- function(...) {
+  stop("ui.widget støttes ikke i R — håndtak kan ikke krysse worker-grensen", call. = FALSE)
+}
+
 #' Gjeldende verdi for en kontroll. Leser fra det injiserte `.ui_values`-snapshots
 #' (satt av index.html FØR cellekjøring); per-kjøring-snapshot, ikke live-oppdatering.
 #' Hvis `name` finnes i `.ui_values`, returneres verdien; ellers NULL.

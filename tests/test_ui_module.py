@@ -20,7 +20,7 @@ class FakeUiJs:
     bindControlHandler-opptak, og el*/value-opptak (elCreate/elSetProps/
     elAppend/elClear/elOn/elShow/elNode/value)."""
 
-    def __init__(self, next_result=None, next_key="k1", value_store=None, imports=None):
+    def __init__(self, next_result=None, next_key="k1", value_store=None, imports=None, widget_keys=None):
         self.calls = []
         self.next_result = next_result
         self.next_key = next_key
@@ -32,6 +32,38 @@ class FakeUiJs:
         # Ui.hasImport) - {ns: True} for "importert", fraværende/False for
         # "ikke importert ennå".
         self.imports = imports if imports is not None else {}
+        # dash-absorpsjon 5a Task 2: speiler js/ui.js sin Ui.widgetLookup —
+        # {navn: controlKey}, fraværende navn -> None (ukjent). widget_calls
+        # (separat fra el_calls, samme opptaksfilosofi) samler
+        # widgetLookup/widgetSet/widgetVisible/widgetNode/widgetBind-kall.
+        self.widget_keys = widget_keys if widget_keys is not None else {}
+        self.widget_calls = []
+        # widgetSet sin retur (JSON-streng) — None betyr "ekko tilbake den
+        # mottatte JSON-en uendret" (default, dekker "koersjon skjer i
+        # js/ui.js" — testene som eksplisitt vil se en KLAMPET/koersert
+        # retur setter denne selv).
+        self.widget_set_result = None
+
+    def widgetLookup(self, name):
+        self.widget_calls.append(("widgetLookup", name))
+        return self.widget_keys.get(name)
+
+    def widgetSet(self, key, value_json):
+        self.widget_calls.append(("widgetSet", key, json.loads(value_json)))
+        if self.widget_set_result is not None:
+            return self.widget_set_result
+        return value_json
+
+    def widgetVisible(self, key, visible):
+        self.widget_calls.append(("widgetVisible", key, visible))
+
+    def widgetNode(self, key, which):
+        self.widget_calls.append(("widgetNode", key, which))
+        return "node:" + str(key) + ":" + str(which)
+
+    def widgetBind(self, key, event, handler):
+        self.widget_calls.append(("widgetBind", key, event, handler))
+        return True
 
     def registerControl(self, spec_json):
         spec = json.loads(spec_json)
@@ -80,10 +112,10 @@ class FakeUiJs:
         return bool(self.imports.get(ns))
 
 
-def _load_ui(monkeypatch, next_result=None, ui_js=None, next_key="k1", value_store=None, imports=None):
+def _load_ui(monkeypatch, next_result=None, ui_js=None, next_key="k1", value_store=None, imports=None, widget_keys=None):
     js = types.ModuleType("js")
     fake = ui_js if ui_js is not None else FakeUiJs(
-        next_result=next_result, next_key=next_key, value_store=value_store, imports=imports)
+        next_result=next_result, next_key=next_key, value_store=value_store, imports=imports, widget_keys=widget_keys)
     js.window = types.SimpleNamespace(Ui=fake)
     monkeypatch.setitem(sys.modules, "js", js)
     path = pathlib.Path(__file__).resolve().parents[1] / "pyodide" / "ui.py"
@@ -696,6 +728,115 @@ def test_ui_value_bridge_exception_returns_none(monkeypatch):
         raise RuntimeError("no ui.js")
     fake.value = boom
     assert mod.value("n") is None
+
+
+# ---- ui.widget("navn") — WidgetHandle (dash-absorpsjon 5a Task 2) ----------
+# Ettlinjeregel: ui.slider(...) DEKLARERER kontrollen og gir verdien;
+# ui.widget("navn") gir HÅNDTAKET.
+
+def test_widget_unknown_name_returns_none_and_warns(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, widget_keys={})
+    warned = []
+    monkeypatch.setattr(mod, "_warn", warned.append)
+    h = mod.widget("finnes-ikke")
+    assert h is None
+    assert len(warned) == 1
+
+
+def test_widget_no_window_returns_none(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    monkeypatch.setattr(mod, "window", None)
+    assert mod.widget("x") is None
+
+
+def test_widget_bridge_exception_returns_none(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, widget_keys={"x": "0::x"})
+    def boom(name):
+        raise RuntimeError("no ui.js")
+    fake.widgetLookup = boom
+    assert mod.widget("x") is None
+
+
+def test_widget_known_name_returns_handle(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, widget_keys={"x": "0::x"})
+    h = mod.widget("x")
+    assert isinstance(h, mod.WidgetHandle)
+    assert h._name == "x"
+    assert h._key == "0::x"
+
+
+def test_widget_value_property_reads_live_via_ui_value(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, widget_keys={"x": "0::x"}, value_store={"x": 7})
+    h = mod.widget("x")
+    assert h.value == 7
+    fake.value_store["x"] = 8
+    assert h.value == 8, "live oppslag — IKKE en frosset verdi ved konstruksjon"
+
+
+def test_widget_set_returns_coerced_value_and_sends_key_and_json(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, widget_keys={"x": "0::x"})
+    fake.widget_set_result = json.dumps(10)
+    h = mod.widget("x")
+    assert h.set(999) == 10
+    call = [c for c in fake.widget_calls if c[0] == "widgetSet"][-1]
+    assert call == ("widgetSet", "0::x", 999)
+
+
+def test_widget_set_without_ui_returns_none(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, widget_keys={"x": "0::x"})
+    h = mod.widget("x")
+    monkeypatch.setattr(mod, "window", None)
+    assert h.set(1) is None
+
+
+def test_widget_set_bridge_exception_returns_none(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, widget_keys={"x": "0::x"})
+    h = mod.widget("x")
+    def boom(key, value_json):
+        raise RuntimeError("no ui.js")
+    fake.widgetSet = boom
+    assert h.set(1) is None
+
+
+def test_widget_on_wraps_handler_and_binds_via_widgetBind(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, widget_keys={"x": "0::x"})
+    h = mod.widget("x")
+    seen = {}
+
+    def handler(v):
+        seen["v"] = v
+        return "ok"
+
+    ret = h.on("input", handler)
+    assert ret is h, "kjedbar (returnerer self)"
+    calls = [c for c in fake.widget_calls if c[0] == "widgetBind"]
+    assert len(calls) == 1
+    _, key, event, wrapped = calls[0]
+    assert key == "0::x" and event == "input"
+    # SAMME wrapper-konvensjon som ui.on()/Element.on() (IKKE widgets sin
+    # enklere handler(value) — se _bind_handler_if_callable/on_change=):
+    # handler mottar hele event-dicten.
+    out = json.loads(wrapped(json.dumps({"type": "input", "value": 5})))
+    assert seen["v"] == {"type": "input", "value": 5}
+    assert out["kind"] == "text" and out["text"] == "ok"
+
+
+def test_widget_hide_show_calls_widgetVisible_and_chain(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, widget_keys={"x": "0::x"})
+    h = mod.widget("x")
+    assert h.hide() is h
+    assert h.show() is h
+    calls = [c for c in fake.widget_calls if c[0] == "widgetVisible"]
+    assert calls == [("widgetVisible", "0::x", False), ("widgetVisible", "0::x", True)]
+
+
+def test_widget_element_and_input_call_widgetNode(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, widget_keys={"x": "0::x"})
+    h = mod.widget("x")
+    assert h.element == "node:0::x:wrap"
+    assert h.input == "node:0::x:input"
+    calls = [c[0] for c in fake.widget_calls if c[0] == "widgetNode"]
+    assert calls == ["widgetNode", "widgetNode"]
 
 
 # ---- _normalize_kwargs (PUR kjerne) - hele "unified kwargs standard"-matrisen ----

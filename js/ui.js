@@ -614,19 +614,60 @@
       text: _buildText
     };
 
+    // Skriver `v` til kontrollens DOM-node PER TYPE — klampet/koersert mot
+    // ctrl.spec sine GJELDENDE grenser/valg (slider/number: min/max;
+    // dropdown: options; checkbox/switch: boolsk; text: streng) — og
+    // returnerer den faktisk skrevne verdien. Factored ut av
+    // _updateControlSpec (dash-absorpsjon 5a Task 2: "the VALUE-write out
+    // of" spec-oppdateringen) slik Ui.widgetSet (under) kan gjenbruke
+    // NØYAKTIG samme per-type-klamp for et programmatisk .set(v) — UTEN
+    // noen av de STRUKTURELLE spec-endringene (min/max-attributter,
+    // dropdown-options-listen, label) _updateControlSpec selv gjør FØR den
+    // kaller hit. Button har ingen gren her (ingen lagret verdi, ingen
+    // DOM-verdi å skrive) — _registerInto returnerer alltid FØR
+    // _updateControlSpec for button-specs, og Ui.widgetSet (under) avviser
+    // button-nøkler eksplisitt av samme grunn.
+    function _writeControlValue(ctrl, v) {
+      var spec = ctrl.spec;
+      var value = v;
+      if (spec.type === 'slider') {
+        value = Number(value);
+        if (value < spec.min) value = spec.min;
+        if (value > spec.max) value = spec.max;
+        ctrl.input.value = value;
+        if (ctrl.readout) ctrl.readout.textContent = String(value);
+      } else if (spec.type === 'dropdown') {
+        value = String(value);
+        if (spec.options.indexOf(value) === -1) value = spec.options[0];
+        ctrl.input.value = value;
+      } else if (spec.type === 'number') {
+        value = Number(value);
+        if (spec.min != null && value < spec.min) value = spec.min;
+        if (spec.max != null && value > spec.max) value = spec.max;
+        ctrl.input.value = value;
+      } else if (spec.type === 'checkbox' || spec.type === 'switch') {
+        value = !!value;
+        ctrl.input.checked = value;
+      } else if (spec.type === 'text') {
+        value = String(value);
+        ctrl.input.value = value;
+      }
+      return value;
+    }
+
     // Oppdaterer en EKSISTERENDE kontrollnode i place (label/min/max/step/
     // options fra ny spec) men BEHOLDER lagret verdi (klampet til evt. nytt
-    // intervall) — ingen ny DOM-node, ingen fokus-tap.
+    // intervall) — ingen ny DOM-node, ingen fokus-tap. Den STRUKTURELLE
+    // delen (attributter/options-liste/label) skjer her; selve
+    // verdi-skrivingen (klamp + input.value/checked) er _writeControlValue
+    // (over) — kalt SIST, ETTER at ctrl.spec/attributtene allerede
+    // reflekterer newSpec, slik klampen bruker de NYE grensene.
     function _updateControlSpec(ctrl, newSpec) {
       var stored = _values.hasOwnProperty(ctrl.key) ? _values[ctrl.key] : newSpec.value;
       ctrl.spec = newSpec;
       if (ctrl.labelEl) ctrl.labelEl.textContent = _labelText(newSpec);
       if (newSpec.type === 'slider') {
         ctrl.input.min = newSpec.min; ctrl.input.max = newSpec.max; ctrl.input.step = newSpec.step;
-        if (stored < newSpec.min) stored = newSpec.min;
-        if (stored > newSpec.max) stored = newSpec.max;
-        ctrl.input.value = stored;
-        if (ctrl.readout) ctrl.readout.textContent = String(stored);
       } else if (newSpec.type === 'dropdown') {
         while (ctrl.input.firstChild) ctrl.input.removeChild(ctrl.input.firstChild);
         newSpec.options.forEach(function (opt) {
@@ -634,8 +675,6 @@
           o.value = opt; o.textContent = opt;
           ctrl.input.appendChild(o);
         });
-        if (newSpec.options.indexOf(stored) === -1) stored = newSpec.options[0];
-        ctrl.input.value = stored;
       } else if (newSpec.type === 'number') {
         // N3-fiksen (final-review): min/max/step er VALGFRIE for number
         // (normalizeSpec kopierer dem kun inn når eksplisitt gitt). Om ny
@@ -644,19 +683,14 @@
         // være å sette en ny verdi lot den forrige kjøringens min/max/step
         // henge igjen som en STALE begrensning ingen gjeldende spec lenger
         // ber om.
-        if (newSpec.min != null) { ctrl.input.min = newSpec.min; if (stored < newSpec.min) stored = newSpec.min; }
+        if (newSpec.min != null) ctrl.input.min = newSpec.min;
         else ctrl.input.removeAttribute('min');
-        if (newSpec.max != null) { ctrl.input.max = newSpec.max; if (stored > newSpec.max) stored = newSpec.max; }
+        if (newSpec.max != null) ctrl.input.max = newSpec.max;
         else ctrl.input.removeAttribute('max');
         if (newSpec.step != null) ctrl.input.step = newSpec.step;
         else ctrl.input.removeAttribute('step');
-        ctrl.input.value = stored;
-      } else if (newSpec.type === 'checkbox' || newSpec.type === 'switch') {
-        ctrl.input.checked = !!stored;
-      } else if (newSpec.type === 'text') {
-        ctrl.input.value = stored;
       }
-      return stored;
+      return _writeControlValue(ctrl, stored);
     }
 
     // Finn cellEl sitt (direkte) barn med gitt klasse — enkel lineær skann
@@ -1093,30 +1127,120 @@
       return JSON.stringify(out);
     };
 
-    /**
-     * Ui.value(name) → gjeldende (rå JS-)verdi til kontrollen hvis nøkkel
-     * SLUTTER på "::<name>", uansett hvilken celle/dokument den ble
-     * registrert i (spec §3: "navnet interpoleres i kodestrenger" — navn
-     * skal være unike, men er de IKKE, vinner den SIST REGISTRERTE (siste
-     * innsatte nøkkel i _values, se Object.keys-rekkefølgen under) + ETT
-     * console.warn. Ukjent navn → null (JSON-vennlig, speiler
-     * registerControl sin null-for-"ingen kjørekontekst"-konvensjon).
-     * Synkront rent oppslag i dokument-verdilageret — kjører ingenting.
-     */
-    Ui.value = function (name) {
+    // Delt oppslag (dash-absorpsjon 5a Task 2: factored ut av Ui.value):
+    // finn _values-nøkkelen som SLUTTER på "::<name>", uansett hvilken
+    // celle/dokument kontrollen ble registrert i (spec §3: "navnet
+    // interpoleres i kodestrenger" — navn skal være unike, men er de IKKE,
+    // vinner den SIST REGISTRERTE (siste innsatte nøkkel i _values, se
+    // Object.keys-rekkefølgen under) + ETT console.warn). Returnerer
+    // NØKKELEN (eller null) — Ui.value (under) slår selv opp verdien i
+    // _values via nøkkelen; Ui.widgetLookup (Task 2) returnerer nøkkelen
+    // DIREKTE til fasadens WidgetHandle. Kun kontroller MED en lagret verdi
+    // (_values-oppføring) er søkbare her — knapper (ingen _values-
+    // oppføring, se _registerInto) finnes derfor aldri, i BEGGE bruk.
+    function _lookupKeyByName(name) {
       var suffix = '::' + name;
-      var found;
+      var found = null;
       var hits = 0;
       Object.keys(_values).forEach(function (key) {
         if (key.length >= suffix.length && key.slice(-suffix.length) === suffix) {
-          found = _values[key];
+          found = key;
           hits++;
         }
       });
       if (hits > 1) {
-        console.warn('Ui.value: flere kontroller med navnet "' + name + '" — bruker sist registrerte');
+        console.warn('Ui: flere kontroller med navnet "' + name + '" — bruker sist registrerte');
       }
-      return found === undefined ? null : found;
+      return found;
+    }
+
+    /**
+     * Ui.value(name) → gjeldende (rå JS-)verdi til kontrollen hvis nøkkel
+     * SLUTTER på "::<name>" (se _lookupKeyByName for selve regelen).
+     * Ukjent navn → null (JSON-vennlig, speiler registerControl sin
+     * null-for-"ingen kjørekontekst"-konvensjon). Synkront rent oppslag i
+     * dokument-verdilageret — kjører ingenting.
+     */
+    Ui.value = function (name) {
+      var key = _lookupKeyByName(name);
+      return key === null ? null : _values[key];
+    };
+
+    /**
+     * Ui.widgetLookup(name) → controlKey|null (dash-absorpsjon 5a Task 2,
+     * spec §1 "widgets-vs-elements"): SAMME suffix-match-regel som
+     * Ui.value (siste registrerte vinner ved duplikate navn + ett
+     * console.warn, delt via _lookupKeyByName over) — men returnerer selve
+     * NØKKELEN i stedet for verdien, slik fasadens WidgetHandle (ui.widget
+     * ("navn")) kan adressere kontrollen for Ui.widgetSet/widgetVisible/
+     * widgetNode/widgetBind (under). Ukjent navn → null, STILLE her
+     * (speiler Ui.value sin egen stillhet for "ingen treff" — fasaden gjør
+     * sin EGEN advarsel over broen når den mottar null, se pyodide/ui.py
+     * sin widget()).
+     */
+    Ui.widgetLookup = function (name) {
+      return _lookupKeyByName(name);
+    };
+
+    /**
+     * Ui.widgetSet(key, valueJson) → JSON av den FAKTISK skrevne (koersert/
+     * klampede) verdien, eller JSON null ved ukjent/uskrivbar nøkkel
+     * (console.warn — samme tolerante "aldri en kastet feil" som resten av
+     * modulen). Skriver _values[key] + kontrollens DOM (Gjenbruker
+     * _writeControlValue — SAMME per-type-klamp som en spec-drevet
+     * _updateControlSpec-oppdatering ville brukt) + sync_to-push — men
+     * fyrer ALDRI _fireControlHandler eller en rerun: et programmatisk
+     * .set(v) er IKKE en brukerhandling (Hans, 2026-07-18 håndtak-
+     * avgjørelsen) — en on_change-handler som selv kaller .set() skal
+     * aldri kunne trigge seg selv i en løkke. Knapper (ingen lagret verdi
+     * å skrive/klampe, se _writeControlValue) behandles som ukjente nøkler
+     * her.
+     */
+    Ui.widgetSet = function (key, valueJson) {
+      var ctrl = _controls[key];
+      if (!ctrl || ctrl.type === 'button') {
+        console.warn('Ui.widgetSet: ukjent nøkkel ' + key);
+        return JSON.stringify(null);
+      }
+      var v;
+      try {
+        v = JSON.parse(valueJson);
+      } catch (e) {
+        console.warn('Ui.widgetSet: ugyldig JSON-verdi: ' + ((e && e.message) || e));
+        return JSON.stringify(null);
+      }
+      var written = _writeControlValue(ctrl, v);
+      _values[key] = written;
+      _syncPush(ctrl.spec, written);
+      return JSON.stringify(written);
+    };
+
+    /**
+     * Ui.widgetVisible(key, visible) — toggler kontrollens `.ui-widget`-
+     * wrap sin display (dash-absorpsjon 5a Task 2: fasadens .hide()/
+     * .show()). Ukjent nøkkel → console.warn, no-op.
+     */
+    Ui.widgetVisible = function (key, visible) {
+      var ctrl = _controls[key];
+      if (!ctrl) { console.warn('Ui.widgetVisible: ukjent nøkkel ' + key); return; }
+      ctrl.wrap.style.display = visible ? '' : 'none';
+    };
+
+    /**
+     * Ui.widgetNode(key, which) → den rå DOM-noden ('wrap' eller 'input'),
+     * eller null (ukjent nøkkel/ukjent `which`). Fasadens .element/.input
+     * -eskapeluke (dash-absorpsjon 5a Task 2) — SAMME "aldri sendt over
+     * JSON-broen selv, kun JS-internt/håndtak-eskapeluke"-kontrakt som
+     * Ui.elNode. For en knapp er wrap === input (se _buildButton) — begge
+     * `which`-verdiene gir samme node der.
+     */
+    Ui.widgetNode = function (key, which) {
+      var ctrl = _controls[key];
+      if (!ctrl) return null;
+      if (which === 'input') return ctrl.input || null;
+      if (which === 'wrap') return ctrl.wrap || null;
+      console.warn('Ui.widgetNode: ukjent which "' + which + '" (forventet "wrap" eller "input")');
+      return null;
     };
 
     /**
@@ -1190,8 +1314,13 @@
           // ui-html-fasen (Task 1): el-scopede bindinger (Ui.elOn) har ingen
           // CSS-selector — de matcher via elementets EGEN data-ui-el-
           // markering (satt av _registerElBinding) i stedet for et
-          // selector-treff mot en ANNEN, forhåndskjent node.
-          var sel = b.elId ? '[data-ui-el="' + b.elId + '"]' : b.selector;
+          // selector-treff mot en ANNEN, forhåndskjent node. Widget-scopede
+          // bindinger (Ui.widgetBind, dash-absorpsjon 5a Task 2) er samme
+          // idé, men matcher via kontrollens EGEN data-ui-key (satt
+          // allerede ved registrering, se _registerInto) i stedet for en
+          // egen data-ui-el-markering.
+          var sel = b.elId ? '[data-ui-el="' + b.elId + '"]'
+            : (b.wKey ? '[data-ui-key="' + b.wKey + '"]' : b.selector);
           var hit = (e.target && typeof e.target.closest === 'function') ? e.target.closest(sel) : null;
           if (hit) _dispatchBinding(b, e, hit);
         }
@@ -1812,6 +1941,59 @@
       if (!elId || !event) { console.warn('Ui.elOn: elId og event er påkrevd'); return null; }
       if (typeof handler !== 'function') { console.warn('Ui.elOn: handler er ikke en funksjon'); return null; }
       return _registerElBinding(elId, event, handler);
+    };
+
+    // Delt registreringskjerne for Ui.widgetBind (dash-absorpsjon 5a Task
+    // 2) — kontroll-scopet tvilling av _registerElBinding (over): nøkkelen
+    // er 'wk::<controlKey>::<event>' (INGEN cellKey-prefiks — controlKey er
+    // allerede globalt unik i _controls), og treffet matches via
+    // kontrollens EGEN data-ui-key-markering (satt allerede ved
+    // registrering, se _registerInto — IKKE satt her, i motsetning til
+    // _registerElBinding sin data-ui-el, siden den allerede finnes). Ellers
+    // BYTE-FOR-BYTE samme livssyklus: samme kjørekontekst-oppløsning
+    // (_resolveCellIdx — DEN KJØRENDE cellen som KALLER widgetBind EIER
+    // bindingen, ikke nødvendigvis kontrollens egen deklarerende celle),
+    // samme erstatning-destruerer-forrige-handler, samme
+    // bindingsRegistered-sporing (mark-og-sopp i Ui.endCellRun er generisk
+    // over _bindings og bryr seg ikke om nøkkel-formen).
+    function _registerWidgetBinding(key, event, handler) {
+      var cellIdx = _resolveCellIdx();
+      if (cellIdx === undefined) return null; // ingen kjørekontekst-mekanisme i det hele tatt
+
+      if (!_controls[key]) { console.warn('Ui.widgetBind: ukjent nøkkel ' + key); return null; }
+
+      var bindKey = 'wk::' + key + '::' + event;
+
+      if (cellIdx != null) {
+        var run = _bindingsRunFor(cellIdx);
+        run.bindingsRegistered[bindKey] = true;
+      }
+
+      var old = _bindings[bindKey];
+      if (old) _destroyHandler(old); // erstatning — samme guardede destroy som sveip/reset
+
+      var binding = { key: bindKey, cellIdx: cellIdx, kind: 'fn', wKey: key, event: event, target: null, handler: handler };
+      _bindings[bindKey] = binding;
+      _installDelegate(event);
+      return true;
+    }
+
+    /**
+     * Ui.widgetBind(key, event, handler) → true/null. Kontroll-scopet
+     * variant av Ui.bindEvent/Ui.elOn (dash-absorpsjon 5a Task 2) —
+     * fasadens WidgetHandle.on(event, fn): en EKSTRA lytter på kontrollens
+     * input-node, ALGSIDE en ev. on_change=/on_click= gitt ved selve
+     * deklarasjonen (egen kanal/nøkkel — forstyrrer ikke
+     * _controlHandlers/has_handler-kanalen _fireControlHandler bruker).
+     * handler kalles med samme JSON event-payload ({type,value,checked,
+     * targetId}) og MÅ returnere en JSON-payload-streng, tegnet via
+     * Ui.renderEventResult (binding.target er alltid null her → slot-
+     * fallback, se _slotFor).
+     */
+    Ui.widgetBind = function (key, event, handler) {
+      if (!key || !event) { console.warn('Ui.widgetBind: nøkkel og event er påkrevd'); return null; }
+      if (typeof handler !== 'function') { console.warn('Ui.widgetBind: handler er ikke en funksjon'); return null; }
+      return _registerWidgetBinding(key, event, handler);
     };
 
     // Finn den KJØRENDE kontekstens monteringssted for elShow(target=null):

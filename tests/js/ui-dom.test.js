@@ -2435,3 +2435,227 @@ test('Task 1: resetDocument — destruerer ALLE bundne kontroll-handlere', () =>
   Ui.resetDocument();
   assert.strictEqual(destroyed, true);
 });
+
+// ---- Task 2 (dash-absorpsjon 5a): ui.widget("navn") sitt håndtak-kvartett -
+// Ui.widgetLookup/widgetSet/widgetVisible/widgetNode/widgetBind. Ettlinje-
+// regelen: ui.slider(...) DEKLARERER kontrollen og gir verdien; ui.widget
+// ("navn") gir HÅNDTAKET til en allerede deklarert kontroll.
+
+test('Task 2: widgetLookup — kjent navn → controlKey (samme suffix-match som Ui.value)', () => {
+  const { Ui } = freshEnv();
+  Ui.registerControl(JSON.stringify({ type: 'slider', name: 'x', value: 5, min: 0, max: 10 }));
+  assert.strictEqual(Ui.widgetLookup('x'), '0::x');
+});
+
+test('Task 2: widgetLookup — ukjent navn → null, STILLE (ingen advarsel — fasaden advarer selv)', () => {
+  const { Ui } = freshEnv();
+  const warns = [];
+  const origWarn = console.warn;
+  console.warn = (m) => warns.push(m);
+  let key;
+  try { key = Ui.widgetLookup('finnes-ikke'); }
+  finally { console.warn = origWarn; }
+  assert.strictEqual(key, null);
+  assert.strictEqual(warns.length, 0);
+});
+
+test('Task 2: widgetLookup — en KNAPP har ingen lagret verdi og finnes derfor aldri via navn (samme begrensning som Ui.value)', () => {
+  const { Ui } = freshEnv();
+  Ui.registerControl(JSON.stringify({ type: 'button', name: 'go' }));
+  assert.strictEqual(Ui.widgetLookup('go'), null);
+});
+
+test('Task 2: widgetSet — skriver DOM + verdilager + sync_to, men fyrer ALDRI en bundet handler og skjeduler ALDRI en rerun (begge negativer)', async () => {
+  const { Ui, outEl, runCellCalls } = freshEnv();
+  const syncLog = [];
+  global.mdUiSyncTo = (name, value) => { syncLog.push([name, value]); };
+
+  const res = JSON.parse(Ui.registerControl(JSON.stringify({
+    type: 'slider', name: 'x', value: 5, min: 0, max: 100, has_handler: true, sync_to: 'x', rerun: 'self',
+  })));
+  const handlerCalls = [];
+  Ui.bindControlHandler(res.key, (payloadJson) => {
+    handlerCalls.push(JSON.parse(payloadJson));
+    return '{}';
+  });
+
+  const key = Ui.widgetLookup('x');
+  const written = JSON.parse(Ui.widgetSet(key, JSON.stringify(42)));
+  assert.strictEqual(written, 42, 'returnerer den skrevne verdien');
+  assert.strictEqual(Ui.value('x'), 42, 'verdilageret oppdatert');
+
+  const strip = outEl.children[0];
+  const input = strip.children[0].children[1];
+  assert.strictEqual(input.value, 42, 'DOM-en oppdatert');
+  assert.deepStrictEqual(syncLog[syncLog.length - 1], ['x', 42], 'sync_to pushet');
+
+  await wait(200); // ville fyrt en debounced rerun HER dersom widgetSet noensinne trigget en
+  assert.deepStrictEqual(handlerCalls, [], 'negativ #1 — den bundne on_change-handleren fyrte ALDRI');
+  assert.deepStrictEqual(runCellCalls, [], 'negativ #2 — ingen rerun skjedulert');
+});
+
+test('Task 2: widgetSet — klamper til kontrollens GJELDENDE grenser (slider)', () => {
+  const { Ui } = freshEnv();
+  Ui.registerControl(JSON.stringify({ type: 'slider', name: 'x', value: 5, min: 0, max: 10 }));
+  const key = Ui.widgetLookup('x');
+  assert.strictEqual(JSON.parse(Ui.widgetSet(key, JSON.stringify(999))), 10);
+  assert.strictEqual(JSON.parse(Ui.widgetSet(key, JSON.stringify(-999))), 0);
+});
+
+test('Task 2: widgetSet — dropdown faller tilbake til første valg for en verdi UTENFOR options', () => {
+  const { Ui } = freshEnv();
+  Ui.registerControl(JSON.stringify({ type: 'dropdown', name: 'd', options: ['a', 'b', 'c'], value: 'a' }));
+  const key = Ui.widgetLookup('d');
+  assert.strictEqual(JSON.parse(Ui.widgetSet(key, JSON.stringify('z'))), 'a');
+  assert.strictEqual(JSON.parse(Ui.widgetSet(key, JSON.stringify('c'))), 'c');
+});
+
+test('Task 2: widgetSet — checkbox koerserer til boolsk', () => {
+  const { Ui } = freshEnv();
+  Ui.registerControl(JSON.stringify({ type: 'checkbox', name: 'c', value: false }));
+  const key = Ui.widgetLookup('c');
+  assert.strictEqual(JSON.parse(Ui.widgetSet(key, JSON.stringify(1))), true);
+});
+
+test('Task 2: widgetSet — ukjent nøkkel → JSON null + console.warn', () => {
+  const { Ui } = freshEnv();
+  const warns = [];
+  const origWarn = console.warn;
+  console.warn = (m) => warns.push(m);
+  let res;
+  try { res = Ui.widgetSet('finnes::ikke', JSON.stringify(1)); }
+  finally { console.warn = origWarn; }
+  assert.strictEqual(JSON.parse(res), null);
+  assert.ok(warns.length >= 1);
+});
+
+test('Task 2: widgetSet — en knapp-nøkkel behandles som ukjent (ingen lagret verdi å skrive/klampe)', () => {
+  const { Ui } = freshEnv();
+  Ui.registerControl(JSON.stringify({ type: 'button', name: 'go' }));
+  const res = Ui.widgetSet('0::go', JSON.stringify(1));
+  assert.strictEqual(JSON.parse(res), null);
+});
+
+test('Task 2: widgetVisible — skjuler og viser kontrollens wrap (display:none/"")', () => {
+  const { Ui, outEl } = freshEnv();
+  Ui.registerControl(JSON.stringify({ type: 'text', name: 'n', value: 'a' }));
+  const key = Ui.widgetLookup('n');
+  const wrap = outEl.children[0].children[0];
+  Ui.widgetVisible(key, false);
+  assert.strictEqual(wrap.style.display, 'none');
+  Ui.widgetVisible(key, true);
+  assert.strictEqual(wrap.style.display, '');
+});
+
+test('Task 2: widgetVisible — ukjent nøkkel → console.warn, ingen krasj', () => {
+  const { Ui } = freshEnv();
+  const warns = [];
+  const origWarn = console.warn;
+  console.warn = (m) => warns.push(m);
+  try { Ui.widgetVisible('finnes::ikke', false); }
+  finally { console.warn = origWarn; }
+  assert.ok(warns.length >= 1);
+});
+
+test('Task 2: widgetNode — "wrap"/"input" gir de RÅ DOM-nodene; ukjent which/nøkkel → null', () => {
+  const { Ui, outEl } = freshEnv();
+  Ui.registerControl(JSON.stringify({ type: 'text', name: 'n', value: 'a' }));
+  const key = Ui.widgetLookup('n');
+  const strip = outEl.children[0];
+  const wrap = strip.children[0];
+  const input = wrap.children[1];
+  assert.strictEqual(Ui.widgetNode(key, 'wrap'), wrap);
+  assert.strictEqual(Ui.widgetNode(key, 'input'), input);
+  assert.strictEqual(Ui.widgetNode(key, 'noe-annet'), null);
+  assert.strictEqual(Ui.widgetNode('finnes::ikke', 'wrap'), null);
+});
+
+test('Task 2: widgetBind — fyrer på kontrollens EGEN input-node (delegert via data-ui-key), ALGSIDE en has_handler on_change ved SAMME fysiske hendelse', () => {
+  const { Ui, outEl } = freshEnv({ cellIdx: 0 });
+  let onChangeCalls = 0;
+  let onCalls = 0;
+  const res = JSON.parse(Ui.registerControl(JSON.stringify({
+    type: 'slider', name: 'x', value: 5, min: 0, max: 10, has_handler: true,
+  })));
+  Ui.bindControlHandler(res.key, () => { onChangeCalls++; return '{}'; });
+  Ui.widgetBind(res.key, 'input', () => { onCalls++; return '{}'; });
+
+  const strip = outEl.children[0];
+  const input = strip.children[0].children[1];
+  input.value = '7';
+  input.dispatchEvent({ type: 'input' });   // kontrollens EGEN _wireChange-lytter → on_change-kanalen
+  dispatchDocEvent('input', input);          // delegert widgetBind-lytter (samme fysiske hendelse i en ekte nettleser)
+
+  assert.strictEqual(onChangeCalls, 1, 'den opprinnelige on_change fyrte fortsatt');
+  assert.strictEqual(onCalls, 1, '.on()-lytteren fyrte OGSÅ, uavhengig');
+});
+
+test('Task 2: widgetBind — merker ALLEREDE kontrollens data-ui-key (satt ved registrering, ikke av widgetBind selv)', () => {
+  const { Ui, outEl } = freshEnv();
+  Ui.registerControl(JSON.stringify({ type: 'slider', name: 'x', value: 5, min: 0, max: 10 }));
+  const key = Ui.widgetLookup('x');
+  Ui.widgetBind(key, 'input', () => '{}');
+  const strip = outEl.children[0];
+  const input = strip.children[0].children[1];
+  assert.strictEqual(input.getAttribute('data-ui-key'), key);
+});
+
+test('Task 2: widgetBind — sveipes ved rerun uten re-deklarasjon (samme mark-og-sopp som elOn/bindEvent)', () => {
+  const { Ui, outEl } = freshEnv({ cellIdx: 0 });
+  Ui.beginCellRun(0);
+  Ui.registerControl(JSON.stringify({ type: 'slider', name: 'x', value: 5, min: 0, max: 10 }));
+  const key = Ui.widgetLookup('x');
+  let calls = 0;
+  Ui.widgetBind(key, 'input', () => { calls++; return '{}'; });
+  Ui.endCellRun(0);
+
+  const strip = outEl.children[0];
+  const input = strip.children[0].children[1];
+  dispatchDocEvent('input', input);
+  assert.strictEqual(calls, 1);
+
+  Ui.beginCellRun(0);
+  // kontrollen re-deklareres (den lever videre) — men widgetBind gjør IKKE,
+  // slik denne testen isolerer BINDINGENS EGEN sveiping fra kontrollens.
+  Ui.registerControl(JSON.stringify({ type: 'slider', name: 'x', value: 5, min: 0, max: 10 }));
+  Ui.endCellRun(0);
+  dispatchDocEvent('input', input);
+  assert.strictEqual(calls, 1, 'sveipet binding mottar ingen flere dispatch');
+});
+
+test('Task 2: widgetBind — destroy kalles på handleren ved sveip', () => {
+  const { Ui } = freshEnv({ cellIdx: 0 });
+  Ui.beginCellRun(0);
+  Ui.registerControl(JSON.stringify({ type: 'slider', name: 'x', value: 5, min: 0, max: 10 }));
+  const key = Ui.widgetLookup('x');
+  let destroyed = false;
+  const h = () => '{}';
+  h.destroy = () => { destroyed = true; };
+  Ui.widgetBind(key, 'input', h);
+  Ui.endCellRun(0);
+
+  Ui.beginCellRun(0);
+  Ui.registerControl(JSON.stringify({ type: 'slider', name: 'x', value: 5, min: 0, max: 10 }));
+  Ui.endCellRun(0);
+  assert.strictEqual(destroyed, true);
+});
+
+test('Task 2: widgetBind — ukjent nøkkel → console.warn, null', () => {
+  const { Ui } = freshEnv();
+  const warns = [];
+  const origWarn = console.warn;
+  console.warn = (m) => warns.push(m);
+  let ok;
+  try { ok = Ui.widgetBind('finnes::ikke', 'input', () => '{}'); }
+  finally { console.warn = origWarn; }
+  assert.strictEqual(ok, null);
+  assert.ok(warns.length >= 1);
+});
+
+test('Task 2: widgetBind — handler er ikke en funksjon → console.warn, null', () => {
+  const { Ui } = freshEnv();
+  Ui.registerControl(JSON.stringify({ type: 'slider', name: 'x', value: 5, min: 0, max: 10 }));
+  const key = Ui.widgetLookup('x');
+  const ok = Ui.widgetBind(key, 'input', 'ikke-en-funksjon');
+  assert.strictEqual(ok, null);
+});
