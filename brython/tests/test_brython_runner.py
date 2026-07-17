@@ -273,6 +273,50 @@ def test_sync_var_bad_json_returns_error():
     assert err != ''
     assert 'x' not in br._shared_vars
 
+
+# ── ui.html display-krok (Task 3, spec §2): _fmt() sin _openstat_el_id-gren ──
+
+class _FakeEl:
+    """Duck-typer et ui.html.* Element-håndtak (kun det _fmt() bryr seg
+    om: attributtet _openstat_el_id + en show()-metode)."""
+    def __init__(self, raises=False):
+        self._openstat_el_id = 'el1'
+        self.shown = 0
+        self._raises = raises
+
+    def show(self):
+        self.shown += 1
+        if self._raises:
+            raise RuntimeError('boom')
+
+
+def test_fmt_mounts_element_and_returns_empty():
+    el = _FakeEl()
+    assert br._fmt(el) == ''
+    assert el.shown == 1
+
+
+def test_fmt_element_raising_show_does_not_crash():
+    # Defensiv kontrakt (spec: "exception-safe - a raising show() must not
+    # kill the cell"): en show() som kaster fanges HER (ikke bare inni
+    # Element.show() sin egen try/except rundt selve elShow-broen), og
+    # _fmt returnerer uansett '' - IKKE en feiltekst (samme "aldri en
+    # ukontrollert exception, men heller ikke ekstra støy for en display-
+    # detalj"-linje som resten av _fmt).
+    el = _FakeEl(raises=True)
+    assert br._fmt(el) == ''
+    assert el.shown == 1
+
+
+def test_execute_code_element_last_expression_mounts_no_blank_line():
+    # Kallstedet (~117-119): shown == '' skal ikke legge til noe (ingen
+    # blank linje) - end-to-end via _execute_code, ikke bare _fmt direkte.
+    br._shared_vars['_el_rt'] = _FakeEl()
+    out = br._execute_code('print("før")\n_el_rt')
+    assert out == 'før' + chr(10)
+    assert br._shared_vars['_el_rt'].shown == 1
+
+
 if __name__ == '__main__':
     # NOTE: iterate in declaration order (not sorted alphabetically) — several
     # tests share state via module globals (e.g. test_figure_embed_marker

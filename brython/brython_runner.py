@@ -14,6 +14,23 @@ def _fmt(obj):
     """Format one object as output text (embed markers for figures/frames)."""
     if obj is None:
         return ''
+    if hasattr(obj, '_openstat_el_id'):
+        # ui-html-fasen (Task 3, spec §2/mount): a ui.html.* Element handle
+        # is a MOUNTABLE value, not something to repr-print — the display
+        # hook mounts it (Element.show(): append into the running cell's
+        # output slot right now) instead, and reports '' (no text output
+        # for the expression itself; the call site's `if shown:` guard
+        # already treats '' as nothing-to-append, so this never produces a
+        # spurious blank line). Guarded HERE (not just inside Element.show()
+        # own try/except around the actual elShow bridge call) because
+        # show() itself could raise before ever reaching the bridge (e.g. a
+        # user override) — a raising show() must never kill the cell, same
+        # defensive contract as the rest of this function.
+        try:
+            obj.show()
+        except Exception:
+            pass
+        return ''
     if hasattr(obj, 'to_plotly_json_str'):
         return _EMBED_S + 'figure__' + '\n' + obj.to_plotly_json_str() + '\n' + _EMBED_E
     if hasattr(obj, 'to_html'):

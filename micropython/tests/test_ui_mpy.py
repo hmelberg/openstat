@@ -14,18 +14,70 @@ import pytest
 
 
 class FakeUiJs:
-    def __init__(self, next_result=None):
+    """window.Ui-stubben. `next_result` speiler ekte Ui.registerControl sin
+    JSON-STRENG-retur (eller None/FakeJsNull for "ingen kjørekontekst") -
+    UENDRET oppførsel fra før ui-html-fasen. ui-html-fasen (Task 3, speiler
+    tests/test_ui_module.py) legger til: has_handler-pakking (KUN når
+    next_result er en ekte JSON-streng), bindControlHandler-opptak, og
+    el*/value-opptak (elCreate/elSetProps/elAppend/elClear/elOn/elShow/
+    elNode/value)."""
+
+    def __init__(self, next_result=None, next_key="k1", value_store=None):
         self.calls = []
         self.next_result = next_result
+        self.next_key = next_key
+        self.bound_handlers = {}   # controlKey -> handler (fra bindControlHandler)
+        self.value_store = value_store if value_store is not None else {}
+        self.el_calls = []
+        self._next_el_id = 1
 
     def registerControl(self, spec_json):
-        self.calls.append(json.loads(spec_json))
+        spec = json.loads(spec_json)
+        self.calls.append(spec)
+        if spec.get("has_handler") and isinstance(self.next_result, str):
+            return json.dumps({"value": json.loads(self.next_result), "key": self.next_key})
         return self.next_result
 
+    def bindControlHandler(self, key, handler):
+        self.bound_handlers[key] = handler
 
-def _load_ui(monkeypatch, next_result=None, ui_js=None):
+    # ---- ui.html element-motoren (Task 1-kontrakten, speilet her) ----
+
+    def elCreate(self, tag, props_json):
+        el_id = "el" + str(self._next_el_id)
+        self._next_el_id += 1
+        self.el_calls.append(("elCreate", tag, json.loads(props_json) if props_json else None))
+        return el_id
+
+    def elSetProps(self, el_id, props_json):
+        self.el_calls.append(("elSetProps", el_id, json.loads(props_json) if props_json else None))
+
+    def elAppend(self, parent_id, child_json):
+        self.el_calls.append(("elAppend", parent_id, json.loads(child_json)))
+
+    def elClear(self, el_id):
+        self.el_calls.append(("elClear", el_id))
+
+    def elOn(self, el_id, event, handler):
+        self.el_calls.append(("elOn", el_id, event, handler))
+        return True
+
+    def elShow(self, el_id, opts_json):
+        self.el_calls.append(("elShow", el_id, json.loads(opts_json) if opts_json else None))
+
+    def elNode(self, el_id):
+        self.el_calls.append(("elNode", el_id))
+        return "node:" + el_id
+
+    def value(self, name):
+        self.el_calls.append(("value", name))
+        return self.value_store.get(name)
+
+
+def _load_ui(monkeypatch, next_result=None, ui_js=None, next_key="k1", value_store=None):
     js = types.ModuleType("js")
-    fake = ui_js if ui_js is not None else FakeUiJs(next_result=next_result)
+    fake = ui_js if ui_js is not None else FakeUiJs(
+        next_result=next_result, next_key=next_key, value_store=value_store)
     js.window = types.SimpleNamespace(Ui=fake)
     monkeypatch.setitem(sys.modules, "js", js)
     path = pathlib.Path(__file__).resolve().parents[1] / "ui_mpy.py"
@@ -430,6 +482,532 @@ def test_on_and_run_cell_return_none_without_browser(monkeypatch):
     monkeypatch.setattr(mod, "window", None)
     assert mod.on("#x", "click", lambda e: None) is None
     assert mod.run_cell("#x", "click", "plot") is None
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# ui-html-fasen (Task 3, speiler tests/test_ui_module.py sin Task 2-
+# seksjon byte for byte, MED to dokumenterte dialektavvik: (1) INGEN
+# create_proxy noe sted (som Brython-tvillingen), (2) enhver test som
+# faktisk KALLER en wrappet handler (ikke bare binder den) må nulle
+# mod.window til None RETT FØR kallet - denne test-stubben har ingen
+# window.__mpyCaptureStart/__mpyCaptureEnd, så _make_event_wrapper sin
+# ekte-mpy-gren ville kastet AttributeError; window=None tvinger samme
+# CPython-stdout-fallback som test_wrapper_catches_exception over
+# allerede bruker. Selve REGISTRERINGEN (som trenger window.Ui) skjer
+# FØR window nulles ut.
+# ═══════════════════════════════════════════════════════════════════════
+
+# ---- _alias_rerun: en callable skal ALDRI havne i rerun= ----
+
+def test_alias_rerun_skips_callable(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    handler = lambda v: v
+    assert mod._alias_rerun("self", handler) == "self"
+    assert mod._alias_rerun("plot", handler) == "plot"
+
+
+def test_alias_rerun_string_still_wins(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    assert mod._alias_rerun("self", "plot") == "plot"
+
+
+def test_alias_rerun_none_alias_keeps_rerun(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    assert mod._alias_rerun("self", None) == "self"
+
+
+# ---- _register_value: dual retur-form (skalar vs {value,key}) ----
+
+def test_register_value_unwraps_dict_shape_and_binds(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result="9", next_key="kx")
+    spec = {"type": "slider"}
+    result = mod._register_value(spec, lambda v: v)
+    assert spec["has_handler"] is True
+    assert result == 9
+    assert "kx" in fake.bound_handlers
+
+
+def test_register_value_plain_scalar_when_no_handler(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result="9")
+    spec = {"type": "slider"}
+    result = mod._register_value(spec, None)
+    assert "has_handler" not in spec
+    assert result == 9
+    assert fake.bound_handlers == {}
+
+
+def test_register_value_string_handler_not_callable_untouched(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result="9")
+    spec = {"type": "slider"}
+    result = mod._register_value(spec, "cellnavn")
+    assert "has_handler" not in spec
+    assert result == 9
+
+
+# ---- widget on_change/on_click callable dispatch (vs. streng-alias) ----
+
+def test_slider_on_change_callable_sets_has_handler_and_binds(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result="5", next_key="cell0::0::n")
+    result = mod.slider(0, 10, name="n", on_change=lambda v: v)
+    assert result == 5
+    assert fake.calls[-1]["has_handler"] is True
+    assert fake.calls[-1]["rerun"] == "self"   # callable havner ALDRI i rerun=
+    assert "cell0::0::n" in fake.bound_handlers
+
+
+def test_slider_on_change_string_no_handler_binding(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result="5")
+    result = mod.slider(0, 10, on_change="plot")
+    assert result == 5
+    assert "has_handler" not in fake.calls[-1]
+    assert fake.calls[-1]["rerun"] == "plot"
+    assert fake.bound_handlers == {}
+
+
+def test_slider_on_change_callable_no_ctx_falls_back(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=None)
+    result = mod.slider(0, 100, value=42, on_change=lambda v: v)
+    assert result == 42
+    assert fake.bound_handlers == {}
+
+
+def test_dropdown_on_change_callable(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=json.dumps("blue"), next_key="k3")
+    result = mod.dropdown(["red", "blue"], on_change=lambda v: v)
+    assert result == "blue"
+    assert "k3" in fake.bound_handlers
+
+
+def test_checkbox_on_change_callable(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result="true", next_key="k4")
+    result = mod.checkbox("Vis", on_change=lambda v: None)
+    assert result is True
+    assert "k4" in fake.bound_handlers
+
+
+def test_switch_on_change_callable(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result="true", next_key="k5")
+    result = mod.switch("Aktiv", on_change=lambda v: None)
+    assert result is True
+    assert "k5" in fake.bound_handlers
+
+
+def test_number_on_change_callable(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result="3.5", next_key="k6")
+    result = mod.number(0, on_change=lambda v: None)
+    assert result == 3.5
+    assert "k6" in fake.bound_handlers
+
+
+def test_text_on_change_callable(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=json.dumps("hei"), next_key="k7")
+    result = mod.text("", on_change=lambda v: None)
+    assert result == "hei"
+    assert "k7" in fake.bound_handlers
+
+
+def test_button_on_click_callable_receives_none_value(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result="null", next_key="k2")
+    result = mod.button("Kjør", on_click=lambda v: v)
+    assert result is None
+    assert fake.calls[-1]["has_handler"] is True
+    handler = fake.bound_handlers["k2"]
+    monkeypatch.setattr(mod, "window", None)   # se filhode-kommentaren over
+    handler(json.dumps({"value": None}))
+    # via _make_event_wrapper -> handler kalt med den unwrapte verdien
+    # (bekreftes indirekte i wrapper-testene under; her: bare at kallet
+    # ikke kaster og at en handler faktisk ble bundet).
+
+
+def test_button_on_click_string_alias_unaffected(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=None)
+    result = mod.button("Kjør", on_click="plot")
+    assert result is None
+    assert "has_handler" not in fake.calls[-1]
+    assert fake.calls[-1]["rerun"] == "plot"
+
+
+# ---- bindControlHandler-wrapperen: pakker ut {"value": v} -> handler(v) ----
+
+def test_bound_control_handler_wrapper_calls_python_handler_with_unwrapped_value(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result="5", next_key="k1")
+    seen = []
+    def h(v):
+        seen.append(v)
+        return "fikk " + str(v)
+    mod.slider(0, 10, on_change=h)
+    handler = fake.bound_handlers["k1"]
+    monkeypatch.setattr(mod, "window", None)   # se filhode-kommentaren over
+    out = json.loads(handler(json.dumps({"value": 7})))
+    assert seen == [7]
+    assert out == {"kind": "text", "text": "fikk 7"}
+
+
+def test_bound_control_handler_wrapper_catches_exception(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result="5", next_key="k1")
+    def boom(v):
+        raise ValueError("au")
+    mod.slider(0, 10, on_change=boom)
+    handler = fake.bound_handlers["k1"]
+    monkeypatch.setattr(mod, "window", None)   # se filhode-kommentaren over
+    out = json.loads(handler(json.dumps({"value": 1})))
+    assert out["kind"] == "error" and "au" in out["text"]
+
+
+def test_bound_control_handler_wrapper_button_value_is_none(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result="null", next_key="k2")
+    seen = []
+    mod.button("Kjør", on_click=lambda v: seen.append(v))
+    handler = fake.bound_handlers["k2"]
+    monkeypatch.setattr(mod, "window", None)   # se filhode-kommentaren over
+    handler(json.dumps({"value": None}))
+    assert seen == [None]
+
+
+# ---- ui.value(name) ----
+
+def test_ui_value_reads_stored_value(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, value_store={"n": 7})
+    assert mod.value("n") == 7
+
+
+def test_ui_value_unknown_name_returns_none(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, value_store={})
+    assert mod.value("missing") is None
+
+
+def test_ui_value_real_js_null_returns_none(monkeypatch):
+    # Dialektavvik fra pyodide/ui.py OG brython/ui_brython.py (browser-
+    # verifisert 2026-07-17, Task 3-browserverifisering): en RÅ JS `null`
+    # KRYSSER til Python `None` over MicroPythons jsffi-grense direkte -
+    # value() sin `raw is None`-sjekk alene er derfor tilstrekkelig, og
+    # denne testen bruker rett og slett ekte Python None i value_store
+    # (ingen egen sentinel-klasse trengs, i motsetning til Brython-
+    # tvillingens NullType-duck-type).
+    mod, fake = _load_ui(monkeypatch)
+    fake.value_store = {"n": None}
+    assert mod.value("n") is None
+
+
+def test_ui_value_falsy_real_values_survive(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, value_store={"z": 0, "f": False, "s": ""})
+    assert mod.value("z") == 0
+    assert mod.value("f") is False
+    assert mod.value("s") == ""
+
+
+def test_ui_value_no_window_returns_none(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    monkeypatch.setattr(mod, "window", None)
+    assert mod.value("n") is None
+
+
+def test_ui_value_bridge_exception_returns_none(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    def boom(name):
+        raise RuntimeError("no ui.js")
+    fake.value = boom
+    assert mod.value("n") is None
+
+
+# ---- _normalize_kwargs (PUR kjerne) - hele "unified kwargs standard"-matrisen ----
+
+def test_normalize_cls_to_attrs_class(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    norm, handlers, warnings = mod._normalize_kwargs({"cls": "box"})
+    assert norm["attrs"]["class"] == "box"
+    assert handlers == [] and warnings == []
+
+
+def test_normalize_class_underscore_to_attrs_class(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    norm, _, _ = mod._normalize_kwargs({"class_": "box"})
+    assert norm["attrs"]["class"] == "box"
+
+
+def test_normalize_style_string_passthrough(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    norm, _, _ = mod._normalize_kwargs({"style": "color:red"})
+    assert norm["style"] == "color:red"
+
+
+def test_normalize_style_dict_snake_to_camel(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    norm, _, _ = mod._normalize_kwargs({"style": {"background_color": "red", "fontSize": 12}})
+    assert norm["style"] == {"backgroundColor": "red", "fontSize": 12}
+
+
+def test_normalize_no_style_key_when_absent(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    norm, _, _ = mod._normalize_kwargs({})
+    assert "style" not in norm
+    assert norm == {"props": {}, "attrs": {}}
+
+
+def test_normalize_data_underscore_to_attrs_hyphen(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    norm, _, _ = mod._normalize_kwargs({"data_x": 1})
+    assert norm["attrs"]["data-x"] == 1
+
+
+def test_normalize_data_multi_underscore_all_hyphenated(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    norm, _, _ = mod._normalize_kwargs({"data_test_id": "abc"})
+    assert norm["attrs"]["data-test-id"] == "abc"
+
+
+def test_normalize_aria_underscore_to_attrs_hyphen(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    norm, _, _ = mod._normalize_kwargs({"aria_label": "Lukk"})
+    assert norm["attrs"]["aria-label"] == "Lukk"
+
+
+def test_normalize_attrs_merged_verbatim(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    norm, _, _ = mod._normalize_kwargs({"cls": "a", "attrs": {"data-x": "1", "role": "button"}})
+    assert norm["attrs"] == {"class": "a", "data-x": "1", "role": "button"}
+
+
+def test_normalize_attrs_non_dict_raises_typeerror(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    with pytest.raises(TypeError):
+        mod._normalize_kwargs({"attrs": "oops"})
+
+
+def test_normalize_bool_passthrough_in_props(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    norm, _, warnings = mod._normalize_kwargs({"checked": True, "disabled": False})
+    assert norm["props"]["checked"] is True
+    assert norm["props"]["disabled"] is False
+    assert warnings == []
+
+
+def test_normalize_generic_key_camelcased(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    norm, _, _ = mod._normalize_kwargs({"tab_index": 3})
+    assert norm["props"]["tabIndex"] == 3
+
+
+def test_normalize_on_event_callable_collected_as_handler(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    def h(evt):
+        return None
+    norm, handlers, warnings = mod._normalize_kwargs({"on_click": h})
+    assert handlers == [("click", h)]
+    assert "click" not in norm["props"] and "onClick" not in norm["props"]
+    assert warnings == []
+
+
+def test_normalize_on_event_string_warns_and_dropped(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    norm, handlers, warnings = mod._normalize_kwargs({"on_click": "cellnavn"})
+    assert handlers == []
+    assert len(warnings) == 1
+    assert "on_click" not in norm["props"] and "on_click" not in norm["attrs"]
+
+
+def test_normalize_callable_without_on_prefix_warns_and_dropped(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    norm, handlers, warnings = mod._normalize_kwargs({"click": lambda: None})
+    assert handlers == []
+    assert "click" not in norm["props"]
+    assert len(warnings) == 1
+
+
+def test_normalize_non_json_safe_value_warns_and_stringified(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    class Weird:
+        def __str__(self):
+            return "weird!"
+    norm, _, warnings = mod._normalize_kwargs({"foo": Weird()})
+    assert norm["props"]["foo"] == "weird!"
+    assert len(warnings) == 1
+
+
+def test_normalize_dict_and_list_values_are_json_safe(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    norm, _, warnings = mod._normalize_kwargs({"data_config": {"a": 1}, "items": [1, 2, 3]})
+    assert norm["attrs"]["data-config"] == {"a": 1}
+    assert norm["props"]["items"] == [1, 2, 3]
+    assert warnings == []
+
+
+# ---- HTML_TAGS + ui.html.__getattr__ ----
+
+def test_html_tags_constant_contains_expected_tags(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    tags = set(mod.HTML_TAGS.split())
+    for t in ("div", "span", "input", "button", "table", "svg", "video", "template", "select"):
+        assert t in tags
+
+
+def test_html_getattr_unknown_tag_raises_attributeerror(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    with pytest.raises(AttributeError) as exc:
+        mod.html.definitely_not_a_real_tag
+    assert "HTML_TAGS" in str(exc.value)
+
+
+# ---- ui.html.<tag>(...) tag-byggeren + Element ----
+
+def test_html_div_creates_element_with_props_and_class(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    el = mod.html.div("hello", cls="box")
+    create_calls = [c for c in fake.el_calls if c[0] == "elCreate"]
+    assert len(create_calls) == 1
+    _, tag, props = create_calls[0]
+    assert tag == "div"
+    assert props == {"props": {}, "attrs": {"class": "box"}}
+    assert el._openstat_el_id == "el1"
+    assert el._classes == {"box"}
+    append_calls = [c for c in fake.el_calls if c[0] == "elAppend"]
+    assert append_calls == [("elAppend", "el1", {"text": "hello"})]
+
+
+def test_html_builder_children_none_skipped(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    mod.html.div("a", None, "b")
+    texts = [c[2]["text"] for c in fake.el_calls if c[0] == "elAppend"]
+    assert texts == ["a", "b"]
+
+
+def test_html_builder_children_list_flatten_one_level(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    mod.html.div("a", ["b", "c"], None)
+    texts = [c[2]["text"] for c in fake.el_calls if c[0] == "elAppend"]
+    assert texts == ["a", "b", "c"]
+
+
+def test_html_builder_children_nested_list_warns_and_skipped(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    warned = []
+    monkeypatch.setattr(mod, "_warn", warned.append)
+    mod.html.div(["a", ["b", "c"]])
+    texts = [c[2]["text"] for c in fake.el_calls if c[0] == "elAppend"]
+    assert texts == ["a"]
+    assert len(warned) == 1
+
+
+def test_html_builder_children_element_appended_as_el_ref(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    inner = mod.html.span("x")
+    outer = mod.html.div(inner)
+    append_calls = [c for c in fake.el_calls if c[0] == "elAppend"]
+    assert ("elAppend", outer._openstat_el_id, {"el": inner._openstat_el_id}) in append_calls
+
+
+def test_html_builder_on_click_kwarg_binds_via_elOn(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    el = mod.html.button("Klikk", on_click=lambda evt: None)
+    on_calls = [c for c in fake.el_calls if c[0] == "elOn"]
+    assert len(on_calls) == 1
+    assert on_calls[0][1] == el._openstat_el_id
+    assert on_calls[0][2] == "click"
+
+
+def test_html_builder_without_ui_returns_inert_element(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    monkeypatch.setattr(mod, "window", None)
+    el = mod.html.div("hei")
+    assert el._openstat_el_id is None
+    assert el.el is None
+    # skal ikke kaste selv uten en aktiv bro:
+    el.show()
+    el.clear()
+    el.add_class("x")
+    el.set_style(color="red")
+
+
+# ---- Element-metoder ----
+
+def test_element_add_appends_more_children(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    el = mod.html.div("a")
+    el.add("b")
+    texts = [c[2]["text"] for c in fake.el_calls if c[0] == "elAppend"]
+    assert texts == ["a", "b"]
+
+
+def test_element_clear_calls_elClear(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    el = mod.html.div()
+    el.clear()
+    assert ("elClear", el._openstat_el_id) in fake.el_calls
+
+
+def test_element_set_style_calls_elSetProps(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    el = mod.html.div()
+    el.set_style(background_color="red", fontSize=12)
+    last = [c for c in fake.el_calls if c[0] == "elSetProps"][-1]
+    assert last[2] == {"style": {"backgroundColor": "red", "fontSize": 12}}
+
+
+def test_element_add_class_and_remove_class(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    el = mod.html.div(cls="a")
+    el.add_class("b", "c")
+    last = [c for c in fake.el_calls if c[0] == "elSetProps"][-1]
+    assert last[2] == {"attrs": {"class": "a b c"}}
+    el.remove_class("b")
+    last2 = [c for c in fake.el_calls if c[0] == "elSetProps"][-1]
+    assert last2[2] == {"attrs": {"class": "a c"}}
+
+
+def test_element_show_default_target_none(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    el = mod.html.div()
+    el.show()
+    assert ("elShow", el._openstat_el_id, {"target": None}) in fake.el_calls
+
+
+def test_element_show_with_target(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    el = mod.html.div()
+    el.show(target="slot1")
+    assert ("elShow", el._openstat_el_id, {"target": "slot1"}) in fake.el_calls
+
+
+def test_element_el_property_calls_elNode(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    el = mod.html.div()
+    node = el.el
+    assert node == "node:" + el._openstat_el_id
+    assert ("elNode", el._openstat_el_id) in fake.el_calls
+
+
+def test_element_on_binds_and_dispatches(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    el = mod.html.button("Klikk")
+    seen = {}
+    def handler(evt):
+        seen.update(evt)
+        return "ok"
+    el.on("click", handler)
+    on_calls = [c for c in fake.el_calls if c[0] == "elOn"]
+    assert len(on_calls) == 1
+    _, el_id, event, wrapped = on_calls[0]
+    assert el_id == el._openstat_el_id and event == "click"
+    monkeypatch.setattr(mod, "window", None)   # se filhode-kommentaren over
+    out = json.loads(wrapped('{"type":"click","value":"7"}'))
+    assert seen["value"] == "7"
+    assert out["kind"] == "text" and out["text"] == "ok"
+
+
+def test_element_returns_self_for_chaining(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    el = mod.html.div()
+    assert el.add("x") is el
+    assert el.clear() is el
+    assert el.set_style(color="red") is el
+    assert el.add_class("a") is el
+    assert el.remove_class("a") is el
+
+
+def test_element_show_returns_none(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    el = mod.html.div()
+    assert el.show() is None
 
 
 # MERK: ui_mpy.py, i likhet med micropython/dash.py, gjør `from js import

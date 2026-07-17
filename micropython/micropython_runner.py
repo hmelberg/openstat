@@ -32,6 +32,22 @@ def _fmt(obj):
     """Formater ett objekt som output-tekst (embed-markører for figurer/frames)."""
     if obj is None:
         return ''
+    if hasattr(obj, '_openstat_el_id'):
+        # ui-html-fasen (Task 3, spec §2/mount): et Element-håndtak
+        # (ui.html.*) er en MONTERBAR verdi, ikke noe å repr-printe —
+        # display-kroken kaller show() (append i cellens output-slot NÅ) i
+        # stedet, og returnerer '' (kallstedet ~134-136 sin `if shown:`-
+        # vakt behandler allerede '' som "ingenting å skrive ut" — ingen
+        # blank linje). Guardet HER (ikke bare inni Element.show() sin egen
+        # try/except rundt selve elShow-broen) fordi show() SELV kan kaste
+        # før den når broen (f.eks. en overstyrt duck-typet .show()) — en
+        # slik feil skal ALDRI drepe cellen, samme forsiktighetslinje som
+        # resten av denne funksjonen.
+        try:
+            obj.show()
+        except Exception:
+            pass
+        return ''
     if hasattr(obj, 'to_plotly_json_str'):
         return _EMBED_S + 'figure__' + '\n' + obj.to_plotly_json_str() + '\n' + _EMBED_E
     if hasattr(obj, 'to_html'):

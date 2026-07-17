@@ -3313,7 +3313,13 @@
           var _omEl = document.querySelector('input[name="outputMode"]:checked');
           var _asHtml = !_omEl || _omEl.value === 'html';
           var _suppress = (typeof suppressEmbedded !== 'undefined' && suppressEmbedded) ? !!suppressEmbedded.checked : false;
-          if (outputArea.querySelector('.dash')) {
+          // ui-html-fasen (Task 3-browserverifisering 2026-07-17): samme
+          // '.dash'-preserverings-mønster utvidet med '[data-ui-shown]'
+          // (js/ui.js sin Ui.elShow-markør, target=null-grenen) — uten
+          // dette OR-et revet renderOutput sin ubetingede innerHTML=''
+          // ned et element montert via siste-uttrykk-display-kroken (spec
+          // §2) idet scriptets tekstresultat rendres rett etter kjøring.
+          if (outputArea.querySelector('.dash') || outputArea.querySelector('[data-ui-shown]')) {
             appendOutput(res.text || '', _asHtml, _suppress);
           } else {
             renderOutput(res.text || '', _asHtml, _suppress);
@@ -3360,7 +3366,13 @@
           var _omEl = document.querySelector('input[name="outputMode"]:checked');
           var _asHtml = !_omEl || _omEl.value === 'html';
           var _suppress = (typeof suppressEmbedded !== 'undefined' && suppressEmbedded) ? !!suppressEmbedded.checked : false;
-          if (outputArea.querySelector('.dash')) {
+          // ui-html-fasen (Task 3-browserverifisering 2026-07-17): samme
+          // '.dash'-preserverings-mønster utvidet med '[data-ui-shown]'
+          // (js/ui.js sin Ui.elShow-markør, target=null-grenen) — uten
+          // dette OR-et revet renderOutput sin ubetingede innerHTML=''
+          // ned et element montert via siste-uttrykk-display-kroken (spec
+          // §2) idet scriptets tekstresultat rendres rett etter kjøring.
+          if (outputArea.querySelector('.dash') || outputArea.querySelector('[data-ui-shown]')) {
             appendOutput(res.text || '', _asHtml, _suppress);
           } else {
             renderOutput(res.text || '', _asHtml, _suppress);

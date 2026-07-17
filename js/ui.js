@@ -1700,7 +1700,22 @@
       if (!target) {
         var slot = _runningSlot();
         if (!slot) { console.warn('Ui.elShow: ingen aktiv kjørekontekst å vise elementet i'); return; }
-        try { slot.appendChild(node); }
+        try {
+          slot.appendChild(node);
+          // data-ui-shown (ui-html-fasen, Task 3-browserverifisering
+          // 2026-07-17): markerer noden som et LIVE elShow-montert element —
+          // brython/mpy sin per-celle "Kjør alle" (js/cells.js sin
+          // renderCellResult) og plain-script runSelf-grenene (index.html,
+          // brython/micropython) sjekker denne (SAMME mønster som '.dash')
+          // for å IKKE tømme sloten sin ubetinget etter kjøring, som ellers
+          // ville revet ned akkurat denne noden idet run-resultatets
+          // TEKST rendres rett etter (browser-verifisert: pyodide sin
+          // "Kjør alle" bruker en append-only segmentløkke og rammes aldri
+          // av dette, men brython/mpy sin Cells.runCell-vei gjorde det -
+          // uten denne markøren forsvant et .show()-montert element idet
+          // cellens print-tekst ble rendret etterpå).
+          try { node.setAttribute('data-ui-shown', '1'); } catch (e2) {}
+        }
         catch (e) { console.warn('Ui.elShow: klarte ikke å legge til elementet: ' + ((e && e.message) || e)); }
         return;
       }

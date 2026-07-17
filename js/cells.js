@@ -2203,7 +2203,19 @@
       // nbUiRunCtx (mountContainer faller da til #outputArea — se
       // js/dash.js) — hasDash er derfor alltid false for R-celler,
       // res.rparts-grenen er dermed urørt.
-      var hasDash = !!(out.querySelector && out.querySelector('.dash'));
+      //
+      // ui-html-fasen (Task 3-browserverifisering 2026-07-17): SAMME
+      // problem/fiks for et ui.html.*-element montert via .show() (siste-
+      // uttrykk-display-kroken, spec §2) — Ui.elShow (js/ui.js) merker
+      // noden med data-ui-shown ved nettopp DENNE (target=null,
+      // slot-append) grenen. Uten dette OR-et forsvant et montert element
+      // idet cellens print-tekst ble rendret rett etter (browser-
+      // verifisert: pyodide sin "Kjør alle" bruker en append-only
+      // segmentløkke og rammes aldri av dette; brython/micropython sin
+      // per-celle Cells.runCell-vei — DENNE funksjonen — gjorde det, siden
+      // mdRenderOutput/renderOutput sin innerHTML=''-tømming ikke visste
+      // om det ferske .show()-kallet).
+      var hasDash = !!(out.querySelector && (out.querySelector('.dash') || out.querySelector('[data-ui-shown]')));
       if (res && res.rparts) {
         if (typeof global.renderROutputParts === 'function') {
           global.renderROutputParts(res.rparts, out);
