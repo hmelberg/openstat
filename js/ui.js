@@ -1482,7 +1482,8 @@
         else if (p.ref != null) delta = Ui.computeDelta(p.value, p.ref, p.fmt, p.bra);
         if (delta) {
           var arrow = delta.dir === 'opp' ? '▲' : (delta.dir === 'ned' ? '▼' : '–');
-          var dcls = 'ui-kpi-delta ' + (delta.good ? 'ui-kpi-delta--up' : 'ui-kpi-delta--down');
+          // Klassene koder GODHET (delta.good = retning×bra), ikke aritmetisk retning — pilen (▲/▼) viser retningen.
+          var dcls = 'ui-kpi-delta ' + (delta.good ? 'ui-kpi-delta--good' : 'ui-kpi-delta--bad');
           node.appendChild(_el('span', dcls, arrow + ' ' + delta.text));
         }
       } else if (kind === 'markdown') {

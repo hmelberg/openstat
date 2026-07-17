@@ -1309,13 +1309,13 @@ test('Ui.renderPayload: kpi — value/unit/fmt formatert, delta fra ref+bra med 
   const deltaEl = node.children.find((c) => c.className && c.className.indexOf('ui-kpi-delta') === 0);
   assert.strictEqual(valueEl.textContent, '120');
   assert.strictEqual(unitEl.textContent, 'kr');
-  assert.strictEqual(deltaEl.className, 'ui-kpi-delta ui-kpi-delta--up');
+  assert.strictEqual(deltaEl.className, 'ui-kpi-delta ui-kpi-delta--good');
   assert.strictEqual(deltaEl.textContent, '▲ +20');
 
-  // ref under value + bra='opp' → nedgang → --down
+  // ref under value + bra='opp' → nedgang → --bad
   const down = Ui.renderPayload({ kind: 'kpi', value: 80, ref: 100, bra: 'opp' }, new FakeEl('div'));
   const downDelta = down.children.find((c) => c.className && c.className.indexOf('ui-kpi-delta') === 0);
-  assert.strictEqual(downDelta.className, 'ui-kpi-delta ui-kpi-delta--down');
+  assert.strictEqual(downDelta.className, 'ui-kpi-delta ui-kpi-delta--bad');
 });
 
 test('Ui.renderPayload: kpi — delta= direkte (Task 3-forberedelse) har forrang over ref/bra', () => {
@@ -1323,7 +1323,7 @@ test('Ui.renderPayload: kpi — delta= direkte (Task 3-forberedelse) har forrang
   const node = Ui.renderPayload({ kind: 'kpi', value: 5, delta: -3, ref: 100, bra: 'opp' }, new FakeEl('div'));
   const deltaEl = node.children.find((c) => c.className && c.className.indexOf('ui-kpi-delta') === 0);
   assert.strictEqual(deltaEl.textContent, '▼ −3');
-  assert.strictEqual(deltaEl.className, 'ui-kpi-delta ui-kpi-delta--down');
+  assert.strictEqual(deltaEl.className, 'ui-kpi-delta ui-kpi-delta--bad');
 });
 
 test('Ui.renderPayload: kpi — label rendres som eget element når satt, utelates ellers', () => {

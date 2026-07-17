@@ -1279,8 +1279,8 @@
   font-size: .95rem; font-weight: 600; font-variant-numeric: tabular-nums;
   display: inline-flex; align-items: center; gap: 2px;
 }
-.ui-kpi-delta--up { color: var(--success); }
-.ui-kpi-delta--down { color: var(--danger); }
+.ui-kpi-delta--good { color: var(--success); }
+.ui-kpi-delta--bad { color: var(--danger); }
 
 .ui-md { color: var(--text); line-height: 1.55; overflow-wrap: break-word; }
 .ui-md :first-child { margin-top: 0; }
