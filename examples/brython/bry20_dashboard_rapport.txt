@@ -1,25 +1,36 @@
 # label: Dashboard — rapport
 #options.mode = brython
-#options.title = "Dashboard — rapport"
-#options.description = "Fra script til rapport: en add() per objekt, auto-layout ordner resten"
+#options.title = "Dashboard — rapport (celle/ui-modellen)"
+#options.description = "ui.html bygger et grid-kort med KPI-er og figurer i én celle — eksplisitt layout i stedet for cols="
 # load https://raw.githubusercontent.com/hmelberg/safestat/master/data/iris.csv as iris
+
+#%% md
+# Iris — datarapport
+
+Klassikeren fra 1936: 150 blomster, tre arter, fire mål. Kort-raden under er
+bygget med ETT `ui.html.div(style={"display": "grid", ...})`-kall som holder
+tre `ui.kpi(...)`-kort og to figurer (`ui.image(fig)`, som gjenkjenner en
+plotly-figur og rendrer den nativt i stedet for et bilde). Dette er
+`ui.html`-layout-idiomet — du bygger rutenettet selv i python, i stedet for
+å bruke cellens `cols=`-attributt (se bry10/bry17/bry18/bry22 for det).
+
+#%% brython id=kort
+import ui
 import pandas_brython as pd
 import plotly_express_brython as pe
-import dash
-
-d = dash.dashboard("Iris — datarapport")
-
-d.add("## Iris-datasettet\nKlassikeren fra 1936: 150 blomster, tre arter, "
-      "fire mal. Alt under er lagt til med en `add()`-linje per objekt — "
-      "ingen layout angitt, auto-layouten ordner plasseringen.")
-
-d.add(len(iris), title="Blomster", unit="stk")
-d.add(len(iris["species"].unique()), title="Arter")
-d.add(round(iris["sepal_length"].mean(), 2), title="Snitt sepal-lengde", unit="cm")
 
 vc = iris["species"].value_counts()
-d.add(pe.pie(values=list(vc.values), names=list(vc.index), title="Fordeling av arter"))
+kake = pe.pie(values=list(vc.values), names=list(vc.index), title="Fordeling av arter")
+hist = pe.histogram(iris, x="petal_length", title="Petal-lengde")
 
-d.add(pe.histogram(iris, x="petal_length", title="Petal-lengde"))
+ui.html.div(
+    ui.kpi(len(iris), unit="stk", label="Blomster"),
+    ui.kpi(len(iris["species"].unique()), label="Arter"),
+    ui.kpi(round(iris["sepal_length"].mean(), 2), unit="cm", label="Snitt sepal-lengde"),
+    ui.image(kake),
+    ui.image(hist),
+    style={"display": "grid", "grid_template_columns": "repeat(3, 1fr)", "gap": "16px"},
+)
 
-d.add(iris.head(8), title="De forste radene")
+#%% brython id=tabell
+iris.head(8)

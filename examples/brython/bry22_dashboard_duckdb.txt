@@ -1,14 +1,23 @@
 # label: Dashboard — DuckDB (SQL)
 #options.mode = brython
-#options.title = "Dashboard — DuckDB (SQL)"
-#options.description = "SQL-aggregering i DuckDB + interaktivt dashboard. Sporringene kjores pa script-niva (replay-trygt); dropdown-valgene er forhandskjort sa kontrollene treffer cachen."
+#options.title = "Dashboard — DuckDB (SQL) (celle/ui-modellen)"
+#options.description = "SQL-aggregering i DuckDB + interaktivt dashboard. Sporringene kjores i en egen celle (replay-trygt per celle); dropdown-valgene er forhandskjort sa kontrollcellen treffer cachen."
 # load https://raw.githubusercontent.com/hmelberg/safestat/master/data/iris.csv as iris
-import duckdb
-import plotly_express_brython as pe
-import dash
 
-# 1) All SQL forst - for dashboard() lages. Forste kjoring replayes til
-#    alle sporringer er i cache; da bygges dashboardet noyaktig en gang.
+#%% md
+# Iris via DuckDB
+
+`import duckdb` lever i «data»-cellen under — hver celle har sin egen
+replay-trygge DuckDB-bro (samme mekanikk som `bry21_duckdb.txt`, bare
+per-celle i stedet for per-skript): et cache-miss kjører sporringen
+asynkront og cellen kjøres på nytt automatisk. Sporringen forhaandskjores
+for HVER dropdown-verdi her, slik at selve kontrollendringen alltid treffer
+cachen med det samme.
+
+#%% brython id=data
+import duckdb
+import pandas_brython as pd
+
 oversikt = duckdb.sql("""
     SELECT species,
            round(avg(sepal_length), 2) AS snitt_sepal,
@@ -21,8 +30,6 @@ oversikt = duckdb.sql("""
 
 ARTER = oversikt["species"].tolist()
 
-# 2) Forhandskjor den parameteriserte sporringen for HVER dropdown-verdi.
-#    Widget-endringer kan ikke vente pa DuckDB - men na er alt cachetreff.
 detalj = {art: duckdb.sql(
               "SELECT sepal_length, petal_length FROM iris "
               "WHERE species = '" + art + "'").df()
@@ -30,20 +37,22 @@ detalj = {art: duckdb.sql(
 
 totalt = int(duckdb.sql("SELECT count(*) AS n FROM iris").df()["n"][0])
 
-# 3) Dashboardet - kortene leser bare fra de materialiserte resultatene.
-d = dash.dashboard("Iris via DuckDB", layout="""
-    antall antall arter  arter
-    spred  spred  spred  tabell
-    spred  spred  spred  tabell
-""")
+#%% brython id=kontroller
+import ui
 
-d.add(totalt, title="Blomster i basen", unit="stk", at="antall")
-d.add(len(ARTER), title="Arter", at="arter")
+art = ui.dropdown(ARTER, label="Art", name="art", on_change=["spred"], sync_to="art")
 
-d.controls(art=ARTER)
+#%% brython id=kpi cols=2
+import ui
 
-d.add(lambda art: pe.scatter(detalj[art], x="sepal_length", y="petal_length",
-                             title="Sepal mot petal — " + art),
-      at="spred")
+show(ui.kpi(totalt, unit="stk", label="Blomster i basen"),
+     ui.kpi(len(ARTER), label="Arter"))
 
-d.add(oversikt, title="SQL-aggregering (GROUP BY)", at="tabell")
+#%% brython id=spred
+import plotly_express_brython as pe
+
+pe.scatter(detalj[art], x="sepal_length", y="petal_length",
+           title="Sepal mot petal — " + art)
+
+#%% brython id=tabell
+oversikt

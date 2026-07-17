@@ -1,30 +1,49 @@
 # label: Dashboard — regresjon
 #options.mode = brython
-#options.title = "Dashboard — regresjon"
-#options.description = "OLS pa iris: velg prediktor, se spredningsplott, koeffisienter og R²"
+#options.title = "Dashboard — regresjon (celle/ui-modellen)"
+#options.description = "OLS pa iris: én dropdown med on_change=callable oppdaterer plott, R² og modellsammendrag direkte — push i stedet for rerun"
 # load https://raw.githubusercontent.com/hmelberg/safestat/master/data/iris.csv as iris
+
+#%% md
+# Hva forklarer sepal-lengden?
+
+Velg prediktor. Denne cellen bruker **push-modellen** i stedet for
+celle-rerun: `on_change=` på nedtrekksmenyen er en python-FUNKSJON, ikke en
+liste med celle-id-er — kontrollen kjøres da aldri på nytt selv (`rerun=`
+spiller ingen rolle), handleren oppdaterer i stedet plott, R² og
+modellsammendrag direkte i tre ferdigbygde `ui.html`-plasser (`.clear()` +
+`.add(...)`), akkurat som knappe-eksempelet i `py_ui_html.txt`.
+
+#%% brython id=regresjon
+import ui
 import pandas_brython as pd
 import plotly_express_brython as pe
 import statsmodels.formula.api as smf
-import dash
 
-d = dash.dashboard("Hva forklarer sepal-lengden?", layout="""
-    plott plott r2
-    plott plott tabell
-    plott plott tabell
-""")
+plott_slot = ui.html.div()
+kpi_slot = ui.html.div()
+tabell_slot = ui.html.div()
 
-d.controls(prediktor=["petal_length", "petal_width", "sepal_width"])
-
-def modell(prediktor):
+def _modell(prediktor):
     return smf.ols("sepal_length ~ " + prediktor, iris).fit()
 
-d.add(lambda prediktor: pe.scatter(iris, x=prediktor, y="sepal_length",
-                                   color="species", title="sepal_length mot " + prediktor),
-      at="plott")
+def _oppdater(prediktor):
+    fig = pe.scatter(iris, x=prediktor, y="sepal_length", color="species",
+                      title="sepal_length mot " + prediktor)
+    m = _modell(prediktor)
+    plott_slot.clear()
+    plott_slot.add(ui.image(fig))
+    kpi_slot.clear()
+    kpi_slot.add(ui.kpi(round(m.rsquared, 3), label="R²"))
+    tabell_slot.clear()
+    tabell_slot.add(ui.html.pre(str(m.summary())))
 
-d.add(lambda prediktor: round(modell(prediktor).rsquared, 3),
-      title="R²", at="r2")
+prediktor = ui.dropdown(["petal_length", "petal_width", "sepal_width"],
+                         label="Prediktor", name="prediktor", on_change=_oppdater)
+_oppdater(prediktor)
 
-d.add(lambda prediktor: modell(prediktor).summary(),
-      title="OLS-resultat", at="tabell")
+ui.html.div(
+    plott_slot,
+    ui.html.div(kpi_slot, tabell_slot,
+                style={"display": "flex", "gap": "16px", "flex_wrap": "wrap"}),
+)

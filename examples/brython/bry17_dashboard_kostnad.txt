@@ -1,57 +1,88 @@
 # label: Dashboard — kostnadsmodell
 #options.mode = brython
-#options.title = "Dashboard — kostnadsmodell"
-#options.description = "Budsjettvirkning med delte kontroller — ren Python, ingen eksterne data"
-import pandas_brython as pd
-import plotly_express_brython as pe
-import dash
+#options.title = "Dashboard — kostnadsmodell (celle/ui-modellen)"
+#options.description = "Budsjettvirkning med delte kontroller (on_change-liste til tre mål-celler) + et ui.widget(...)-håndtak som skjuler/viser en kontroll"
 
-d = dash.dashboard("Budsjettvirkning — nytt legemiddel", layout="""
-    total total perpas perpas
-    kurve kurve kurve  tabell
-    kurve kurve kurve  tabell
-""")
+#%% md
+# Budsjettvirkning — nytt legemiddel
 
+Tre glidebrytere styrer tre mål-celler samtidig: `on_change=["kpi", "kurve",
+"tabell"]` (én liste, TRE mål) + `sync_to=` på hver av dem. Avkrysningsboksen
+«Avansert» bruker i stedet `ui.widget("opptak_pst")` — HÅNDTAKET til en
+allerede deklarert kontroll — og kaller `.hide()`/`.show()` på den. Det er en
+push-callback (ingen rerun): den endrer bare synligheten til
+opptak-glidebryteren, selve verdien lever videre uendret (`sync_to`) enten
+den vises eller ei.
+
+#%% brython
 AAR = [1, 2, 3, 4, 5]
 
 def kohort(pris, pasienter, opptak_pst):
-    """Enkel opptakskurve: andelen nås gradvis over tre år."""
+    """Enkel opptakskurve: andelen naas gradvis over tre aar."""
     rader = []
     for t in AAR:
         n = round(pasienter * min(1.0, (opptak_pst / 100) * t / 3))
         rader.append({"aar": t, "pasienter": n, "mill_kr": round(n * pris / 1e6, 2)})
     return rader
 
-d.controls(pris=dash.slider(5000, 50000, step=5000, label="Pris per pasient (kr)"),
-           pasienter=dash.slider(200, 2000, step=200, label="Aktuelle pasienter"),
-           opptak_pst=dash.slider(10, 90, step=10, label="Opptak (%)"))
-
-# Referanse: totalkostnad med pris/pasienter paa kontrollenes defaultverdier, men ved
-# 50 % opptak (i stedet for default 10 %) - et naturlig "hva om opptaket blir stort"-anker.
-# Slik viser delta-pilen (ned = bra) om dagens innstilling er billigere eller dyrere enn det.
-REF_TOTAL = round(sum(r["mill_kr"] for r in kohort(5000, 200, 50)), 1)
-
-d.add(lambda pris, pasienter, opptak_pst:
-          round(sum(r["mill_kr"] for r in kohort(pris, pasienter, opptak_pst)), 1),
-      title="Totalkostnad 5 aar", unit="mill. kr", at="total",
-      fmt=",.1f", ref=REF_TOTAL, bra="ned")
-
-d.add(lambda pris, pasienter, opptak_pst:
-          kohort(pris, pasienter, opptak_pst)[-1]["pasienter"],
-      title="Pasienter i aar 5", unit="stk", at="perpas")
-
-def kurve(pris, pasienter, opptak_pst):
-    rader = kohort(pris, pasienter, opptak_pst)
+def kumulativ(rader):
+    """Lokal funksjonsscope med vilje (unngaar ogsaa lekkasje av
+    løkkevariabelen til sesjonsglobalene). Løkkevariabelen heter bevisst
+    IKKE «r» - Brython-motoren (denne bygningen) lekker "r" spesifikt til
+    modulnivaa fra en generator-/for-løkkevariabel (verifisert), selv om
+    list-/dict-comprehensions med samme navn er trygge - «rad» unngaar
+    fallgruven helt uansett uttrykksform."""
     kum, s = [], 0.0
-    for r in rader:
-        s += r["mill_kr"]
+    for rad in rader:
+        s += rad["mill_kr"]
         kum.append(round(s, 2))
-    return pe.line(x=AAR, y=kum, title="Kumulativ kostnad (mill. kr)")
+    return kum
 
-d.add(kurve, at="kurve")
+# Referanse: totalkostnad ved 50 % opptak (i stedet for default 10 %) - et
+# naturlig "hva om opptaket blir stort"-anker. Delta-pilen (ned = bra) viser
+# om dagens innstilling er billigere eller dyrere enn det.
+REF_TOTAL = round(sum(rad["mill_kr"] for rad in kohort(5000, 200, 50)), 1)
 
-d.add(lambda pris, pasienter, opptak_pst:
-          pd.DataFrame({"Aar": AAR,
-                        "Pasienter": [r["pasienter"] for r in kohort(pris, pasienter, opptak_pst)],
-                        "Mill. kr": [r["mill_kr"] for r in kohort(pris, pasienter, opptak_pst)]}),
-      title="Per aar", at="tabell")
+#%% brython id=kontroller
+import ui
+
+pris = ui.slider(5000, 50000, value=5000, step=5000, label="Pris per pasient (kr)",
+                  name="pris", on_change=["kpi", "kurve", "tabell"], sync_to="pris")
+pasienter = ui.slider(200, 2000, value=200, step=200, label="Aktuelle pasienter",
+                       name="pasienter", on_change=["kpi", "kurve", "tabell"], sync_to="pasienter")
+opptak_pst = ui.slider(10, 90, value=10, step=10, label="Opptak (%)",
+                        name="opptak_pst", on_change=["kpi", "kurve", "tabell"], sync_to="opptak_pst")
+
+def _veksle_avansert(vis):
+    w = ui.widget("opptak_pst")
+    if w is None:
+        return
+    if vis:
+        w.show()
+    else:
+        w.hide()
+
+avansert = ui.checkbox(label="Avansert (vis opptaksrate)", value=True, name="avansert",
+                        on_change=_veksle_avansert)
+
+#%% brython id=kpi cols=2
+import ui
+
+rader = kohort(pris, pasienter, opptak_pst)
+show(ui.kpi(round(sum(rad["mill_kr"] for rad in rader), 1), unit="mill. kr",
+            label="Totalkostnad 5 aar", fmt=",.1f", ref=REF_TOTAL, bra="ned"),
+     ui.kpi(rader[-1]["pasienter"], unit="stk", label="Pasienter i aar 5"))
+
+#%% brython id=kurve
+import plotly_express_brython as pe
+
+pe.line(x=AAR, y=kumulativ(kohort(pris, pasienter, opptak_pst)),
+        title="Kumulativ kostnad (mill. kr)")
+
+#%% brython id=tabell
+import pandas_brython as pd
+
+rader = kohort(pris, pasienter, opptak_pst)
+pd.DataFrame({"Aar": AAR,
+              "Pasienter": [rad["pasienter"] for rad in rader],
+              "Mill. kr": [rad["mill_kr"] for rad in rader]})
