@@ -499,10 +499,11 @@
   // Mount-rot (fase B2 Task 4b, oppdatert i widget-plassering-fasen):
   // dashbord i en notatbok-celle skal rendre INN i cellens EGEN
   // .nb-output-body (sluket ALL run-output skriver til, se js/cells.js sin
-  // cellNode/renderCellResult), ikke det skjulte #outputArea (Task 3-funnet:
-  // #outputArea ligger inni `.container`, som får `.nb-hidden` mens
-  // notatbok-cellevisningen er aktiv -- et dashboard bygget der var derfor
-  // teknisk ryddig, men usynlig for brukeren). Merk: `.nb-output` er nå en
+  // cellNode/renderCellResult), ikke #outputArea (som etter fase 4-
+  // konvergeringen HOSTER selve doc-root'en -- #outputArea er ikke skjult;
+  // .nb-hidden døde i 4a. Uten celleadressert kontekst havner mount-roten
+  // der som før: enten via mountContainer sin ctx-routing, eller via
+  // errorHost-fallback dersom ingen kontekst er satt). Merk: `.nb-output` er nå en
   // WRAPPER som også kan holde .param-form/.ui-controls-striper -- å montere
   // rett i `.nb-output` (som før) ville lagt dashboardroten som en tredje
   // stripe der, IKKE i sluket, og latt den forstyrres av widgets=left sin

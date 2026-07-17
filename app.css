@@ -1362,6 +1362,10 @@ body.present-active .panel-left, body.present-active #resizer { display: none; }
 .doc-root { padding: 4px 8px; }
 .doc-bar { display: flex; align-items: center; gap: 10px; padding: 2px 0 8px;
   font-size: 12px; color: var(--text-muted); }
+/* Presentasjon: doc-bar (sesjonschip/Restart/varsler) skal ikke vises inni
+   slide-flaten (4b exit gate-funn — gapet task-4-report.md flagget: den
+   gamle .nb-present .nb-bar-regelen traff aldri .doc-bar). */
+.nb-present .doc-bar { display: none; }
 .doc-cell { padding: 2px 0; }
 .doc-cell.nb-running { outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent); }
 .doc-cell.nb-stale { opacity: .75; }
