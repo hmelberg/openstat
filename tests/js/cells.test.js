@@ -945,6 +945,42 @@ test('cellAtLine: linje → celleindeks via startLine/endLine; utenfor → -1', 
   assert.strictEqual(C.cellAtLine([], 0), -1);
 });
 
+test('selectionCellSpan: spennet ligger helt i én kode-celles kropp → {idx}', () => {
+  const p = C.parseCells('#%% python\nx = 1\ny = 2\n#%% md\ntekst');
+  assert.deepStrictEqual(C.selectionCellSpan(p.cells, 1, 2, 'python'), { idx: 0 });
+  // hele kroppen (én linje) markert
+  assert.deepStrictEqual(C.selectionCellSpan(p.cells, 1, 1, 'python'), { idx: 0 });
+});
+
+test('selectionCellSpan: spennet inkluderer header-linjen → outside', () => {
+  const p = C.parseCells('#%% python\nx = 1\ny = 2\n#%% md\ntekst');
+  // startLine 0 er selve '#%% python'-header-linjen — ikke kropp.
+  assert.deepStrictEqual(C.selectionCellSpan(p.cells, 0, 1, 'python'), { error: 'outside' });
+});
+
+test('selectionCellSpan: spennet krysser to celler → span', () => {
+  const p = C.parseCells('#%% python\nx = 1\n#%% python\ny = 2\n');
+  // linje 1 (siste kroppslinje celle 0) → linje 3 (kroppslinje celle 1):
+  // header-linjen (2) mellom dem beviser krysningen.
+  assert.deepStrictEqual(C.selectionCellSpan(p.cells, 1, 3, 'python'), { error: 'span' });
+});
+
+test('selectionCellSpan: hele spennet i én md-celle → noncode', () => {
+  const p = C.parseCells('#%% md\nHei\nDu\n');
+  assert.deepStrictEqual(C.selectionCellSpan(p.cells, 1, 2, 'python'), { error: 'noncode' });
+});
+
+test('selectionCellSpan: preambel-kropp ok når preambelen resolver til kode', () => {
+  const p = C.parseCells('x = 1\ny = 2\n#%% md\ntekst');
+  assert.deepStrictEqual(C.selectionCellSpan(p.cells, 0, 1, 'python'), { idx: 0 });
+});
+
+test('selectionCellSpan: linje utenfor ethvert celle-spenn → outside', () => {
+  const p = C.parseCells('#%% python\nx = 1\n');
+  assert.deepStrictEqual(C.selectionCellSpan(p.cells, 5, 5, 'python'), { error: 'outside' });
+  assert.deepStrictEqual(C.selectionCellSpan([], 0, 0, 'python'), { error: 'outside' });
+});
+
 test('sameStructure: samme headerRaw-sekvens → true; endret antall/markør → false', () => {
   const a = C.parseCells('#%% python\nx = 1\n#%% md\nA').cells;
   const b = C.parseCells('#%% python\ny = 2\n#%% md\nB endret').cells;

@@ -1807,3 +1807,159 @@ test('updateCellSource: usforsonet redigering som legger til en #%%-celle → fu
   assert.strictEqual(scriptInputEl.value, edited, 'brukerens redigering står urørt — ingen korrupsjon fra en feilrettet splice');
   assert.strictEqual(C.parseCells(scriptInputEl.value).cells[1].source, 'n = 3 #@param', 'param-verdien er UENDRET — kontroll-interaksjonen ble droppet, ikke feilrettet inn i feil celle');
 });
+
+// ---------- spec 4b Task 2: markør-/seleksjonskjøring ----------
+
+// ---- C.cellAtLineInDoc / C.selectionSpanInDoc (DOM-halvdel-innpakninger) ----
+
+test('cellAtLineInDoc: speiler cellAtLine mot NB.cells; -1 når notatboken er inaktiv', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python\nx = 1\ny = 2\n#%% md\ntekst\n';
+  C.init('python');
+  assert.strictEqual(C.active(), true);
+
+  assert.strictEqual(C.cellAtLineInDoc(1), 0);
+  assert.strictEqual(C.cellAtLineInDoc(3), 1);
+  assert.strictEqual(C.cellAtLineInDoc(99), -1);
+
+  C.exit();
+  assert.strictEqual(C.cellAtLineInDoc(1), -1, 'inaktiv notatbok → -1, aldri en stale indeks');
+});
+
+test('selectionSpanInDoc: speiler selectionCellSpan mot NB.cells/NB.docMode; {error:"outside"} når inaktiv', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python\nx = 1\ny = 2\n#%% md\ntekst\n';
+  C.init('python');
+  assert.strictEqual(C.active(), true);
+
+  assert.deepStrictEqual(C.selectionSpanInDoc(1, 2), { idx: 0 });
+  assert.deepStrictEqual(C.selectionSpanInDoc(0, 1), { error: 'outside' }, 'linje 0 er header-linjen');
+  assert.deepStrictEqual(C.selectionSpanInDoc(4, 4), { error: 'noncode' }, 'md-cellens kropp');
+
+  C.exit();
+  assert.deepStrictEqual(C.selectionSpanInDoc(1, 2), { error: 'outside' });
+});
+
+// ---- C.runSelection ----
+
+test('runSelection: payload har text (hele cellekroppen), selText (seleksjonen) og riktig cellIdx/kind/nb', async () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\na = 1\nb = 2\nc = 3\n';
+  C.init('python');
+  assert.strictEqual(C.active(), true);
+
+  let captured = null;
+  global.mdIsScriptRunning = () => false;
+  global.mdRunNotebookCell = (payload) => { captured = payload; return Promise.resolve({ text: '2' }); };
+
+  await C.runSelection(0, 'b = 2');
+
+  assert.ok(captured, 'mdRunNotebookCell skal kalles');
+  assert.strictEqual(captured.kind, 'pyodide');
+  assert.strictEqual(captured.cellIdx, 0);
+  assert.strictEqual(captured.text, 'a = 1\nb = 2\nc = 3\n', 'text er HELE (tag-blanket) cellekroppen, som runCell');
+  assert.strictEqual(captured.selText, 'b = 2', 'selText er seleksjonen');
+  assert.deepStrictEqual(captured.nb, { echo: false, last: true });
+
+  const { out } = cellParts(containerEl, 0);
+  assert.strictEqual(out.textContent, '2', 'resultatet rendres i cellens egen slot, som runCell');
+});
+
+test('runSelection: selText tag-blankes (samme #tag-vern som execCellSource)', async () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python\nx = 1\n';
+  C.init('python');
+
+  let captured = null;
+  global.mdIsScriptRunning = () => false;
+  global.mdRunNotebookCell = (payload) => { captured = payload; return Promise.resolve({ text: '' }); };
+
+  await C.runSelection(0, '#tag.style = "note"\nprint(1)');
+
+  assert.ok(captured);
+  assert.strictEqual(captured.selText, '\nprint(1)', 'tag-linjen blanket PÅ PLASS, linjetall bevart');
+});
+
+test('runSelection: IKKE C._afterCellRun — en tidligere stale-tint overlever en seleksjonskjøring', async () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python\nx = 1\ny = 2\n';
+  C.init('python');
+  global.mdIsScriptRunning = () => false;
+  global.mdRunNotebookCell = () => Promise.resolve({ text: 'ok' });
+
+  // Kjør cellen i sin helhet én gang (ranOk=true), rediger den så kroppen
+  // (docReconcile markerer stale), og kjør SÅ et utvalg — stale skal IKKE
+  // fjernes av seleksjonskjøringen, i motsetning til en full runCell().
+  await C.runCell(0);
+  scriptInputEl.value = '#%% python\nx = 9\ny = 2\n';
+  C.refreshFromScript();
+  assert.strictEqual(C.cellElementAt(0).classList.contains('nb-stale'), true, 'sanity: cellen er stale før seleksjonskjøringen');
+
+  await C.runSelection(0, 'y = 2');
+
+  assert.strictEqual(C.cellElementAt(0).classList.contains('nb-stale'), true,
+    'seleksjonskjøring er en DELVIS kjøring — "partial run ≠ cell ran", stale-tinten overlever');
+});
+
+test('runSelection: en tidligere runCell-suksess (ranOk) er urørt av en seleksjonskjøring — ny stale etter redigering fungerer som før', async () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python\nx = 1\n';
+  C.init('python');
+  global.mdIsScriptRunning = () => false;
+  global.mdRunNotebookCell = () => Promise.resolve({ text: 'ok' });
+
+  // Cellen har ALDRI kjørt (ranOk=false) — kjør et utvalg av den.
+  await C.runSelection(0, 'x = 1');
+  // markStaleIfRan (docReconcile) skal fortsatt ikke gi stale ved en
+  // etterfølgende kroppsredigering, fordi runSelection ALDRI satte ranOk.
+  scriptInputEl.value = '#%% python\nx = 2\n';
+  C.refreshFromScript();
+  assert.strictEqual(C.cellElementAt(0).classList.contains('nb-stale'), false,
+    'cellen har aldri "kjørt" (kun et utvalg av den) — markStaleIfRan er et no-op uten ranOk');
+});
+
+test('runSelection: nekter mens mdIsScriptRunning() er true / for en md-celle (ingen-op, speiler runCell)', async () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% md\nhei\n#%% python\n1\n';
+  C.init('python');
+  let called = false;
+  global.mdRunNotebookCell = () => { called = true; return Promise.resolve({ text: '' }); };
+
+  global.mdIsScriptRunning = () => false;
+  await C.runSelection(0, 'hei'); // md-celle
+  assert.strictEqual(called, false, 'en md-celle skal aldri trigge en kjøring');
+
+  global.mdIsScriptRunning = () => true;
+  await C.runSelection(1, '1');
+  assert.strictEqual(called, false, 'skal nekte å kjøre mens en annen kjøring pågår');
+});
+
+// ---- C.rerenderCell ----
+
+test('rerenderCell: re-rendrer en md-celles kropp fra NB.cells sin kildetekst inn i sitt eget sluk', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% md\nHei\n';
+  C.init('python');
+  const { out } = cellParts(containerEl, 0);
+  // Vandaliser sluket direkte (simulerer et utdatert/feil-rendret innhold) —
+  // cellens KILDE (NB.cells[0].source) er urørt av dette.
+  out.textContent = 'FEIL INNHOLD';
+
+  C.rerenderCell(0);
+
+  const nodes = collectNodes(containerEl, []);
+  const md = nodes.find((n) => n.classList && n.classList.contains('output-markdown'));
+  assert.ok(md, 'rerenderCell bygger markdown-strukturen på nytt');
+  const rendered = (md.innerHTML || '') + (md.textContent || '');
+  assert.ok(rendered.includes('Hei'), 'innholdet kommer fra cellens KILDE, ikke det vandaliserte sluket');
+});
+
+test('rerenderCell: no-op for en kode-celle og for en ugyldig indeks', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\nx = 1\n';
+  C.init('python');
+  const before = cellParts(containerEl, 0).out.textContent;
+  assert.doesNotThrow(() => C.rerenderCell(0));
+  assert.strictEqual(cellParts(containerEl, 0).out.textContent, before, 'kode-celle: ingen re-rendring');
+  assert.doesNotThrow(() => C.rerenderCell(99), 'ugyldig indeks krasjer ikke');
+});

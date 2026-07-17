@@ -431,6 +431,35 @@
     return -1;
   };
 
+  // Markørspenn (spec §4 "cursor-run/selection-run", plan 4b Task 2): [startLine,
+  // endLine] → { idx } når HELE spennet ligger inni ÉN celles KROPP (header-
+  // linjen selv teller ALDRI som kropp — en preambel har ingen header, så dens
+  // kropp starter på startLine i stedet for startLine+1) OG cellen resolver til
+  // en kjørbar (kode-)type; ellers { error }. En kroppslinje kan aldri tilhøre
+  // to celler samtidig (parseCells sin close() gjør span-ene disjunkte — neste
+  // celles header-linje ligger MELLOM to nabo-kroppers spenn), så "startLine og
+  // endLine begge treffer en gyldig kropp, men ULIKE celler" er i seg selv
+  // beviset for at seleksjonen krysser minst én header-linje ("spans two
+  // cells" — task-brief). 'outside' dekker BÅDE "linje utenfor ethvert
+  // celle-spenn" og "linje på en header-linje" (samme gren: header-linjer
+  // inngår aldri i noe body-intervall her).
+  C.selectionCellSpan = function (cells, startLine, endLine, docMode) {
+    var startIdx = -1, endIdx = -1;
+    for (var i = 0; i < cells.length; i++) {
+      var c = cells[i];
+      var bodyStart = c.headerRaw === null ? c.startLine : c.startLine + 1;
+      var bodyEnd = c.endLine;
+      if (startLine >= bodyStart && startLine <= bodyEnd) startIdx = i;
+      if (endLine >= bodyStart && endLine <= bodyEnd) endIdx = i;
+    }
+    if (startIdx === -1 || endIdx === -1) return { error: 'outside' };
+    if (startIdx !== endIdx) return { error: 'span' };
+    var cell = cells[startIdx];
+    var type = C.resolveType(cell, docMode);
+    if (!C.isCodeType(type)) return { error: 'noncode' };
+    return { idx: startIdx };
+  };
+
   // Forsonings-porten (spec §1 render/update-policy): samme antall celler
   // med samme headerRaw-sekvens → oppdater på plass; ellers full rebuild.
   C.sameStructure = function (a, b) {
@@ -2243,6 +2272,22 @@
       return -1;
     };
 
+    // ---- markør-/seleksjonskjøring (spec §4, plan 4b Task 2) ----
+    // DOM-halvdel-innpakninger rundt de rene hjelperne (cellAtLine/
+    // selectionCellSpan) mot LEVENDE NB.cells/NB.docMode — samme "levende
+    // tilstand"-antakelse som cellIndexById/cellElementAt over: index.html
+    // trenger aldri selv holde styr på docMode eller re-parse #scriptInput
+    // bare for å slå opp cellen markøren står i. -1 / {error:'outside'} når
+    // notatboken er inaktiv (samme fallback-kontrakt som resten av filen).
+    C.cellAtLineInDoc = function (line) {
+      if (!NB.activeFlag) return -1;
+      return C.cellAtLine(NB.cells, line);
+    };
+    C.selectionSpanInDoc = function (startLine, endLine) {
+      if (!NB.activeFlag) return { error: 'outside' };
+      return C.selectionCellSpan(NB.cells, startLine, endLine, NB.docMode);
+    };
+
     // Celleindeks → gjeldende DOM-node (Task 2, ui-widgets W1): brukes av
     // window.mdUiRunCtx() sin cellEl-oppslag. Querier NB.root direkte (samme
     // '.doc-cell[data-idx="…"]'-mønster som beginRun bruker) i stedet for å
@@ -2416,6 +2461,100 @@
       if (global.ParamForms && typeof global.ParamForms.onCellRan === 'function') {
         global.ParamForms.onCellRan(idx);
       }
+    };
+
+    // Blanker #tag-linjer INNI en fristående tekst-seleksjon (plan 4b Task 2):
+    // en seleksjon er en vilkårlig substring av en cellekropp — den kan bare
+    // ha SIN EGEN tag-blokk hvis seleksjonen tilfeldigvis starter ved
+    // kroppens begynnelse, men scanTagBlock(text, false) er trygg å kjøre
+    // uansett (finner ingen blokk i en seleksjon som starter midt inni
+    // koden, se scanTagBlock sin egen "ledende blanklinjer/celle-modus"-
+    // kommentar) — samme "# er direktiv-prefiks i microdata/ikke-kommentar i
+    // duckdb-SQL"-begrunnelse som execCellSource: en tag-linje MÅ aldri nå
+    // motorene, selv i en delvis kjøring.
+    function blankTagLinesInText(text) {
+      var s = String(text == null ? '' : text);
+      var scan = C.scanTagBlock(s, false);
+      if (!scan.tagLines.length) return s;
+      var lines = s.split('\n');
+      for (var i = 0; i < scan.tagLines.length; i++) lines[scan.tagLines[i]] = '';
+      return lines.join('\n');
+    }
+
+    // Kjør en TEKST-SELEKSJON inni cells[idx] mot den levende sesjonen (plan
+    // 4b Task 2: markør-/seleksjonskjøring, Ctrl/Cmd+Enter over en ikke-tom
+    // seleksjon). Speiler C.runCell sin struktur (guardene, payload-formen,
+    // setRunningUi/renderCellResult-parret) MED TO BEVISSTE AVVIK:
+    //
+    //  1. Ingen dash mount-to-slot-purge før kjøring (sammenlign C.runCell
+    //     sin egen '.dash'-sjekk rett før payload bygges): den purgen
+    //     eksisterer KUN for å hindre at en FULL rerun av SAMME celle
+    //     stapler et nytt dashboard oppå et gammelt i cellens slot (D.create()
+    //     sin sweepDisconnected() ser den gamle roten som "i live" til den
+    //     ryddes). En seleksjonskjøring er per definisjon en DELVIS,
+    //     ikke-kanonisk kjøring av cellen (se avvik 2 rett under) — et
+    //     dashboard cellens ekte (fulle) kjøring har montert i denne sloten
+    //     hører til DEN kjøringen og skal overleve en seleksjonskjøring
+    //     urørt, akkurat som stale/ranOk-tilstanden skal. (Kjører seleksjonen
+    //     selv en NY dashboard()-linje, er utfallet det samme som om
+    //     C.runCell aldri hadde purge-grenen i det hele tatt — en akseptert
+    //     kant, ikke denne funksjonens ansvar å dekke.)
+    //  2. C._afterCellRun kalles ALDRI: et utvalg er ikke cellen — "partial
+    //     run ≠ cell ran" (task-brief). En stale-tint cellen hadde FØR
+    //     seleksjonskjøringen skal stå present ETTER den også (kjøring av
+    //     tre linjer midt i en tolv-linjers celle sier ingenting om hvorvidt
+    //     RESTEN av cellen fortsatt matcher det den viste resultatet), og en
+    //     celle som ALDRI har kjørt i sin helhet skal fortsatt ikke telle som
+    //     ranOk. Samme resonnement dekker Kjør-chip-skjulingen (den kanalen
+    //     henger på _afterCellRun) — en seleksjonskjøring skal aldri skjule
+    //     den.
+    C.runSelection = function (idx, selText) {
+      flushPendingEdit();
+      if (!NB.activeFlag) return Promise.resolve();
+      var c = NB.cells[idx];
+      if (!c) return Promise.resolve();
+      if (global.mdIsScriptRunning && global.mdIsScriptRunning()) return Promise.resolve();
+      var type = C.resolveType(c, NB.docMode);
+      var kind = C.isCodeType(type) ? KIND_FOR_TYPE[type] : null;
+      if (!kind) {
+        flashHint(c._wrap);
+        return Promise.resolve();
+      }
+      if (typeof global.mdRunNotebookCell !== 'function') return Promise.resolve();
+      var out = c._out;
+      var payload = {
+        kind: kind,
+        text: C.execCellSource(c) || '',
+        selText: blankTagLinesInText(selText),
+        uses: [],
+        nb: { echo: false, last: true },
+        cellIdx: idx
+      };
+      setRunningUi(idx, true);
+      return global.mdRunNotebookCell(payload).then(function (res) {
+        renderCellResult(idx, out, res);
+      }, function (err) {
+        renderCellResult(idx, out, { error: (err && err.message) || String(err) });
+      }).then(function () {
+        setRunningUi(idx, false);
+        updateSessionChip();
+      });
+    };
+
+    // Re-render en md/html-celles kropp PÅ PLASS (plan 4b Task 2: markørkjøring
+    // over en ikke-kjørbar celle rendrer i stedet på nytt — samme handling som
+    // dobbeltklikk-ut-av-redigering/blur ga i den gamle cellNode, og samme
+    // gren docReconcile sin egen "kroppen ER resultatet"-oppdatering bruker
+    // (se docReconcile over) — faktorert hit slik at BEGGE stiene kaller
+    // NØYAKTIG samme rendring. No-op for kode-celler (ingenting å re-rendre —
+    // C.runCell er den rette handlingen der) eller en celle uten et
+    // tilkoblet sluk ennå.
+    C.rerenderCell = function (idx) {
+      var c = NB.cells[idx];
+      if (!c || !c._out) return;
+      var type = C.resolveType(c, NB.docMode);
+      if (C.isCodeType(type)) return;
+      renderNonCode(c._out, type, C.renderContent(c.source, type, c.sniffed));
     };
 
     function markStaleIfRan(idx) {

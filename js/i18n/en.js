@@ -733,4 +733,8 @@ window.M2PY_I18N.en = {
   "Kunne ikke hente siden for publisering (HTTP {code}).": "Could not fetch the page for publishing (HTTP {code}).",
   "Fant ikke </head> eller </body> i siden — publisering avbrutt.": "Could not find </head> or </body> in the page — publishing aborted.",
   "Publisering feilet: {msg}": "Publishing failed: {msg}",
+
+  // ── Editor-konvergens: markør-/seleksjonskjøring (plan 4b Task 2) ──
+  "Merk tekst innenfor én kodecelle for å kjøre et utvalg": "Select text within a single code cell to run a selection",
+  "Markøren står utenfor cellene": "The cursor is outside the cells",
 };

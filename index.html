@@ -5312,10 +5312,141 @@ json.dumps(out)
       return;
     }
 
+    // Editor-konvergens (spec 2026-07-17 §4, plan 4b Task 2): markør-/
+    // seleksjonskjøring i notatbok-dokumenter — Ctrl/Cmd+Enter og Shift+Enter
+    // deler denne klassifiseringen ("hvilken celle står markøren i, og hva
+    // slags celle er det"). Kun meningsfull mens en notatbok faktisk er
+    // rendret (window.Cells.active()) — se addEventListener-kroppen under for
+    // det ubetingede fallbacket til dagens hel-kjøring for et vanlig skript.
+    //
+    // Reparser #scriptInput.value direkte for typeklassifisering i stedet for
+    // en (foreløpig ikke-eksisterende) DOM-halvdel-celle-getter — samme
+    // etablerte mønster som mdRunNotebookCell selv allerede bruker to steder
+    // (~9716/~9842) for cellemetadata. cellAtLineInDoc (DOM-halvdel, leser
+    // NB.cells) gir selve INDEKSEN — de to kildene kan i prinsippet drifte
+    // fra hverandre i opptil ett tikk-vindu (NB.cells forsones på tikken/
+    // input-debouncen, ikke synkront per tastetrykk, se js/cells.js sin
+    // tick()), men en kroppslinjes celle-TILHØRIGHET endrer seg kun ved en
+    // strukturell redigering (ny/fjernet #%%-linje) — en akseptert, smal kant
+    // (dokumentert her fremfor gold-plated bort med en ekstra DOM-halvdel-API).
+    function nbCellAtCursor(ta) {
+      var line = ta.value.slice(0, ta.selectionStart).split('\n').length - 1;
+      var idx = window.Cells.cellAtLineInDoc(line);
+      if (idx === -1) return { idx: -1 };
+      var cell = window.Cells.parseCells(ta.value).cells[idx];
+      var type = window.Cells.resolveType(cell, activeEditorMode);
+      return { idx: idx, cell: cell, type: type, code: window.Cells.isCodeType(type) };
+    }
+    function nbCharOffsetForLine(text, lineIdx) {
+      var lines = text.split('\n');
+      var offset = 0;
+      for (var i = 0; i < lineIdx && i < lines.length; i++) offset += lines[i].length + 1;
+      return offset;
+    }
+    // Shift+Enter sin cursor-flytting: sett seleksjonen, deretter blur+focus
+    // — enkleste pålitelige triks på tvers av browsere for å tvinge en
+    // <textarea> sin visningsport til å følge den nye caret-posisjonen
+    // (task-brief: "simplest reliable").
+    function nbMoveCursorToLine(ta, lineIdx) {
+      var offset = nbCharOffsetForLine(ta.value, lineIdx);
+      ta.selectionStart = ta.selectionEnd = offset;
+      ta.blur();
+      ta.focus();
+    }
+    function nbFirstBodyLine(cell) {
+      return cell.headerRaw === null ? cell.startLine : cell.startLine + 1;
+    }
+
     scriptInput.addEventListener('keydown', function(e) {
-      if (e.key === 'Enter' && e.ctrlKey) {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        if (window.Cells && window.Cells.active()) {
+          e.preventDefault();
+          var ta = scriptInput;
+          if (ta.selectionStart !== ta.selectionEnd) {
+            // Seleksjonskjøring (spec §4, plan 4b Task 2): Ctrl/Cmd+Enter over
+            // en ikke-tom tekst-seleksjon kjører KUN seleksjonen, ikke hele
+            // cellen — men bare når hele seleksjonen ligger i én kode-celles
+            // kropp (selectionSpanInDoc, DOM-halvdel-innpakning rundt den rene
+            // C.selectionCellSpan).
+            var startLine = ta.value.slice(0, ta.selectionStart).split('\n').length - 1;
+            var endLine = ta.value.slice(0, ta.selectionEnd).split('\n').length - 1;
+            var span = window.Cells.selectionSpanInDoc(startLine, endLine);
+            if (span.idx !== undefined) {
+              window.Cells.runSelection(span.idx, ta.value.slice(ta.selectionStart, ta.selectionEnd));
+            } else {
+              setStatus(rightStatus, span.error === 'outside'
+                ? t('Markøren står utenfor cellene')
+                : t('Merk tekst innenfor én kodecelle for å kjøre et utvalg'), true);
+            }
+            return;
+          }
+          // Markørkjøring (ingen seleksjon): kjør cellen markøren står i.
+          var at = nbCellAtCursor(ta);
+          if (at.idx === -1) {
+            setStatus(rightStatus, t('Markøren står utenfor cellene'), true);
+            return;
+          }
+          if (at.code) {
+            // Preambelen (headerRaw null) er bare kjørbar når segmentPlan
+            // faktisk regner den med (ikke-blank kropp, spec: "kjørbar CELLE"
+            // — se C.segmentPlan sin kommentar i js/cells.js) — ellers ville
+            // Cells.runCell(0) landet på mdRunNotebookCell sin generiske
+            // "fant ikke cellens segment"-feil i stedet for en rolig notis.
+            var isPreamble = at.cell.headerRaw === null;
+            if (isPreamble) {
+              var plan = window.Cells.segmentPlan(ta.value, activeEditorMode);
+              if (plan.length && plan[0] === 0) window.Cells.runCell(0);
+              else setStatus(rightStatus, t('Markøren står utenfor cellene'), true);
+            } else {
+              window.Cells.runCell(at.idx);
+            }
+          } else if (at.type === 'md' || at.type === 'html') {
+            // Ikke-kjørbar celle: re-render på plass (samme handling som
+            // dobbeltklikk-ut-av-redigering ga i den gamle cellNode) — ingen
+            // kjøring, ingen feil (task-brief: "no run, no error").
+            window.Cells.rerenderCell(at.idx);
+            setStatus(rightStatus, t('Ferdig'));
+          }
+          // skip/ukjent celletype under markøren: stille no-op — samme
+          // "ingen kjøring, ingen feil"-kontrakt som Cells.runCell allerede
+          // har for ikke-kjørbare celletyper (flashHint der, intet her).
+          return;
+        }
+        // Notatbok inaktiv (Rå tekst / vanlig skript uten #%%-markører):
+        // dagens hel-kjøring, UENDRET.
         e.preventDefault();
         document.getElementById('btnRun').click();
+        return;
+      }
+      if (e.key === 'Enter' && e.shiftKey && window.Cells && window.Cells.active()) {
+        // Shift+Enter (notatbok aktiv): kjør (eller re-render, for md/html)
+        // cellen markøren står i, flytt så markøren til NESTE kjørbare
+        // celles første kroppslinje — siste celle: markøren blir stående.
+        e.preventDefault();
+        var sTa = scriptInput;
+        var sAt = nbCellAtCursor(sTa);
+        if (sAt.idx === -1) {
+          setStatus(rightStatus, t('Markøren står utenfor cellene'), true);
+          return;
+        }
+        var advance = function () {
+          var plan = window.Cells.segmentPlan(sTa.value, activeEditorMode);
+          var nextIdx = null;
+          for (var i = 0; i < plan.length; i++) {
+            if (plan[i] > sAt.idx) { nextIdx = plan[i]; break; }
+          }
+          if (nextIdx === null) return; // siste (kjørbare) celle — markøren blir stående
+          var nextCell = window.Cells.parseCells(sTa.value).cells[nextIdx];
+          nbMoveCursorToLine(sTa, nbFirstBodyLine(nextCell));
+        };
+        if (sAt.code) {
+          Promise.resolve(window.Cells.runCell(sAt.idx)).then(advance);
+        } else if (sAt.type === 'md' || sAt.type === 'html') {
+          window.Cells.rerenderCell(sAt.idx);
+          advance();
+        } else {
+          advance();
+        }
         return;
       }
       if (e.key === 'Tab') {
@@ -9576,7 +9707,11 @@ async def _m2py_run_segment(_seg_json):
     // (`{notice}`, IKKE `{error}` — carry-over-poleringen i Task 4: disse skal
     // vises som en rolig info-boks, ikke som en rød feilmelding).
     async function runNotebookRCell(payload) {
-      var cellText = (payload && payload.text) || '';
+      // selText-threading (plan 4b Task 2): verify-first-funn — denne grenen
+      // bruker payload.text/payload.selText DIREKTE (ingen segment-re-
+      // utledning som hybrid-familien over), så en selText-override er en
+      // enkel prioritering her.
+      var cellText = (payload && payload.selText) || (payload && payload.text) || '';
       // Dashboard-guard (Task 4-kontrakten): dashboard()-celler kan IKKE
       // kjøres isolert — DashWebR.reset() nullstiller HELE dashboard-
       // registeret og skal ALDRI kalles fra denne per-celle-stien (i
@@ -9724,7 +9859,9 @@ async def _m2py_run_segment(_seg_json):
         setStatus(rightStatus, t('Kjører…'));
         nbUiRunCtx = _nbUiCtxFor(payload.cellIdx);
         if (window.Ui && window.Ui.beginCellRun) window.Ui.beginCellRun(payload.cellIdx);
-        var res = await sess.runCell(payload.text || '');
+        // selText-threading (plan 4b Task 2): verify-first-funn — samme som
+        // R-grenen (runNotebookRCell over), bruker payload.text DIREKTE.
+        var res = await sess.runCell((payload && payload.selText) || payload.text || '');
         setStatus(rightStatus, res.error ? t('Feil') : t('Ferdig'));
         if (res.error) return { error: res.error };
         return { text: (res.text || '').trim() };
@@ -9848,6 +9985,19 @@ async def _m2py_run_segment(_seg_json):
           return { error: t('Fant ikke cellens segment i dokumentet (planavvik) — prøv Kjør alle.') };
         }
         var targetSeg = segments[_segIdx];
+        // selText-threading (plan 4b Task 2, markør-/seleksjonskjøring): en
+        // Ctrl/Cmd+Enter-kjøring over en tekst-seleksjon sender payload.selText
+        // — den EKSEKVERTE koden for MÅLCELLEN blir da seleksjonen, ikke hele
+        // cellekroppen. Verify-first-funn: denne grenen (pyodide/duckdb/
+        // microdata) IKKE bruker payload.text direkte — den re-utleder
+        // målsegmentets kode fra HELE dokumentteksten via buildDocumentSegments
+        // (segments over) og henter segmentet ut via den justerte planen
+        // (targetSeg = segments[_segIdx]). targetSeg ER segments[_segIdx] (samme
+        // objekt-referanse) — denne ENE mutasjonen dekker derfor BÅDE
+        // enkelt-segment-stien (targetSeg.text brukt lenger ned, ~10028) OG
+        // microdata-"kjør fra toppen"-replayen rett under (_rseg === targetSeg
+        // når _ri === _segIdx i løkka der — ingen duplisert gren trengs).
+        if (payload && payload.selText) targetSeg.text = payload.selText;
         // dash v2 (fase B2 Task 3 — browser-investigert): window.Dash.create()
         // (js/dash.js, kalt fra pyodide/dash.py sin Dash.__init__) skriver DOM
         // DIREKTE til #outputArea — HELT UTENOM denne cellens egen .nb-output-
