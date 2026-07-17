@@ -317,6 +317,20 @@ def test_execute_code_element_last_expression_mounts_no_blank_line():
     assert br._shared_vars['_el_rt'].shown == 1
 
 
+def test_show_element_mounts_no_blank_line():
+    # _show() (den eksplisitte show(x)-funksjonen, linje ~45-48) manglet
+    # samme `if shown:`-vakt som sist-uttrykk-kroken over (linje ~135):
+    # show(element) kalte print(_fmt(o)) UBETINGET, og print('') skriver en
+    # tom linje selv om elementet alt ble montert av _fmt sin egen
+    # obj.show()-gren (samme mekanisme som test_fmt_mounts_element_and_
+    # returns_empty over dokumenterer). Reviewer-funn fra samme gjennomgang
+    # som data-ui-shown-for-kjøringsrensken i js/cells.js (commit 15ce63c).
+    br._shared_vars['_el_arg'] = _FakeEl()
+    out = br._execute_code('print("før")\nshow(_el_arg)\nprint("etter")')
+    assert out == 'før' + chr(10) + 'etter' + chr(10)
+    assert br._shared_vars['_el_arg'].shown == 1
+
+
 if __name__ == '__main__':
     # NOTE: iterate in declaration order (not sorted alphabetically) — several
     # tests share state via module globals (e.g. test_figure_embed_marker

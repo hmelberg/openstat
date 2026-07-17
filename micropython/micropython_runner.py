@@ -62,7 +62,15 @@ def _fmt(obj):
 
 def _show(*objs):
     for o in objs:
-        print(_fmt(o))
+        # Speiler `if shown: print(shown)`-vakten i _execute_code (~linje
+        # 150-152): et ui.html.*-Element formaterer til '' (_fmt monterer det
+        # i stedet for å repr-printe, se _fmt sin _openstat_el_id-gren over)
+        # — print('') ville uansett skrevet en tom linje. Reviewer-funn (samme
+        # gjennomgang som data-ui-shown-for-kjøringsrensken i js/cells.js,
+        # commit 15ce63c) — port av Brython-tvillingens fiks.
+        shown = _fmt(o)
+        if shown:
+            print(shown)
 
 
 _shared_vars['show'] = _show

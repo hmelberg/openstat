@@ -194,3 +194,20 @@ def test_execute_code_element_last_expression_mounts_no_blank_line(capsys):
     out = capsys.readouterr().out
     assert out == 'før' + chr(10)
     assert mr._shared_vars['_el_rt'].shown == 1
+
+
+def test_show_element_mounts_no_blank_line(capsys):
+    # _show() (den eksplisitte show(x)-funksjonen, linje ~63-65) manglet
+    # samme `if shown:`-vakt som sist-uttrykk-kroken over (linje ~150-152):
+    # show(element) kalte print(_fmt(o)) UBETINGET, og print('') skriver en
+    # tom linje selv om elementet alt ble montert av _fmt sin egen
+    # obj.show()-gren (samme mekanisme som test_fmt_mounts_element_and_
+    # returns_empty over dokumenterer). Reviewer-funn fra samme gjennomgang
+    # som data-ui-shown-for-kjøringsrensken i js/cells.js (commit 15ce63c) —
+    # port av Brython-tvillingens test.
+    mr._shared_vars['_el_arg'] = _FakeEl()
+    ret = mr._execute_code('print("før")\nshow(_el_arg)\nprint("etter")')
+    assert ret == ''
+    out = capsys.readouterr().out
+    assert out == 'før' + chr(10) + 'etter' + chr(10)
+    assert mr._shared_vars['_el_arg'].shown == 1

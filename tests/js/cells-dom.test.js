@@ -174,6 +174,11 @@ function freshEnv() {
     },
     querySelectorAll: () => [],
     createElement: (tag) => new FakeEl(tag),
+    // Samme minimale ekte-tekst-node-stub som tests/js/ui-dom.test.js sin
+    // document-fake bruker (js/ui.js/js/cells.js sitt document.createTextNode-
+    // kall trenger dette — cells.js:2242 sin hasDash-append-fallback rammes
+    // av en ny data-ui-shown-regresjonstest under).
+    createTextNode: (text) => { const n = new FakeEl('#text'); n.textContent = text; return n; },
     activeElement: null,
   };
 
@@ -926,6 +931,69 @@ test('runCell: {notice} → pre.nb-notice (ikke pre.error) i cellens egen slot (
   assert.ok(noticeNode, 'begrensningsmeldingen skal vises som pre.nb-notice');
   assert.strictEqual(noticeNode.textContent, 'Dashboard-celler krever Kjør alle (fase B2)');
   assert.strictEqual(errNode, undefined, 'skal IKKE rendres som pre.error (den er rød/alarmerende, dette er ikke en feil)');
+});
+
+// ---- data-ui-shown for-kjøringsrensk (review-funn 15ce63c: commit 15ce63c
+// speilet kun HALVE .dash-mønsteret — post-run-vaktposten (renderCellResult
+// sin hasDash-sjekk) ble utvidet til data-ui-shown, men PRE-run-purgen i
+// C.runCell (rett før payload bygges) ble stående gated på KUN '.dash'. Et
+// mdRunNotebookCell-stub under simulerer Ui.elShow sin live DOM-mutasjon
+// (js/ui.js): den monterer en ny data-ui-shown-node RETT INN i cellens
+// .nb-output-body SYNKRONT, før Promise'n resolver — nøyaktig slik
+// Brython/MicroPython sin bro kaller inn under selve kjøringen (mdUiRunCtx()
+// peker da på nettopp denne sloten, se cells.js sin egen kommentar over
+// renderCellResult sin hasDash-linje). ----
+
+test('runCell: rerun med et data-ui-shown-montert element PURGER forrige kjørings node først — ingen akkumulering (review-funn 15ce63c)', async () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\nx = ui.html.div()\nx.show()\n';
+  C.init('python');
+  global.mdIsScriptRunning = () => false;
+
+  var mountCount = 0;
+  global.mdRunNotebookCell = () => {
+    mountCount++;
+    var out = cellParts(containerEl, 0).out;
+    var mounted = document.createElement('div');
+    mounted.dataset.uiShown = '1';
+    mounted.textContent = 'mount-' + mountCount;
+    out.appendChild(mounted);
+    return Promise.resolve({ text: '' });
+  };
+
+  await C.runCell(0);
+  var out1 = cellParts(containerEl, 0).out;
+  var shown1 = out1.children.filter((n) => n.dataset && n.dataset.uiShown === '1');
+  assert.strictEqual(shown1.length, 1, 'første kjøring: ett montert data-ui-shown-element');
+
+  await C.runCell(0);
+  var out2 = cellParts(containerEl, 0).out;
+  var shown2 = out2.children.filter((n) => n.dataset && n.dataset.uiShown === '1');
+  assert.strictEqual(shown2.length, 1, 'andre kjøring: FORTSATT bare ett data-ui-shown-element (forrige rerun sin node skal være purget, ikke akkumulert ved siden av)');
+  assert.strictEqual(shown2[0].textContent, 'mount-2', 'det gjenværende elementet er DEN FERSKE kjøringens monterte node, ikke den gamle');
+});
+
+test('renderCellResult: et data-ui-shown-element montert MIDT I kjøringen overlever selve kjøringens output-rendring (append-ikke-tøm, innad i ÉN kjøring)', async () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\nx = ui.html.div()\nx.show()\n';
+  C.init('python');
+  global.mdIsScriptRunning = () => false;
+
+  global.mdRunNotebookCell = () => {
+    var out = cellParts(containerEl, 0).out;
+    var mounted = document.createElement('div');
+    mounted.dataset.uiShown = '1';
+    mounted.textContent = 'live-mount';
+    out.appendChild(mounted);
+    return Promise.resolve({ text: 'siste uttrykk' });
+  };
+
+  await C.runCell(0);
+
+  var out = cellParts(containerEl, 0).out;
+  var shown = out.children.filter((n) => n.dataset && n.dataset.uiShown === '1');
+  assert.strictEqual(shown.length, 1, 'det monterte elementet skal overleve DENNE kjøringens egen resultat-rendring (append, ikke wipe)');
+  assert.strictEqual(shown[0].textContent, 'live-mount');
 });
 
 // ---- widget-plassering-fasen: widgets=top|bottom|left klasse-plumbing,
@@ -1773,6 +1841,37 @@ test('runSelection: IKKE C._afterCellRun — en tidligere stale-tint overlever e
 
   assert.strictEqual(C.cellElementAt(0).classList.contains('nb-stale'), true,
     'seleksjonskjøring er en DELVIS kjøring — "partial run ≠ cell ran", stale-tinten overlever');
+});
+
+test('runSelection: purger IKKE et data-ui-shown-montert element fra cellens ekte (fulle) kjøring — avvik 1 dekker nå også ui.html, ikke bare dash (review-funn 15ce63c)', async () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\nx = ui.html.div()\nx.show()\n';
+  C.init('python');
+  global.mdIsScriptRunning = () => false;
+
+  // Cellens ekte (fulle) kjøring monterer et data-ui-shown-element i sin slot.
+  global.mdRunNotebookCell = () => {
+    const out = cellParts(containerEl, 0).out;
+    const mounted = document.createElement('div');
+    mounted.dataset.uiShown = '1';
+    mounted.textContent = 'full-run-mount';
+    out.appendChild(mounted);
+    return Promise.resolve({ text: '' });
+  };
+  await C.runCell(0);
+  let shown = cellParts(containerEl, 0).out.children.filter((n) => n.dataset && n.dataset.uiShown === '1');
+  assert.strictEqual(shown.length, 1, 'sanity: full kjøring monterte elementet');
+
+  // En etterfølgende SELEKSJONSkjøring (som ikke selv monterer noe nytt) skal
+  // ikke rive ned den ekte kjøringens data-ui-shown-node — C.runSelection
+  // mangler bevisst C.runCell sin pre-run-purge (se avvik 1-kommentaren over
+  // funksjonen).
+  global.mdRunNotebookCell = () => Promise.resolve({ text: 'delresultat' });
+  await C.runSelection(0, 'x.show()');
+
+  shown = cellParts(containerEl, 0).out.children.filter((n) => n.dataset && n.dataset.uiShown === '1');
+  assert.strictEqual(shown.length, 1, 'seleksjonskjøringen skal la den fulle kjøringens montering stå urørt');
+  assert.strictEqual(shown[0].textContent, 'full-run-mount', 'det er FORTSATT den fulle kjøringens node, ikke fjernet/erstattet');
 });
 
 test('runSelection: en tidligere runCell-suksess (ranOk) er urørt av en seleksjonskjøring — ny stale etter redigering fungerer som før', async () => {

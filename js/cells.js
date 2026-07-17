@@ -1928,7 +1928,25 @@
       // etter, samme par-begrunnelse som mdRunNotebookCell sin #outputArea-
       // sweep: uten det ville registeroppføringen henge igjen til et
       // vilkårlig FREMTIDIG dashboard()-kall et annet sted i dokumentet.
-      if (out && out.querySelector && out.querySelector('.dash')) {
+      //
+      // data-ui-shown-noder er forrige kjørings monterte ui.html-elementer —
+      // uten denne for-kjøringsrensken akkumulerer reruns duplikater
+      // (review-funn 15ce63c). Commit 15ce63c la til data-ui-shown-merkingen
+      // (Ui.elShow) og speilet KUN post-run-halvdelen av .dash-mønsteret
+      // (renderCellResult sin hasDash-sjekk over, som hindrer AKKURAT DENNE
+      // kjøringens eget resultat fra å tømme sin egen ferske montering) — men
+      // glemte PRE-run-halvdelen her: uten OR-et under sto forrige kjørings
+      // data-ui-shown-node fortsatt tilkoblet ved rerun-start (samme ".dash
+      // fortsatt i live"-problem som dashboard-kommentaren over beskriver),
+      // og en ny .show() i den nye kjøringen STAPLET et nytt element oppå det
+      // gamle i stedet for å erstatte det. Purge+clear her kobler den gamle
+      // noden fra DOM-en (isConnected blir false); den generasjons-skopede
+      // _els-sveipen i Ui.endCellRun (js/ui.js) reklamerer selv
+      // registeroppføringen ved kjøringens slutt — ingen egen
+      // Ui.sweepDisconnected()-analog trengs (ingen slik funksjon finnes;
+      // Dash.sweepDisconnected() under er dash-spesifikk og rører ikke
+      // Ui-registeret).
+      if (out && out.querySelector && (out.querySelector('.dash') || out.querySelector('[data-ui-shown]'))) {
         purge(out);
         out.innerHTML = '';
         if (global.Dash && typeof global.Dash.sweepDisconnected === 'function') global.Dash.sweepDisconnected();
@@ -2015,19 +2033,26 @@
     // seleksjon). Speiler C.runCell sin struktur (guardene, payload-formen,
     // setRunningUi/renderCellResult-parret) MED TO BEVISSTE AVVIK:
     //
-    //  1. Ingen dash mount-to-slot-purge før kjøring (sammenlign C.runCell
-    //     sin egen '.dash'-sjekk rett før payload bygges): den purgen
-    //     eksisterer KUN for å hindre at en FULL rerun av SAMME celle
-    //     stapler et nytt dashboard oppå et gammelt i cellens slot (D.create()
-    //     sin sweepDisconnected() ser den gamle roten som "i live" til den
-    //     ryddes). En seleksjonskjøring er per definisjon en DELVIS,
-    //     ikke-kanonisk kjøring av cellen (se avvik 2 rett under) — et
-    //     dashboard cellens ekte (fulle) kjøring har montert i denne sloten
-    //     hører til DEN kjøringen og skal overleve en seleksjonskjøring
-    //     urørt, akkurat som stale/ranOk-tilstanden skal. (Kjører seleksjonen
-    //     selv en NY dashboard()-linje, er utfallet det samme som om
-    //     C.runCell aldri hadde purge-grenen i det hele tatt — en akseptert
-    //     kant, ikke denne funksjonens ansvar å dekke.)
+    //  1. Ingen dash/ui.html mount-to-slot-purge før kjøring (sammenlign
+    //     C.runCell sin egen '.dash'/'[data-ui-shown]'-sjekk rett før payload
+    //     bygges, review-funn 15ce63c): den purgen eksisterer KUN for å
+    //     hindre at en FULL rerun av SAMME celle stapler et nytt dashboard
+    //     (eller en ny ui.html-montering) oppå en gammel i cellens slot
+    //     (D.create() sin sweepDisconnected() ser den gamle dash-roten som
+    //     "i live" til den ryddes; Ui sin generasjons-skopede _els-sveip i
+    //     Ui.endCellRun ser tilsvarende den gamle data-ui-shown-noden som "i
+    //     live" til den kobles fra). En seleksjonskjøring er per definisjon
+    //     en DELVIS, ikke-kanonisk kjøring av cellen (se avvik 2 rett under)
+    //     — et dashboard/ui.html-element cellens ekte (fulle) kjøring har
+    //     montert i denne sloten hører til DEN kjøringen og skal overleve en
+    //     seleksjonskjøring urørt, akkurat som stale/ranOk-tilstanden skal.
+    //     (Kjører seleksjonen selv en NY dashboard()-linje eller .show(), er
+    //     utfallet det samme som om C.runCell aldri hadde purge-grenen i det
+    //     hele tatt — en akseptert kant, ikke denne funksjonens ansvar å
+    //     dekke.) Denne funksjonen deler INGEN kode med C.runCell sin
+    //     purge-gren (egen funksjonskropp, ingen felles helper) — den kan
+    //     derfor aldri "arve" data-ui-shown-utvidelsen ved et uhell; dette
+    //     avviket dokumenterer bevisst UTELATELSEN, ikke en risiko.
     //  2. C._afterCellRun kalles ALDRI: et utvalg er ikke cellen — "partial
     //     run ≠ cell ran" (task-brief). En stale-tint cellen hadde FØR
     //     seleksjonskjøringen skal stå present ETTER den også (kjøring av
