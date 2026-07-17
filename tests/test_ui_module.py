@@ -981,4 +981,10 @@ def test_element_returns_self_for_chaining(monkeypatch):
     assert el.set_style(color="red") is el
     assert el.add_class("a") is el
     assert el.remove_class("a") is el
-    assert el.show() is el
+
+
+def test_element_show_returns_none(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    el = mod.html.div()
+    assert el.show() is None
+    assert el.show(target="slot1") is None

@@ -694,7 +694,10 @@ class Element:
         """Monter elementet (Ui.elShow, spec §2). target=None: append i
         DEN KJØRENDE cellens output-slot nå (kan kalles flere ganger per
         celle). target="dom-id": erstatt-inn-i-target, med W5-registerets
-        replace-ved-rerun-semantikk (js/ui.js sin _elShowTargets)."""
+        replace-ved-rerun-semantikk (js/ui.js sin _elShowTargets).
+
+        Returnerer None med vilje — siste-uttrykk-display skal ikke
+        re-montere; kjedebruk av .show() er ikke støttet."""
         u = _ui()
         if u is not None and self._openstat_el_id is not None:
             opts = {"target": str(target) if target is not None else None}
@@ -702,7 +705,7 @@ class Element:
                 u.elShow(self._openstat_el_id, json.dumps(opts))
             except Exception:
                 pass
-        return self
+        return None
 
     @property
     def el(self):
