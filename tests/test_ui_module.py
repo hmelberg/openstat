@@ -20,7 +20,7 @@ class FakeUiJs:
     bindControlHandler-opptak, og el*/value-opptak (elCreate/elSetProps/
     elAppend/elClear/elOn/elShow/elNode/value)."""
 
-    def __init__(self, next_result=None, next_key="k1", value_store=None):
+    def __init__(self, next_result=None, next_key="k1", value_store=None, imports=None):
         self.calls = []
         self.next_result = next_result
         self.next_key = next_key
@@ -28,6 +28,10 @@ class FakeUiJs:
         self.value_store = value_store if value_store is not None else {}
         self.el_calls = []
         self._next_el_id = 1
+        # ui-html-fasen (Task 4): speiler window.__uiImports (js/ui.js sin
+        # Ui.hasImport) - {ns: True} for "importert", fraværende/False for
+        # "ikke importert ennå".
+        self.imports = imports if imports is not None else {}
 
     def registerControl(self, spec_json):
         spec = json.loads(spec_json)
@@ -71,11 +75,15 @@ class FakeUiJs:
         self.el_calls.append(("value", name))
         return self.value_store.get(name)
 
+    def hasImport(self, ns):
+        self.el_calls.append(("hasImport", ns))
+        return bool(self.imports.get(ns))
 
-def _load_ui(monkeypatch, next_result=None, ui_js=None, next_key="k1", value_store=None):
+
+def _load_ui(monkeypatch, next_result=None, ui_js=None, next_key="k1", value_store=None, imports=None):
     js = types.ModuleType("js")
     fake = ui_js if ui_js is not None else FakeUiJs(
-        next_result=next_result, next_key=next_key, value_store=value_store)
+        next_result=next_result, next_key=next_key, value_store=value_store, imports=imports)
     js.window = types.SimpleNamespace(Ui=fake)
     monkeypatch.setitem(sys.modules, "js", js)
     path = pathlib.Path(__file__).resolve().parents[1] / "pyodide" / "ui.py"
@@ -981,6 +989,201 @@ def test_element_returns_self_for_chaining(monkeypatch):
     assert el.set_style(color="red") is el
     assert el.add_class("a") is el
     assert el.remove_class("a") is el
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# #tag.import — kuratert register + dynamiske navnerom (ui-html-fasen,
+# Task 4, spec §4). js/ui.js sin faktiske LASTING (mdEnsureTagImports) er
+# ikke testet her (JS-side, node-testet i tests/js/*) — disse testene dekker
+# KUN python-fasadens del av kontrakten: modul-__getattr__, _LibNamespace,
+# accepts-validering, pico-klassekartet, ui.lib().
+# ══════════════════════════════════════════════════════════════════════════
+
+def test_module_getattr_sl_not_imported_raises_clear_error(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, imports={})
+    with pytest.raises(AttributeError, match=r"#tag\.import = sl"):
+        mod.sl
+
+
+def test_module_getattr_pico_not_imported_raises_clear_error(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, imports={})
+    with pytest.raises(AttributeError, match=r"#tag\.import = pico"):
+        mod.pico
+
+
+def test_module_getattr_generic_not_imported_raises_clear_error(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, imports={})
+    with pytest.raises(AttributeError, match=r"#tag\.import = acme"):
+        mod.acme
+
+
+def test_module_getattr_unknown_dunder_still_raises_attributeerror(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, imports={})
+    with pytest.raises(AttributeError):
+        mod._some_private_name
+
+
+def test_module_getattr_sl_imported_returns_lib_namespace(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, imports={"sl": True})
+    assert isinstance(mod.sl, mod._LibNamespace)
+    assert mod.sl._prefix == "sl"
+    assert mod.sl._accepts is mod._SL_ACCEPTS
+
+
+def test_module_getattr_pico_imported_returns_pico_namespace(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, imports={"pico": True})
+    assert isinstance(mod.pico, mod._PicoNamespace)
+
+
+def test_module_getattr_generic_imported_returns_lib_namespace_no_accepts(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, imports={"acme": True})
+    ns = mod.acme
+    assert isinstance(ns, mod._LibNamespace)
+    assert ns._prefix == "acme"
+    assert ns._accepts == {}
+
+
+def test_lib_function_mirrors_getattr(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, imports={"acme": True})
+    ns = mod.lib("acme")
+    assert isinstance(ns, mod._LibNamespace)
+    assert ns._prefix == "acme"
+    with pytest.raises(AttributeError):
+        mod.lib("nope")
+
+
+def test_sl_namespace_button_builds_sl_button_tag(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, imports={"sl": True})
+    el = mod.sl.button("Klikk", variant="primary")
+    create = [c for c in fake.el_calls if c[0] == "elCreate"][0]
+    assert create[1] == "sl-button"
+    assert create[2]["props"]["variant"] == "primary"
+    assert el._openstat_tag == "sl-button"
+
+
+def test_sl_namespace_snake_to_kebab_component_name(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, imports={"sl": True})
+    mod.sl.button_group()
+    create = [c for c in fake.el_calls if c[0] == "elCreate"][0]
+    assert create[1] == "sl-button-group"
+
+
+def test_sl_namespace_getattr_gates_even_when_import_revoked_later(monkeypatch):
+    # MicroPython-avviket (se ui_mpy.py): _LibNamespace sin EGEN gate er den
+    # eneste som fyrer der (ingen modul-__getattr__) — testet HER via
+    # instansen direkte, uavhengig av modul-__getattr__ sin egen (tidligere)
+    # gate, akkurat som mpy-fasaden faktisk fungerer.
+    mod, fake = _load_ui(monkeypatch, imports={"sl": True})
+    ns = mod.sl
+    fake.imports["sl"] = False
+    with pytest.raises(AttributeError, match=r"#tag\.import = sl"):
+        ns.button
+
+
+def test_sl_accepts_known_component_valid_child_no_warning(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, imports={"sl": True})
+    warned = []
+    monkeypatch.setattr(mod, "_warn", warned.append)
+    option = mod.sl.option("x")
+    mod.sl.select(option)
+    assert warned == []
+
+
+def test_sl_accepts_known_component_invalid_child_warns_but_still_appends(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, imports={"sl": True})
+    warned = []
+    monkeypatch.setattr(mod, "_warn", warned.append)
+    bad_child = mod.html.div("x")   # elCreate #1 + elAppend #1 (div sin egen "x"-tekst)
+    select_el = mod.sl.select(bad_child)   # elCreate #2 + elAppend #2 (el-referansen)
+    assert len(warned) == 1
+    assert "div" in warned[0]
+    appends = [c for c in fake.el_calls if c[0] == "elAppend"]
+    assert len(appends) == 2   # varsel, men IKKE blokkert — barnet ble likevel appendet
+    ref_append = [c for c in appends if c[1] == select_el._openstat_el_id][0]
+    assert ref_append[2] == {"el": bad_child._openstat_el_id}
+
+
+def test_sl_accepts_unknown_component_no_validation_at_all(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, imports={"sl": True})
+    warned = []
+    monkeypatch.setattr(mod, "_warn", warned.append)
+    mod.sl.some_unknown_widget(mod.html.div("whatever"))
+    assert warned == []
+
+
+def test_sl_accepts_string_child_never_warns(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, imports={"sl": True})
+    warned = []
+    monkeypatch.setattr(mod, "_warn", warned.append)
+    mod.sl.select("bare tekst")
+    assert warned == []
+
+
+def test_generic_namespace_has_no_accepts_validation(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, imports={"acme": True})
+    warned = []
+    monkeypatch.setattr(mod, "_warn", warned.append)
+    mod.acme.select(mod.html.div("x"))   # "select" betyr ingenting for et generisk navnerom
+    assert warned == []
+    creates = [c for c in fake.el_calls if c[0] == "elCreate"]
+    assert creates[-1][1] == "acme-select"   # creates[0] er div("x") sin egen elCreate
+
+
+def test_pico_button_gets_btn_class(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, imports={"pico": True})
+    mod.pico.button("Ok")
+    create = [c for c in fake.el_calls if c[0] == "elCreate"][0]
+    assert create[1] == "button"
+    assert create[2]["attrs"]["class"] == "btn"
+
+
+def test_pico_button_utility_kwarg_adds_extra_class_not_a_dom_prop(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, imports={"pico": True})
+    mod.pico.button("Ok", primary=True)
+    create = [c for c in fake.el_calls if c[0] == "elCreate"][0]
+    assert create[2]["attrs"]["class"] == "btn btn-primary"
+    assert "primary" not in create[2]["props"]
+
+
+def test_pico_button_extra_cls_appended_after_pico_class(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, imports={"pico": True})
+    mod.pico.button("Ok", cls="my-extra")
+    create = [c for c in fake.el_calls if c[0] == "elCreate"][0]
+    assert create[2]["attrs"]["class"] == "btn my-extra"
+
+
+def test_pico_unknown_component_falls_back_to_div_with_own_name_as_class(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, imports={"pico": True})
+    mod.pico.thingamajig("x")
+    create = [c for c in fake.el_calls if c[0] == "elCreate"][0]
+    assert create[1] == "div"
+    assert create[2]["attrs"]["class"] == "thingamajig"
+
+
+def test_pico_known_non_default_html_element(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, imports={"pico": True})
+    mod.pico.label("x")
+    create = [c for c in fake.el_calls if c[0] == "elCreate"][0]
+    assert create[1] == "label"
+    assert create[2]["attrs"]["class"] == "form-label"
+
+
+def test_pico_positional_string_child_is_a_text_node_not_special_cased(monkeypatch):
+    # Dokumentert avvik fra code2web (se PICO_HTML_ELEMENTS-kommentaren i
+    # pyodide/ui.py): INGEN placeholder-gjetting for input/textarea/select —
+    # alle ui.<navn>-byggere (inkl. pico) bruker SAMME "streng -> tekstnode"
+    # regel som ui.html (spec §1).
+    mod, fake = _load_ui(monkeypatch, imports={"pico": True})
+    mod.pico.input("placeholder-aktig tekst")
+    texts = [c[2]["text"] for c in fake.el_calls if c[0] == "elAppend"]
+    assert texts == ["placeholder-aktig tekst"]
+
+
+def test_pico_namespace_getattr_gates_on_import(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, imports={})
+    ns = mod._PicoNamespace()
+    with pytest.raises(AttributeError, match=r"#tag\.import = pico"):
+        ns.button
 
 
 def test_element_show_returns_none(monkeypatch):

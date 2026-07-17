@@ -17,7 +17,11 @@
   // widgets (widget-plassering-fasen): styrer hvor .param-form/.ui-controls-
   // stripene havner i cellens .nb-output (se docCellNode) — top|bottom|left,
   // default top når fraværende eller ugyldig (WIDGETS_POS under).
-  var KNOWN_KEYS = { id: 1, style: 1, slide: 1, speak: 1, rerun: 1, sync: 1, widgets: 1 };
+  // import: ui-html-fasen (Task 4, spec §4) — '#tag.import' er en KJENT
+  // nøkkel (unngår "ukjent attributt"-varselet), men er PREAMBEL-ONLY —
+  // se parseCells() sin post-pass under, som varsler eksplisitt når den
+  // dukker opp i en celleblokk i stedet for å bake den inn i cell.attrs.
+  var KNOWN_KEYS = { id: 1, style: 1, slide: 1, speak: 1, rerun: 1, sync: 1, widgets: 1, import: 1 };
   var KNOWN_FLAGS = { 'hide-code': 1, 'hide-output': 1, slide: 1 };
   var STYLES = { note: 1, warn: 1, card: 1 };
   var WIDGETS_POS = { top: 1, bottom: 1, left: 1 };
@@ -178,7 +182,12 @@
       }
       if (key === 'style' && !STYLES[val]) res.warnings.push({ line: i, msg: 'ukjent style: ' + val });
       if (key === 'widgets' && !WIDGETS_POS[val]) res.warnings.push({ line: i, msg: 'ukjent widgets-plassering: ' + val });
-      if (Object.prototype.hasOwnProperty.call(res.tags, key)) {
+      // 'import' er REPETERBAR med vilje (ui-html-fasen, Task 4, spec §4:
+      // "the last-wins tags map is bypassed for this key") — hver
+      // '#tag.import = …'-linje er en EGEN import, ikke en omskriving av
+      // forrige, så duplikat-varselet (som er skrevet for last-wins-nøkler)
+      // skal aldri fyre for den.
+      if (key !== 'import' && Object.prototype.hasOwnProperty.call(res.tags, key)) {
         res.warnings.push({ line: i, msg: 'duplisert #tag-nøkkel: ' + key });
       }
       res.tags[key] = val;
@@ -337,6 +346,15 @@
         if (mk === 'type') {
           if (cell.type !== null) warnings.push('linje ' + lineNo + ': #tag.type overstyrt av #%%-typen');
           else cell.type = ent.value;
+          continue;
+        }
+        // ui-html-fasen (Task 4, spec §4): '#tag.import' er et DOKUMENT-
+        // (preambel-)konsept, ikke en celle-attributt — en forekomst i en
+        // celleblokk varsles eksplisitt og droppes (ikke bakt inn i
+        // cell.attrs, som ellers ville gjort den usynlig for konsumenten
+        // i index.html, der KUN preambelen skannes for imports).
+        if (mk === 'import') {
+          warnings.push('linje ' + lineNo + ': #tag.import gjelder bare i preambelen');
           continue;
         }
         if (Object.prototype.hasOwnProperty.call(cell.attrs, mk)) {

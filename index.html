@@ -579,8 +579,8 @@
   <script src="js/brython-engine.js?v=2026-07-17a"></script>
   <script src="js/micropython-engine.js?v=2026-07-17a"></script>
   <script src="js/dash.js"></script>
-  <script src="js/cells.js?v=2026-07-17b"></script>
-  <script src="js/ui.js?v=2026-07-17a"></script>
+  <script src="js/cells.js?v=2026-07-17c"></script>
+  <script src="js/ui.js?v=2026-07-17b"></script>
   <script src="js/param-forms.js"></script>
   <script src="js/ipywidgets-bridge.js"></script>
   <script src="js/dash-webr.js"></script>
@@ -620,7 +620,7 @@
     window.t = window.t || function (s) { return s; };
     window.i18nField = window.i18nField || function (obj, field) { return obj && obj[field]; };
 
-    window.M2PY_VERSION = '2026-07-17b';
+    window.M2PY_VERSION = '2026-07-17c';
 
     // One-time migration: remove obsolete localStorage keys from previous milestones
     // Safe to delete this snippet after a few months when most users have re-loaded
@@ -3218,6 +3218,10 @@
             try { await __ensureUi(ctx.py); }
             catch (e) { console.warn('pyodide/ui.py:', e); }
           }
+          // '#tag.import' (ui-html-fasen, Task 4, spec §4) — no-op når
+          // dokumentet ikke er en notatbok (ingen preambel-konsept).
+          try { await window.mdEnsureTagImports(ctx.rightStatus); }
+          catch (e) { console.warn('#tag.import (preRun):', e); }
           // ipywidgets-import (spec 2, W3 Task 2) — se __ensureIpywidgets.
           // MÅ stå FØR micropip-løkka under (pinnet 8.1.6, ikke upinnet
           // PyPI-latest). Feiler gracefully (console.warn): cellen får da
@@ -3264,6 +3268,12 @@
             try { await window.mdNotebookSession.restart(); }
             catch (e) { console.warn('R Kjør alle-reset feilet:', e); }
           }
+          // '#tag.import' (ui-html-fasen, Task 4, spec §4) — laster
+          // biblioteket (ren DOM/nettverk) selv i R-modus; ui.sl/ui.pico
+          // er R-side foreløpig ikke koblet på (Task 5), men et html-cell-
+          // element/skript kan likevel dra nytte av at CSS/JS er lastet.
+          try { await window.mdEnsureTagImports(ctx.rightStatus); }
+          catch (e) { console.warn('#tag.import (R runSelf):', e); }
           await runHybridR(script, ctx.py, { showCommands: ctx.showCommands, profile: ctx.profile });
         } },
       statx: { id: 'statx', label: 'Statx',
@@ -3283,6 +3293,12 @@
           setStatus(ctx.rightStatus, t('Laster Brython…'));
           var _dl = await window.DataLoader.resolveAndFetchLoads(script,
             { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey });
+          // '#tag.import' (ui-html-fasen, Task 4, spec §4) — no-op for et
+          // umerket/rent script (Cells.active()-notatbøker for brython går
+          // ALDRI hit, se kommentaren under — men wiret uansett for
+          // symmetri/robusthet, ren no-op når det ikke er en notatbok).
+          try { await window.mdEnsureTagImports(ctx.rightStatus); }
+          catch (e) { console.warn('#tag.import (brython runSelf):', e); }
           setStatus(ctx.rightStatus, t('Kjører…'));
           // dash v2 (js/dash.js) skriver DOM direkte til #outputArea MENS
           // scriptet kjører (window.Dash.create/addCard) — helt utenom
@@ -3342,6 +3358,10 @@
           setStatus(ctx.rightStatus, t('Laster MicroPython…'));
           var _dl = await window.DataLoader.resolveAndFetchLoads(script,
             { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey });
+          // '#tag.import' (ui-html-fasen, Task 4, spec §4) — se Brython-
+          // raden over for begrunnelsen (samme no-op-for-notatbøker-note).
+          try { await window.mdEnsureTagImports(ctx.rightStatus); }
+          catch (e) { console.warn('#tag.import (micropython runSelf):', e); }
           setStatus(ctx.rightStatus, t('Kjører…'));
           // Samme dash v2-forbehold som Brython-raden over: js/dash.js skriver
           // DOM direkte til #outputArea under kjøring — tøm FØR, ikke etter.
@@ -8758,6 +8778,151 @@ json.dumps(out)
       return __uiP;
     }
 
+    // ── #tag.import: laster, kuratert register (sl/pico), dynamiske
+    // navnerom (ui-html-fasen, Task 4, spec §4) ─────────────────────────
+    // Kuratert register: pinnede jsdelivr-URL-er for de to snarveiene spec
+    // §4 nevner ('shoelace'/'pico'). sw.js sin CDN_HOSTS-allowlist dekker
+    // disse automatisk (cdn.jsdelivr.net er allerede der, cache-first) —
+    // et VILKÅRLIG '<url> as <navn>'-import er IKKE i den allowlisten og
+    // går derfor alltid nettverk-only (dokumentert, ikke endret her — se
+    // sw.js sin egen CDN_HOSTS-kommentar).
+    var TAG_IMPORT_REGISTRY = {
+      shoelace: {
+        js: ['https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.20.1/cdn/shoelace-autoloader.js'],
+        css: ['https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.20.1/cdn/themes/light.css'],
+        ns: 'sl'
+      },
+      pico: {
+        css: ['https://cdn.jsdelivr.net/npm/@picocss/pico@2.1.1/css/pico.min.css'],
+        ns: 'pico',
+        classes: true
+      }
+    };
+
+    // mdCollectTagImports(text): '#tag.import'-oppføringene fra
+    // PREAMBELEN ALENE (spec §4: "consumed from the PREAMBLE block only")
+    // — henter selve preambelteksten (linjene FØR den første #%%-markøren)
+    // og skanner den DIREKTE med Cells.scanTagBlock(pre, true) (EXPORTED —
+    // parseCells() sin egen parse-retur eksponerer ikke entries, se
+    // cells.js sin egen kommentar der). entries-arrayet (IKKE det
+    // dedupliserende tags-kartet) er kilden — '#tag.import' er repeterbar
+    // med vilje (js/cells.js sin scanTagBlock unntar nøkkelen eksplisitt
+    // fra duplikat-varselet, se der). Ingen markører i det hele tatt (rent
+    // script, ingen notatbok) → tom liste — ingen preambel-konsept å skanne.
+    window.mdCollectTagImports = function (text) {
+      text = String(text == null ? '' : text);
+      if (!window.Cells || !window.Cells.hasMarkers || !window.Cells.scanTagBlock
+          || !window.Cells.isMarkerLine || !window.Cells.hasMarkers(text)) {
+        return [];
+      }
+      var lines = text.split('\n');
+      var markerIdx = -1;
+      for (var i = 0; i < lines.length; i++) {
+        if (window.Cells.isMarkerLine(lines[i])) { markerIdx = i; break; }
+      }
+      var pre = markerIdx === -1 ? text : lines.slice(0, markerIdx).join('\n');
+      var scan = window.Cells.scanTagBlock(pre, true);
+      var specs = [];
+      for (var j = 0; j < scan.entries.length; j++) {
+        if (scan.entries[j].key === 'import') specs.push(scan.entries[j].value);
+      }
+      return specs;
+    };
+
+    // Parse ÉN '#tag.import'-verdi → et lastbart oppslag, eller null
+    // (ugyldig — kalleren varsler og hopper over). Tre former (spec §4):
+    // en registernøkkel ('shoelace'/'pico'), '<url> as <navn>' (navn =
+    // python-attributnavnet OG custom-element-prefikset, må derfor være
+    // et python-identifikator-aktig navn), eller en bar '.css'-URL (ingen
+    // navn — kun stilark, ikke noe navnerom).
+    var TAG_IMPORT_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+    function _parseTagImportSpec(raw) {
+      var spec = String(raw == null ? '' : raw).trim();
+      if (!spec) return null;
+      if (Object.prototype.hasOwnProperty.call(TAG_IMPORT_REGISTRY, spec)) {
+        var entry = TAG_IMPORT_REGISTRY[spec];
+        return { js: entry.js || [], css: entry.css || [], ns: entry.ns || null };
+      }
+      var m = /^(\S+)\s+as\s+(\S+)$/i.exec(spec);
+      if (m) {
+        var url = m[1], navn = m[2];
+        if (!TAG_IMPORT_NAME_RE.test(navn)) return null;
+        if (/\.css(\?.*)?$/i.test(url)) return { js: [], css: [url], ns: null };
+        return { js: [url], css: [], ns: navn };
+      }
+      if (!/\s/.test(spec) && /\.css(\?.*)?$/i.test(spec)) {
+        return { js: [], css: [spec], ns: null };
+      }
+      return null;
+    }
+
+    // Idempotens per URL (spec §4) — ETT sett per fane-levetid (overlever
+    // "Kjør alle"-rekjøringer INNENFOR samme side, akkurat som
+    // js/brython-engine.js sin addScript-mønster/__jsLoaded).
+    var _loadedImports = {};
+
+    function _loadImportScript(url) {
+      if (_loadedImports[url]) return _loadedImports[url];
+      _loadedImports[url] = new Promise(function (resolve, reject) {
+        var s = document.createElement('script');
+        s.type = 'module';
+        s.src = url;
+        s.onload = resolve;
+        s.onerror = function () { reject(new Error('Kunne ikke laste ' + url)); };
+        document.head.appendChild(s);
+      }).catch(function (e) { delete _loadedImports[url]; throw e; });
+      return _loadedImports[url];
+    }
+
+    function _loadImportCss(url) {
+      if (_loadedImports[url]) return _loadedImports[url];
+      _loadedImports[url] = new Promise(function (resolve, reject) {
+        var l = document.createElement('link');
+        l.rel = 'stylesheet';
+        l.href = url;
+        l.onload = resolve;
+        l.onerror = function () { reject(new Error('Kunne ikke laste ' + url)); };
+        document.head.appendChild(l);
+      }).catch(function (e) { delete _loadedImports[url]; throw e; });
+      return _loadedImports[url];
+    }
+
+    // mdEnsureTagImports(statusEl): les preambelens '#tag.import'-linjer og
+    // last hver (js som <script type="module">, css som
+    // <link rel="stylesheet">), idempotent per URL. Kalt fra ALLE
+    // kjøreveiene som allerede ensure'er pyodide/ui.py o.l. (samme
+    // call-site-liste: python-modusens preRun, mdRunNotebookCell sin
+    // per-celle-gate, brython/mpy sin runSelf + motor-notatbok-øktstart,
+    // R sin runSelf) — FØR brukerkoden kjører. Feil (404/CSP/ugyldig spec)
+    // → statusvarsel + KJØRINGEN FORTSETTER (spec §4: "the run continues")
+    // — kaster ALDRI videre til kalleren. window.__uiImports oppdateres
+    // KUN ved suksess (js/ui.js sin Ui.hasImport leser denne).
+    window.mdEnsureTagImports = async function (statusEl) {
+      var specs;
+      try {
+        specs = window.mdCollectTagImports(scriptInput ? scriptInput.value : '');
+      } catch (e) { return; }
+      if (!specs || !specs.length) return;
+      window.__uiImports = window.__uiImports || {};
+      for (var i = 0; i < specs.length; i++) {
+        var raw = specs[i];
+        var parsed = _parseTagImportSpec(raw);
+        if (!parsed) {
+          if (statusEl) setStatus(statusEl, t('#tag.import: ugyldig angivelse: {spec}', { spec: raw }), true);
+          console.warn('#tag.import: ugyldig angivelse:', raw);
+          continue;
+        }
+        try {
+          for (var j = 0; j < parsed.css.length; j++) await _loadImportCss(parsed.css[j]);
+          for (var k = 0; k < parsed.js.length; k++) await _loadImportScript(parsed.js[k]);
+          if (parsed.ns) window.__uiImports[parsed.ns] = true;
+        } catch (e) {
+          if (statusEl) setStatus(statusEl, t('#tag.import: kunne ikke laste {spec} ({feil})', { spec: raw, feil: (e && e.message) || String(e) }), true);
+          console.warn('#tag.import:', raw, e);
+        }
+      }
+    };
+
     // ── python-modus: ekte ipywidgets-bro (spec 2 W3, Task 2) — lazy ──────
     // Gated i BEGGE kjøreveiene (btnRun sin preRun ~3170 OG mdRunNotebookCell
     // sin per-celle-sti ~9250) på /^\s*(?:import|from)\s+ipywidgets\b/m mot
@@ -10049,6 +10214,13 @@ async def _m2py_run_segment(_seg_json):
           var _dl = await window.DataLoader.resolveAndFetchLoads(scriptInput.value,
             { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey });
           await sess.ensure(_dl.loads);
+          // '#tag.import' (ui-html-fasen, Task 4, spec §4) — motor-
+          // notatbok-øktstart (engine notebook loop entry): kjøres ÉN gang
+          // her (isLive()-gaten over), FØR preambelcellen kjøres, slik at
+          // ui.sl/ui.pico er tilgjengelig fra og med den aller første
+          // brukercelle-kjøringen i denne økten.
+          try { await window.mdEnsureTagImports(rightStatus); }
+          catch (e) { console.warn('#tag.import (motor-notatbok):', e); }
           // Preambel (celle 0, headerRaw === null) inn i den ferske økten —
           // med mindre målcellen ER preambelen (da kjøres den under, med
           // synlig output i sin egen slot).
@@ -10157,6 +10329,13 @@ async def _m2py_run_segment(_seg_json):
           try { await __ensureUi(py); }
           catch (e) { console.warn('ui-modul kunne ikke lastes:', e); }
         }
+        // '#tag.import' (ui-html-fasen, Task 4, spec §4) — samme per-celle-
+        // gate-begrunnelse som ui/dash over: denne stien kaller ALDRI
+        // preRun, så et fersk sesjonsboot + ▶ på en enkelt widget-celle med
+        // ui.sl/ui.pico ville ellers feilet med "ikke importert" selv om
+        // '#tag.import'-linja finnes i preambelen.
+        try { await window.mdEnsureTagImports(rightStatus); }
+        catch (e) { console.warn('#tag.import (per-celle):', e); }
         // ipywidgets likeens (spec 2 W3, Task 2) — samme dokument-brede
         // regex-vakt som preRun (~3170), av samme B1-grunn som dash/ui over:
         // per-celle-stien kaller ALDRI preRun, så uten denne gaten ville et

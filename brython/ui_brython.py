@@ -601,13 +601,16 @@ class Element:
     avgjøre "dette er et monterbart element, ikke en vanlig verdi å
     repr-printe"."""
 
-    def __init__(self, el_id):
+    def __init__(self, el_id, tag=None):
         self._openstat_el_id = el_id
         # Python-sidens speil av class-settet - add_class/remove_class
         # (under) må kjenne HELE det gjeldende settet for å kunne sende
         # en fullstendig erstatnings-streng til elSetProps (JS eier ikke
         # et strukturert class-sett, bare selve attributt-STRENGEN).
         self._classes = set()
+        # ui-html-fasen (Task 4, speiler pyodide/ui.py byte for byte) -
+        # elementets EGEN tag, KUN til _validate_accepts-whitelisten under.
+        self._openstat_tag = tag
 
     def add(self, *children):
         """Legg til flere barn (samme regler som konstruktørens
@@ -723,7 +726,7 @@ def _tag_builder(tag):
                 el_id = u.elCreate(tag, json.dumps(norm))
             except Exception:
                 el_id = None
-        el = Element(el_id)
+        el = Element(el_id, tag=tag)
         cls_attr = norm.get("attrs", {}).get("class")
         if cls_attr:
             el._classes.update(str(cls_attr).split())
@@ -754,3 +757,212 @@ class _HtmlNamespace:
 
 
 html = _HtmlNamespace()
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# #tag.import — kuratert register + dynamiske navnerom (ui-html-fasen,
+# Task 4). Speiler pyodide/ui.py sin tilsvarende seksjon BYTE FOR BYTE
+# (samme klasser/dicter/feilmeldinger) — se der for den fulle
+# arkitektur-kommentaren. Dialektnote: Brython har EKTE modul-objekter
+# (types.ModuleType, se brython_runner.py sin _register_module) og
+# implementerer PEP 562 modul-__getattr__ som en generell Python 3.7+-
+# språkfunksjon — samme mønster som pyodide fungerer derfor uendret her
+# (verifisert i browser, se task-4-rapporten). MicroPython-avviket (INGEN
+# modul-__getattr__ der) er dokumentert i ui_mpy.py sin egen header-
+# kommentar, ikke her.
+# ══════════════════════════════════════════════════════════════════════════
+
+def _has_import(ns):
+    """Ui.hasImport(ns) over broen - se js/ui.js sin docstring."""
+    u = _ui()
+    if u is None:
+        return False
+    try:
+        return bool(u.hasImport(str(ns)))
+    except Exception:
+        return False
+
+
+def _not_imported_error(navn):
+    return AttributeError(
+        'ui.' + str(navn) + ': ikke importert - legg til "#tag.import = '
+        + str(navn) + '" (eller for et generisk bibliotek: "#tag.import = '
+        '<url> as ' + str(navn) + '") i preambelen')
+
+
+def _validate_accepts(prefix, name, accepted, children):
+    """`accepts`-barn-whitelist-validering (spec §4, portert fra
+    code2web/ui.py:3320-3380) - varsler (ALDRI blokkerer) når et
+    Element-barn av en KJENT komponent har en tag utenfor den kuraterte
+    lista. `accepted` tom/None -> ingen validering (ukjent komponent)."""
+    if not accepted:
+        return
+    flat = []
+    for child in children:
+        if isinstance(child, (list, tuple)):
+            flat.extend(child)
+        else:
+            flat.append(child)
+    for child in flat:
+        child_tag = getattr(child, "_openstat_tag", None)
+        if child_tag is not None and child_tag not in accepted:
+            _warn(
+                'ui.' + prefix + '.' + name + ': "' + child_tag + '" er '
+                'kanskje ikke en gyldig barn-tag her (forventet en av: '
+                + ", ".join(accepted) + ")")
+
+
+def _lib_tag_builder(tag, prefix=None, name=None, accepted=None):
+    """Som _tag_builder (ui.html), men for et #tag.import-lastet biblioteks
+    egen tag + valgfri accepts-validering FØR barna appendes."""
+    def _build(*children, **kwargs):
+        norm, handlers, warnings = _normalize_kwargs(kwargs)
+        for w in warnings:
+            _warn(w)
+        if children and accepted:
+            _validate_accepts(prefix, name, accepted, children)
+        u = _ui()
+        el_id = None
+        if u is not None:
+            try:
+                el_id = u.elCreate(tag, json.dumps(norm))
+            except Exception:
+                el_id = None
+        el = Element(el_id, tag=tag)
+        cls_attr = norm.get("attrs", {}).get("class")
+        if cls_attr:
+            el._classes.update(str(cls_attr).split())
+        if children:
+            el.add(*children)
+        for event, handler in handlers:
+            el.on(event, handler)
+        return el
+    return _build
+
+
+class _LibNamespace:
+    """`ui.<navn>` for et #tag.import-lastet bibliotek (spec §4).
+    Gate HER (i tillegg til modul-__getattr__ sin gate under) med vilje -
+    samme instans-klasse gjenbrukes uendret av ui_mpy.py, der DENNE gaten
+    er den ENESTE som fyrer (ingen modul-__getattr__ der)."""
+
+    def __init__(self, prefix, accepts=None):
+        self._prefix = prefix
+        self._accepts = accepts or {}
+
+    def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
+        if not _has_import(self._prefix):
+            raise _not_imported_error(self._prefix)
+        kebab = name.replace("_", "-")
+        tag = self._prefix + "-" + kebab
+        return _lib_tag_builder(tag, prefix=self._prefix, name=name,
+                                 accepted=self._accepts.get(kebab))
+
+
+# shoelace sin accepts-whitelist (spec §4, portert ORDRETT fra
+# code2web/ui.py:3320-3380 — se pyodide/ui.py for den fulle kommentaren).
+_SL_ACCEPTS = {
+    "select": ["sl-option"],
+    "dropdown": ["sl-menu-item"],
+    "button-group": ["sl-button", "button"],
+    "card": ["sl-card-header", "sl-card-body", "sl-card-footer",
+             "div", "p", "h1", "h2", "h3", "h4", "h5", "h6"],
+    "form": ["sl-input", "sl-textarea", "sl-select", "sl-checkbox",
+             "sl-radio", "sl-button", "sl-button-group"],
+    "dialog": ["sl-dialog-header", "sl-dialog-body", "sl-dialog-footer",
+               "div", "p"],
+    "tabs": ["sl-tab", "sl-tab-panel"],
+    "accordion": ["sl-accordion-item"],
+}
+
+
+# Pico-navnerommet — portert ORDRETT fra code2web/ui.py:3751-3808 (se
+# pyodide/ui.py for den fulle "bevisst forenkling"-kommentaren om
+# input/textarea/select-placeholder-varten som er DROPPET her med vilje).
+PICO_HTML_ELEMENTS = frozenset((
+    "button input textarea select form fieldset legend label article aside "
+    "footer header main nav section"
+).split())
+
+PICO_COMPONENT_CLASSES = {
+    "button": "btn", "input": "form-control", "textarea": "form-control",
+    "select": "form-control", "checkbox": "form-check-input",
+    "radio": "form-check-input", "range": "form-range", "progress": "progress",
+    "card": "card", "modal": "modal", "nav": "nav", "accordion": "accordion",
+    "tabs": "tabs", "dropdown": "dropdown", "form": "form",
+    "fieldset": "fieldset", "legend": "legend", "label": "form-label",
+    "group": "form-group", "grid": "grid", "container": "container",
+    "article": "article", "aside": "aside", "footer": "footer",
+    "header": "header", "main": "main", "section": "section",
+}
+
+PICO_UTILITY_CLASSES = {
+    "primary": "btn-primary", "secondary": "btn-secondary",
+    "contrast": "btn-contrast", "outline": "btn-outline", "ghost": "btn-ghost",
+    "small": "btn-sm", "large": "btn-lg", "full": "btn-full",
+    "loading": "btn-loading", "disabled": "btn-disabled",
+}
+
+
+def _pico_component(name):
+    """component_name -> f(*children, **kwargs) -> Element - se pyodide/
+    ui.py for den fulle docstringen."""
+    html_tag = name if name in PICO_HTML_ELEMENTS else "div"
+    pico_class = PICO_COMPONENT_CLASSES.get(name, name)
+
+    def _build(*children, **kwargs):
+        classes = [pico_class]
+        for key in list(kwargs.keys()):
+            if key in PICO_UTILITY_CLASSES:
+                classes.append(PICO_UTILITY_CLASSES[key])
+                del kwargs[key]
+        extra_cls = kwargs.pop("cls", None)
+        extra_cls = kwargs.pop("class_", extra_cls)
+        if extra_cls:
+            classes.append(str(extra_cls))
+        kwargs["cls"] = " ".join(classes)
+        return _tag_builder(html_tag)(*children, **kwargs)
+    return _build
+
+
+class _PicoNamespace:
+    """`ui.pico` (spec §4). Samme gate-i-instansen-begrunnelse som
+    _LibNamespace (MicroPython-avviket, se der)."""
+
+    def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
+        if not _has_import("pico"):
+            raise _not_imported_error("pico")
+        return _pico_component(name)
+
+
+# PEP 562 - modul-nivå __getattr__. Brython implementerer dette som en
+# generell språkfunksjon på ekte types.ModuleType-instanser (verifisert i
+# browser) — samme oppførsel/feilmeldinger som pyodide/ui.py, se der for
+# den fulle kommentaren.
+def __getattr__(name):
+    if name.startswith("_"):
+        raise AttributeError("module 'ui' has no attribute '" + name + "'")
+    if name == "sl":
+        if not _has_import("sl"):
+            raise _not_imported_error("sl")
+        return _LibNamespace("sl", _SL_ACCEPTS)
+    if name == "pico":
+        if not _has_import("pico"):
+            raise _not_imported_error("pico")
+        return _PicoNamespace()
+    if _has_import(name):
+        return _LibNamespace(name)
+    # Samme feiltekst som sl/pico-grenene over (og ui.lib(), som ruter
+    # gjennom akkurat denne funksjonen) - ÉN feilformulering for "ikke
+    # importert", uansett hvilken vei den nås fra.
+    raise _not_imported_error(name)
+
+
+def lib(name):
+    """ui.lib(navn) - eksplisitt funksjonsform (spec §4: "also available
+    for symmetry") - se pyodide/ui.py for den fulle docstringen."""
+    return __getattr__(str(name))

@@ -403,6 +403,8 @@ window.M2PY_I18N.en = {
   "Datasett-navn må starte med bokstav eller _ og kun inneholde bokstaver, tall og _.": "Dataset names must start with a letter or _ and contain only letters, digits and _.",
   "Sjekker pakker…": "Checking packages…",
   "Installerer {pkg}…": "Installing {pkg}…",
+  "#tag.import: ugyldig angivelse: {spec}": "#tag.import: invalid spec: {spec}",
+  "#tag.import: kunne ikke laste {spec} ({feil})": "#tag.import: could not load {spec} ({feil})",
   "Oversetter…": "Translating…",
   "WebR er ikke klar ennå. Vent litt og prøv igjen.": "WebR is not ready yet. Wait a moment and try again.",
   "Oversettelseadvarsler:": "Translation warnings:",

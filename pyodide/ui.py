@@ -616,13 +616,22 @@ class Element:
     (spec §2) til å avgjøre "dette er et monterbart element, ikke en
     vanlig verdi å repr-printe"."""
 
-    def __init__(self, el_id):
+    def __init__(self, el_id, tag=None):
         self._openstat_el_id = el_id
         # Python-sidens speil av class-settet - add_class/remove_class
         # (under) må kjenne HELE det gjeldende settet for å kunne sende
         # en fullstendig erstatnings-streng til elSetProps (JS eier ikke
         # et strukturert class-sett, bare selve attributt-STRENGEN).
         self._classes = set()
+        # ui-html-fasen (Task 4, spec §4): elementets EGEN tag (f.eks.
+        # "div" eller "sl-button") - satt av _tag_builder/_lib_tag_builder
+        # ved opprettelse, None for elementer bygget på annet vis (aldri
+        # antatt/gjettet i etterkant). Brukes KUN til `accepts`-
+        # barn-whitelist-validering (_validate_accepts under) - portert fra
+        # code2web/ui.py:3320-3380 sin "er dette en gyldig barn-tag for
+        # denne komponenten"-sjekk, generalisert til å virke via SAMME
+        # Element-klasse som ui.html bruker (ingen egen sl-Element-klasse).
+        self._openstat_tag = tag
 
     def add(self, *children):
         """Legg til flere barn (samme regler som konstruktørens
@@ -737,7 +746,7 @@ def _tag_builder(tag):
                 el_id = u.elCreate(tag, json.dumps(norm))
             except Exception:
                 el_id = None
-        el = Element(el_id)
+        el = Element(el_id, tag=tag)
         cls_attr = norm.get("attrs", {}).get("class")
         if cls_attr:
             el._classes.update(str(cls_attr).split())
@@ -767,3 +776,281 @@ class _HtmlNamespace:
 
 
 html = _HtmlNamespace()
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# #tag.import - kuratert register + dynamiske navnerom (ui-html-fasen,
+# Task 4, spec §4)
+#
+# Selve LASTINGEN (script/link-injeksjon, TAG_IMPORT_REGISTRY med pinnede
+# jsdelivr-URL-er, idempotens) skjer JS-side (index.html sin
+# mdEnsureTagImports() - kjørt FØR brukerkoden, ved alle kjøreveiene som
+# allerede ensure'er pyodide/ui.py selv). Denne fila vet bare to ting:
+# (1) er navnerommet `ns` faktisk lastet (Ui.hasImport, satt av
+# mdEnsureTagImports ved suksess), og (2) hvordan man bygger
+# `<prefix>-<kebab(navn)>`-elementer via SAMME element-motor/kwargs-standard
+# som ui.html - _LibNamespace/_lib_tag_builder under.
+# ══════════════════════════════════════════════════════════════════════════
+
+def _has_import(ns):
+    """Ui.hasImport(ns) over broen - se js/ui.js sin docstring. False (ikke
+    en feil) ved: ingen window/Ui (ikke i nettleser/ikke lastet ennå), ELLER
+    en utdatert js/ui.js uten hasImport (samme defensive konvensjon som
+    resten av fila - degraderer stille til False, aldri en krasj)."""
+    u = _ui()
+    if u is None:
+        return False
+    try:
+        return bool(u.hasImport(str(ns)))
+    except Exception:
+        return False
+
+
+def _not_imported_error(navn):
+    """Samme feiltekst uansett hvor den kastes fra (modul-__getattr__ HER,
+    ELLER - MicroPython-avviket, se ui_mpy.py sin header-kommentar -
+    _LibNamespace/_PicoNamespace sin EGEN __getattr__) - spec §4: "clear
+    error naming the #tag.import line to add"."""
+    return AttributeError(
+        'ui.' + str(navn) + ': ikke importert - legg til "#tag.import = '
+        + str(navn) + '" (eller for et generisk bibliotek: "#tag.import = '
+        '<url> as ' + str(navn) + '") i preambelen')
+
+
+def _validate_accepts(prefix, name, accepted, children):
+    """`accepts`-barn-whitelist-validering (spec §4, portert fra
+    code2web/ui.py:3320-3380 sitt `_component_definitions`) - varsler (ALDRI
+    blokkerer, speiler code2web sin egen ikke-fatale "may not be a valid
+    child"-oppførsel) når et Element-barn av en KJENT komponent har en tag
+    utenfor den kuraterte lista. `accepted` er None/tom for en UKJENT
+    komponent (spec: "unknown sl-names -> generic sl-*") - da skjer INGEN
+    validering i det hele tatt, uansett hvilke barn som gis. Samme ett-nivås
+    flating som _append_children (spec §1) - en dobbelt-nøstet liste er
+    allerede _append_children sitt eget varselansvar, ikke denne
+    funksjonens."""
+    if not accepted:
+        return
+    flat = []
+    for child in children:
+        if isinstance(child, (list, tuple)):
+            flat.extend(child)
+        else:
+            flat.append(child)
+    for child in flat:
+        child_tag = getattr(child, "_openstat_tag", None)
+        if child_tag is not None and child_tag not in accepted:
+            _warn(
+                'ui.' + prefix + '.' + name + ': "' + child_tag + '" er '
+                'kanskje ikke en gyldig barn-tag her (forventet en av: '
+                + ", ".join(accepted) + ")")
+
+
+def _lib_tag_builder(tag, prefix=None, name=None, accepted=None):
+    """Som _tag_builder (ui.html), men for et #tag.import-lastet biblioteks
+    egen tag (f.eks. "sl-button") + valgfri accepts-validering
+    (_validate_accepts) FØR barna faktisk appendes. `prefix`/`name` er kun
+    til varselteksten (ikke til selve byggingen - `tag` er allerede den
+    fullstendige, sammensatte kebab-tag-strengen)."""
+    def _build(*children, **kwargs):
+        norm, handlers, warnings = _normalize_kwargs(kwargs)
+        for w in warnings:
+            _warn(w)
+        if children and accepted:
+            _validate_accepts(prefix, name, accepted, children)
+        u = _ui()
+        el_id = None
+        if u is not None:
+            try:
+                el_id = u.elCreate(tag, json.dumps(norm))
+            except Exception:
+                el_id = None
+        el = Element(el_id, tag=tag)
+        cls_attr = norm.get("attrs", {}).get("class")
+        if cls_attr:
+            el._classes.update(str(cls_attr).split())
+        if children:
+            el.add(*children)
+        for event, handler in handlers:
+            el.on(event, handler)
+        return el
+    return _build
+
+
+class _LibNamespace:
+    """`ui.<navn>` for et #tag.import-lastet bibliotek (spec §4).
+    `__getattr__(navn)` -> byggerfunksjon for `<prefix>-<kebab(navn)>`, via
+    SAMME element-motor/kwargs-standard som ui.html (_lib_tag_builder).
+
+    Gate HER (i tillegg til modul-__getattr__ sin gate under) med vilje -
+    se ui_mpy.py sin header-kommentar: MicroPython-fasaden har INGEN
+    modul-__getattr__ i det hele tatt (den er forhåndsinstansiert der), så
+    denne instans-__getattr__-gaten er den ENESTE gaten som fyrer i den
+    fasaden. Harmløst dobbelt-sjekket i pyodide/brython (modul-__getattr__
+    har allerede gatet FØR denne klassen i det hele tatt instansieres der).
+
+    `accepts` (kun satt for "sl", spec §4): valgfritt
+    {kebab-navn: [aksepterte barn-tagger]} - portert fra
+    code2web/ui.py:3320-3380."""
+
+    def __init__(self, prefix, accepts=None):
+        self._prefix = prefix
+        self._accepts = accepts or {}
+
+    def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
+        if not _has_import(self._prefix):
+            raise _not_imported_error(self._prefix)
+        kebab = name.replace("_", "-")
+        tag = self._prefix + "-" + kebab
+        return _lib_tag_builder(tag, prefix=self._prefix, name=name,
+                                 accepted=self._accepts.get(kebab))
+
+
+# shoelace sin accepts-whitelist (spec §4, portert ORDRETT fra
+# code2web/ui.py:3320-3380 sin `_component_definitions` - samme komponenter,
+# samme aksepterte barn-tagger). Nøklene er kebab-navnet (dvs. det som står
+# ETTER "sl-" i den fulle tag-strengen / det du skriver som
+# ui.sl.button_group(...) -> "button-group"). Komponenter UTENFOR denne
+# dicten er "unknown sl-names -> generic sl-*" (spec) - ingen
+# barn-validering i det hele tatt, bygges likevel fint via _lib_tag_builder.
+_SL_ACCEPTS = {
+    "select": ["sl-option"],
+    "dropdown": ["sl-menu-item"],
+    "button-group": ["sl-button", "button"],
+    "card": ["sl-card-header", "sl-card-body", "sl-card-footer",
+             "div", "p", "h1", "h2", "h3", "h4", "h5", "h6"],
+    "form": ["sl-input", "sl-textarea", "sl-select", "sl-checkbox",
+             "sl-radio", "sl-button", "sl-button-group"],
+    "dialog": ["sl-dialog-header", "sl-dialog-body", "sl-dialog-footer",
+               "div", "p"],
+    "tabs": ["sl-tab", "sl-tab-panel"],
+    "accordion": ["sl-accordion-item"],
+}
+
+
+# Pico-navnerommet (spec §4: "CSS-class mapping onto plain elements -
+# inherently curated, not generic") - IKKE en _LibNamespace (Pico er ikke
+# custom-elements, bare vanlige HTML-tagger + klasser). Portert ORDRETT
+# (samme klassenavn/nøkler - bevisst IKKE "korrigert" mot ekte Pico CSS sin
+# faktiske klasseløse konvensjon; spec ber om en PORT av code2web sitt kart,
+# ikke en nyskriving) fra code2web/ui.py:3751-3808 sin `_PicoNamespace`.
+#
+# Bevisst FORENKLING i selve BYGGINGEN (ikke i klassekartet): code2web sin
+# variant har en egen "gjett hva det første positional-argumentet betyr"-
+# spesialbehandling per komponent (placeholder for input/textarea, en
+# disabled/selected <option> for select, ellers textContent) - DROPPET her.
+# spec §1 sin "unified kwargs standard (fixes code2web's warts)" definerer
+# ÉN generell regel for positional varargs (children - streng blir
+# tekstnode, spec §1) som ALLEREDE er den ubetingede oppførselen for
+# ui.html/ui.sl/enhver annen ui.<navn> - å la PICO ALENE ha en avvikende
+# regel ville brutt "samme element-motor/kwargs-standard for alle" (denne
+# task-spec-linja), så Pico sitt EGET bidrag er BARE klassekartleggingen,
+# ikke input-gjetting-varten. Dokumentert avvik, ikke en forglemmelse.
+PICO_HTML_ELEMENTS = frozenset((
+    "button input textarea select form fieldset legend label article aside "
+    "footer header main nav section"
+).split())
+
+PICO_COMPONENT_CLASSES = {
+    "button": "btn", "input": "form-control", "textarea": "form-control",
+    "select": "form-control", "checkbox": "form-check-input",
+    "radio": "form-check-input", "range": "form-range", "progress": "progress",
+    "card": "card", "modal": "modal", "nav": "nav", "accordion": "accordion",
+    "tabs": "tabs", "dropdown": "dropdown", "form": "form",
+    "fieldset": "fieldset", "legend": "legend", "label": "form-label",
+    "group": "form-group", "grid": "grid", "container": "container",
+    "article": "article", "aside": "aside", "footer": "footer",
+    "header": "header", "main": "main", "section": "section",
+}
+
+PICO_UTILITY_CLASSES = {
+    "primary": "btn-primary", "secondary": "btn-secondary",
+    "contrast": "btn-contrast", "outline": "btn-outline", "ghost": "btn-ghost",
+    "small": "btn-sm", "large": "btn-lg", "full": "btn-full",
+    "loading": "btn-loading", "disabled": "btn-disabled",
+}
+
+
+def _pico_component(name):
+    """component_name -> f(*children, **kwargs) -> Element (spec §4: "plain
+    tags + pico classes"). HTML-tag = `name` selv hvis den er i
+    PICO_HTML_ELEMENTS, ellers "div" (code2web-varten sin regel, linje
+    3808). pico_class = PICO_COMPONENT_CLASSES.get(name, name) - et UKJENT
+    name får sitt eget navn som klasse (code2web sin fallback, linje 3814).
+    Utility-kwargs (primary=True/secondary=True/...) legges til som EKSTRA
+    klasser og fjernes FØR resten når over til _tag_builder (de er ikke
+    ekte DOM-props)."""
+    html_tag = name if name in PICO_HTML_ELEMENTS else "div"
+    pico_class = PICO_COMPONENT_CLASSES.get(name, name)
+
+    def _build(*children, **kwargs):
+        classes = [pico_class]
+        for key in list(kwargs.keys()):
+            if key in PICO_UTILITY_CLASSES:
+                classes.append(PICO_UTILITY_CLASSES[key])
+                del kwargs[key]
+        extra_cls = kwargs.pop("cls", None)
+        extra_cls = kwargs.pop("class_", extra_cls)
+        if extra_cls:
+            classes.append(str(extra_cls))
+        kwargs["cls"] = " ".join(classes)
+        return _tag_builder(html_tag)(*children, **kwargs)
+    return _build
+
+
+class _PicoNamespace:
+    """`ui.pico` (spec §4). `__getattr__` over VILKÅRLIG navn - code2web
+    sin variant har ingen fast medlemsliste (ethvert navn blir enten et av
+    PICO_HTML_ELEMENTS eller <div class="{navn}">, se _pico_component sin
+    egen fallback). Samme gate-i-instansen-begrunnelse som _LibNamespace
+    (MicroPython-avviket, se der)."""
+
+    def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
+        if not _has_import("pico"):
+            raise _not_imported_error("pico")
+        return _pico_component(name)
+
+
+# PEP 562 - modul-nivå __getattr__ (kun pyodide/brython - se ui_mpy.py sin
+# header-kommentar for MicroPython-avviket: INGEN modul-__getattr__ der,
+# sl/pico er forhåndsinstansierte modul-attributter i stedet, og generiske
+# #tag.import-navn er KUN nåbare via ui.lib(navn), ikke ui.<navn>).
+#
+# ui.sl / ui.pico / ui.<et hvilket som helst #tag.import-lastet generisk
+# navn> løses HER, LAZY - navnerommet finnes bare når det tilsvarende
+# #tag.import faktisk ble lastet (Ui.hasImport, satt av index.html sin
+# mdEnsureTagImports ved KJØRETID, FØR brukerkoden - se modulens
+# toppkommentar). Ukjent/ikke-importert navn -> AttributeError som navngir
+# #tag.import-linja å legge til (spec: "Namespaces exist lazily... raises a
+# clear error naming the #tag.import line to add").
+def __getattr__(name):
+    if name.startswith("_"):
+        raise AttributeError("module 'ui' has no attribute '" + name + "'")
+    if name == "sl":
+        if not _has_import("sl"):
+            raise _not_imported_error("sl")
+        return _LibNamespace("sl", _SL_ACCEPTS)
+    if name == "pico":
+        if not _has_import("pico"):
+            raise _not_imported_error("pico")
+        return _PicoNamespace()
+    if _has_import(name):
+        return _LibNamespace(name)
+    # Samme feiltekst som sl/pico-grenene over (og ui.lib(), som ruter
+    # gjennom akkurat denne funksjonen) - ÉN feilformulering for "ikke
+    # importert", uansett hvilken vei den nås fra (forenkling, ikke en
+    # egen "ukjent attributt"-variant).
+    raise _not_imported_error(name)
+
+
+def lib(name):
+    """ui.lib(navn) - eksplisitt FUNKSJONSFORM av nøyaktig samme oppslag som
+    modul-__getattr__ over (spec §4: "ui.lib() also available for
+    symmetry") - nyttig når navnet er en PYTHON-VERDI (variabel) i stedet
+    for et bokstavelig attributtnavn (`ui.<navn>` krever et syntaktisk
+    identifikatornavn; `ui.lib(en_variabel)` gjør ikke det). Samme
+    feil/gate-oppførsel som __getattr__ - IKKE en egen sti."""
+    return __getattr__(str(name))

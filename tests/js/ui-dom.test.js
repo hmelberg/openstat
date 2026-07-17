@@ -2072,6 +2072,36 @@ test('Task 1: Ui.value — duplikate navn på tvers av celler/dokument: SIST REG
   assert.strictEqual(warns.length, 1);
 });
 
+// ---- Ui.hasImport (ui-html-fasen, Task 4, spec §4) -------------------------
+
+test('Task 4: Ui.hasImport — false når __uiImports mangler helt (ingen import kjørt ennå)', () => {
+  const { Ui } = freshEnv();
+  delete global.__uiImports;
+  assert.strictEqual(Ui.hasImport('sl'), false);
+});
+
+test('Task 4: Ui.hasImport — false for et navn __uiImports IKKE har', () => {
+  const { Ui } = freshEnv();
+  global.__uiImports = { sl: true };
+  assert.strictEqual(Ui.hasImport('pico'), false);
+  delete global.__uiImports;
+});
+
+test('Task 4: Ui.hasImport — true for et navn satt til true (mdEnsureTagImports sin suksess-markør)', () => {
+  const { Ui } = freshEnv();
+  global.__uiImports = { sl: true, acme: true };
+  assert.strictEqual(Ui.hasImport('sl'), true);
+  assert.strictEqual(Ui.hasImport('acme'), true);
+  delete global.__uiImports;
+});
+
+test('Task 4: Ui.hasImport — aldri kaster (bare Object med rar shape)', () => {
+  const { Ui } = freshEnv();
+  global.__uiImports = 'ikke-et-objekt';
+  assert.strictEqual(Ui.hasImport('sl'), false);
+  delete global.__uiImports;
+});
+
 // ---- data-ui-key (identitet, spec-krav) ------------------------------------
 
 test('Task 1: registerControl — bygde kontroller får data-ui-key = controlKey', () => {

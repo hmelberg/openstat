@@ -775,6 +775,34 @@ test('parseCells: duplisert tag-nøkkel — siste vinner også i merge (ingen fa
   assert.ok(/duplisert/.test(p.warnings[0]));
 });
 
+// ui-html-fasen (Task 4, spec §4): '#tag.import' er kjent (ingen "ukjent
+// attributt"-varsel), men gjelder KUN preambelen — en forekomst i en
+// celleblokk varsles eksplisitt og bakes ALDRI inn i cell.attrs.
+test('parseCells: #tag.import i en celleblokk varsles ("gjelder bare i preambelen") og droppes fra attrs', () => {
+  const p = C.parseCells('#%% python\n#tag.import = shoelace\nx = 1');
+  const c = p.cells[0];
+  assert.strictEqual(c.attrs.import, undefined);
+  assert.strictEqual(p.warnings.length, 1);
+  assert.ok(/^linje 2: #tag\.import gjelder bare i preambelen$/.test(p.warnings[0]));
+});
+
+test('parseCells: #tag.import i preambelen gir INGEN "ukjent attributt"-varsel', () => {
+  const p = C.parseCells('#tag.import = shoelace\n#%% python\nx = 1');
+  assert.deepStrictEqual(p.warnings, []);
+});
+
+// mdCollectTagImports (index.html) skanner preambelen DIREKTE med
+// scanTagBlock(pre, true) og leser entries (repeterbar, IKKE tags-kartet,
+// som ville dedupliseres til "siste vinner") — denne testen dokumenterer
+// nøyaktig kontrakten den konsumenten er bygget på.
+test('scanTagBlock preambel: gjentatt #tag.import gir FLERE entries (repeterbar, ikke deduplisert i tags), INGEN duplikat-varsel', () => {
+  const s = C.scanTagBlock('#tag.import = shoelace\n#tag.import = pico', true);
+  const imports = s.entries.filter((e) => e.key === 'import').map((e) => e.value);
+  assert.deepStrictEqual(imports, ['shoelace', 'pico']);
+  assert.strictEqual(s.tags.import, 'pico'); // tags-kartet dedupliserer (siste vinner) — entries gjør ikke
+  assert.deepStrictEqual(s.warnings, []); // 'import' er unntatt duplikat-varselet (repeterbar med vilje)
+});
+
 test('parseCells sniffing: lone-string """-celle → md; docstring + kode forblir kode', () => {
   const md = C.parseCells('#%%\n"""\n# Overskrift\ntekst\n"""');
   assert.strictEqual(md.cells[0].type, 'md');

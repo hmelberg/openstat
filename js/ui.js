@@ -1068,6 +1068,25 @@
     };
 
     /**
+     * Ui.hasImport(ns) → true/false (ui-html-fasen, Task 4, spec §4):
+     * er navnerommet `ns` (f.eks. "sl"/"pico"/et generisk `as navn`-navn)
+     * faktisk lastet? Leser `window.__uiImports` — satt av index.html sin
+     * mdEnsureTagImports() KUN ved vellykket lasting av det tilhørende
+     * '#tag.import'-oppslaget (aldri optimistisk FØR lastingen er ferdig).
+     * Guardet mot at __uiImports ikke finnes ennå (ingen import kjørt i
+     * dette dokumentet) — fasadenes `ui.sl`/`ui.pico`/`ui.<navn>`
+     * modul-`__getattr__` kaller denne FØR de bygger navnerom-objektet,
+     * og skal da få et rent `false`, ikke en TypeError.
+     */
+    Ui.hasImport = function (ns) {
+      try {
+        return !!(global.__uiImports && global.__uiImports[String(ns)]);
+      } catch (e) {
+        return false;
+      }
+    };
+
+    /**
      * Ui.bindControlHandler(key, handler) — widget-callable-kanalen
      * (ui-html-fasen, Task 1): binder `handler` (en JS-funksjon — pyodide-
      * fasaden sender en create_proxy-innpakket python-callable, brython/mpy
