@@ -61,6 +61,25 @@ test('parseHeader: widgets — top/bottom/left gyldig, andre verdier advarer (wi
   assert.strictEqual(bad.attrs.widgets, 'weird', 'verdien beholdes selv om den advarer (samme filosofi som style)');
 });
 
+test('parseHeader: cols — gyldig heltall 2-6 lagres som streng', () => {
+  assert.deepStrictEqual(C.parseHeader('#%% python cols=3').attrs, { cols: '3' });
+  assert.deepStrictEqual(C.parseHeader('#%% python cols=3').warnings, []);
+  assert.deepStrictEqual(C.parseHeader('#%% python cols=2').warnings, []);
+  assert.deepStrictEqual(C.parseHeader('#%% python cols=6').warnings, []);
+});
+
+test('parseHeader: cols — ugyldig verdi (utenfor 2-6 eller ikke-heltall) advarer OG droppes (speiler id)', () => {
+  const tooLow = C.parseHeader('#%% python cols=1');
+  assert.match(tooLow.warnings[0], /ugyldig cols: 1 \(2-6\)/);
+  assert.strictEqual(tooLow.attrs.cols, undefined);
+  const tooHigh = C.parseHeader('#%% python cols=7');
+  assert.match(tooHigh.warnings[0], /ugyldig cols: 7 \(2-6\)/);
+  assert.strictEqual(tooHigh.attrs.cols, undefined);
+  const notInt = C.parseHeader('#%% python cols=abc');
+  assert.match(notInt.warnings[0], /ugyldig cols: abc \(2-6\)/);
+  assert.strictEqual(notInt.attrs.cols, undefined);
+});
+
 test('parseHeader: ukjent første token er attr, ikke type', () => {
   const h = C.parseHeader('#%% notatype');
   assert.strictEqual(h.type, null);
@@ -698,6 +717,16 @@ test('scanTagBlock: ugyldig type/id droppes med varsel; ukjent style lagres med 
   assert.strictEqual(s.warnings.length, 3);
 });
 
+test('scanTagBlock: ugyldig cols droppes med varsel (speiler id); gyldig cols lagres', () => {
+  const bad = C.scanTagBlock('#tag.cols = 7\n#tag.speak = hei', false);
+  assert.strictEqual(bad.tags.cols, undefined);
+  assert.strictEqual(bad.warnings.length, 1);
+  assert.match(bad.warnings[0].msg, /ugyldig cols: 7 \(2-6\)/);
+  const ok = C.scanTagBlock('#tag.cols = 3', false);
+  assert.strictEqual(ok.tags.cols, '3');
+  assert.deepStrictEqual(ok.warnings, []);
+});
+
 test('scanTagBlock: duplisert nøkkel — siste vinner, varsel', () => {
   const s = C.scanTagBlock('#tag.slide = 1\n#tag.slide = 2', false);
   assert.strictEqual(s.tags.slide, '2');
@@ -765,6 +794,28 @@ test('parseCells: header vinner over tag — verdi beholdes, varsel med absolutt
   assert.strictEqual(p.warnings.length, 2);
   assert.ok(p.warnings.some((w) => /^linje 2: #tag\.slide overstyrt av #%%-attributt$/.test(w)));
   assert.ok(p.warnings.some((w) => /^linje 3: #tag\.type overstyrt av #%%-typen$/.test(w)));
+});
+
+test('parseCells: #tag.cols = 2 merges inn i attrs', () => {
+  const p = C.parseCells('#%% python\n#tag.cols = 2\nx = 1');
+  assert.strictEqual(p.cells[0].attrs.cols, '2');
+  assert.deepStrictEqual(p.warnings, []);
+});
+
+test('parseCells: header vinner over #tag.cols', () => {
+  const p = C.parseCells('#%% python cols=4\n#tag.cols = 2\nx = 1');
+  const c = p.cells[0];
+  assert.strictEqual(c.attrs.cols, '4');
+  assert.strictEqual(p.warnings.length, 1);
+  assert.ok(p.warnings.some((w) => /^linje 2: #tag\.cols overstyrt av #%%-attributt$/.test(w)));
+});
+
+test('parseCells preambel-default: #tag.cols i preambelen er en legitim dokument-default (alle celler 2-kolonne)', () => {
+  const src = '#tag.cols = 2\n# load x\n\n#%%\nx = 1\n#%% python cols=5\ny = 2';
+  const p = C.parseCells(src);
+  assert.strictEqual(p.cells[0].attrs.cols, undefined, 'preambelen selv røres ikke');
+  assert.strictEqual(p.cells[1].attrs.cols, '2', 'celle uten egen cols arver preambel-defaulten');
+  assert.strictEqual(p.cells[2].attrs.cols, '5', 'celle med egen cols beholder sin egen verdi');
 });
 
 test('parseCells: duplisert tag-nøkkel — siste vinner også i merge (ingen falskt overstyrt-varsel)', () => {

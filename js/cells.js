@@ -21,10 +21,18 @@
   // nøkkel (unngår "ukjent attributt"-varselet), men er PREAMBEL-ONLY —
   // se parseCells() sin post-pass under, som varsler eksplisitt når den
   // dukker opp i en celleblokk i stedet for å bake den inn i cell.attrs.
-  var KNOWN_KEYS = { id: 1, style: 1, slide: 1, speak: 1, rerun: 1, sync: 1, widgets: 1, import: 1 };
+  // cols (Task 4, spec §4) — dash-gridens enkle arvtaker: heltall 2-6, gjør
+  // .nb-output-body til et grid som lar flere mounted payloads/elementer
+  // flyte i kolonner (docCellNode/app.css under). Ugyldig verdi (ikke et
+  // heltall 2-6) speiler id sin "droppes"-semantikk (se COLS_VALUES-sjekkene
+  // i parseHeader/scanTagBlock) i stedet for style/widgets sin "behold verdi,
+  // bare varsle" — en cols-klasse kan ikke finnes for en verdi CSS-en ikke
+  // har en regel for, så attributten må utelates helt, ikke bare varsles om.
+  var KNOWN_KEYS = { id: 1, style: 1, slide: 1, speak: 1, rerun: 1, sync: 1, widgets: 1, import: 1, cols: 1 };
   var KNOWN_FLAGS = { 'hide-code': 1, 'hide-output': 1, slide: 1 };
   var STYLES = { note: 1, warn: 1, card: 1 };
   var WIDGETS_POS = { top: 1, bottom: 1, left: 1 };
+  var COLS_VALUES = { 2: 1, 3: 1, 4: 1, 5: 1, 6: 1 };
   C.WIDGETS_POS = WIDGETS_POS;
   var ID_RE = /^[A-Za-z0-9_-]+$/;
   // Fase A: modusene der notebook-rendring og segmentkjøring er støttet.
@@ -86,6 +94,7 @@
         var val = tok.slice(eq + 1);
         if (!KNOWN_KEYS[key]) res.warnings.push('ukjent attributt: ' + key);
         if (key === 'id' && !ID_RE.test(val)) { res.warnings.push('ugyldig id: ' + val); return; }
+        if (key === 'cols' && !COLS_VALUES[val]) { res.warnings.push('ugyldig cols: ' + val + ' (2-6)'); return; }
         if (key === 'style' && !STYLES[val]) res.warnings.push('ukjent style: ' + val);
         if (key === 'widgets' && !WIDGETS_POS[val]) res.warnings.push('ukjent widgets-plassering: ' + val);
         res.attrs[key] = val;
@@ -179,6 +188,10 @@
           res.warnings.push({ line: i, msg: 'ugyldig id: ' + val });
           continue;                             // speiler parseHeader: ugyldig id droppes
         }
+      }
+      if (key === 'cols' && !COLS_VALUES[val]) {
+        res.warnings.push({ line: i, msg: 'ugyldig cols: ' + val + ' (2-6)' });
+        continue;                               // speiler parseHeader: ugyldig cols droppes
       }
       if (key === 'style' && !STYLES[val]) res.warnings.push({ line: i, msg: 'ukjent style: ' + val });
       if (key === 'widgets' && !WIDGETS_POS[val]) res.warnings.push({ line: i, msg: 'ukjent widgets-plassering: ' + val });
@@ -1278,6 +1291,10 @@
       wrap.dataset.idx = String(idx);
       if (c.attrs.style && /^(note|warn|card)$/.test(c.attrs.style)) wrap.classList.add('nb-style-' + c.attrs.style);
       if (c.attrs['hide-output']) wrap.classList.add('nb-hide-output');
+      // cols (Task 4, spec §4): verdien er allerede validert (heltall 2-6,
+      // ellers droppet av parseHeader/scanTagBlock over) — trygg å bruke
+      // direkte i klassenavnet uten en ny range-sjekk her.
+      if (c.attrs.cols) wrap.classList.add('nb-cols-' + c.attrs.cols);
       var out = el('div', 'nb-output');
       var widgetsPos = WIDGETS_POS[c.attrs.widgets] ? c.attrs.widgets : 'top';
       out.classList.add('nb-widgets-' + widgetsPos);
@@ -1438,6 +1455,19 @@
       // Task 3-review-funn 4 (Minor): doc-baren sine parse-varsler holdes
       // ferske gjennom in-place-grenen — se updateWarnings sin egen kommentar.
       updateWarnings(parsed.warnings);
+      // Wrap-attr in-place-etterslep (kjent, akseptert — samme kategori som
+      // doc-bar-etterslepet over var FØR Task 3-review-funn 4 rettet nettopp
+      // DEN ene): style/hide-output/widgets/cols (Task 4, spec §4) bakes alle
+      // inn i selve WRAP/OUT-noden av docCellNode, men denne grenen overfører
+      // kun _out/_wrap-REFERANSENE til de gamle nodene (linjene rett under) —
+      // den skriver aldri klasselisten på nytt. En #tag-ENDRING av en av disse
+      // fire i cellekroppen (uten at headerRaw eller effektiv type endrer
+      // seg, se sniff-porten over) etterlater derfor de gamle nb-style-/
+      // nb-hide-output/nb-widgets-/nb-cols-klassene inntil neste STRUKTURELLE
+      // rendring (docRender), som alltid bygger ferske wrap-noder fra ferske
+      // attrs. Akseptert: en full wrap-klasse-resync her ville krevd å lese
+      // cell.attrs på nytt for HVER untouched celle og differensiere mot
+      // wrap.classList — en kostnad ingen bruker har bedt om ennå.
       for (var i = 0; i < newCells.length; i++) {
         var oldC = oldCells[i], c = newCells[i];
         // Slot-identitet overlever (spec §1 "leave untouched cells' slots

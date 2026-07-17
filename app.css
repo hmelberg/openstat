@@ -1176,6 +1176,21 @@
 .nb-style-note { border-left: 4px solid #4a90d9; }
 .nb-style-warn { border-left: 4px solid #d9a54a; }
 .nb-style-card { box-shadow: 0 1px 4px rgba(0,0,0,.15); }
+/* cols= (Task 4, spec §4) er dash-gridens enkle arvtaker — direkte barn av
+   .nb-output-body (kpi-kort, ui.html-noder, andre mountede payloads/
+   elementer) flyter i N kolonner i stedet for å stables under hverandre.
+   #%% html-grid + .show(target=) er power-mønsteret for alt mosaic-
+   layoutet dekket (nøstede grid-arealer, ujevne kolonnebredder, …) — dette
+   er kun den vanlige, jevne N-kolonners rutenett-saken. Klassen sitter på
+   selve .nb-cell-wrapperen (docCellNode) og styrer .nb-output-body via
+   etterkommer-selektoren, samme mønster som .nb-hide-output/.nb-style-*
+   over. Verdien er allerede validert til et heltall 2-6 av js/cells.js
+   (parseHeader/scanTagBlock) — ugyldige verdier gir aldri en klasse her. */
+.nb-cols-2 .nb-output-body { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.nb-cols-3 .nb-output-body { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.nb-cols-4 .nb-output-body { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.nb-cols-5 .nb-output-body { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.nb-cols-6 .nb-output-body { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; align-items: start; }
 .nb-chip { position: absolute; right: 12px; top: 8px; z-index: 6; font-size: 12px;
   padding: 3px 10px; border: 1px solid var(--border); border-radius: 12px;
   background: var(--bg-code); color: inherit; cursor: pointer; }

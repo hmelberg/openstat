@@ -603,6 +603,17 @@ test('skip-celler utelates; hide-output skjuler wrapper; style-klasser følger m
   assert.ok(cells[1].classList.contains('nb-hide-output'));
 });
 
+test('docCellNode: cols=3 legger til nb-cols-3 på wrapperen; ugyldig cols gir ingen nb-cols-*-klasse', () => {
+  const { C, scriptInputEl, outputAreaEl } = freshEnv();
+  scriptInputEl.value = '#%% python cols=3\nx = 1\n#%% python cols=9\ny = 2\n#%% python\nz = 3\n';
+  C.init('python');
+  const cells = collectNodes(outputAreaEl, []).filter((n) => n.classList && n.classList.contains('doc-cell'));
+  assert.strictEqual(cells.length, 3);
+  assert.ok(cells[0].classList.contains('nb-cols-3'), 'gyldig cols=3 gir nb-cols-3');
+  assert.ok(!cells[1].className.split(/\s+/).some((c) => /^nb-cols-/.test(c)), 'ugyldig cols=9 gir ingen nb-cols-klasse (droppet av parseHeader)');
+  assert.ok(!cells[2].className.split(/\s+/).some((c) => /^nb-cols-/.test(c)), 'cols-løs celle er uendret');
+});
+
 test('exit() fjerner doc-root og gjenoppretter plain-oppførsel', () => {
   const { C, scriptInputEl, outputAreaEl } = freshEnv();
   scriptInputEl.value = '#%% python\nx = 1\n';
