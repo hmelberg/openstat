@@ -620,7 +620,7 @@
     window.t = window.t || function (s) { return s; };
     window.i18nField = window.i18nField || function (obj, field) { return obj && obj[field]; };
 
-    window.M2PY_VERSION = '2026-07-17a';
+    window.M2PY_VERSION = '2026-07-17b';
 
     // One-time migration: remove obsolete localStorage keys from previous milestones
     // Safe to delete this snippet after a few months when most users have re-loaded
@@ -7280,6 +7280,16 @@ def _show_one(obj):
     if isinstance(obj, (list, tuple)):
         for _x in obj:
             _show_one(_x)
+        return
+    # ui-html-fasen (Task 2, spec §2): "duck-type"-kontrakten for et
+    # ui.html-elementhåndtak (pyodide/ui.py sin Element, evt. brython/mpy-
+    # tvillingene, Task 3) - attributtet _openstat_el_id er ALDRI satt på
+    # noe annet enn et slikt håndtak. obj.show() (no-arg) monterer
+    # elementet inn i DEN KJØRENDE cellens output-slot - samme sti som
+    # brukerens eksplisitte .show()-kall (spec §2), her trigget av at
+    # elementet var siste bare-uttrykk i cellen.
+    if hasattr(obj, "_openstat_el_id"):
+        obj.show()
         return
     print(obj)
 def show(*args):
