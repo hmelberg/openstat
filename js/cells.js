@@ -980,26 +980,35 @@
       updateChip();
     };
 
+    // 4a (spec 2026-07-17 §2): tynn delegat — det konvergerte dokumentet har
+    // ingen egen notatbok-layout lenger (ingen .nb-input-halvdel å legge i
+    // kolonner/stables mot, se docCellNode), så "layout" betyr nå det samme
+    // for et notatbok-aktivt dokument som for et vanlig skript: appens egne
+    // primitiver (mdSetLayoutMode/mdSetInputHidden på .container). NB.layout
+    // beholdes likevel (presentExit sin prevLayout-gjenoppretting leser den,
+    // se C.presentStart under). Dobbelt-guardet — globalene kan mangle i
+    // stub-DOM-testene, samme mønster som resten av fila.
     C.setLayout = function (layout) {
       NB.layout = layout;
-      if (NB.root) {
-        NB.root.classList.remove('nb-layout-columns', 'nb-layout-stacked', 'nb-layout-output');
-        NB.root.classList.add('nb-layout-' + layout);
-        if (global.refreshPlotlyAfterLayout) global.refreshPlotlyAfterLayout();
-        // W-issue 1 fiks: kolonne↔stablet endrer bredden .nb-src bryter
-        // teksten mot (to kolonner vs. full bredde), så linjetallet — og
-        // dermed nødvendig høyde — må regnes om for hver celle på nytt.
-        autoSizeAll();
+      if (layout === 'output') {
+        if (global.mdSetInputHidden) global.mdSetInputHidden(true);
+      } else {
+        if (global.mdSetInputHidden) global.mdSetInputHidden(false);
+        if (global.mdSetLayoutMode) global.mdSetLayoutMode(layout === 'stacked' ? 'stacked' : 'columns');
       }
     };
 
-    // ---------- presentasjon (spec 2026-07-16-presentation-design.md §2) ----------
+    // ---------- presentasjon (spec 2026-07-16-presentation-design.md §2,
+    //            re-hostet på det konvergerte dokumentet i 4a §3) ----------
     // Layout-TILSTAND over samme rendrede dokument: ingen DOM-flytting —
-    // synlighet per celle via .nb-slide-hidden, editor-chrome skjules av
-    // .nb-present-CSS-en (nb-layout-output-oppskriften, app.css). Widgets/
-    // plots/dash blir stående i cellene sine og lever videre på sin slide.
-    // Stub-DOM-forbehold: document.body/addEventListener kan mangle i test-
-    // harnesset — samme dobbelt-guard som resten av fila bruker for globaler.
+    // synlighet per celle via .nb-slide-hidden. Editor-halvdelen (redigerings-
+    // ruta/panel-left, #resizer) finnes ikke lenger INNI dokumentet (den
+    // konvergerte doc-root har ingen .nb-input) — den skjules i stedet av
+    // body.present-active .panel-left/#resizer (app.css), satt/fjernet av
+    // presentStart/presentExit under. Widgets/plots/dash blir stående i
+    // cellene sine og lever videre på sin slide. Stub-DOM-forbehold:
+    // document.body/addEventListener kan mangle i test-harnesset — samme
+    // dobbelt-guard som resten av fila bruker for globaler.
 
     function presentApply() {
       var P = NB.present;
@@ -1091,8 +1100,9 @@
         }
         if (NB.trailing) NB.trailing.classList.remove('nb-slide-hidden');
       }
-      // Gjenopprett layouten fra før presentasjonen (setLayout re-appliserer
-      // nb-layout-klassen render()s className-reset ellers ville satt).
+      // Gjenopprett layouten fra før presentasjonen — setLayout (4a: tynn
+      // delegat til mdSetLayoutMode/mdSetInputHidden) driver app-
+      // primitivene direkte, samme vei som visningsmenyen selv bruker.
       C.setLayout(P.prevLayout || 'columns');
       if (global.mdSyncViewDropdown) {
         global.mdSyncViewDropdown(P.prevLayout === 'output' ? 'output' : (P.prevLayout || 'columns'));

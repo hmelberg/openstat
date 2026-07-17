@@ -162,6 +162,12 @@ function freshEnv() {
   btnRunEl.click = () => { btnRunClicks++; };
 
   global.document = {
+    // Task 4 (spec 2026-07-17 §3): presentStart/presentExit dytter/fjerner
+    // 'present-active' på document.body (guardet — mangler i mange av de
+    // andre testenes DOM-fake, se resten av fila) — eksponer bodyEl (samme
+    // node som isConnected-rot-sentinelen over) slik at present-active-
+    // testen faktisk kan observere klassen lande/forsvinne.
+    body: bodyEl,
     getElementById: (id) => {
       if (id === 'scriptInput') return scriptInputEl;
       if (id === 'btnRun') return btnRunEl;
@@ -187,6 +193,15 @@ function freshEnv() {
 
   global.mdIsInputHidden = undefined;
   global.mdIsStackedLayout = undefined;
+  // Task 4 (spec 2026-07-17 §2): C.setLayout er nå en tynn delegat til disse
+  // to app-primitivene (index.html sin initLayoutAndResizer) i stedet for å
+  // style .doc-root selv — call-recorder-stubber slik at presentExit/setLayout-
+  // testene kan se ETTER hvilke primitiver som ble kalt, med hvilke argumenter,
+  // i stedet for å inspisere klasser som ikke lenger settes her.
+  const layoutModeCalls = [];
+  const inputHiddenCalls = [];
+  global.mdSetLayoutMode = (mode) => { layoutModeCalls.push(mode); };
+  global.mdSetInputHidden = (hidden) => { inputHiddenCalls.push(hidden); };
   global.requestAnimationFrame = () => {};
   global.purgePlots = undefined;
   // B2-review-fiks 2: verktøylinje-handlerne sjekker nå mdIsScriptRunning()
@@ -207,7 +222,10 @@ function freshEnv() {
     outputAreaEl,
     wrapEl,
     btnRunEl,
+    bodyEl,
     getBtnRunClicks: () => btnRunClicks,
+    getLayoutModeCalls: () => layoutModeCalls.slice(),
+    getInputHiddenCalls: () => inputHiddenCalls.slice(),
     tick() { fakeNow += 1000; if (intervalCallback) intervalCallback(); },
     typeInput(newValue) {
       scriptInputEl.value = newValue;
@@ -1339,7 +1357,11 @@ test('present: klikk-soner navigerer, teller oppdateres, klemming i endene', () 
 });
 
 test('presentExit gjenoppretter layout og fjerner nav-noder + synlighetsklasser', () => {
-  const { C, scriptInputEl, containerEl } = freshEnv();
+  // Task 4 (spec 2026-07-17 §2): setLayout er nå en tynn delegat — den
+  // gjenopprettede layouten vises IKKE lenger som en nb-layout-*-klasse på
+  // .doc-root (den klasse-juggleringen er død), men som et kall til
+  // mdSetLayoutMode ('columns', prevLayout-standarden) + mdSetInputHidden(false).
+  const { C, scriptInputEl, containerEl, getLayoutModeCalls, getInputHiddenCalls } = freshEnv();
   scriptInputEl.value = '#%% md slide=1\nA\n#%% md slide=2\nB\n';
   C.init('python');
   C.presentStart();
@@ -1347,7 +1369,8 @@ test('presentExit gjenoppretter layout og fjerner nav-noder + synlighetsklasser'
   assert.strictEqual(C.presenting(), false);
   const root = nbRoot(containerEl);
   assert.ok(!root.classList.contains('nb-present'));
-  assert.ok(root.classList.contains('nb-layout-columns'));
+  assert.deepStrictEqual(getInputHiddenCalls(), [false], 'presentExit gjenoppretter synlig input via app-primitiven');
+  assert.deepStrictEqual(getLayoutModeCalls(), ['columns'], 'prevLayout ("columns", satt av presentStart) gjenopprettes via app-primitiven');
   assert.ok(!cellParts(containerEl, 1).wrap.classList.contains('nb-slide-hidden'));
   const nodes = collectNodes(root, []);
   assert.ok(!nodes.some((n) => n.classList && n.classList.contains('nb-present-nav')));
@@ -1416,6 +1439,48 @@ test('contentLoaded: #options.view = present auto-starter presentasjonen', () =>
   C.contentLoaded({ untrusted: true });
   assert.strictEqual(C.active(), true);
   assert.strictEqual(C.presenting(), true);
+});
+
+// ---- Task 4 (spec 2026-07-17 §2/§3): fem-visningsmenyen på app-primitivene
+//      + presentasjon re-hostet på det konvergerte dokumentet ----
+
+test('setLayout delegerer til app-primitivene (ingen nb-layout-*-klasser lenger)', () => {
+  const { C, scriptInputEl, containerEl, getLayoutModeCalls, getInputHiddenCalls } = freshEnv();
+  scriptInputEl.value = '#%% python\nx = 1\n';
+  C.init('python');
+  C.setLayout('stacked');
+  assert.deepStrictEqual(getInputHiddenCalls(), [false]);
+  assert.deepStrictEqual(getLayoutModeCalls(), ['stacked']);
+  const root = nbRoot(containerEl);
+  assert.ok(!root.classList.contains('nb-layout-stacked'), 'ingen nb-layout-klasse på doc-root lenger');
+
+  C.setLayout('output');
+  assert.deepStrictEqual(getInputHiddenCalls(), [false, true]);
+  assert.deepStrictEqual(getLayoutModeCalls(), ['stacked'], 'output kaller ikke mdSetLayoutMode');
+
+  C.setLayout('columns');
+  assert.deepStrictEqual(getInputHiddenCalls(), [false, true, false]);
+  assert.deepStrictEqual(getLayoutModeCalls(), ['stacked', 'columns']);
+});
+
+test('presentStart: body.present-active lander (skjuler panel-left/#resizer via CSS); Esc gjenoppretter layouten via delegaten', () => {
+  const { C, scriptInputEl, bodyEl, getLayoutModeCalls, getInputHiddenCalls } = freshEnv();
+  scriptInputEl.value = '#%% md slide=1\nA\n#%% md slide=2\nB\n';
+  C.init('python');
+  assert.ok(!bodyEl.classList.contains('present-active'));
+  assert.strictEqual(C.presentStart(), true);
+  // body.present-active lander på rota (CSS-en — app.css sin
+  // `body.present-active .panel-left, body.present-active #resizer { display: none; }`
+  // — er browser-land og verifiseres ikke her, kun at bryteren faktisk slås på).
+  assert.ok(bodyEl.classList.contains('present-active'));
+  C._presentKeydown({ key: 'Escape', target: { tagName: 'DIV' }, preventDefault: () => {} });
+  assert.strictEqual(C.presenting(), false);
+  assert.ok(!bodyEl.classList.contains('present-active'), 'Esc fjerner present-active igjen');
+  // Layouten (NB.layout var 'columns' — default — da presentStart fanget
+  // prevLayout) gjenopprettes via NØYAKTIG samme app-primitiv-delegat som
+  // visningsmenyen selv bruker (setLayout-delegasjonstesten over).
+  assert.deepStrictEqual(getInputHiddenCalls(), [false]);
+  assert.deepStrictEqual(getLayoutModeCalls(), ['columns']);
 });
 
 // ---------- Task 3b (spec 2026-07-17 §1): outputArea-tømming er doc-bevisst ----------
