@@ -1749,15 +1749,43 @@ test('Task 1: elShow — target satt: erstatter innholdet i #target-noden (ikke 
   assert.strictEqual(bodyEl.children.length, 0, 'celle-sloten er urørt — target-noden ble brukt');
 });
 
-test('Task 1: elShow — target satt men finnes ikke: console.warn, ingen krasj', () => {
-  const { Ui } = freshEnv();
+test('Task 1: elShow — target satt men finnes ikke: W5-fallback (revidert etter reviewer-anmerkning på commit daa9ee3) — noden vises i kjørende slot MED synlig varsel, ingen fantom-registeroppføring', () => {
+  const { Ui, bodyEl } = freshEnv();
   const id = Ui.elCreate('div');
   const warns = [];
   const origWarn = console.warn;
   console.warn = (m) => warns.push(m);
   try { Ui.elShow(id, JSON.stringify({ target: 'finnes-ikke' })); }
   finally { console.warn = origWarn; }
-  assert.ok(warns.some((m) => m.includes('finnes-ikke')));
+
+  assert.ok(warns.some((m) => m.includes('finnes-ikke')), 'console.warn fortsatt logget (diagnostikk uendret)');
+  // Noden landet i DEN KJØRENDE kontekstens slot (samme _runningSlot som
+  // target=null-grenen bruker) — IKKE en stille no-op.
+  assert.strictEqual(bodyEl.children[1], Ui.elNode(id), 'noden landet i slot (etter varselet)');
+  // Synlig varsel-boks, samme <pre class="error">-stil som
+  // Ui.renderEventResult sin missingTarget-gren.
+  const notice = bodyEl.children[0];
+  assert.strictEqual(notice.className, 'error');
+  assert.ok(notice.textContent.includes('finnes-ikke') && notice.textContent.includes('viser her i stedet'));
+  // INGEN _elShowTargets-oppføring for et treff som aldri skjedde — bevis
+  // konkret, ikke bare indirekte: la '#finnes-ikke' faktisk DUKKE OPP i
+  // dokumentet senere (simulerer en helt urelatert node som får samme id
+  // ved en senere strukturell omrendring), og la SAMME skapende celle kjøre
+  // på nytt UTEN å kalle elShow(target='finnes-ikke') igjen. Hadde den
+  // gamle koden (som registrerte _elShowTargets FØR host-sjekken) fortsatt
+  // vært i bruk, ville mark-og-sopp-løkka i Ui.endCellRun funnet den
+  // "glemte" fantom-oppføringen og TØMT den nå-eksisterende noden — selv om
+  // DENNE cellen aldri klarte å treffe den. Den reviderte koden registrerer
+  // ingenting ved en mislykket target-oppslag, så noden skal stå urørt.
+  const senereNode = new FakeEl('div');
+  senereNode.id = 'finnes-ikke';
+  senereNode.appendChild(new FakeEl('span')); // "urelatert" innhold
+  global.document._idIndex['finnes-ikke'] = senereNode;
+
+  Ui.beginCellRun(0);
+  Ui.endCellRun(0); // ingen re-elShow til 'finnes-ikke' i denne kjøringen
+  assert.strictEqual(senereNode.children.length, 1,
+    'den senere-dukkede #finnes-ikke-noden er URØRT — ingen fantom-oppføring fantes til å sope den');
 });
 
 test('Task 1: elShow — to elShow-kall til SAMME target i samme kjøring: siste vinner (replace, ikke stable)', () => {
@@ -1834,17 +1862,36 @@ test('Task 1: resetDocument — glemmer elShow target-registeret OG hele _els-re
   assert.strictEqual(b, 'el1');
 });
 
-// ---- _els-registeret må ikke lekke løsrevne noder (isConnected-sveip) -----
+// ---- _els-registeret: generasjons-skopet isConnected-sveip (revidert etter
+// reviewer-anmerkning på commit daa9ee3 — se _elGens-docstringen i js/ui.js
+// ved Ui.elCreate/Ui.beginCellRun/Ui.endCellRun for hele begrunnelsen).
+// Kort: kryss-celle-handles ("celle 1 bygger, celle 2 viser") er GYLDIGE —
+// en løsrevet node overlever sin EGEN skapende kjørings avslutning. En
+// lekkasje (bygget, aldri vist, ALDRI hentet av noen senere celle heller)
+// avgrenses først ved skaperens NESTE rerun uten gjenkobling.
 
-test('Task 1: endCellRun — sveiper _els-oppføringer for noder som ALDRI ble vist (ingen lekkasje)', () => {
+test('Task 1: endCellRun — en ALDRI vist node OVERLEVER sin egen skapende kjørings avslutning (kryss-celle-vinduet er åpent)', () => {
   const { Ui } = freshEnv();
   Ui.beginCellRun(0);
-  const id = Ui.elCreate('div'); // bygget, men aldri vist noe sted
+  const id = Ui.elCreate('div'); // bygget, men aldri vist noe sted i DENNE kjøringen
   Ui.endCellRun(0);
-  assert.strictEqual(Ui.elNode(id), null, 'løsrevet node sveipet — ingen lekkasje i _els');
+  assert.ok(Ui.elNode(id), 'overlever SIN EGEN skapende kjørings avslutning — tilgjengelig for en senere celle');
 });
 
-test('Task 1: endCellRun — en VIST (tilkoblet) node overlever sveipet', () => {
+test('Task 1: endCellRun — en ALDRI vist node SVEIPES når dens SKAPENDE celle kjører på nytt (gen 2) uten å ha koblet den til (lekkasjen avgrenses ved neste rerun)', () => {
+  const { Ui } = freshEnv();
+  Ui.beginCellRun(0); // gen 1
+  const id = Ui.elCreate('div');
+  Ui.endCellRun(0);
+  assert.ok(Ui.elNode(id), 'overlever gen 1 sin egen avslutning');
+
+  Ui.beginCellRun(0); // gen 2 — SAMME skapende celle kjører på nytt
+  // ingen elCreate/elShow for `id` i det hele tatt i denne runden
+  Ui.endCellRun(0);
+  assert.strictEqual(Ui.elNode(id), null, 'sopt — skaperens neste kjøring uten gjenkobling avgrenser lekkasjen');
+});
+
+test('Task 1: endCellRun — en VIST (tilkoblet) node overlever sveipet, også på tvers av flere reruns av skapercellen', () => {
   const { Ui, bodyEl } = freshEnv();
   Ui.beginCellRun(0);
   const id = Ui.elCreate('div');
@@ -1852,6 +1899,47 @@ test('Task 1: endCellRun — en VIST (tilkoblet) node overlever sveipet', () => 
   Ui.endCellRun(0);
   assert.ok(Ui.elNode(id), 'tilkoblet node (i cellens slot) overlever sveipet');
   assert.strictEqual(bodyEl.children[0], Ui.elNode(id));
+
+  // Enda en rerun av SAMME skapende celle, uten NOEN elCreate/elShow-kall
+  // for denne noden i det hele tatt denne runden — den henger fortsatt i
+  // sloten fra forrige visning. isConnected-vakta betyr at et gen-hopp
+  // ALENE aldri sveiper en tilkoblet node.
+  Ui.beginCellRun(0);
+  Ui.endCellRun(0);
+  assert.ok(Ui.elNode(id), 'fortsatt tilkoblet — overlever selv et helt gen-hopp uten re-registrering');
+});
+
+test('Task 1: kryss-celle-handle — element bygget i celle 0 vises av celle 1 ETTER at celle 0 sin egen endCellRun har lukket', () => {
+  const { Ui, cellEl, setCtx } = freshEnv({ cellIdx: 0 });
+
+  // Celle 1 sin egen DOM — separat isConnected-rot (se FakeEl-kommentaren
+  // øverst i denne fila), akkurat som cellEl (celle 0) og outputAreaEl er.
+  const cellEl1 = new FakeEl('div');
+  cellEl1.className = 'nb-cell';
+  cellEl1.__docRoot = true;
+  const outEl1 = new FakeEl('div');
+  outEl1.className = 'nb-output';
+  const bodyEl1 = new FakeEl('div');
+  bodyEl1.className = 'nb-output-body';
+  outEl1.appendChild(bodyEl1);
+  cellEl1.appendChild(outEl1);
+  global.Cells.cellElementAt = (idx) => (idx === 0 ? cellEl : (idx === 1 ? cellEl1 : null));
+
+  // Celle 0: `x = ui.html.div(...)` — bygget, ALDRI vist DER (meningen er
+  // at en senere celle skal ta over den).
+  Ui.beginCellRun(0);
+  const id = Ui.elCreate('div');
+  Ui.endCellRun(0);
+
+  // Celle 1: `x.show()` — samme handle (elId), brukt fra en ANNEN, SENERE
+  // celle, etter at celle 0 sin egen kjørebrakett allerede har lukket.
+  setCtx({ cellIdx: 1, cellEl: cellEl1 });
+  Ui.beginCellRun(1);
+  Ui.elShow(id, JSON.stringify({ target: null }));
+  Ui.endCellRun(1);
+
+  assert.strictEqual(bodyEl1.children[0], Ui.elNode(id),
+    'kryss-celle .show() renderer — handle overlevde celle 0 sin egen endCellRun');
 });
 
 // ---- Ui.elOn: el-scopet variant av Ui.bindEvent ----------------------------

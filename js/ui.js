@@ -1375,9 +1375,30 @@
     // registerControl/bindEvent). _els er id-registeret; elOn gjenbruker
     // W5.2 sin _bindings/_installDelegate/_dispatchBinding-maskin (over)
     // fremfor å bygge en egen — samme mark-og-sopp, samme guardede destroy.
-    var _els = {};            // elId → node
+    var _els = {};            // elId → { node, cellIdx, gen } (se _elGens under)
     var _elCounter = 1;       // neste elId er 'el' + _elCounter
     var _elShowTargets = {};  // "cellKey::target" -> { elId, cellIdx, target }
+
+    // ui-html-fasen (Task 1, revidert etter reviewer-anmerkning på commit
+    // daa9ee3): per-cellIdx generasjonsteller for _els-sveipen under. Hvorfor
+    // dette finnes i det hele tatt — den OPPRINNELIGE sveipen var et blankt
+    // isConnected-feie over HELE _els ved ENHVER endCellRun, uansett hvilken
+    // celle som bygget oppføringen. Det drepte kryss-celle-idiomet spec-en
+    // selv legger opp til: celle 1 bygger `x = ui.html.div(...)` (elCreate,
+    // ALDRI vist DER — meningen er at en SENERE celle skal vise den), celle
+    // 2 kaller `x.show()`. Under den gamle sveipen ble _els[x] allerede
+    // fjernet av celle 1 sin EGEN endCellRun (før celle 2 i det hele tatt
+    // fikk kjøre) — elShow ble da en stille no-op mot et elId som "aldri
+    // fantes". Generasjonstelleren gjør sveipen presis: en oppføring bygget
+    // I DENNE kjøringen overlever ALLTID sin egen kjørings avslutning (den
+    // kan jo bli hentet av en senere celle); den sveipes først når dens
+    // SKAPENDE celle kjører PÅ NYTT uten å ha koblet den til noe sted i
+    // mellomtiden — se Ui.beginCellRun/endCellRun under for selve bruken.
+    var _elGens = {}; // cellIdx → nåværende generasjon (monotont voksende, økt i Ui.beginCellRun)
+
+    function _currentElGen(cellIdx) {
+      return _elGens[cellIdx] || 0;
+    }
 
     // Delt props-application for Ui.elCreate/Ui.elSetProps: DOM-egenskap når
     // `navn in node`, ellers setAttribute (se _setAttrValue for dict/list/
@@ -1474,7 +1495,16 @@
       }
       if (opts) _applyElProps(node, opts);
       var id = 'el' + (_elCounter++);
-      _els[id] = node;
+      // Task 1 (revidert): cellIdx løses via SAMME mekanisme som
+      // _registerInto sine kallere bruker (_resolveCellIdx — elOn/elShow sin
+      // egen kjørekontekst-oppløsning) — null både når det ikke finnes noen
+      // kjørekontekst-mekanisme i det hele tatt (undefined normalisert til
+      // null) OG i doc-/ingen-kjøring-tilfellet (samme sentinel som resten
+      // av fila). gen er nåværende generasjon for DEN cellIdx-en — se
+      // Ui.beginCellRun.
+      var cellIdx = _resolveCellIdx();
+      if (cellIdx === undefined) cellIdx = null;
+      _els[id] = { node: node, cellIdx: cellIdx, gen: _currentElGen(cellIdx) };
       return id;
     };
 
@@ -1484,7 +1514,8 @@
      * no-op.
      */
     Ui.elSetProps = function (elId, propsJson) {
-      var node = _els[elId];
+      var entry = _els[elId];
+      var node = entry ? entry.node : null;
       if (!node) { console.warn('Ui.elSetProps: ukjent elId ' + elId); return; }
       var opts;
       try {
@@ -1503,7 +1534,8 @@
      * eller manglende felt → warn, no-op.
      */
     Ui.elAppend = function (parentId, childJson) {
-      var parent = _els[parentId];
+      var parentEntry = _els[parentId];
+      var parent = parentEntry ? parentEntry.node : null;
       if (!parent) { console.warn('Ui.elAppend: ukjent parentId ' + parentId); return; }
       var child;
       try {
@@ -1515,7 +1547,8 @@
       if (!child || typeof child !== 'object') { console.warn('Ui.elAppend: ugyldig childJson'); return; }
       try {
         if (child.el !== undefined) {
-          var childNode = _els[child.el];
+          var childEntry = _els[child.el];
+          var childNode = childEntry ? childEntry.node : null;
           if (!childNode) { console.warn('Ui.elAppend: ukjent el-id ' + child.el); return; }
           parent.appendChild(childNode);
         } else if (child.text !== undefined) {
@@ -1534,7 +1567,8 @@
      * ikke selve noden eller dens plass i EGEN forelder).
      */
     Ui.elClear = function (elId) {
-      var node = _els[elId];
+      var entry = _els[elId];
+      var node = entry ? entry.node : null;
       if (!node) { console.warn('Ui.elClear: ukjent elId ' + elId); return; }
       try {
         while (node.firstChild) node.removeChild(node.firstChild);
@@ -1550,7 +1584,8 @@
      * DOM-tilgang til et ui.html-bygget element).
      */
     Ui.elNode = function (elId) {
-      return _els[elId] || null;
+      var entry = _els[elId];
+      return entry ? entry.node : null;
     };
 
     // Delt registreringskjerne for Ui.elOn — el-scopet variant av
@@ -1569,7 +1604,8 @@
       var cellIdx = _resolveCellIdx();
       if (cellIdx === undefined) return null; // ingen kjørekontekst-mekanisme i det hele tatt
 
-      var node = _els[elId];
+      var elEntry = _els[elId];
+      var node = elEntry ? elEntry.node : null;
       if (!node) { console.warn('Ui.elOn: ukjent elId ' + elId); return null; }
 
       var key = 'el::' + elId + '::' + event;
@@ -1637,9 +1673,22 @@
      * stable duplikater — samme livssyklus-mønster (mark-og-sopp i
      * Ui.endCellRun, glem-alt i Ui.resetDocument) som resten av
      * kjørebrakett-registrene i denne fila.
+     *
+     * target satt men #target IKKE funnet i dokumentet (revidert etter
+     * reviewer-anmerkning på commit daa9ee3): dette er IKKE lenger en stille
+     * console.warn+no-op. Samme W5-fallback som Ui.renderEventResult sin
+     * missingTarget-gren (se der, ~linje 1330+) — noden vises likevel, i den
+     * KJØRENDE kontekstens slot (_runningSlot), sammen med en synlig
+     * varsel-boks (samme <pre class="error">-stil). showKey-registeret
+     * (_elShowTargets/showsRegistered — FREMTIDIG mark-og-sopp-grunnlag i
+     * Ui.endCellRun) får INGEN oppføring i dette tilfellet: en fantom-
+     * oppføring for et mål som faktisk aldri ble truffet ville latt en
+     * SENERE, ekte visning til samme mål bli feilaktig sopt av en rerun som
+     * selv aldri klarte å treffe #target.
      */
     Ui.elShow = function (elId, optsJson) {
-      var node = _els[elId];
+      var elEntry = _els[elId];
+      var node = elEntry ? elEntry.node : null;
       if (!node) { console.warn('Ui.elShow: ukjent elId ' + elId); return; }
       var opts = {};
       if (optsJson) {
@@ -1660,17 +1709,31 @@
       var cellKey = cellIdx != null ? _cellKeyAt(cellIdx) : 'doc';
       var showKey = cellKey + '::' + target;
 
+      var host = (typeof document !== 'undefined' && document.getElementById) ? document.getElementById(target) : null;
+      if (!host) {
+        console.warn('Ui.elShow: fant ikke target-element #' + target);
+        var fallbackSlot = _runningSlot();
+        if (!fallbackSlot) { console.warn('Ui.elShow: ingen aktiv kjørekontekst å vise elementet i'); return; }
+        try {
+          var notice = document.createElement('pre');
+          notice.className = 'error';
+          notice.textContent = 'Ui.elShow: fant ikke target-element #' + target + ' — viser her i stedet';
+          fallbackSlot.appendChild(notice);
+          fallbackSlot.appendChild(node);
+        } catch (e) {
+          console.warn('Ui.elShow: klarte ikke å legge til elementet: ' + ((e && e.message) || e));
+        }
+        return;
+      }
+
+      // showKey-registreringen skjer HER, ETTER host-sjekken over — se
+      // docstringen (ingen fantom-oppføring for et treff som aldri skjedde).
       if (cellIdx != null) {
         var run = _bindingsRunFor(cellIdx);
         run.showsRegistered[showKey] = true;
       }
       _elShowTargets[showKey] = { elId: elId, cellIdx: cellIdx, target: target };
 
-      var host = (typeof document !== 'undefined' && document.getElementById) ? document.getElementById(target) : null;
-      if (!host) {
-        console.warn('Ui.elShow: fant ikke target-element #' + target);
-        return;
-      }
       try {
         while (host.firstChild) host.removeChild(host.firstChild);
         host.appendChild(node);
@@ -1709,6 +1772,14 @@
       // samme måte, av samme grunn (se docstringen over). ui-html-fasen
       // (Task 1): showsRegistered er DENS tvilling for elShow(target=...).
       _cellRuns[cellIdx] = { ordinal: 0, registered: {}, bindingsRegistered: {}, showsRegistered: {} };
+      // ui-html-fasen (Task 1, revidert): NY generasjon for DENNE cellIdx-en
+      // sin _els-sveip (se _elGens-docstringen over Ui.elCreate) — hver
+      // elCreate SOM SKJER I DENNE KJØRINGEN tagges med denne generasjonen,
+      // og overlever dermed uansett DENNE kjøringens egen endCellRun
+      // (kryss-celle-vinduet). En oppføring fra en TIDLIGERE generasjon av
+      // SAMME cellIdx som fortsatt er løsrevet når DENNE kjøringen lukkes,
+      // sveipes derimot — det er nettopp "skaperens neste rerun".
+      _elGens[cellIdx] = _currentElGen(cellIdx) + 1;
     };
 
     /**
@@ -1762,16 +1833,32 @@
           delete _elShowTargets[showKey];
         }
       });
-      // ui-html-fasen (Task 1): _els-registeret må ikke lekke løsrevne
-      // noder — en (billig) isConnected-sveip fjerner oppføringer for
-      // elementer som ikke lenger henger i dokumentet (sloten deres ble
-      // tømt av en F6-omrendring, eller elementet ble aldri vist). Ikke
-      // cellIdx-skopet (registeret selv holder ikke styr på hvilken celle
-      // som BYGGET et gitt element) — kjøres likevel her, samme rytme som
-      // resten av sveipe-logikken over.
+      // ui-html-fasen (Task 1, revidert etter reviewer-anmerkning på commit
+      // daa9ee3): _els-sveipen er nå GENERASJONS-SKOPET, ikke lenger et
+      // blankt isConnected-feie over HELE registeret uansett hvilken celle
+      // som bygget oppføringen (se _elGens-docstringen ved Ui.elCreate for
+      // hvorfor det var galt — kryss-celle-idiomet `x = ui.html.div(...)` i
+      // celle 1, `x.show()` i celle 2, ble drept av den gamle sveipen).
+      //
+      // En oppføring sveipes HER kun når ALLE tre holder: (1) DENNE
+      // cellIdx-en BYGGET den (entry.cellIdx === cellIdx — en annen celles
+      // endCellRun rører den aldri), (2) den er fra en TIDLIGERE generasjon
+      // av DEN cellens kjøring (entry.gen < currentGen — en oppføring
+      // bygget I DENNE kjøringen overlever alltid sin egen kjørings
+      // avslutning, selv om den ennå ikke er vist noe sted), og (3) den er
+      // fortsatt løsrevet (!isConnected — en vist/tilkoblet node sveipes
+      // aldri, uansett generasjon). Lekkasjen (bygget-men-aldri-vist)
+      // avgrenses dermed ikke ved kjøringens egen slutt, men ved dens
+      // SKAPENDE celles NESTE rerun uten at noden ble koblet til i mellomtiden
+      // — kryss-celle-handles (norsk: "kryss-celle-handtak") er gyldige helt
+      // til akkurat det skjer.
+      var currentElGen = _currentElGen(cellIdx);
       Object.keys(_els).forEach(function (id) {
-        var node = _els[id];
-        if (node && node.isConnected === false) delete _els[id];
+        var entry = _els[id];
+        if (entry && entry.cellIdx === cellIdx && entry.gen < currentElGen &&
+            entry.node && entry.node.isConnected === false) {
+          delete _els[id];
+        }
       });
       if (run) run.closed = true;
     };
@@ -1809,6 +1896,10 @@
       _els = {};
       _elCounter = 1;
       _elShowTargets = {};
+      // ui-html-fasen (Task 1, revidert): glem generasjonstellerne også —
+      // et nytt dokument har ingen gamle cellIdx-kjøringer å telle videre
+      // fra (se _elGens-docstringen ved Ui.elCreate).
+      _elGens = {};
       // W5.2: et helt nytt dokument invaliderer også alle element-event-
       // bindinger fra det forrige (samme "glem ALT"-hensikt som resten av
       // denne funksjonen) — guardet Ui.resetBindings finnes alltid her
