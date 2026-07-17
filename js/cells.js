@@ -15,7 +15,7 @@
   var NONCODE = { md: 1, html: 1, skip: 1 };
   // slide/speak/rerun/sync er reservert for spec 2/3 — parses, brukes ikke ennå.
   // widgets (widget-plassering-fasen): styrer hvor .param-form/.ui-controls-
-  // stripene havner i cellens .nb-output (se cellNode) — top|bottom|left,
+  // stripene havner i cellens .nb-output (se docCellNode) — top|bottom|left,
   // default top når fraværende eller ugyldig (WIDGETS_POS under).
   var KNOWN_KEYS = { id: 1, style: 1, slide: 1, speak: 1, rerun: 1, sync: 1, widgets: 1 };
   var KNOWN_FLAGS = { 'hide-code': 1, 'hide-output': 1, slide: 1 };
@@ -861,9 +861,9 @@
   if (typeof document !== 'undefined') (function () {
     var t = typeof global.t === 'function' ? global.t : function (s) { return s; };
     var NB = { root: null, cells: [], docMode: 'python', layout: 'columns',
-               rawOverride: false, activeFlag: false, lastSerialized: null,
+               activeFlag: false, lastSerialized: null,
                plan: [], runSinks: null, runPlan: null, trailing: null, chip: null,
-               editTimer: null, pendingFlush: null, tickHandle: null, lastUserInput: 0,
+               tickHandle: null, lastUserInput: 0,
                lastTickValue: null, lastTickTime: 0, htmlTrusted: true,
                // Fase B1 Task 5: per-celle kjøring — "endret siden sist kjørt"
                // (stale) og "har kjørt OK minst én gang" (ranOk), keyet på
@@ -871,12 +871,6 @@
                // engangs-vakt for onStateChange-abonnementet.
                stale: {}, ranOk: {}, sessionChip: null, restartBtn: null,
                sessionListenerAttached: false,
-               // Fase B2 Task 1: 2-sekunders "Angre"-toast etter Slett celle
-               // (task-1-brief: "instead of a confirm dialog"). Toasten er en
-               // ENKELT closure-singleton (samme mønster som chip/sessionChip
-               // over) — en ny sletting FØR forrige toasts 2s er omme erstatter
-               // (ikke stabler) forrige toast, se showUndoToast.
-               undoToast: null, undoTimer: null,
                // Editor-konvergens (plan 4b Task 3): markør↔slot-koblingens
                // "hvilken celle er aktiv" — satt av C.setActiveCell (index.html
                // sin cursor-tracker kaller denne), lest av applyActiveCellClass
@@ -909,7 +903,7 @@
 
     // Eksplisitt signal fra innlastingsstedene (eksempler, share/GitHub):
     // nytt dokument er lastet → auto-åpne notatboken hvis dokumentet er en,
-    // uavhengig av tick-heuristikken. Nytt dokument nullstiller Rå tekst-valget.
+    // uavhengig av tick-heuristikken.
     // opts.untrusted === true (share-lenker, GitHub-filer, dyplenker — alt
     // eksternt): html-celler rendres eskapert til brukeren godtar dem (Vis HTML
     // / Kjør), så attributt-baserte hendelseshandlere ikke kjører ved lasting.
@@ -945,7 +939,6 @@
       // sesjonen over; presentasjon overlever aldri dokument-/modusbytte).
       C.presentExit();
       NB.htmlTrusted = !(opts && opts.untrusted === true);
-      NB.rawOverride = false;
       var ta = $('scriptInput');
       if (!ta) return;
       if (NB.activeFlag) { if (C.hasMarkers(ta.value)) docRender(); else C.exit(); }
@@ -993,16 +986,14 @@
       if (!ta || !C.supportedMode(NB.docMode) || !C.hasMarkers(ta.value)) return false;
       if (!docHost()) return false;
       NB.activeFlag = true;
-      NB.rawOverride = false;
       if (layout) NB.layout = layout;
       docRender();
       updateChip();
       return true;
     };
 
-    C.exit = function (opts) {
+    C.exit = function () {
       C.presentExit();
-      if (opts && opts.raw) NB.rawOverride = true;
       NB.activeFlag = false;
       // Markør↔slot-kobling (plan 4b Task 3): en inaktiv notatbok har ingen
       // aktiv celle — NB.root fjernes rett under uansett (klassen forsvinner
@@ -1010,15 +1001,6 @@
       // at en senere re-inngang (docRender/enter) ikke reapplisérer .doc-active
       // mot en indeks som hørte til et helt annet dokument-øyeblikk.
       NB.activeCellIdx = null;
-      // Flush en ventende celle-redigerings-debounce FØR vi bytter til Rå
-      // tekst (B2 Task 4-fiks, speiler toolbarGate over): en ren clearTimeout
-      // her ville DROPPET siste <250ms med utaste tekst (skrevet, aldri
-      // serialisert) — brukeren ville sett en gammel #scriptInput-tekst i Rå
-      // tekst-visningen. flushPendingEdit() kansellerer timeren OG kjører den
-      // ventende doFlush-lukningen synkront (samme serializeAndSync-vei som
-      // runCell() allerede stoler på), så #scriptInput alltid speiler akkurat
-      // det brukeren nettopp skrev, uansett når exit() kalles.
-      flushPendingEdit();
       // 4a: doc-root fjernes fra #outputArea (gjenoppretter tom output-
       // flate for påfølgende vanlig skript-kjøring) — ingen container-
       // klasse å reversere lenger, og ingen layout-speiling tilbake til
@@ -1263,8 +1245,9 @@
       return false;
     }
 
-    // Output-only cellenode (spec §1): ETTERFØLGER av cellNode under, men
-    // uten .nb-input/textarea/head/toolbar — kun .nb-output → .nb-output-body
+    // Output-only cellenode (spec §1): ETTERFØLGER av den gamle (nå fjernede,
+    // 4b §5) cellNode, men uten .nb-input/textarea/head/toolbar — kun
+    // .nb-output → .nb-output-body
     // (identisk klassenavn/struktur, så ParamForms/Ui/dash/ipywidgets sine
     // mount-seams via cellElementAt/renderCellResult trenger ingen endring).
     function docCellNode(c, idx) {
@@ -1335,18 +1318,15 @@
       NB.root = el('div', 'doc-root');
       host.innerHTML = '';
       host.appendChild(NB.root);
-      // Kopier-knapper (tabell/pre/plotly) på resultater rendret inn i
-      // celle-outputene: samme forsterkning som #outputArea sin egen
-      // MutationObserver (index.html), men scopet til doc-root — flyttet
-      // hit fra den gamle C.enter (spec §1: hooket til doc-root-skaping,
-      // ikke til enter() — docRender bygger en FERSK rot ved hver
-      // (re-)inngang inntil Task 3 sin forsoningspolicy). Guardet — mangler
-      // i test-harnessets lette DOM-fake, bare ekte browsere/jsdom har den.
-      if (typeof global.MutationObserver === 'function') {
-        new global.MutationObserver(function () {
-          if (global.mdScheduleResultEnhance) global.mdScheduleResultEnhance();
-        }).observe(NB.root, { childList: true, subtree: true });
-      }
+      // Kopier-knapper (tabell/pre/plotly) på resultater rendret inn i celle-
+      // outputene: dekkes av #outputArea sin EGEN MutationObserver
+      // (index.html, observeOutputAreaForCopyButtons — { childList: true,
+      // subtree: true } på #outputArea selv) — NB.root er ALLTID et barn av
+      // #outputArea (docHost() over), så enhver mutasjon inni doc-root er
+      // allerede inni det observerte subtreet. En egen doc-root-scoped
+      // MutationObserver her (én ny instans per docRender-kall) var dermed
+      // en ren duplikat-forsterkning (samme mdScheduleResultEnhance-kall to
+      // ganger per mutasjon) — fjernet i 4b §5 (spec 2026-07-17 §5-sjekklisten).
       NB.root.appendChild(docBar(parsed));
       attachSessionListener();
       updateSessionChip();
@@ -1542,397 +1522,6 @@
       if (NB.activeFlag) docRender();
     };
 
-    // DØD ETTER 4a — fjernes i plan 4b (spec §5). cellNode/buildToolbar og
-    // resten av celleliste-redigeringsmaskineriet under er UNÅBAR: ingenting
-    // kaller render() lenger (docRender over har overtatt ALLE reelle
-    // rendrings-stier — enter/contentLoaded/refreshFromScript/grantHtmlTrust/
-    // tick). Holdes i filen kun til 4b sin verifiserte fjerning.
-    function render() {
-      var ta = $('scriptInput');
-      var parsed = C.parseCells(ta.value);
-      NB.cells = parsed.cells;
-      NB.lastSerialized = ta.value;
-      NB.plan = C.segmentPlan(ta.value, NB.docMode);
-      NB.runSinks = null; NB.runPlan = null; NB.trailing = null;
-      // Fase B1 Task 5: struktur-endring er en ærlig reset av stale/ranOk —
-      // cellene under er FRISKE objekter (nettopp parset), gamle stempler
-      // (keyet kun på indeks) ville ellers feste seg til feil innhold.
-      NB.stale = {}; NB.ranOk = {};
-      purge(NB.root);
-      NB.root.innerHTML = '';
-      NB.root.className = 'nb-root nb-layout-' + NB.layout;
-      var bar = el('div', 'nb-bar');
-      var rawBtn = el('button', 'nb-raw-btn', t('Rå tekst'));
-      rawBtn.type = 'button';
-      rawBtn.title = t('Rediger notatboken som ren tekst');
-      rawBtn.addEventListener('click', function () { C.exit({ raw: true }); });
-      bar.appendChild(rawBtn);
-      if (parsed.warnings.length) bar.appendChild(el('span', 'nb-warnings', parsed.warnings.join(' · ')));
-      var sessionChip = el('span', 'nb-session-chip');
-      NB.sessionChip = sessionChip;
-      bar.appendChild(sessionChip);
-      var restartBtn = el('button', 'nb-restart-btn', t('Restart & kjør alle'));
-      restartBtn.type = 'button';
-      restartBtn.title = t('Restart & kjør alle');
-      restartBtn.addEventListener('click', onRestartClick);
-      NB.restartBtn = restartBtn;
-      bar.appendChild(restartBtn);
-      NB.root.appendChild(bar);
-      attachSessionListener();
-      updateSessionChip();
-      for (var i = 0; i < NB.cells.length; i++) NB.root.appendChild(cellNode(NB.cells[i], i));
-      // Render-tidens engangs-sjekk (poll-fri per Task 5-kontrakten): fanger
-      // et Kjør alle/Forklar-løp som allerede er i gang idet notatboken
-      // (re-)rendres (f.eks. en strukturendring midt i en kjøring) — den
-      // løpende synkroniseringen ellers skjer via setRunningUi (runCell) og
-      // clearAllStale (beginRun), ikke via en ny poll-løkke.
-      setNbButtonsDisabled(!!(global.mdIsScriptRunning && global.mdIsScriptRunning()));
-      // W-issue 1 fiks: samlet autoSize-pass HELT på slutten av render(), når
-      // NB.root garantert er vedlagt DOM-treet og synlig (C.enter setter
-      // NB.root.hidden = false FØR render() kalles, se over) — se
-      // autoSizeAll for hvorfor det tidligere per-celle rAF-kallet i
-      // cellNode ikke var pålitelig ved (re-)inngang.
-      autoSizeAll();
-      // Presentasjon overlever re-render (spec §2): innerHTML=''-rebyggingen
-      // over kastet nav-nodene og alle synlighetsklasser, og className-
-      // resetten fjernet nb-present. Regn planen på nytt (dokumentet kan ha
-      // endret seg), klem cur, og bygg overlegget på nytt.
-      if (NB.present) {
-        var _plan = C.slidePlan(NB.cells);
-        if (!_plan.slides.length) {
-          C.presentExit();
-        } else {
-          NB.present.slides = _plan.slides;
-          NB.present.byCell = _plan.byCell;
-          if (NB.present.cur >= _plan.slides.length) NB.present.cur = _plan.slides.length - 1;
-          NB.root.classList.add('nb-present');
-          presentBuildNav();
-          presentApply();
-        }
-      }
-    }
-
-    function cellNode(c, idx) {
-      var type = C.resolveType(c, NB.docMode);
-      var nonCode = !C.isCodeType(type);
-      var wrap = el('div', 'nb-cell');
-      wrap.dataset.idx = String(idx);
-      if (c.attrs.style && /^(note|warn|card)$/.test(c.attrs.style)) wrap.classList.add('nb-style-' + c.attrs.style);
-      if (type === 'skip') wrap.classList.add('nb-skip');
-      if (nonCode) wrap.classList.add('nb-noncode');
-      if (c.attrs['hide-code']) wrap.classList.add('nb-hide-code');
-      if (c.attrs['hide-output']) wrap.classList.add('nb-hide-output');
-
-      var input = el('div', 'nb-input');
-      c._input = input;
-      var head = el('div', 'nb-head');
-      head.appendChild(el('span', 'nb-type', type + (c.attrs.id ? ' · ' + c.attrs.id : '')));
-      // Kjøreknapp per kode-celle (Task 5): fraværende for md/html/skip
-      // (samme "nonCode"-flagg som resten av cellen bruker).
-      if (!nonCode) {
-        var runBtn = el('button', 'nb-runbtn', '▶');
-        runBtn.type = 'button';
-        runBtn.title = t('Kjør denne cellen');
-        runBtn.addEventListener('click', function () { C.runCell(idx); });
-        head.appendChild(runBtn);
-        c._runBtn = runBtn;
-      }
-      input.appendChild(head);
-      var ta = el('textarea', 'nb-src');
-      ta.value = c.source;
-      ta.spellcheck = false;
-      ta.addEventListener('input', function () { autoSize(ta); onEdit(idx, ta.value); });
-      ta.addEventListener('keydown', function (ev) { onSrcKeydown(ev, idx); });
-      input.appendChild(ta);
-      c._ta = ta;
-
-      // Widget-plassering-fasen (Task 3: PER KONTROLL plassering): .nb-output
-      // er en WRAPPER, ikke selve sluket. Den kan holde opptil fem
-      // .param-form/.ui-controls-striper (topp/bunn-par + en delt
-      // .nb-strips-left-sidekolonne, satt inn av js/param-forms.js sin
-      // ParamForms.decorate og js/ui.js sin _ensureStrip — hver stripe
-      // bærer sin EGEN plassering som et `data-pos`-attributt, CSS Grid
-      // (app.css) ruter den til riktig navngitt areal), og til slutt
-      // .nb-output-body — SLUKET all kjøre-output/purge/rendring skjer mot
-      // (renderCellResult, beginRun, sinkForSegment/errorHost, dash sin
-      // mountContainer). Stripene lever DERMED strukturelt utenfor
-      // .nb-output-body og overlever enhver output-purge helt uten egen
-      // preserve-logikk. widgets=top|bottom|left (default top, se
-      // WIDGETS_POS) er nå KUN DEFAULTEN for kontroller uten sin egen
-      // placement — js/ui.js/js/param-forms.js leser denne
-      // nb-widgets-<pos>-klassen av .nb-output for å avgjøre "cellens
-      // default", mens selve visuelle plasseringen styres av data-pos +
-      // CSS Grid (app.css), ikke lenger av en enkelt klasse på wrapperen.
-      var out = el('div', 'nb-output');
-      var widgetsPos = WIDGETS_POS[c.attrs.widgets] ? c.attrs.widgets : 'top';
-      out.classList.add('nb-widgets-' + widgetsPos);
-      var body = el('div', 'nb-output-body');
-      out.appendChild(body);
-      if (nonCode && type !== 'skip') {
-        wrap.classList.add('nb-rendered-only');
-        renderNonCode(body, type, C.renderContent(c.source, type, c.sniffed));
-        body.title = t('Dobbeltklikk for å redigere');
-        var enterEdit = function () {
-          wrap.classList.remove('nb-rendered-only');
-          autoSize(ta); ta.focus();
-        };
-        body.addEventListener('dblclick', enterEdit);
-        var editBtn = el('button', 'nb-edit-btn', '✎');
-        editBtn.type = 'button';
-        editBtn.title = t('Dobbeltklikk for å redigere');
-        editBtn.addEventListener('click', enterEdit);
-        wrap.appendChild(editBtn);
-        ta.addEventListener('blur', function () {
-          renderNonCode(body, type, C.renderContent(ta.value, type, c.sniffed));
-          wrap.classList.add('nb-rendered-only');
-        });
-      }
-      wrap.appendChild(input);
-      wrap.appendChild(out);
-      // (Ingen per-celle rAF-autoSize her lenger — W-issue 1 fiks: se
-      // autoSizeAll, kalt samlet fra render() sin hale i stedet, ETTER at
-      // .nb-root faktisk er synlig/i DOM-treet.)
-      // Direkte DOM-referanser for enkelt-celle-kjøring (Task 2): runCell(idx)
-      // vet allerede nøyaktig hvilken celle den kjører, så et querySelector-
-      // oppslag mot NB.root (som beginRun/sinkForSegment bruker for segment-
-      // JUSTERT plan-indeksering) er unødvendig her — cellens egen node holdes.
-      // c._out peker på .nb-output-body (SLUKET), ikke wrapperen — all
-      // run-output-skriving (renderCellResult, dash mount-to-slot-sjekken
-      // under) er dermed body-scoped by construction.
-      c._out = body;
-      c._wrap = wrap;
-      // Post-build seam (spec 2 W4, Task 2): #@param-skjema-stripe. Kun for
-      // celletyper ParamForms faktisk vet hvordan den skal skrive literaler
-      // for (paramLangForType → null for duckdb/microdata/statx/md/html/skip
-      // — parse-gate per planens Global Constraints). js/param-forms.js sin
-      // egen _build/_insertStrip finner `.nb-output` inni `wrap` og setter
-      // stripa inn der (FØR en evt. .ui-controls, alltid FØR .nb-output-body)
-      // — ParamForms.reorder-hacken (fase 2 W4) er borte: rekkefølgen er nå
-      // strukturell, ikke noe som må reasserteres etter hver kjøring.
-      var paramLang = C.paramLangForType(type);
-      if (paramLang && global.ParamForms && typeof global.ParamForms.decorate === 'function') {
-        global.ParamForms.decorate(idx, wrap, c.source, paramLang);
-      }
-      wrap.appendChild(buildToolbar(c, idx, type));
-      return wrap;
-    }
-
-    // Fase B2 Task 1: hover/focus-within-verktøylinje for strukturelle
-    // operasjoner. Absolutt posisjonert (se app.css .nb-tools) — bevisst
-    // UTENFOR .nb-cell sitt grid-flow, slik at den ikke forstyrrer
-    // ParamForms/Ui sine "jeg er alltid FØRSTE barn"-antakelser (deres
-    // striper settes inn via insertBefore(wrap.firstChild), som denne
-    // ordinære appendChild-en ved slutten av cellNode aldri kolliderer med).
-    // Hver knapp: ren transform (js/cells.js sin egen C.*-funksjon) →
-    // #scriptInput → full render() → fokus tilbake på berørt celles
-    // tekstfelt — nøyaktig oppskriften fra spec/task-1-brief.
-    function buildToolbar(c, idx, type) {
-      var tools = el('div', 'nb-tools');
-      // Alle interaktive verktøylinje-elementer samles på celleobjektet så
-      // setNbButtonsDisabled kan deaktivere dem under en kjøring (B2-review,
-      // Important) — samme livssyklus som c._runBtn. Grense-deaktiverte
-      // knapper (↑ på første, ↓ på siste) markeres med _staticDisabled slik
-      // at re-aktiveringen etter kjøringen ikke ved et uhell slår dem PÅ.
-      c._toolEls = [];
-      function track(node, staticDisabled) {
-        if (staticDisabled) { node.disabled = true; node._staticDisabled = true; }
-        c._toolEls.push(node);
-        tools.appendChild(node);
-        return node;
-      }
-      function toolBtn(cls, label, title, handler) {
-        var b = el('button', 'nb-tool-btn ' + cls, label);
-        b.type = 'button';
-        b.title = title;
-        b.addEventListener('click', handler);
-        return b;
-      }
-      track(toolBtn('nb-tool-add-above', '+▲', t('Legg til celle over'),
-        function () { toolbarInsert(idx - 1, type); }));
-      track(toolBtn('nb-tool-add-below', '+▼', t('Legg til celle under'),
-        function () { toolbarInsert(idx, type); }));
-      track(toolBtn('nb-tool-up', '↑', t('Flytt celle opp'), function () { toolbarMove(idx, -1); }),
-        idx === 0);
-      track(toolBtn('nb-tool-down', '↓', t('Flytt celle ned'), function () { toolbarMove(idx, 1); }),
-        idx === NB.cells.length - 1);
-      track(toolBtn('nb-tool-split', '✂', t('Del celle ved markøren'),
-        function () { toolbarSplit(idx); }));
-      // Type-bytte og slå-sammen-med-forrige gir ingen mening for den
-      // underforståtte preambel-cellen (headerRaw null — ingen header-linje å
-      // skrive om, og ingen "forrige" som ikke allerede ER den — de rene
-      // transformene no-op'er begge her uansett, men UI-et utelater dem helt
-      // i stedet for å tilby en knapp som alltid feiler stille).
-      if (c.headerRaw !== null) {
-        track(toolBtn('nb-tool-merge', '⤒', t('Slå sammen med forrige celle'),
-          function () { toolbarMerge(idx); }), idx === 0);
-
-        var typeSel = el('select', 'nb-tool-type');
-        typeSel.title = t('Bytt celletype');
-        TYPES.forEach(function (ty) {
-          var opt = el('option', null, ty);
-          opt.value = ty;
-          typeSel.appendChild(opt);
-        });
-        typeSel.value = type;
-        typeSel.addEventListener('change', function () { toolbarChangeType(idx, typeSel.value); });
-        track(typeSel);
-      }
-      track(toolBtn('nb-tool-delete', '🗑', t('Slett celle'), function () { toolbarDelete(idx); }));
-      return tools;
-    }
-
-    // Sett cellens fremdriftsindeks etter en strukturell operasjon: fokuser
-    // dens tekstfelt, og — hvis oppgitt — plasser markøren på cursorPos
-    // (tegnoffset inn i cellens NYE kilde). setSelectionRange finnes ikke på
-    // test-harnessets lette DOM-stub — vaktet, ekte nettlesere har den alltid.
-    function focusCellAt(targetIdx, cursorPos) {
-      var c = NB.cells[targetIdx];
-      if (!c || !c._ta) return;
-      c._ta.focus();
-      if (cursorPos != null && typeof c._ta.setSelectionRange === 'function') {
-        c._ta.setSelectionRange(cursorPos, cursorPos);
-      }
-    }
-
-    // Felles hale for enhver strukturell verktøylinje-operasjon som FAKTISK
-    // endret noe: skriv den nye teksten til #scriptInput, hold linjenumrene
-    // synkront (samme kall som serializeAndSync gjør), full re-rendring
-    // (struktur-endring = rebuild, per spec), gjenopprett fokus. Selve
-    // pure-transformen + no-op-sjekken (result.cells === NB.cells → uendret
-    // referanse, se js/cells.js sin ren halvdel) gjøres av HVER kaller for
-    // seg, siden hver operasjon har sin egen no-op-begrunnelse (flashHint) og
-    // sitt eget fokusmål.
-    function commitStructuralOp(newCells) {
-      var ta = $('scriptInput');
-      ta.value = C.serializeCells(newCells);
-      if (global.updateLineNumbers) global.updateLineNumbers();
-      render();
-    }
-
-    // Felles PORT for enhver strukturell verktøylinje-operasjon (B2-review,
-    // Important + Minor) — kalt FØRST i hver handler, FØR NB.cells leses:
-    //  1. Kjøre-guard (speiler C.runCell/onRestartClick sin egen sjekk):
-    //     en strukturell render() midt i et Kjør alle-løp river vekk
-    //     .nb-output-nodene kjøringen ruter inn i (F6-faren) — stille
-    //     avvisning, akkurat som runCell.
-    //  2. flushPendingEdit (speiler runCell sin "skriv → kjør"-disiplin):
-    //     en armert 250ms-redigeringsdebounce ville ellers kunne fyre ETTER
-    //     den strukturelle re-rendringen — mot en closure-fanget idx som nå
-    //     peker på en annen (eller fjernet) celle — og re-serialisere gammel
-    //     tilstand over det ferske dokumentet. Flushen anvender redigeringen
-    //     synkront NÅ, så transformen under opererer på den ferskeste kilden.
-    function toolbarGate() {
-      if (global.mdIsScriptRunning && global.mdIsScriptRunning()) return false;
-      flushPendingEdit();
-      return true;
-    }
-
-    function toolbarInsert(afterIdx, type) {
-      if (!toolbarGate()) return;
-      // Speil insertCellAfter sitt preambel-vern for FOKUS-målet: «over
-      // preambelen» klemmes til «rett etter preambelen» i den rene halvdelen
-      // (se insertCellAfter) — den nye cellen lander da på indeks 1, ikke 0.
-      if (afterIdx === -1 && NB.cells.length && NB.cells[0].headerRaw === null) afterIdx = 0;
-      var r = C.insertCellAfter(NB.cells, afterIdx, type);
-      commitStructuralOp(r.cells);
-      focusCellAt(afterIdx + 1, 0);
-    }
-
-    function toolbarMove(idx, dir) {
-      if (!toolbarGate()) return;
-      var wrapBefore = NB.cells[idx] && NB.cells[idx]._wrap;
-      var r = C.moveCell(NB.cells, idx, dir);
-      if (r.cells === NB.cells) { flashHint(wrapBefore); return; }
-      commitStructuralOp(r.cells);
-      focusCellAt(idx + dir, null);
-    }
-
-    function toolbarSplit(idx) {
-      if (!toolbarGate()) return;
-      var c = NB.cells[idx];
-      var wrapBefore = c && c._wrap;
-      var offset = 0;
-      if (c && c._ta) {
-        var pos = c._ta.selectionStart || 0;
-        offset = String(c._ta.value).slice(0, pos).split('\n').length - 1;
-      }
-      var r = C.splitCell(NB.cells, idx, offset);
-      if (r.cells === NB.cells) { flashHint(wrapBefore); return; }
-      commitStructuralOp(r.cells);
-      focusCellAt(idx + 1, 0);
-    }
-
-    function toolbarMerge(idx) {
-      if (!toolbarGate()) return;
-      var prev = NB.cells[idx - 1];
-      // Fokuser markøren PÅ SAMMENFØYNINGSPUNKTET (slutten av forrige celles
-      // ORIGINALE kilde — fanget FØR operasjonen muterer NB.cells) — ikke
-      // slutten av den ferdig sammenslåtte teksten. Speiler mergeWithPrevious
-      // sin egen kombineringslogikk (se js/cells.js): prev uten kropp bidrar
-      // ingen tegn, så sømmen er da posisjon 0.
-      var seamPos = prev && prev.hasBody ? String(prev.source).length : 0;
-      var wrapBefore = NB.cells[idx] && NB.cells[idx]._wrap;
-      var r = C.mergeWithPrevious(NB.cells, idx);
-      if (r.cells === NB.cells) { flashHint(wrapBefore); return; }
-      commitStructuralOp(r.cells);
-      focusCellAt(idx - 1, seamPos);
-    }
-
-    function toolbarChangeType(idx, newType) {
-      if (!toolbarGate()) return;
-      var wrapBefore = NB.cells[idx] && NB.cells[idx]._wrap;
-      var r = C.changeCellType(NB.cells, idx, newType);
-      if (r.cells === NB.cells) { flashHint(wrapBefore); return; }
-      commitStructuralOp(r.cells);
-      focusCellAt(idx, null);
-    }
-
-    // Slett celle: INGEN confirm-dialog (task-1-brief: "less friction, text
-    // is canonical anyway") — i stedet en 2-sekunders flytende "Angre"-toast
-    // som gjenoppretter den PRE-operasjon-serialiserte teksten byte-for-byte
-    // (samme tekst NB.lastSerialized pekte på RETT FØR denne slettingen).
-    function toolbarDelete(idx) {
-      if (!toolbarGate()) return;
-      var preOpText = NB.lastSerialized;
-      var r = C.deleteCell(NB.cells, idx);
-      if (r.cells === NB.cells) { flashHint(NB.cells[idx] && NB.cells[idx]._wrap); return; }
-      commitStructuralOp(r.cells);
-      focusCellAt(Math.min(idx, NB.cells.length - 1), null);
-      showUndoToast(preOpText);
-    }
-
-    // Flytende Angre-knapp (2s, se toolbarDelete): closure-singleton (samme
-    // "kun én om gangen"-mønster som NB.chip/NB.sessionChip) — en ny sletting
-    // FØR forrige toasts tidsavbrudd erstatter den (ingen stabling). Selve
-    // klikket setter #scriptInput tilbake til preOpText BYTE-FOR-BYTE og
-    // rendrer på nytt — ingen egen gjenopprettings-logikk, samme
-    // sett-verdi-og-render()-oppskrift som resten av verktøylinjen.
-    function showUndoToast(preOpText) {
-      hideUndoToast();
-      var toast = el('div', 'nb-undo-toast');
-      toast.appendChild(el('span', 'nb-undo-label', t('Celle slettet')));
-      var btn = el('button', 'nb-undo-btn', t('Angre'));
-      btn.type = 'button';
-      btn.addEventListener('click', function () {
-        var ta = $('scriptInput');
-        ta.value = preOpText;
-        if (global.updateLineNumbers) global.updateLineNumbers();
-        render();
-        hideUndoToast();
-      });
-      toast.appendChild(btn);
-      NB.root.appendChild(toast);
-      NB.undoToast = toast;
-      var h = global.setTimeout(function () { hideUndoToast(); }, 2000);
-      if (h && typeof h.unref === 'function') h.unref();
-      NB.undoTimer = h;
-    }
-
-    function hideUndoToast() {
-      if (NB.undoTimer) { global.clearTimeout(NB.undoTimer); NB.undoTimer = null; }
-      if (NB.undoToast) { NB.undoToast.remove(); NB.undoToast = null; }
-    }
-
     function renderNonCode(out, type, src) {
       purge(out);
       out.innerHTML = '';
@@ -1967,155 +1556,6 @@
       if (NB.activeFlag && NB.root) docRender();
     };
 
-    // W-issue 1 fiks: klem inline-høyden til samme tak som CSS-en (.nb-src
-    // max-height, app.css) bruker. CSS-en alene ville uansett klemt visningen
-    // (max-height vinner alltid over en inline height-verdi), men vi klemmer
-    // OGSÅ her i JS slik at vi aldri skriver en urimelig stor inline height
-    // (unødvendig reflow-kostnad for en 200-linjers celle vi vet blir klippet
-    // ned igjen av CSS-en likevel). Holdes i sync med .nb-src { max-height }.
-    var NB_SRC_MAX_PX = 420;
-
-    function autoSize(ta) {
-      if (!ta) return;
-      ta.style.height = 'auto';
-      var h = Math.min(ta.scrollHeight + 2, NB_SRC_MAX_PX);
-      ta.style.height = h + 'px';
-    }
-
-    // Kjør autoSize over ALLE celletekstfelt i én omgang (W-issue 1 fiks).
-    // Erstatter en tidligere per-celle rAF-kall ved cellNode-bygging: et
-    // enkelt-celle-kall som fyrer FØR .nb-root faktisk er lagt ut/synlig
-    // (skjult container midt i enter(), fonter ikke ferdig lastet, eller
-    // display:none akkurat idet rAF-en kjører) leser scrollHeight som 0/feil
-    // — resultatet var en for lav tekstboks med indre scroll i stedet for å
-    // vise hele cellens kode. Kalles i stedet FRA HALEN av render()/enter()
-    // (NB.root er da allerede satt synlig og satt inn i DOM-treet, se
-    // C.enter over) og fra setLayout (kolonne↔stablet endrer bredden
-    // teksten brytes mot, så linjetallet — og dermed høyden — må regnes om).
-    // To nøstede rAF-lag: én ekstra frame etter innsetting fanger opp
-    // tilfeller der layout/fonter fortsatt ikke er helt klare i den aller
-    // første (samme forsiktighet som spesifikasjonen ber om).
-    function autoSizeAllNow() {
-      for (var i = 0; i < NB.cells.length; i++) {
-        if (NB.cells[i]._ta) autoSize(NB.cells[i]._ta);
-      }
-    }
-    function autoSizeAll() {
-      requestAnimationFrame(function () {
-        autoSizeAllNow();
-        requestAnimationFrame(autoSizeAllNow);
-      });
-    }
-
-    // Fase B1 Task 5: Shift+Enter = kjør + hopp til NESTE kode-celle (ingen
-    // auto-opprettelse av en hale-celle ennå); Ctrl/Cmd+Enter = kjør på
-    // stedet (fokus urørt). preventDefault KUN for disse to kombinasjonene —
-    // vanlig Enter (linjeskift i cellen) er helt upåvirket. Gjelder KUN
-    // kodeceller (samme port som kjøreknappen): i en md/html/skip-celles
-    // editor (etter dblclikk) er Shift+Enter et vanlig linjeskift — uten
-    // denne vakten ville preventDefault sluke linjeskiftet og Shift+Enter
-    // rykke fokus til neste kodecelle midt i skrivingen.
-    function onSrcKeydown(ev, idx) {
-      if (ev.key !== 'Enter') return;
-      var c = NB.cells[idx];
-      if (!c || !C.isCodeType(C.resolveType(c, NB.docMode))) return;
-      var mod = ev.ctrlKey || ev.metaKey;
-      if (mod) {
-        ev.preventDefault();
-        C.runCell(idx);
-      } else if (ev.shiftKey) {
-        ev.preventDefault();
-        C.runCell(idx);
-        focusNextCodeCell(idx);
-      }
-    }
-
-    // Neste KODE-celle (md/html/skip hoppes over — de har ingen kjørbar
-    // tekstflate å lande fokus i som gir mening her). Siste celle / ingen
-    // flere kode-celler → behold fokus i inneværende (spec: ingen auto-
-    // opprettet hale-celle i fase B1).
-    function focusNextCodeCell(idx) {
-      for (var i = idx + 1; i < NB.cells.length; i++) {
-        var c = NB.cells[i];
-        var type = C.resolveType(c, NB.docMode);
-        // Hopp over celler med skjult editor (hide-code) — focus() på et
-        // usynlig felt gjør ingenting, og markøren ville "forsvinne".
-        if (C.isCodeType(type) && c._ta && !c.attrs['hide-code']) { c._ta.focus(); return; }
-      }
-    }
-
-    // Serialiser NB.cells → #scriptInput + oppdater plan/linjenummer. Felles
-    // kjerne mellom onEdit sin debouncede flush og updateCellSource (Task 2)
-    // sitt UMIDDELBARE (ikke-debouncede) skriv — begge ender opp med å måtte
-    // gjøre nøyaktig det samme etter at NB.cells er mutert (spec §Task 2:
-    // "reuse the existing flush path — read onEdit/flushPendingEdit and
-    // factor or call").
-    function serializeAndSync() {
-      var ta = $('scriptInput');
-      var text = C.serializeCells(NB.cells);
-      NB.lastSerialized = text;
-      ta.value = text;
-      NB.plan = C.segmentPlan(text, NB.docMode);
-      if (global.updateLineNumbers) global.updateLineNumbers();
-      return text;
-    }
-
-    function onEdit(idx, value) {
-      var c = NB.cells[idx];
-      c.source = value;
-      c.hasBody = true;
-      // SYNKRON kildesynk mot skjema-tilstanden (W4 review-fiks 1a,
-      // krysskanal-race): ParamForms sitt splice-grunnlag (st.source +
-      // st.entries med ferske lineIdx-er) må følge HVERT tastetrykk, ikke
-      // 250ms-debouncen under — ellers ville en skjema-kontroll avfyrt
-      // INNENFOR debounce-vinduet splice inn i en foreldet kilde og stille
-      // miste nettopp-skrevet tekst (repro: skriv `y = 1` på linja over en
-      // #@param-slider, dra slideren < 250ms etter). syncSource er DOM-fri
-      // og billig (ren re-parse av én celles tekst); den VISUELLE
-      // oppdateringen av kontrollene hører fortsatt til refresh i doFlush.
-      if (global.ParamForms && typeof global.ParamForms.syncSource === 'function') {
-        global.ParamForms.syncSource(idx, value);
-      }
-      markStaleIfRan(idx);
-      if (NB.editTimer) { clearTimeout(NB.editTimer); NB.editTimer = null; }
-      // Selve flush-kroppen holdes i en navngitt lukning (NB.pendingFlush) i
-      // tillegg til å være setTimeout-callbacken, slik at runCell() kan
-      // trigge AKKURAT samme logikk synkront (flushPendingEdit) uten å vente
-      // på debouncen — "skriv → kjør" skal alltid kjøre det du nettopp skrev.
-      var doFlush = function () {
-        NB.editTimer = null;
-        NB.pendingFlush = null;
-        serializeAndSync();
-        // GJELDENDE kilde, ikke den closure-fangede `value` (W4 review-fiks
-        // 1b): en skjema-kontroll kan ha kalt Cells.updateCellSource (og
-        // dermed endret c.source) ETTER tastetrykket som armerte denne
-        // debouncen men FØR den fyrte — å flushe med den fangede verdien
-        // ville da rulle skjemaets tilstand tilbake til før kontroll-
-        // endringen og desynke videre. serializeAndSync() over serialiserte
-        // allerede nettopp c.source; refresh/markør-skanningen under må se
-        // NØYAKTIG samme tekst.
-        var cur = NB.cells[idx] ? NB.cells[idx].source : value;
-        // Manuell tekst-redigering (Task 2): re-parse cellens #@param-linjer
-        // og oppdater skjema-kontrollene i place — IKKE synkront per
-        // tastetrykk (ville vært distraherende midt i skriving), men her,
-        // hooket på AKKURAT samme 250ms-debounce som resten av flush-en,
-        // slik planen ber om. Strukturelle endringer (linje lagt til/fjernet,
-        // type endret) bygger stripa på nytt inni ParamForms.refresh selv —
-        // cells.js trenger ikke vite forskjellen.
-        if (global.ParamForms && typeof global.ParamForms.refresh === 'function') {
-          global.ParamForms.refresh(idx, cur);
-        }
-        // Skrev brukeren en ny #%%-markør inni cellen? Da har strukturen
-        // endret seg — full re-rendring (bevisst handling, fokus-hopp ok).
-        var lines = String(cur).split('\n');
-        for (var i = 0; i < lines.length; i++) {
-          if (C.isMarkerLine(lines[i])) { render(); return; }
-        }
-      };
-      NB.pendingFlush = doFlush;
-      NB.editTimer = setTimeout(doFlush, 250);
-    }
-
     // Cells.updateCellSource(idx, newSource) (spec 2 W4, Task 2; retarget mot
     // #scriptInput i Task 3): den PROGRAMMATISKE motparten til vanlig
     // #scriptInput-redigering — brukt av ParamForms når en skjema-kontroll
@@ -2145,9 +1585,10 @@
     //
     // docReconcile ser cellens headerRaw-linje URØRT (kun kroppslinjer ble
     // spliset), så C.sameStructure holder ALLTID her → forsoningen tar den
-    // in-place-grenen, som re-kaller ParamForms.decorate for DENNE cellIdx-
-    // en (source endret) — se docReconcile over for hvorfor et re-kall mot
-    // samme, fortsatt tilkoblede c._wrap er trygt.
+    // in-place-grenen, som re-kaller ParamForms.syncSource for DENNE cellIdx-
+    // en (source endret) — DOM-fri kildesynk, IKKE et full decorate-ombygg
+    // (se docReconcile over for hvorfor et re-kall mot samme, fortsatt
+    // tilkoblede c._wrap er trygt uten å rive ned kontroll-DOM-en).
     //
     // Stale-span-racet (4a-sluttreview, Important 1 — spec 4b Task 1): idx
     // og c.startLine/c.endLine kommer fra NB.cells sist gang DOKUMENTET ble
@@ -2206,19 +1647,6 @@
       return fresh ? fresh.source : null;
     };
 
-    // Kjør cellens ventende redigering (250ms debounce) SYNKRONT — kalt fra
-    // runCell() FØR kjøringen leser #scriptInput, slik at index.html sin
-    // segmentoppløsning (full-dokument, cellIdx → segment) alltid ser den
-    // ferskeste kildeteksten, ikke en som henger igjen til debouncen fyrer.
-    function flushPendingEdit() {
-      if (!NB.editTimer) return;
-      clearTimeout(NB.editTimer);
-      NB.editTimer = null;
-      var fn = NB.pendingFlush;
-      NB.pendingFlush = null;
-      if (fn) fn();
-    }
-
     // Én tikker: aktiv → fang programmatiske endringer i #scriptInput
     // (eksempler/AI setter .value uten input-event) og forson dem (Task 3:
     // docReconcile — untouched cellers slots/outputs overlever, kun det som
@@ -2231,7 +1659,7 @@
       if (NB.activeFlag) {
         if (v !== NB.lastSerialized) reconcileScriptInput(v);
       } else if (v !== NB.lastTickValue && NB.lastUserInput < NB.lastTickTime &&
-                 C.hasMarkers(v) && C.supportedMode(NB.docMode) && !NB.rawOverride) {
+                 C.hasMarkers(v) && C.supportedMode(NB.docMode)) {
         // Per-tikk-attribusjon: verdien endret seg siden forrige tikk UTEN at
         // noen input-event fyrte i samme vindu → endringen er programmatisk
         // (share-lenke, eksempler, i18n-gjenoppretting) → rett til celle-
@@ -2252,7 +1680,6 @@
         NB.chip = el('button', 'nb-chip', t('Notatbok — vis som celler'));
         NB.chip.type = 'button';
         NB.chip.addEventListener('click', function () {
-          NB.rawOverride = false;
           C.enter(appLayout());
         });
         wrap.appendChild(NB.chip);
@@ -2467,7 +1894,6 @@
     // (buildDocumentSegments + Cells.segmentPlan/alignPlan på cellIdx) er
     // autoritativ.
     C.runCell = function (idx) {
-      flushPendingEdit();
       if (!NB.activeFlag) return Promise.resolve();
       var c = NB.cells[idx];
       if (!c) return Promise.resolve();
@@ -2614,7 +2040,6 @@
     //     henger på _afterCellRun) — en seleksjonskjøring skal aldri skjule
     //     den.
     C.runSelection = function (idx, selText) {
-      flushPendingEdit();
       if (!NB.activeFlag) return Promise.resolve();
       var c = NB.cells[idx];
       if (!c) return Promise.resolve();
@@ -2728,27 +2153,17 @@
     }
 
     // Poll-fri knappe-deaktivering (Task 5): flippes fra selve kjøre-
-    // livssyklusen (setRunningUi, kalt av runCell) i tillegg til render()-
+    // livssyklusen (setRunningUi, kalt av runCell) i tillegg til docRender()-
     // tidens engangs-sjekk av mdIsScriptRunning() — Kjør alle/Forklar sin
     // egen kjøreløkke har ingen tilbakekalls-hake inn i cells.js sin DOM-
     // halvdel underveis, så et allerede-rendret notatbok-visning som IKKE
     // re-rendres midt i et Kjør alle-løp forblir uendret (akseptert scope,
-    // se brief).
+    // se brief). 4b §5: c._runBtn/c._toolEls (per-celle kjøreknapp +
+    // verktøylinje) hørte til den fjernede celle-listen (cellNode/
+    // buildToolbar) — docCellNode setter ALDRI disse referansene, så den
+    // gamle løkka over var unåbar død kode. Restart-knappen (docBar) er
+    // fortsatt den eneste faktiske deaktiveringen her.
     function setNbButtonsDisabled(disabled) {
-      for (var i = 0; i < NB.cells.length; i++) {
-        var c = NB.cells[i];
-        if (c && c._runBtn) c._runBtn.disabled = disabled;
-        // Verktøylinje-kontrollene følger samme livssyklus (B2-review):
-        // strukturelle operasjoner er like farlige midt i en kjøring som en
-        // ny kjøring er (toolbarGate er den harde vakten; dette er den
-        // synlige speilingen). _staticDisabled (grense-↑/↓, se buildToolbar)
-        // vinner alltid over re-aktivering.
-        if (c && c._toolEls) {
-          for (var j = 0; j < c._toolEls.length; j++) {
-            c._toolEls[j].disabled = disabled || !!c._toolEls[j]._staticDisabled;
-          }
-        }
-      }
       if (NB.restartBtn) NB.restartBtn.disabled = disabled;
     }
 

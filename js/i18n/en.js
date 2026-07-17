@@ -10,7 +10,6 @@ window.M2PY_I18N.en = {
   "Presentasjon krever et notatbok-dokument (#%%-celler)": "Presentation requires a notebook document (#%% cells)",
   "Forrige slide": "Previous slide",
   "Neste slide": "Next slide",
-  "Velg visning (kolonner, stablet, kun output/dashboard, skrittvis, presentasjon)": "Choose view (columns, stacked, output only/dashboard, step-by-step, presentation)",
   "Velg visning (rad, kolonne, kun output/dashboard, skrittvis, presentasjon)": "Choose view (row, column, output only/dashboard, step-by-step, presentation)",
   "Rad": "Row",
   "Kolonne": "Column",

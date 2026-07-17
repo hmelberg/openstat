@@ -1445,3 +1445,25 @@ test('reattachDocStrips: setter en frakoblet doc-stripe (etter helhets-render-wi
     'ingen duplikat-stripe etter et andre, no-op-kall');
   assert.strictEqual(outputAreaEl.children[0], strip);
 });
+
+// 4a-sluttreview Minor, lukket 4b §5: notatbok-aktiv → #outputArea sitt
+// eneste ekte barn er .doc-root (docRender) — en frakoblet PLAIN-SCRIPT
+// dokument-stripe (cellIdx=null, fra FØR notatboken ble aktivert) skal
+// ALDRI reinnsettes som et søsken-element ved siden av .doc-root.
+test('reattachDocStrips: no-op når notatboken er aktiv (stale plain-script doc-stripe skal ikke lande ved siden av .doc-root)', () => {
+  const { Ui, outputAreaEl } = freshEnv({ docCtx: true });
+  Ui.registerControl(JSON.stringify({ type: 'slider', name: 'n', value: 5, min: 0, max: 10 }));
+  const strip = outputAreaEl.children.find((c) => c.classList.contains('ui-controls'));
+  assert.ok(strip, 'stripa bygget under kjøring, som forventet');
+
+  outputAreaEl.removeChild(strip);
+  assert.strictEqual(strip.parentNode, null, 'stripa er frakoblet');
+
+  global.Cells.active = () => true;
+  Ui.reattachDocStrips();
+
+  assert.strictEqual(strip.parentNode, null,
+    'guarden hindrer reattach mens notatboken er aktiv — stripa forblir frakoblet');
+  assert.strictEqual(outputAreaEl.children.filter((c) => c.classList.contains('ui-controls')).length, 0,
+    'ingen ui-controls-stripe ved siden av .doc-root i #outputArea');
+});

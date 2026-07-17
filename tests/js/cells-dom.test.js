@@ -279,20 +279,15 @@ test('brukerskrevet markør (input-event) etterfulgt av rene tikk → ALDRI auto
   assert.strictEqual(C.active(), false, 'skriving skal aldri auto-åpne, uansett pauselengde');
 });
 
-test('exit({raw:true}) etterfulgt av programmatisk endring → rawOverride holder den lukket', () => {
-  const { C, scriptInputEl, tick } = freshEnv();
-  scriptInputEl.value = '#%% python\nprint(1)\n';
-  C.init('python');
-  assert.strictEqual(C.active(), true);
-
-  C.exit({ raw: true });
-  assert.strictEqual(C.active(), false);
-
-  // Programmatisk endring (ingen input-event) mens rawOverride er satt.
-  scriptInputEl.value = '#%% python\nprint(1)\nprint(2)\n';
-  tick();
-  assert.strictEqual(C.active(), false, 'rawOverride skal blokkere auto-inngang selv om innhold endres programmatisk');
-});
+// 4b §5: DELETED (ikke rewritet) — testen dokumenterte NB.rawOverride, flagget
+// exit({raw:true}) (den gamle nb-bar sin Rå tekst-knapp) satte for å blokkere
+// tick() sin auto-inngang inntil neste contentLoaded(). Knappen/UI-en som
+// SATTE flagget døde med celle-listen (docBar har ingen Rå tekst-affordanse,
+// se nbBar-kommentaren over) — rawOverride var dermed en skrive-ALDRI-lest-
+// UNNTATT-AV-SEG-SELV tilstand, fjernet i sin helhet (js/cells.js). C.exit()
+// tar ikke lenger noen opts; et exit() etterfulgt av en programmatisk endring
+// auto-åpner nå alltid igjen (dekket av de andre tick()-auto-inngang-testene
+// i denne fila).
 
 test('syncTickBaseline() etter modusbytte-gjenoppretting sluker endringen: neste tikk auto-åpner IKKE (regresjon for finding 1)', () => {
   const { C, scriptInputEl, tick } = freshEnv();
@@ -368,20 +363,20 @@ test('contentLoaded() uten mdNotebookSession (stub-DOM) → ingen krasj', () => 
   assert.doesNotThrow(() => C.contentLoaded());
 });
 
-test('contentLoaded() nullstiller rawOverride: nytt dokument re-åpner etter Rå tekst-exit', () => {
+test('contentLoaded() etter exit(): nytt dokument re-åpner uansett (ingen rest-tilstand fra forrige exit blokkerer)', () => {
   const { C, scriptInputEl } = freshEnv();
   scriptInputEl.value = '#%% python\nprint(1)\n';
   C.init('python');
   assert.strictEqual(C.active(), true);
 
-  C.exit({ raw: true });
+  C.exit();
   assert.strictEqual(C.active(), false);
 
-  // Nytt dokument med markører leveres (eksempel/share) → rawOverride
-  // gjaldt det FORRIGE dokumentet og nullstilles.
+  // Nytt dokument med markører leveres (eksempel/share) — det eksplisitte
+  // innlastingssignalet auto-åpner uavhengig av forrige exit().
   scriptInputEl.value = '#%% python\nprint(2)\n#%% md\nny\n';
   C.contentLoaded();
-  assert.strictEqual(C.active(), true, 'nytt dokument skal re-åpne selv etter Rå tekst-valg');
+  assert.strictEqual(C.active(), true, 'nytt dokument skal re-åpne etter en tidligere exit()');
 });
 
 test('contentLoaded() uten markører mens aktiv → forlater notatboken (rent dokument lastet)', () => {
@@ -875,13 +870,13 @@ test('runCell: nekter mens mdIsScriptRunning() er true (kaller ikke mdRunNoteboo
 // 4a: DELETED (ikke rewritet) — testen dokumenterte at runCell() flusher en
 // ventende PER-CELLE redigeringsdebounce (armert av en textarea 'input'-
 // hendelse på cellens egen c._ta) synkront før kjøring. Den debounce-kilden
-// finnes ikke lenger: docCellNode har ingen textarea, og onEdit (som armerte
-// NB.editTimer) er dermed unåbar død kode i 4a — flushPendingEdit() i
-// C.runCell er fortsatt et no-op-safe kall (NB.editTimer er alltid null),
-// se js/cells.js. Den nye redigerings-debouncen lever i #scriptInput selv
-// (docReconcile/refreshFromScript) og er Task 3 sitt ansvar — et analogt
-// "runCell flusher ventende #scriptInput-redigering"-scenario hører hjemme
-// der, ikke her.
+// finnes ikke lenger: docCellNode har ingen textarea. 4b §5: onEdit/
+// doFlush/flushPendingEdit (og NB.editTimer/NB.pendingFlush) var dermed
+// unåbar død kode og er nå fjernet fra js/cells.js i sin helhet — runCell()
+// kaller ikke lenger noe flush-steg først. Den nye redigerings-debouncen
+// lever i #scriptInput selv (docReconcile/refreshFromScript) og er Task 3
+// sitt ansvar — et analogt "runCell flusher ventende #scriptInput-
+// redigering"-scenario hører hjemme der, ikke her.
 
 // ---- C.runCell: R-modus per-celle-kjøring (Task 4, fase B1) ----
 // index.html sin mdRunNotebookCell/webRShelter.captureR er utenfor rekkevidde
@@ -1422,7 +1417,7 @@ test('re-render mens presentasjon er aktiv: modus beholdes, cur klemmes', () => 
   assert.strictEqual(counter.textContent, '1 / 1');
 });
 
-test('contentLoaded (nytt dokument) og exit (Rå tekst) avslutter presentasjonen', () => {
+test('contentLoaded (nytt dokument) og exit() avslutter presentasjonen', () => {
   const { C, scriptInputEl } = freshEnv();
   scriptInputEl.value = '#%% md slide=1\nA\n';
   C.init('python');
@@ -1431,7 +1426,7 @@ test('contentLoaded (nytt dokument) og exit (Rå tekst) avslutter presentasjonen
   C.contentLoaded();
   assert.strictEqual(C.presenting(), false);
   C.presentStart();
-  C.exit({ raw: true });
+  C.exit();
   assert.strictEqual(C.presenting(), false);
 });
 

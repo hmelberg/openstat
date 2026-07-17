@@ -6434,17 +6434,17 @@ json.dumps(out)
     // Debounced MutationObserver: fanger opp alle stedene i koden som setter
     // outputArea.innerHTML/appendChild uten at vi må endre hvert enkelt sted.
     // Idempotent via data-copybtn-done, så gjentatte kall er billige no-ops.
-    // Eksponert som window.mdScheduleResultEnhance (Task 6): notatbokens
-    // egen MutationObserver på #notebookRoot (js/cells.js, C.enter) kaller
-    // denne — samme debounce, generalisert til å dekke celle-outputene også.
+    // Eksponert som window.mdScheduleResultEnhance (Task 6): det konvergerte
+    // dokumentets doc-root (js/cells.js, docRender) rendres INN I #outputArea
+    // selv (4a, spec §1) — observeOutputAreaForCopyButtons under dekker den
+    // derfor allerede via subtree:true; ingen egen #notebookRoot (fjernet
+    // sammen med celle-listen, 4b §5) å observere separat lenger.
     var _resultEnhancePending = null;
     function scheduleResultEnhance() {
       if (_resultEnhancePending) clearTimeout(_resultEnhancePending);
       _resultEnhancePending = setTimeout(function() {
         _resultEnhancePending = null;
         attachResultCopyButtons(outputArea);
-        var nbRoot = document.getElementById('notebookRoot');
-        if (nbRoot) attachResultCopyButtons(nbRoot);
         updateCopyAllResultsVisibility();
       }, 150);
     }
@@ -8171,11 +8171,13 @@ json.dumps(out)
       runOpts = runOpts || {};
       var showCommands = runOpts.showCommands !== false; // default true
       if (!webRReady) {
-        // Notatbok aktiv (Task 7-oppfølging): #outputArea ligger skjult bak
-        // .nb-hidden — meldingen må til trailing-sloten, ellers ser brukeren
-        // ingenting. En fersk pre APPENDES der (ikke innerHTML-wipe: sloten
-        // kan holde forrige kjørings samlede output); utenfor notatbok
-        // beholdes dagens erstatt-alt-adferd i #outputArea uendret.
+        // Notatbok aktiv (Task 7-oppfølging): meldingen må til cellens egen
+        // trailing-slot (Cells.errorHost()), ikke til #outputArea direkte —
+        // #outputArea ER doc-root sin vert (4a, spec §1), men individuelle
+        // celle-slots inni den er de synlige målene for run-output, ikke
+        // #outputArea-noden selv. En fersk pre APPENDES der (ikke innerHTML-
+        // wipe: sloten kan holde forrige kjørings samlede output); utenfor
+        // notatbok beholdes dagens erstatt-alt-adferd i #outputArea uendret.
         var _nbEarlyHost = window.Cells && window.Cells.active() && window.Cells.errorHost();
         var _wrMsg = 'WebR er ikke klar. Vent til R er lastet og pr\u00f8v igjen.';
         if (_nbEarlyHost) {
@@ -10720,20 +10722,19 @@ async def _m2py_run_segment(_seg_json):
       }
       const snapshotScript = rawScript;
       // Notatbok aktiv (fase B2 Task 2): samme presedens som Kjør alle
-      // (linje ~9596 over, "Gates på active(), IKKE hasMarkers()") — med
-      // Rå tekst-valget på kjører Forklar som et vanlig skript (#%%-linjer
-      // er bare kommentarer, blank-linje-seksjonering uendret). Cellevisningen
-      // skjuler #scriptInput/#outputArea/forklarLineHighlight helt
-      // (.container.nb-hidden, se app.css) — Forklar MÅ derfor forlate
-      // cellevisningen FØR selve kjøringen, ellers kjører hele løpet usett
-      // bak en skjult .container (verifisert: dette er dagens faktiske
-      // oppførsel før denne fiksen). Forlater UTEN {raw:true}, så
-      // rawOverride ikke settes — js/cells.js sin egen tick()-heuristikk
-      // (poll hvert sekund) tar notatboken tilbake til cellevisning helt av
-      // seg selv når #scriptInput får sitt opprinnelige #%%-merkede innhold
-      // igjen i finally-blokken under (programmatisk endring, ingen
-      // brukertasting) — «bonus»-gjeninntreden per task-2-brief, uten en
-      // eneste ekstra kodelinje.
+      // (linje ~9596 over, "Gates på active(), IKKE hasMarkers()") — uten en
+      // notatbok-innsjekk kjører Forklar som et vanlig skript (#%%-linjer er
+      // bare kommentarer, blank-linje-seksjonering uendret). #outputArea ER
+      // doc-root sin vert når notatboken er aktiv (4a, spec §1) — Forklar MÅ
+      // derfor forlate cellevisningen FØR selve kjøringen, ellers skriver
+      // scriptRun-output rett inn i (eller bak) det konvergerte dokumentet i
+      // stedet for en ren #outputArea. exit() fjerner doc-root fra
+      // #outputArea igjen (js/cells.js), og js/cells.js sin egen
+      // tick()-heuristikk (poll hvert sekund) tar notatboken tilbake til
+      // cellevisning helt av seg selv når #scriptInput får sitt opprinnelige
+      // #%%-merkede innhold igjen i finally-blokken under (programmatisk
+      // endring, ingen brukertasting) — «bonus»-gjeninntreden per
+      // task-2-brief, uten en eneste ekstra kodelinje.
       const forklarNbActive = !!(window.Cells && window.Cells.active());
       if (forklarNbActive) window.Cells.exit();
       scriptInput.value = '';

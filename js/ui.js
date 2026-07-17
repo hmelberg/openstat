@@ -908,8 +908,19 @@
      * settes inn som #outputArea sitt første barn, 'bottom' → appendes
      * sist). Stille no-op om #outputArea mangler eller ingen
      * dokument-striper (cellIdx=null) finnes ennå.
+     *
+     * Guard (4a-sluttreview Minor, lukket 4b §5): notatbok-aktiv → #outputArea
+     * sitt eneste ekte barn skal være .doc-root (docRender, js/cells.js) —
+     * en cellIdx=null-plain-script-stripe fra FØR notatboken ble aktivert
+     * skal ALDRI reinnsettes som et søsken-element ved siden av .doc-root
+     * (stale plain-script-stripe ville dukket opp over/under det konvergerte
+     * dokumentet). Notatbok-aktive dokumenter har uansett ingen dokument-nivå
+     * (cellIdx=null) striper av sin egen — kontroller der er alltid
+     * celle-scopet (ParamForms.decorate/Ui _ensureStrip med en ekte cellIdx,
+     * se docCellNode) — så guarden dropper aldri en LEGITIM reattach.
      */
     Ui.reattachDocStrips = function () {
+      if (global.Cells && typeof global.Cells.active === 'function' && global.Cells.active()) return;
       var outputArea = document.getElementById ? document.getElementById('outputArea') : null;
       if (!outputArea) return;
       var byPos = _strips[null];
