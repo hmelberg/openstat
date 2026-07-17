@@ -122,6 +122,19 @@ converged document). The published HTML gets `#options.view =
 output-only` injected (unless the document sets a view) so it opens as
 a report. Menu label + i18n updated.
 
+### Trust posture for published documents (pinned 2026-07-18)
+
+A published document is a self-contained web page that AUTO-RUNS the
+author's code on load — that is its purpose. Its `#%% html` cells are
+therefore trusted by default (`contentLoaded()` without the untrusted
+flag): escaping them while the page freely executes arbitrary
+brython/micropython would be security theater — the code can do
+anything the html could. The trust boundary for a hosted published
+page is "you opened this HTML file", exactly as for any website. (The
+`untrusted` gate remains for the OTHER ingestion paths — share links,
+GitHub files — where the app loads foreign content into the user's own
+session.)
+
 ## 6. Rewrite inventory (plan 5b)
 
 The 13 dash documents (12 examples + the loose `ex_dashboard_jobb.r`)

@@ -2183,7 +2183,7 @@
         // allerede har tatt et eksplisitt standpunkt (f.eks. «#options.view =
         // split» eller «= present»). Samme regex-form som extractScriptOptions
         // over (~6627) bruker for å kjenne igjen «#options.view = ...»-linjer.
-        if (!/^[ \t]*(?:#|\/\/)[ \t]*options\.view[ \t]*=/mi.test(publishedScript)) {
+        if (!/^[ \t]*(?:#|\/\/)[ \t]*options\.view[ \t]*=/m.test(publishedScript)) {
           publishedScript = '#options.view = output-only\n' + publishedScript;
         }
 
