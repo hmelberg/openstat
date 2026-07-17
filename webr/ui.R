@@ -1,4 +1,8 @@
 # ui - widget-fasade for webR (R-modus notatbøker, spec 2 ui-widgets, W2).
+# Offentlig API: ui_slider, ui_dropdown, ui_checkbox, ui_switch, ui_number,
+# ui_text, ui_button (funksjonerer; W5.1 on_change=/on_click=-aliaser),
+# ui_html/ui_sl/ui_pico (høflige notiser), ui_value (per-run-snapshot-leser).
+#
 # Speiler pyodide/ui.py sitt vokabular og fallback-semantikk, men bruker
 # DEKLARER-OG-INJISER-MODELLEN i stedet for pyodide sin PULL-modell:
 #
@@ -227,6 +231,36 @@ ui_button <- function(label, rerun = "self", on_click = NULL, name = NULL,
   .ui_register(list(type = "button", name = key, label = label, rerun = rerun,
                     placement = placement))
   invisible(NULL)
+}
+
+#' HTML-elementer. Task 5: Ikke støttet i R-modus ennå - bruk python-modusene.
+#' Høflig melding, ikke krasj (spec 2026-07-17).
+ui_html <- function(...) {
+  stop("ui.html støttes ikke i R ennå — bruk python-modusene (pyodide/brython/micropython)", call. = FALSE)
+}
+
+#' Shoelace-komponenter. Task 5: Ikke støttet i R-modus ennå - bruk python-modusene.
+#' Høflig melding, ikke krasj (spec 2026-07-17).
+ui_sl <- function(...) {
+  stop("ui.html støttes ikke i R ennå — bruk python-modusene (pyodide/brython/micropython)", call. = FALSE)
+}
+
+#' Pico-komponenter. Task 5: Ikke støttet i R-modus ennå - bruk python-modusene.
+#' Høflig melding, ikke krasj (spec 2026-07-17).
+ui_pico <- function(...) {
+  stop("ui.html støttes ikke i R ennå — bruk python-modusene (pyodide/brython/micropython)", call. = FALSE)
+}
+
+#' Gjeldende verdi for en kontroll. Leser fra det injiserte `.ui_values`-snapshots
+#' (satt av index.html FØR cellekjøring); per-kjøring-snapshot, ikke live-oppdatering.
+#' Hvis `name` finnes i `.ui_values`, returneres verdien; ellers NULL.
+#' Speiler pyodide/ui.py sin ui.value(name), men R-versjonen leser fra preinjisert
+#' liste i stedet for synkron JS-spørring (W2 declare-og-injiser-modellen).
+ui_value <- function(name) {
+  if (!exists(".ui_values", envir = globalenv(), inherits = FALSE)) return(NULL)
+  vals <- get(".ui_values", envir = globalenv())
+  if (!is.list(vals)) return(NULL)
+  vals[[name]]
 }
 
 # ---- grensesnittet index.html bruker (post-run, speiler .dash_registry_json) ----
