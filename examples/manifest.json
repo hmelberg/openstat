@@ -769,6 +769,11 @@
       "group": null
     },
     {
+      "file": "python/py_ui_html.txt",
+      "label": "ui.html — bygg sider med elementer, biblioteker og callbacks",
+      "group": null
+    },
+    {
       "file": "python/py_widget_events.txt",
       "label": "Widget-events — ui.on og ui.run_cell",
       "group": null

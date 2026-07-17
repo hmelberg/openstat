@@ -1,0 +1,57 @@
+# label: ui.html — bygg sider med elementer, biblioteker og callbacks
+#options.mode = python
+#options.title = "ui.html — elementer og biblioteker"
+#options.description = "Bygg DOM direkte fra python: ui.html.div(...), #tag.import = shoelace → ui.sl.button, widget-callbacks uten rerun og ui.value"
+#tag.import = shoelace
+
+#%% md
+# `ui.html` — HTML fra python
+
+`ui.html.ELEMENT(...)` bygger ekte DOM-elementer: posisjonsargumenter er
+barn (tekst eller andre elementer), nøkkelord er attributter
+(`cls=`/`class_=`, `style=` som streng eller dict, `data_x=` → `data-x`).
+Siste uttrykk i en celle monteres i cellens slot — eller bruk
+`.show(target="en-id")` for å plassere i en html-celle.
+
+#%% python
+import ui
+
+kort = ui.html.div(
+    ui.html.h3("Et kort"),
+    ui.html.p("Bygget med ", ui.html.b("ui.html"), "."),
+    cls="kort", style={"border": "1px solid #ccc", "padding": "12px", "border_radius": "8px"},
+    data_kilde="ui-html-eksempel",
+)
+kort
+
+#%% md
+`#tag.import = shoelace` i preambelen lastet Shoelace — da finnes
+`ui.sl.*` som web-komponenter:
+
+#%% python
+import ui
+
+teller = {"n": 0}
+visning = ui.html.span("0", id="teller-visning")
+
+def klikk(event):
+    teller["n"] += 1
+    visning.clear()
+    visning.add(str(teller["n"]))
+
+knapp = ui.sl.button("Klikk meg", variant="primary")
+knapp.on("click", klikk)
+ui.html.div(knapp, ui.html.p("Antall klikk: ", visning))
+
+#%% python
+import ui
+
+# Widget-callback UTEN rerun: handleren får den nye verdien direkte.
+melding = ui.html.div("Flytt slideren …")
+
+def endret(v):
+    melding.clear()
+    melding.add("Verdien er nå " + str(v) + " (lest via ui.value: " + str(ui.value("s")) + ")")
+
+ui.slider(0, 100, value=25, name="s", label="Prøv meg", on_change=endret)
+melding

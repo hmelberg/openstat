@@ -1044,9 +1044,9 @@ def lib(name):
     de forhåndsinstansierte modul-attributtene (samme semantikk som direkte
     `ui.sl`/`ui.pico`-oppslag), ikke opprett nye _LibNamespace-instanser."""
     name = str(name)
-    # Specialize sl and pico to return pre-instantiated namespaces
-    # (dialectal difference from pyodide/brython, where these route
-    # through module-level __getattr__)
+    # Spesialtilfelle sl og pico: returnér de forhåndsinstansierte
+    # navnerommene (dialektavvik fra pyodide/brython, der disse går
+    # via modul-nivå __getattr__)
     if name == "sl":
         return sl
     if name == "pico":

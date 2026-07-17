@@ -1,5 +1,7 @@
 # `ui.html` element builders, library imports, widget callbacks (design)
 
+**Status:** DELIVERED 2026-07-18 (plan 2026-07-17-ui-html.md).
+
 New phase in the unified-document-model line (between phase 4 and the
 dash absorption — approved ordering: this phase FIRST, dash absorption
 builds on it). All decisions resolved with Hans 2026-07-17 (three

@@ -405,6 +405,7 @@ window.M2PY_I18N.en = {
   "Installerer {pkg}…": "Installing {pkg}…",
   "#tag.import: ugyldig angivelse: {spec}": "#tag.import: invalid spec: {spec}",
   "#tag.import: kunne ikke laste {spec} ({feil})": "#tag.import: could not load {spec} ({feil})",
+  "#tag.import: importnavn normalisert til småbokstaver: {original} → {normalized}": "#tag.import: import name normalized to lowercase: {original} → {normalized}",
   "Oversetter…": "Translating…",
   "WebR er ikke klar ennå. Vent litt og prøv igjen.": "WebR is not ready yet. Wait a moment and try again.",
   "Oversettelseadvarsler:": "Translation warnings:",
