@@ -1294,7 +1294,10 @@
       // cols (Task 4, spec §4): verdien er allerede validert (heltall 2-6,
       // ellers droppet av parseHeader/scanTagBlock over) — trygg å bruke
       // direkte i klassenavnet uten en ny range-sjekk her.
-      if (c.attrs.cols) wrap.classList.add('nb-cols-' + c.attrs.cols);
+      // Belte-sjekk (review-Minor): bare `cols`-FLAGGET (boolean true fra
+      // ukjent-flagg-stien) skal ikke gi en inert nb-cols-true-klasse —
+      // kun validerte strengverdier ('2'..'6') når hit fra skannerne.
+      if (typeof c.attrs.cols === 'string') wrap.classList.add('nb-cols-' + c.attrs.cols);
       var out = el('div', 'nb-output');
       var widgetsPos = WIDGETS_POS[c.attrs.widgets] ? c.attrs.widgets : 'top';
       out.classList.add('nb-widgets-' + widgetsPos);
