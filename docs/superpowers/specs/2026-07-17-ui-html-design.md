@@ -63,11 +63,23 @@ bridge; polite notice; future path = the registry/declare-channel).
 - **Children**: positional varargs — strings become text nodes,
   elements append, lists flatten one level, `None` skipped. `.add(*
   children)` appends later. No context-manager form (YAGNI).
-- **Returns the live element handle** (a python wrapper holding the JS
-  node): methods `.add`, `.clear`, `.on(event, handler)` (python
-  callable — routes through the same callback plumbing as §3),
-  `.set_style(**styles)`, `.add_class`/`.remove_class`, `.show(
-  target=None)`, plus `.el` (the raw JS node) as the escape hatch.
+- **Returns the live element handle** (a python wrapper): methods
+  `.add`, `.clear`, `.on(event, handler)` (python callable — routes
+  through the same callback plumbing as §3), `.set_style(**styles)`,
+  `.add_class`/`.remove_class`, `.show(target=None)`, plus `.el` (the
+  raw JS node, resolved on access) as the escape hatch.
+- **Architecture (pinned 2026-07-17 after seam recon)**: the builder is
+  a JS-side element engine (`Ui.el*` JSON API — create/append/props/
+  on/show over an id-registry); the python wrapper holds only the
+  element id. Rationale: no facade touches `document` today — the
+  established, tested bridge is `window.Ui.*` with JSON payloads
+  (registerControl/bindEvent precedent); an id-based engine keeps the
+  three twins near-identical and pytest-able with the FakeUiJs
+  pattern, and concentrates every DOM quirk in one place. Real DOM
+  nodes are still created — they are owned JS-side. Kwarg-NAME
+  normalization (cls/class_/data_/aria_/style-dict) happens
+  python-side (pure, heavily unit-tested); property-vs-setAttribute
+  application happens JS-side.
 
 ### The unified kwargs standard (fixes code2web's warts)
 
