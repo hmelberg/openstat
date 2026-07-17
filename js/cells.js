@@ -1214,7 +1214,75 @@
       }
     }
 
-    C.refreshFromScript = function () { if (NB.activeFlag) docRender(); else updateChip(); };
+    // Forsonings-policy (Task 3, spec §1 "Render/update policy"): samme
+    // celletall + samme headerRaw-sekvens (C.sameStructure, Task 1) →
+    // oppdater PÅ PLASS — untouched celler (source uendret) beholder sin
+    // DOM-node OG sitt tidligere resultat urørt; kun cellene hvis `source`
+    // faktisk endret seg re-rendres (md/html-kropp på nytt, kodeceller får
+    // .nb-stale). Ulik struktur (celle lagt til/fjernet, header omskrevet)
+    // → ærlig full rebuild (docRender, samme "outputs borte, stale
+    // nullstilt"-oppførsel som strukturendring alltid har hatt).
+    //
+    // `parsed` er ALLEREDE resultatet av C.parseCells(ta.value) — kalleren
+    // (refreshFromScript/tick/updateCellSource) har lest #scriptInput selv,
+    // docReconcile parser aldri på nytt.
+    function docReconcile(parsed) {
+      if (!NB.root || !C.sameStructure(NB.cells, parsed.cells)) { docRender(); return; }
+      var ta = $('scriptInput');
+      var oldCells = NB.cells;
+      var newCells = parsed.cells;
+      NB.cells = newCells;
+      NB.lastSerialized = ta.value;
+      NB.plan = C.segmentPlan(ta.value, NB.docMode);
+      for (var i = 0; i < newCells.length; i++) {
+        var oldC = oldCells[i], c = newCells[i];
+        // Slot-identitet overlever (spec §1 "leave untouched cells' slots
+        // (and their outputs) alone") — DOM-nodene ble bygget for oldC av en
+        // TIDLIGERE docRender/docReconcile og lever fortsatt i NB.root; å
+        // overføre referansene hit er det som gjør resultatet av en
+        // tidligere kjøring synlig etter forsoningen (renderCellResult skrev
+        // rett inn i akkurat denne _out-noden).
+        c._out = oldC._out;
+        c._wrap = oldC._wrap;
+        if (oldC.source === c.source) continue;   // untouched — ingen re-rendring
+        var type = C.resolveType(c, NB.docMode);
+        if (C.isCodeType(type)) {
+          markStaleIfRan(i);
+        } else if (c._out) {
+          // md/html: kroppen ER resultatet — re-render inn i det overlevende
+          // sluket (samme byggeklosser som docCellNode selv brukte).
+          renderNonCode(c._out, type, C.renderContent(c.source, type, c.sniffed));
+        }
+        // #@param-stripa må følge den endrede kildeteksten (ny linje lagt
+        // til/fjernet/verdi endret av en manuell redigering) — decorate
+        // fjerner eksisterende striper for DENNE cellIdx FØRST (se _build i
+        // js/param-forms.js), så et re-kall mot samme, fortsatt tilkoblede
+        // c._wrap er trygt (ingen duplikat-stripe).
+        var paramLang = C.paramLangForType(type);
+        if (paramLang && c._wrap && global.ParamForms && typeof global.ParamForms.decorate === 'function') {
+          global.ParamForms.decorate(i, c._wrap, c.source, paramLang);
+        }
+      }
+    }
+
+    // refreshFromScript() dobbeltjobber (Task 3b + Task 3): index.html sin
+    // clearOutput() kaller den som en EKSPLISITT "nullstill output"-handling
+    // (Task 3b) — den skal ALLTID tømme slots, selv når #scriptInput ikke er
+    // rørt siden sist rendret. tick() (under) kaller den samme funksjonen
+    // implisitt når #scriptInput FAKTISK har endret seg siden sist (en
+    // programmatisk endring — AI/eksempel/#@param-kontroll utenom
+    // updateCellSource). Samme skillelinje som tick() selv allerede bruker
+    // (`ta.value !== NB.lastSerialized`) avgjør hvilken av de to brukeren
+    // mente: uendret siden sist → full ærlig reset (docRender, Task 3b-
+    // kontrakten); endret siden sist → forsoning (docReconcile, Task 3-
+    // kontrakten — outputs for UENDREDE celler overlever).
+    C.refreshFromScript = function () {
+      if (!NB.activeFlag) { updateChip(); return; }
+      var ta = $('scriptInput');
+      if (!ta) return;
+      if (ta.value === NB.lastSerialized) { docRender(); return; }
+      docReconcile(C.parseCells(ta.value));
+    };
 
     // DØD ETTER 4a — fjernes i plan 4b (spec §5). cellNode/buildToolbar og
     // resten av celleliste-redigeringsmaskineriet under er UNÅBAR: ingenting
@@ -1790,44 +1858,51 @@
       NB.editTimer = setTimeout(doFlush, 250);
     }
 
-    // Cells.updateCellSource(idx, newSource) (spec 2 W4, Task 2): den
-    // PROGRAMMATISKE motparten til onEdit — brukt av ParamForms når en
-    // skjema-kontroll endrer verdi (control → writeValue → HIT). I motsetning
-    // til onEdit (drevet av en ekte 'input'-DOM-hendelse på cellens egen
-    // textarea) MÅ denne selv synkronisere den synlige textareaen (c._ta) —
-    // å sette .value programmatisk fyrer ALDRI en 'input'-hendelse, så uten
-    // denne linja ville brukeren dratt en slider og sett cellens Python-tekst
-    // henge igjen uendret til neste manuelle redigering.
+    // Cells.updateCellSource(idx, newSource) (spec 2 W4, Task 2; retarget mot
+    // #scriptInput i Task 3): den PROGRAMMATISKE motparten til vanlig
+    // #scriptInput-redigering — brukt av ParamForms når en skjema-kontroll
+    // endrer verdi (control → writeValue → HIT). 4a fjernet celle-listens
+    // egne textareaer (c._ta) — kanonisk kilde er nå #scriptInput ALENE, så
+    // denne funksjonen SPLICER cellens kroppslinjer rett inn i
+    // #scriptInput.value i stedet for å sette en cellelokal .value.
     //
-    // KRITISK ingen-ombygging-disiplin (samme prinsipp som js/ui.js sin
-    // _updateControlSpec): INGEN rebuild av celle-noden her — kun c._ta.value
-    // + autoSize i place. En slider midt i en drag ville ellers blitt revet
-    // ned av sin EGEN endring (control → updateCellSource → en hypotetisk
-    // rebuild → ny DOM-node → dragens 'input'-lytter peker på en fjernet
-    // node). c._out/output røres ikke i det hele tatt (ingen kjøring skjedde).
+    // Kroppsspennet gjenbruker NØYAKTIG samme aritmetikk som parseCells sin
+    // egen close() (linje 279 over): bodyStart er startLine (preambel,
+    // headerRaw null) eller startLine+1 (vanlig celle — kroppen begynner
+    // rett ETTER headerlinja); deleteCount er 0 for en kroppsløs celle
+    // (hasBody false — splicingen blir da en REN INNSETTING rett etter
+    // headerlinja, ingen linjer å slette) ellers hele det eksisterende
+    // spennet (endLine - bodyStart + 1). newSource === '' splices inn NULL
+    // linjer (IKKE ['']  — en tom streng ville satt inn én uønsket blank
+    // linje) — symmetrisk med hvordan cellBlock/parseCells selv behandler
+    // en tømt kropp (hasBody:false etter re-parse).
     //
-    // Kaller til slutt ParamForms.refresh(idx, newSource) (guardet) — IKKE
-    // for å lukke en loop tilbake til onEdit (updateCellSource fyrer aldri en
-    // 'input'-hendelse på c._ta, så onEdit sin debounce trigges ALDRI av
-    // dette kallet — ingen sirkularitet finnes), men fordi updateCellSource
-    // er et generelt Cells-API som i prinsippet kan kalles av annet enn
-    // ParamForms selv: skjemaet skal uansett reflektere den nyeste kilden.
-    // ParamForms.refresh sin egen "no-op når verdien allerede stemmer"-vakt
-    // (se js/param-forms.js) gjør AKKURAT dette kallet en trygg no-op for
-    // kontrollen som selv utløste endringen (formatLiteral→currentValue
-    // rundtures byte-nøyaktig til samme typede verdi) — den drasende
-    // slideren sin range-input røres dermed ALDRI av dette tilbakekallet.
+    // syncTickBaseline() FØR docReconcile (ikke etter): forsoningen under
+    // leser/oppdaterer selv NB.lastSerialized til den nye teksten, men
+    // tikkeren sin EGEN "endret siden forrige tikk"-basislinje
+    // (NB.lastTickValue) må også synkes her — samme regel som enhver annen
+    // programmatisk #scriptInput-endring (se contentLoaded/setDocMode) — så
+    // IKKE et påfølgende tikk tolker AKKURAT DENNE skriften som en ny
+    // ekstern injeksjon.
+    //
+    // docReconcile ser cellens headerRaw-linje URØRT (kun kroppslinjer ble
+    // spliset), så C.sameStructure holder ALLTID her → forsoningen tar den
+    // in-place-grenen, som re-kaller ParamForms.decorate for DENNE cellIdx-
+    // en (source endret) — se docReconcile over for hvorfor et re-kall mot
+    // samme, fortsatt tilkoblede c._wrap er trygt.
     C.updateCellSource = function (idx, newSource) {
       var c = NB.cells[idx];
       if (!c) return;
-      c.source = newSource;
-      c.hasBody = true;
-      if (c._ta) { c._ta.value = newSource; autoSize(c._ta); }
-      markStaleIfRan(idx);
-      serializeAndSync();
-      if (global.ParamForms && typeof global.ParamForms.refresh === 'function') {
-        global.ParamForms.refresh(idx, newSource);
-      }
+      var ta = $('scriptInput');
+      var lines = String(ta.value).split('\n');
+      var bodyStart = c.headerRaw === null ? c.startLine : c.startLine + 1;
+      var deleteCount = c.hasBody ? (c.endLine - bodyStart + 1) : 0;
+      var newLines = newSource === '' ? [] : String(newSource).split('\n');
+      var spliceArgs = [bodyStart, deleteCount].concat(newLines);
+      Array.prototype.splice.apply(lines, spliceArgs);
+      ta.value = lines.join('\n');
+      C.syncTickBaseline();
+      docReconcile(C.parseCells(ta.value));
     };
 
     // Kjør cellens ventende redigering (250ms debounce) SYNKRONT — kalt fra
@@ -1844,14 +1919,17 @@
     }
 
     // Én tikker: aktiv → fang programmatiske endringer i #scriptInput
-    // (eksempler/AI setter .value uten input-event); inaktiv → vis/skjul hint.
+    // (eksempler/AI setter .value uten input-event) og forson dem (Task 3:
+    // docReconcile — untouched cellers slots/outputs overlever, kun det som
+    // faktisk endret seg re-rendres; ulik struktur faller selv tilbake til
+    // docRender inni docReconcile); inaktiv → vis/skjul hint.
     function tick() {
       var ta = $('scriptInput');
       if (!ta) return;
       var v = ta.value;
       if (NB.activeFlag) {
         if (v !== NB.lastSerialized) {
-          if (C.hasMarkers(v)) docRender();
+          if (C.hasMarkers(v)) docReconcile(C.parseCells(v));
           else C.exit();
         }
       } else if (v !== NB.lastTickValue && NB.lastUserInput < NB.lastTickTime &&

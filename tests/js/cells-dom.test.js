@@ -1451,3 +1451,68 @@ test('Task 3b: refreshFromScript() etter en kjøring rebygger dokumentet med TOM
   assert.strictEqual(cell0.out.textContent, '', 'slot 0 er tom etter rebygging');
   assert.strictEqual(cell1.out.textContent, '', 'slot 1 sitt forrige resultat er borte — rebygd tomt, ikke bevart');
 });
+
+// ---------- Task 3 (spec 2026-07-17 §1): forsonings-policy + updateCellSource ----------
+//
+// refreshFromScript() dobbeltjobber (se js/cells.js): kalt med #scriptInput
+// UENDRET siden sist rendret (Task 3b sin "nullstill output"-kontrakt over)
+// → full docRender(); kalt ETTER at #scriptInput faktisk har endret seg
+// (denne seksjonen) → docReconcile() — untouched cellers slots/outputs
+// overlever, kun det som faktisk endret seg re-rendres.
+
+test('forsoning: kropps-endring i md re-rendrer cellen; kode-endring gir stale; output overlever', async () => {
+  const { C, scriptInputEl, outputAreaEl } = freshEnv();
+  scriptInputEl.value = '#%% md\n# En\n#%% python\nx = 1\n';
+  C.init('python');
+  global.mdIsScriptRunning = () => false;
+  global.mdRunNotebookCell = () => Promise.resolve({ text: 'ok' });
+  await C.runCell(1);
+  scriptInputEl.value = '#%% md\n# To\n#%% python\nx = 2\n';
+  C.refreshFromScript();
+  const nodes = collectNodes(outputAreaEl, []);
+  const md = nodes.find((n) => n.classList && n.classList.contains('output-markdown'));
+  assert.ok((md.innerHTML || md.textContent).includes('To'), 'md re-rendret');
+  const cell1 = nodes.find((n) => n.classList && n.classList.contains('doc-cell') && n.dataset.idx === '1');
+  assert.ok(cell1.classList.contains('nb-stale'), 'kodecellen stale');
+  const body1 = collectNodes(cell1, []).find((n) => n.classList && n.classList.contains('nb-output-body'));
+  assert.strictEqual(body1.textContent, 'ok', 'outputen overlevde forsoningen');
+});
+
+test('forsoning: strukturendring → full rebuild (output borte, stale nullstilt)', async () => {
+  const { C, scriptInputEl, outputAreaEl } = freshEnv();
+  scriptInputEl.value = '#%% python\nx = 1\n';
+  C.init('python');
+  global.mdIsScriptRunning = () => false;
+  global.mdRunNotebookCell = () => Promise.resolve({ text: 'ok' });
+  await C.runCell(0);
+  scriptInputEl.value = '#%% python\nx = 1\n#%% md\nny celle\n';
+  C.refreshFromScript();
+  const cell0 = collectNodes(outputAreaEl, []).find((n) => n.classList && n.classList.contains('doc-cell') && n.dataset.idx === '0');
+  const body0 = collectNodes(cell0, []).find((n) => n.classList && n.classList.contains('nb-output-body'));
+  assert.strictEqual(body0.textContent, '', 'rebuild tømmer slots (ærlig reset)');
+});
+
+test('updateCellSource: splicer #scriptInput, forsoner, bevarer resten av dokumentet', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python\nn = 3 #@param\n#%% md\nA\n';
+  C.init('python');
+  C.updateCellSource(0, 'n = 7 #@param');
+  assert.strictEqual(scriptInputEl.value, '#%% python\nn = 7 #@param\n#%% md\nA\n');
+  assert.strictEqual(C.parseCells(scriptInputEl.value).cells[0].source, 'n = 7 #@param');
+});
+
+// Review-funn (Task 2): eksplisitt kontrollpunkt for at .nb-stale faktisk
+// lander på .doc-cell-WRAPPEREN (samme node cellElementAt/beginRun/CSS ser),
+// ikke bare et internt objekt-flagg — kjør en celle, endre kilden via den
+// offentlige Cells.updateCellSource-API-en (ParamForms sin seam), og les
+// klassen tilbake fra DOM-en via cellElementAt.
+test('updateCellSource: .nb-stale lander på .doc-cell-wrapperen for en tidligere kjørt celle', async () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% python\nx = 1\n';
+  C.init('python');
+  global.mdIsScriptRunning = () => false;
+  global.mdRunNotebookCell = () => Promise.resolve({ text: 'ok' });
+  await C.runCell(0);
+  C.updateCellSource(0, 'x = 2');
+  assert.strictEqual(C.cellElementAt(0).classList.contains('nb-stale'), true);
+});
