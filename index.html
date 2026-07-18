@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="preconnect" href="https://cdn.plot.ly" crossorigin>
   <link rel="preload" as="script" href="https://cdn.jsdelivr.net/pyodide/v314.0.2/full/pyodide.js">
-  <link rel="stylesheet" href="app.css?v=2026-07-18a">
+  <link rel="stylesheet" href="app.css?v=2026-07-19a">
 </head>
 <body data-theme="light">
   <header class="topbar">
@@ -1686,8 +1686,8 @@
         var textColor = (styles.getPropertyValue('--text') || '#1a1b26').trim();
         var borderColor = (styles.getPropertyValue('--border') || '#e4e2dd').trim();
         var layoutUpdate = {
-          paper_bgcolor: bgCode,
-          plot_bgcolor: bgCode,
+          paper_bgcolor: 'rgba(0,0,0,0)',
+          plot_bgcolor: 'rgba(0,0,0,0)',
           font: { color: textColor },
           xaxis: { gridcolor: borderColor, zerolinecolor: borderColor, linecolor: borderColor, tickfont: { color: textColor } },
           yaxis: { gridcolor: borderColor, zerolinecolor: borderColor, linecolor: borderColor, tickfont: { color: textColor } }
@@ -6102,7 +6102,9 @@ json.dumps(out)
       var baseLayout = {
         autosize: false, width: 480, height: 300,
         margin: { t: 40, r: 40, b: 50, l: 50 },
-        paper_bgcolor: bgCode, plot_bgcolor: bgCode,
+        // Gjennomsiktig (brukerfeedback 2026-07-19): blend med verten
+        // (celle-panel ELLER klassisk output-flate) i begge temaer.
+        paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
         font: { color: textColor, family: 'DejaVu Sans, Arial, sans-serif', size: 12 },
         xaxis: { gridcolor: borderColor, zerolinecolor: borderColor, linecolor: borderColor, tickfont: { color: textColor } },
         yaxis: { gridcolor: borderColor, zerolinecolor: borderColor, linecolor: borderColor, tickfont: { color: textColor } }

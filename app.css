@@ -559,7 +559,11 @@
     .output-copy-btn:hover { transform: scale(1.05); }
     .output-copy-btn.copied { background: #16a34a; }
     .output-table-wrap:hover .output-copy-btn, .output-table-wrap:focus-within .output-copy-btn { opacity: 1; }
-    .plotly-container { width: 480px; max-width: 100%; box-sizing: border-box; min-height: 260px; height: 340px; padding: 4px; margin: 0.15em auto; background: var(--bg-code); overflow-x: auto; overflow-y: hidden; }
+    /* Gjennomsiktig (brukerfeedback 2026-07-19): containeren hadde --bg-code
+       mens cellene har --bg-panel → synlige striper i venstre/høyre kant.
+       Figur-layouten er også gjennomsiktig (mdRenderPlotlyFigure/
+       updatePlotlyThemes), så figuren smelter inn i verten begge steder. */
+    .plotly-container { width: 480px; max-width: 100%; box-sizing: border-box; min-height: 260px; height: 340px; padding: 4px; margin: 0.15em auto; background: transparent; overflow-x: auto; overflow-y: hidden; }
     .plotly-container.seaborn-style { background: #fff; }
     /* B1: generisk kopier-knapp-overlegg for resultatblokker (table/pre/plot/safestat) */
     .result-copy-wrap { position: relative; }
@@ -1087,6 +1091,12 @@
 .nb-warnings { font-size: 12px; opacity: .75; }
 .nb-cell { display: grid; gap: 10px; margin-bottom: 12px; border: 1px solid var(--border);
   border-radius: 8px; padding: 10px; position: relative; background: var(--bg-panel);
+  /* Dokumentet bor INNE i .output-area (fase 4), som har white-space:
+     pre-wrap — arvet inn i md/html-celler gjorde markdown-it sine
+     inter-tag-newlines til ekstra blanke linjer («dobbel linjeavstand»,
+     brukerfunn 2026-07-19). Nullstill her; pre-er setter sin egen
+     pre-wrap via .output-area pre-regelen uansett. */
+  white-space: normal;
   transition: box-shadow .15s ease, border-color .15s ease, background-color .15s ease; }
 .nb-cell:hover { border-color: color-mix(in srgb, var(--accent) 25%, var(--border));
   box-shadow: 0 2px 6px rgba(0,0,0,.12); }
