@@ -303,6 +303,7 @@
           <button type="button" data-mode="duckdb">SQL - DuckDB</button>
           <button type="button" data-mode="brython">Brython</button>
           <button type="button" data-mode="micropython">MicroPython</button>
+          <button type="button" data-mode="javascript">JavaScript</button>
         </div>
       </div>
       <button type="button" class="btn btn-tolk" id="btnDmQuick" data-mode-only="microdata" style="display:none;gap:6px" data-i18n-title title="Vurder personvern: sjekk om scriptet henter mer detaljerte data enn n&#248;dvendig (dataminimering), og f&#229; forslag til &#229; aggregere/forenkle. Krever egen Anthropic-n&#248;kkel.">
@@ -577,7 +578,8 @@
        etter at nettleseren allerede har startet disse to lastingene). -->
   <script src="js/brython-engine.js?v=2026-07-17a"></script>
   <script src="js/micropython-engine.js?v=2026-07-17a"></script>
-  <script src="js/cells.js?v=2026-07-18d"></script>
+  <script src="js/javascript-engine.js?v=2026-07-19a"></script>
+  <script src="js/cells.js?v=2026-07-19a"></script>
   <script src="js/ui.js?v=2026-07-18a"></script>
   <script src="js/param-forms.js"></script>
   <script src="js/ipywidgets-bridge.js"></script>
@@ -1526,7 +1528,7 @@
           if (!r.ok) throw new Error(r.status);
           return r.text();
         }).then(function(text) {
-          if (mode && (mode === 'microdata' || mode === 'python' || mode === 'r' || mode === 'statx' || mode === 'duckdb' || mode === 'brython' || mode === 'micropython')
+          if (mode && (mode === 'microdata' || mode === 'python' || mode === 'r' || mode === 'statx' || mode === 'duckdb' || mode === 'brython' || mode === 'micropython' || mode === 'javascript')
               && typeof switchEditorMode === 'function'
               && typeof activeEditorMode !== 'undefined') {
             if (typeof editorContent !== 'undefined') editorContent[mode] = text;
@@ -2031,8 +2033,9 @@
         if (_mm && window.switchEditorMode) {
           var _wanted = _mm[1].toLowerCase();
           if (_wanted === 'py') _wanted = 'python';
+          if (_wanted === 'js') _wanted = 'javascript';
           var _cur = window.M2PY && window.M2PY.currentMode && window.M2PY.currentMode();
-          if (['python', 'r', 'duckdb', 'microdata', 'jamovi', 'brython', 'micropython'].indexOf(_wanted) < 0) _wanted = _cur && _cur.id;
+          if (['python', 'r', 'duckdb', 'microdata', 'jamovi', 'brython', 'micropython', 'javascript'].indexOf(_wanted) < 0) _wanted = _cur && _cur.id;
           if (_wanted && (!_cur || _cur.id !== _wanted)) {
             var _txt = _si.value;
             window.switchEditorMode(_wanted);
@@ -2497,6 +2500,17 @@
       'greatest','least','floor','ceil','exp','ln','log','sqrt','pow','regexp_matches','regexp_replace']);
     const SQL_HL_CFG = { commentChar: '#', commentPrefix: '--', triple: false, caseInsensitive: true,
       identStart: /[A-Za-z_]/, identPart: /[A-Za-z0-9_]/, kw: SQL_HL_KW, fn: SQL_HL_FN };
+    const JS_HL_KW = new Set(['const','let','var','function','class','return','if','else',
+      'for','while','do','switch','case','default','break','continue','new','delete','typeof',
+      'instanceof','in','of','try','catch','finally','throw','async','await','yield',
+      'import','export','extends','super','this','true','false','null','undefined']);
+    const JS_HL_FN = new Set(['console','Math','JSON','Object','Array','String','Number',
+      'Boolean','Date','Promise','Map','Set','RegExp','parseInt','parseFloat','isNaN','fetch',
+      'aq','op','ss','jStat','ML','Plot','Plotly']);
+    // commentChar '#' med vilje: # load/#%%-direktivlinjer farges som
+    // kommentarer (js-motoren stripper dem før eval); '//' via commentPrefix.
+    const JS_HL_CFG = { commentChar: '#', commentPrefix: '//', triple: false,
+      identStart: /[A-Za-z_$]/, identPart: /[A-Za-z0-9_$]/, kw: JS_HL_KW, fn: JS_HL_FN };
 
     // Modul-namespace → funksjoner (for `px.`, `pd.`, `np.`, `sm.` i autocomplete).
     const PY_NS_FUNCS = {
@@ -2863,6 +2877,7 @@
         return bytes;
       } finally { await conn.close(); }
     }
+    window.__duckUseBytes = __duckUseBytes;   // JavaScript-motorens use-from-duckdb
 
     window.__duck = {
       conn: null,
@@ -3421,6 +3436,43 @@
           }
           setStatus(ctx.rightStatus, res.error ? t('Feil') : t('Ferdig'));
         } },
+      javascript: { id: 'javascript', label: 'JavaScript', hlConfig: JS_HL_CFG, handleTab: handlePythonTab,
+        onActivate: function () { if (window.JsEngine) window.JsEngine.load().catch(function () {}); },
+        runSelf: async function (script, ctx) {
+          var _dl = await window.DataLoader.resolveAndFetchLoads(script,
+            { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey });
+          // '#tag.import' — samme wiring som Brython-/MicroPython-radene over.
+          try { await window.mdEnsureTagImports(ctx.rightStatus); }
+          catch (e) { console.warn('#tag.import (javascript runSelf):', e); }
+          setStatus(ctx.rightStatus, t('Kjører…'));
+          // Samme ui.*/doc-forbehold som motor-radene over: tøm FØR, ikke etter.
+          window.mdClearOutputAreaUnlessDoc();
+          nbUiRunCtx = { cellIdx: null, cellEl: null, doc: true };
+          if (window.Ui && window.Ui.beginCellRun) window.Ui.beginCellRun(null);
+          var res;
+          try {
+            res = await window.JsEngine.run(script, { loads: _dl.loads });
+          } finally {
+            nbUiRunCtx = null;
+            if (window.Ui && window.Ui.endCellRun) window.Ui.endCellRun(null);
+          }
+          var _omEl = document.querySelector('input[name="outputMode"]:checked');
+          var _asHtml = !_omEl || _omEl.value === 'html';
+          var _suppress = (typeof suppressEmbedded !== 'undefined' && suppressEmbedded) ? !!suppressEmbedded.checked : false;
+          if (outputArea.querySelector('[data-ui-shown]')) {
+            appendOutput(res.text || '', _asHtml, _suppress);
+          } else {
+            renderOutput(res.text || '', _asHtml, _suppress);
+          }
+          if (window.Ui && window.Ui.reattachDocStrips) window.Ui.reattachDocStrips();
+          if (res.error) {
+            var _pre = document.createElement('pre');
+            _pre.className = 'error';
+            _pre.textContent = res.error;
+            outputArea.appendChild(_pre);
+          }
+          setStatus(ctx.rightStatus, res.error ? t('Feil') : t('Ferdig'));
+        } },
     };
     function currentMode() {
       return modeRegistry[activeEditorMode] || modeRegistry.microdata;
@@ -3449,7 +3501,8 @@
     // (plan 2026-07-09: R uten Pyodide, fremtidig brython/subdomene-boot).
     var RUNTIME_FOR_MODE = { python: 'pyodide', microdata: 'pyodide', duckdb: 'duckdb',
                              jamovi: 'pyodide', statx: 'pyodide',
-                             safestat: 'pyodide', brython: 'brython', micropython: 'micropython', r: 'webr' };
+                             safestat: 'pyodide', brython: 'brython', micropython: 'micropython',
+                             javascript: 'javascript', r: 'webr' };
     function runtimeForMode(id) { return RUNTIME_FOR_MODE[id] || 'pyodide'; }  // ukjent → trygt valg
 
     function switchEditorMode(newMode) {
@@ -3460,6 +3513,7 @@
       // Fase C: motor-sesjonene er også modus-bundet
       if (window.BrythonEngine && window.BrythonEngine.notebookSession) window.BrythonEngine.notebookSession.invalidate();
       if (window.MicroPythonEngine && window.MicroPythonEngine.notebookSession) window.MicroPythonEngine.notebookSession.invalidate();
+      if (window.JsEngine && window.JsEngine.notebookSession) window.JsEngine.notebookSession.invalidate();
       // Save departing mode's content and breakpoints
       const si = document.getElementById('scriptInput');
       if (si) editorContent[activeEditorMode] = si.value;
@@ -3786,7 +3840,20 @@
       '           title="Iris — begerbladlengde mot -bredde")',
     ].join('\n');
 
-    const STARTUP_EXAMPLES = { python: _STARTUP_PY, r: _STARTUP_R, microdata: _PLACEHOLDER_MICRODATA, brython: _STARTUP_BRYTHON };
+    const _STARTUP_JS = [
+      '// OpenStat — JavaScript: kjører direkte i nettleseren, ingen nedlasting.',
+      '// Biblioteker lastes automatisk når de brukes: aq/op (Arquero, dataframes),',
+      '// ss (simple-statistics), jStat (fordelinger), ML (ml.js), Plot, Plotly.',
+      '# load ' + _DATA_RAW + 'iris.csv as iris',
+      '',
+      'const stats = iris',
+      '  .groupby("species")',
+      '  .rollup({ n: op.count(), snitt: op.mean("sepal_length") });',
+      'console.log("Begerbladlengde per art:");',
+      'stats',
+    ].join('\n');
+
+    const STARTUP_EXAMPLES = { python: _STARTUP_PY, r: _STARTUP_R, microdata: _PLACEHOLDER_MICRODATA, brython: _STARTUP_BRYTHON, javascript: _STARTUP_JS };
 
     // ── Hurtigspør-boks i toppen: Enter åpner AI-panelet og sender spørsmålet ──
     (function initTopbarAsk() {
@@ -3889,8 +3956,8 @@
     }
     // ── Editor mode (always-on, controlled by bottom-bar dropdown) ──────
     let activeEditorMode  = 'microdata'; // 'microdata' | 'python' | 'r'
-    const editorContent   = { microdata: '', python: '', r: '', statx: '', jamovi: '', duckdb: '', brython: '', micropython: '' };
-    const editorBP        = { microdata: new Set(), python: new Set(), r: new Set(), statx: new Set(), jamovi: new Set(), duckdb: new Set(), brython: new Set(), micropython: new Set() };
+    const editorContent   = { microdata: '', python: '', r: '', statx: '', jamovi: '', duckdb: '', brython: '', micropython: '', javascript: '' };
+    const editorBP        = { microdata: new Set(), python: new Set(), r: new Set(), statx: new Set(), jamovi: new Set(), duckdb: new Set(), brython: new Set(), micropython: new Set(), javascript: new Set() };
     // B4/B5 (docs/REVIEW_2026-07-07.md §3): switchEditorMode() persists
     // md_editor_mode but nothing ever read it back, so a reload always
     // landed on 'microdata'. Restore it here, synchronously, as part of this
@@ -6292,6 +6359,15 @@ json.dumps(out)
               } catch (e) {
                 div.textContent = t('ipywidgets: kunne ikke lese widget-data');
               }
+            } else if (p.embedType === 'html' && p.payload) {
+              // JavaScript-modusens DOM-verdier (Observable Plot-SVG m.m.).
+              // Payloaden kommer fra brukerens egen kode i brukerens egen
+              // nettleser — samme tillitsnivå som html-celler etter trust-
+              // gaten og ui.* sin direkte DOM-skriving.
+              const hDiv = document.createElement('div');
+              hDiv.className = 'output-html-embed';
+              hDiv.innerHTML = p.payload;
+              frag.appendChild(hDiv);
             } else {
               const pre = document.createElement('pre');
               pre.className = 'embed-placeholder';
@@ -9646,6 +9722,9 @@ options(width = 200)
       }).catch(function (e) {
         setStatus(leftStatus, 'Load failed: ' + (e && e.message ? e.message : String(e)), true);
       });
+    } else if (runtimeForMode(activeEditorMode) === 'javascript') {
+      // JavaScript-modus har ingen runtime å boote — klar umiddelbart.
+      runtimeReadyBootstrap(null);
     } else if (runtimeForMode(activeEditorMode) === 'duckdb') {
       // Fase 1 (plan 2026-07-11): SQL-modus booter duckdb-wasm, ikke Pyodide.
       __ensureDuckDB().then(function () {
@@ -9983,8 +10062,10 @@ async def _m2py_run_segment(_seg_json):
         // Pyodide-boot (samme F4-prinsipp som r-grenen under). live=false i
         // notebookSession → neste kjørings ensure() re-resolver # load og
         // rebinder friske datasettvariabler.
-        if (activeEditorMode === 'brython' || activeEditorMode === 'micropython') {
-          var _eng = activeEditorMode === 'brython' ? window.BrythonEngine : window.MicroPythonEngine;
+        if (activeEditorMode === 'brython' || activeEditorMode === 'micropython' || activeEditorMode === 'javascript') {
+          var _eng = activeEditorMode === 'brython' ? window.BrythonEngine
+                   : activeEditorMode === 'javascript' ? window.JsEngine
+                   : window.MicroPythonEngine;
           if (_eng && _eng.notebookSession) {
             return _eng.notebookSession.reset().catch(function (e) {
               console.warn('motor-reset (fase C):', e);
@@ -10052,6 +10133,9 @@ async def _m2py_run_segment(_seg_json):
         if (activeEditorMode === 'micropython' && window.MicroPythonEngine && window.MicroPythonEngine.notebookSession) {
           return window.MicroPythonEngine.notebookSession.isLive();
         }
+        if (activeEditorMode === 'javascript' && window.JsEngine && window.JsEngine.notebookSession) {
+          return window.JsEngine.notebookSession.isLive();
+        }
         return nbSessionLive;
       },
       // Klemmer til de fire kjøretidene notatbok-sesjonen faktisk kjenner
@@ -10060,7 +10144,7 @@ async def _m2py_run_segment(_seg_json):
       runtime: function () {
         var m = activeEditorMode;
         return (m === 'python' || m === 'r' || m === 'duckdb' || m === 'microdata'
-                || m === 'brython' || m === 'micropython') ? m : null;
+                || m === 'brython' || m === 'micropython' || m === 'javascript') ? m : null;
       },
       onStateChange: function (cb) {
         if (typeof cb === 'function') nbStateChangeCbs.push(cb);
@@ -10242,7 +10326,9 @@ async def _m2py_run_segment(_seg_json):
       if (activeEditorMode !== kind) {
         return { notice: t('{kind}-celler kjøres bare i {kind}-modus — bytt modus først', { kind: kind }) };
       }
-      var engine = kind === 'brython' ? window.BrythonEngine : window.MicroPythonEngine;
+      var engine = kind === 'brython' ? window.BrythonEngine
+                 : kind === 'javascript' ? window.JsEngine
+                 : window.MicroPythonEngine;
       if (!engine || !engine.notebookSession) {
         return { error: t('Motoren er ikke lastet ennå. Vent og prøv igjen.') };
       }
@@ -10304,7 +10390,7 @@ async def _m2py_run_segment(_seg_json):
       // Fase C: motor-celler (egen sti — se runNotebookEngineCell over).
       // Modusmatch håndheves DER (kind !== activeEditorMode → notis), så
       // en #%% brython-celle i et r-/python-dokument også lander riktig.
-      if (kind === 'brython' || kind === 'micropython') {
+      if (kind === 'brython' || kind === 'micropython' || kind === 'javascript') {
         return runNotebookEngineCell(payload);
       }
       // R-modus: pyodide-sesjonen bootes ikke lenger der (F4-fiksen), så ALLE
@@ -10315,7 +10401,7 @@ async def _m2py_run_segment(_seg_json):
       }
       // Fase C: fremmede kode-kinds i motor-modus (spec-avgjørelse 1:
       // enspråklige dokumenter) — notis, aldri Pyodide-boot.
-      if (activeEditorMode === 'brython' || activeEditorMode === 'micropython') {
+      if (activeEditorMode === 'brython' || activeEditorMode === 'micropython' || activeEditorMode === 'javascript') {
         return { notice: t('Denne celletypen kjøres ikke i {mode}-modus — dokumentet er enspråklig', { mode: activeEditorMode }) };
       }
       if (kind !== 'pyodide' && kind !== 'duckdb' && kind !== 'microdata') {
@@ -10645,7 +10731,8 @@ async def _m2py_run_segment(_seg_json):
       // — akseptert: en delt løkke-flagg ville fått Cells.runCell sin egen
       // mdIsScriptRunning-vakt til å avvise alle cellene.
       if (window.Cells && window.Cells.active()
-          && (activeEditorMode === 'brython' || activeEditorMode === 'micropython')) {
+          && (activeEditorMode === 'brython' || activeEditorMode === 'micropython'
+              || activeEditorMode === 'javascript')) {
         if (engineNbRunActive) return;
         engineNbRunActive = true;
         try {
