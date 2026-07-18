@@ -671,7 +671,14 @@
     var steps = [];
     for (var idx = 0; idx < cells.length; idx++) {
       if (codeSet[idx]) {
-        steps.push({ kind: 'code', cellIdx: idx, source: C.execCellSource(cells[idx]) });
+        // cellType følger med steget (Task 7) slik at forklar-eksekutoren
+        // kan oppdage fremmede celler (annet språk enn docMode) og hoppe
+        // dem ærlig over i stedet for å kjøre dem i feil motor.
+        steps.push({
+          kind: 'code', cellIdx: idx,
+          cellType: C.resolveType(cells[idx], docMode),
+          source: C.execCellSource(cells[idx])
+        });
         continue;
       }
       var c = cells[idx];

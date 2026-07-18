@@ -6955,6 +6955,18 @@ json.dumps(out)
       const blocks = [];
       for (let i = 0; i < steps.length; i++) {
         const st = steps[i];
+        // Fremmed celle (annet språk enn dokumentmotoren): ALDRI feil-motor-
+        // kjøring (duckdb→pyodide ga SyntaxError, fase 1-backloggen) — en
+        // tale-only notisblokk i stedet. Tom code ⇒ replay-stien hopper over
+        // den selv (codeTrim-gaten i forklarReplayChunksBeforeIndex).
+        if (st.kind === 'code' && st.cellType && st.cellType !== docMode) {
+          blocks.push({
+            code: '', codeTrim: '',
+            commentItems: [{ silent: false, text: t('Cellen er i et annet språk og hoppes over i forklar-modus') + ' (' + st.cellType + ')', kwargs: {} }],
+            postCommentItems: [], skipCodeSpeech: false
+          });
+          continue;
+        }
         const b = st.kind === 'md' ? buildForklarMdNarrationBlock(st.source) : buildForklarCellCodeBlock(st.source);
         if (b) blocks.push(b);
       }

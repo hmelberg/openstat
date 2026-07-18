@@ -509,6 +509,7 @@ window.M2PY_I18N.en = {
   "Ingen kode å forklare.": "No code to step through.",
   "Skrittvis kjøring støttes ikke for navngitte kilder (server-kjøring). Bruk Kjør.": "Step-by-step running is not supported for named sources (server execution). Use Run.",
   "Skrittvis kjøring støttes ikke for serverkilder. Bruk Kjør.": "Step-by-step running is not supported for server sources. Use Run.",
+  "Cellen er i et annet språk og hoppes over i forklar-modus": "This cell is in a different language and is skipped in explain mode",
   "Forklar feilet.": "Step-through failed.",
   "Trykk Ctrl+Enter (eller Cmd+Enter) for å kjøre scriptet.": "Press Ctrl+Enter (or Cmd+Enter) to run the script.",
   "Bruk Tab i kode-feltet for å få kommando- og variabel-forslag.": "Use Tab in the code field to get command and variable suggestions.",

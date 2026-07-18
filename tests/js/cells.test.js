@@ -347,6 +347,14 @@ test('forklarCellSteps: tom md-celle er fortsatt ETT "md"-steg (tomhet håndtere
   assert.strictEqual(steps[0].source, '');
 });
 
+test('forklarCellSteps bærer per-celle-språket', () => {
+  const doc = '#%% python\nx = 1\n#%% duckdb\nSELECT 1\n#%% md\n"""tekst"""\n';
+  const steps = C.forklarCellSteps(doc, 'python');
+  const code = steps.filter(s => s.kind === 'code');
+  assert.equal(code[0].cellType, 'python');
+  assert.equal(code[1].cellType, 'duckdb');
+});
+
 test('mdNarrationText: overskrifter, emphasis, lenker, inline-kode og lister strippes rimelig', () => {
   const src = '# Tittel\n\nDette er **fet** og *kursiv* tekst med `kode` og en [lenke](https://x.no).\n\n- punkt en\n- punkt to';
   const out = C.mdNarrationText(src);
