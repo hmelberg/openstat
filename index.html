@@ -8141,13 +8141,23 @@ json.dumps(out)
     }
 
     // Valgfri `target` (Task 7, speiler renderOutput i index.html ~5770):
-    // runHybridR er en samlet single-shot-rendring (alle segmenter bygger én
-    // outputParts-liste, rendret ÉN gang til slutt — se løkka over) — derfor
-    // 2b-grenen (trailing-slot fallback), ikke per-celle-attribusjon.
+    // wholesale-varianten (innerHTML=''-wipe + full rendring) — brukes for
+    // trailing-sloten og for plain-skript-stien i #outputArea. Per-celle-
+    // attribusjon (spec 2026-07-18) går via appendROutputParts (under) i
+    // stedet, som append-er uten wipe til den enkelte cellens slot.
     function renderROutputParts(outputParts, target) {
       var host = target || outputArea;
       purgePlots(host);
       host.innerHTML = '';
+      host.appendChild(buildROutputNodes(outputParts));
+    }
+
+    // Per-celle-varianten (R per-celle-attribusjon, spec 2026-07-18): APPEND
+    // uten wipe — beginRun-purgen (js/cells.js) har allerede tømt slottene
+    // med bevart strip/[data-ui-shown]-kontrakt (5b); en innerHTML=''-wipe
+    // her ville radert kontrollstriper og [data-ui-shown]-noder i cellen.
+    function appendROutputParts(outputParts, host) {
+      if (!host || !outputParts.length) return;
       host.appendChild(buildROutputNodes(outputParts));
     }
 
@@ -8385,13 +8395,15 @@ json.dumps(out)
       });
       var outputParts  = [];
 
-      // Notatbok aktiv (Task 7): tøm forrige kjørings per-celle-output FØR
-      // denne kjøringen begynner å skrive. R-modus bygger ÉN samlet
-      // outputParts-liste og rendrer den ÉN gang til slutt (se
-      // renderROutputParts-kallet nederst) — per-celle-attribusjon er Fase B.
-      // Count 0 er bevisst: matcher aldri NB.plan.length, så sinks forblir
-      // av og alt R-output havner i trailing-sloten (errorHost) i stedet.
-      if (window.Cells && window.Cells.active()) window.Cells.beginRun(0);
+      // Notatbok aktiv: aktiver per-celle-sinkene (spec 2026-07-18, tilnærming
+      // B) — samme beginRun-kall som pyodide-løkka, med HELE dokumentets
+      // segment-kinds i dokumentrekkefølge (_rSegsAll — samme grunnlag som
+      // _rUiPlan under). beginRun purger slottene og bygger NB.runSinks;
+      // null (inaktiv notatbok / plan som ikke justerer, f.eks. håndskrevne
+      // ##-markører) → gammel samlet trailing-rendring uendret.
+      var _rSinks = (window.Cells && window.Cells.active())
+        ? window.Cells.beginRun(_rSegsAll.map(function (s) { return s.kind; }))
+        : null;
 
       // ── Phase 1: run all microdata segments with a shared interpreter ────
       // Runs silently (setup). Datasets exported to WebR as typed tibbles via
@@ -8497,15 +8509,18 @@ json.dumps(out)
       }
 
       // Justert plan for ui-verdi-injeksjon/registeroppdatering per r-segment
-      // (plassfase Task 2) — HELT ADSKILT fra Cells.beginRun(0) over: den
-      // planen forblir bevisst null (trailing-slot for ALL tekst-/plott-
-      // output, uendret W2-tilpasning). Cells.alignedPlanForKinds gjør SAMME
-      // alignPlan-oppslag som beginRun ville gjort, men uten å røre
-      // NB.runSinks/NB.runPlan (se kommentaren i js/cells.js). Kinds-arrayet
-      // er HELE dokumentets segment-rekkefølge (_rSegsAll, ikke det filtrerte
-      // rSegs) — samme grunnlag som python-sidens _segmentKinds. null når
-      // notatboken er inaktiv eller planen ikke justerer (håndskrevne
-      // ##-markører m.m.) — per-segment-injeksjonen hopper da over, se under.
+      // (plassfase Task 2) — Cells.beginRun over (spec 2026-07-18) FÅR nå
+      // denne samme kinds-arrayen og bygger NB.runSinks fra den ekte planen,
+      // så _rUiPlan er ikke lenger adskilt fra sink-planen, bare et separat
+      // side-effekt-fritt oppslag: Cells.alignedPlanForKinds gjør SAMME
+      // alignPlan-oppslag som beginRun gjør internt, men uten å røre
+      // NB.runSinks/NB.runPlan (se kommentaren i js/cells.js) — samme
+      // justering, samme resultat som NB.runPlan, kun for ui-indeksene.
+      // Kinds-arrayet er HELE dokumentets segment-rekkefølge (_rSegsAll,
+      // ikke det filtrerte rSegs) — samme grunnlag som python-sidens
+      // _segmentKinds. null når notatboken er inaktiv eller planen ikke
+      // justerer (håndskrevne ##-markører m.m.) — per-segment-injeksjonen
+      // hopper da over, se under.
       var _rUiActive = UI_R_REGEX.test(src) && !!(window.Cells && window.Cells.active());
       var _rUiPlan = _rUiActive
         ? window.Cells.alignedPlanForKinds(_rSegsAll.map(function (s) { return s.kind; }))
@@ -8543,6 +8558,11 @@ json.dumps(out)
       for (var ri = 0; ri < rSegs.length; ri++) {
         var segText = rSegs[ri].text.trim();
         if (!segText) continue;
+
+        // Per-celle-attribusjon: dette segmentets parts samles lokalt og
+        // rutes til cellens slot etter statement-løkka; uten sink faller de
+        // til den delte outputParts (samlet trailing-rendring nederst).
+        var segParts = _rSinks ? [] : outputParts;
 
         // ui-widgets (plassfase Task 2): celleindeks for DETTE r-segmentet i
         // den justerte planen (rSegOrigIdx[ri] — IKKE ri, se dens kommentar
@@ -8584,7 +8604,7 @@ json.dumps(out)
           try {
             if (showCommands) {
               var _echoStmt = stripCodeComments(stmt, '#'); // ikke vis #-kommentarer i output
-              if (_echoStmt) outputParts.push({ type: 'code', text: _echoStmt });
+              if (_echoStmt) segParts.push({ type: 'code', text: _echoStmt });
             }
             var captured = await webRShelter.captureR(stmt, {
               withAutoprint: true,
@@ -8602,19 +8622,25 @@ json.dumps(out)
               .map(function(o) { return String(o.data); })
               .join('\n');
             if (stdout.length) {
-              outputParts.push({ type: 'text', text: stdout, className: 'm2py-stmt-output' });
+              segParts.push({ type: 'text', text: stdout, className: 'm2py-stmt-output' });
             }
             if (stderr.trim()) {
-              outputParts.push({ type: 'text', text: stderr, className: 'm2py-stmt-output' });
+              segParts.push({ type: 'text', text: stderr, className: 'm2py-stmt-output' });
             }
             if (captured.images && captured.images.length) {
               captured.images.forEach(function(bitmap) {
-                outputParts.push({ type: 'image', bitmap: bitmap });
+                segParts.push({ type: 'image', bitmap: bitmap });
               });
             }
           } catch(e) {
-            outputParts.push({ type: 'error', text: 'R-feil: ' + (e.message || e) });
+            segParts.push({ type: 'error', text: 'R-feil: ' + (e.message || e) });
           }
+        }
+
+        if (_rSinks) {
+          var _rSegSink = _rSinks[rSegOrigIdx[ri]] || null;
+          if (_rSegSink) appendROutputParts(segParts, _rSegSink);
+          else Array.prototype.push.apply(outputParts, segParts);
         }
 
         // (2) post-run: les registeret (.ui_registry_json() returnerer OG
@@ -8667,11 +8693,13 @@ json.dumps(out)
         _rDocUiHadControls = false;
       }
 
-      // Trailing-slot fallback (Task 7, 2b): samlet R-output havner i
-      // notatbokens errorHost-slot nederst når notatbok er aktiv, ellers
-      // uendret i #outputArea.
-      renderROutputParts(outputParts,
-        (window.Cells && window.Cells.active() && window.Cells.errorHost()) || null);
+      // Sink-modus med alt attribuert: intet å rendre i trailing (og en tom
+      // wholesale-rendring ville skapt en tom trailing-node). Ellers (plain,
+      // fallback-parts, plan-mismatch): samlet rendring som før.
+      if (!_rSinks || outputParts.length) {
+        renderROutputParts(outputParts,
+          (window.Cells && window.Cells.active() && window.Cells.errorHost()) || null);
+      }
       // ui-widgets exit-gate-fiks: renderROutputParts over gjør et helhets-
       // innerHTML=''-bytte av #outputArea som frakobler doc-stripa
       // registerFromRegistry(null, ...) bygde over (~linje 8264) — sett den

@@ -1830,13 +1830,13 @@
     };
 
     // Justert plan UTEN beginRun sine sluk-bivirkninger (ui-widgets, plass-
-    // fase Task 2): R-modus sin "Kjør alle" (runHybridR) kaller beginRun(0)
-    // for å BEVISST tvinge all tekst-/plott-output til den samlede trailing-
-    // sloten (dokumentert R2-tilpasning, se runHybridR sin egen kommentar) —
-    // NB.runSinks/NB.runPlan skal derfor IKKE overskrives med den ekte
-    // justerte planen bare fordi vi også trenger celleindekser for ui-verdi-
-    // injeksjon/registeroppdatering per r-segment. Denne funksjonen gjør
-    // NØYAKTIG det alignPlan-kallet inni beginRun gjør (samme NB.plan/
+    // fase Task 2): R-modus sin "Kjør alle" (runHybridR) kaller beginRun nå
+    // med de EKTE segment-kindene i notatbokmodus (per-celle-attribusjon,
+    // spec 2026-07-18) — denne funksjonen trengs likevel fortsatt som et
+    // separat, side-effekt-fritt oppslag: den brukes for ui-verdi-injeksjon/
+    // registeroppdatering per r-segment UAVHENGIG av om beginRun sitt kall
+    // skjedde/lyktes, uten å røre NB.runSinks/NB.runPlan. Denne funksjonen
+    // gjør NØYAKTIG det alignPlan-kallet inni beginRun gjør (samme NB.plan/
     // NB.cells/NB.docMode), men returnerer planen i stedet for å lagre den
     // noe sted — ingen purge, ingen NB.runSinks/NB.runPlan-mutasjon, ingen
     // clearAllStale(). Returnerer null når notatboken er inaktiv eller
