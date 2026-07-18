@@ -1201,4 +1201,5 @@ test('javascript er en kjørbar celletype med engine-kind', () => {
   assert.strictEqual(C.KIND_FOR_TYPE.javascript, 'javascript');
   assert.strictEqual(C.isRunnableType('javascript'), true);
   assert.strictEqual(C.paramLangForType('javascript'), null);
+  assert.strictEqual(C.supportedMode('javascript'), true);   // notatbokvisning aktiveres
 });

@@ -40,7 +40,7 @@
   // kjøres celle-for-celle UTENOM segmentmaskineriet (SEG_MARKER har dem
   // med vilje IKKE; executableSource skal fortsette å blanke dem).
   var SUPPORTED_MODES = { python: 1, r: 1, duckdb: 1, microdata: 1,
-                          brython: 1, micropython: 1 };
+                          brython: 1, micropython: 1, javascript: 1 };
 
   C.isMarkerLine = function (line) { return MARKER_RE.test(String(line)); };
 
