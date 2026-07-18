@@ -10,8 +10,8 @@ function loadDD() {
   return sandbox.window.DataDirectives;
 }
 const DD = loadDD();
-const FILES = ['ex_csv_iris.txt','ex_columns_penguins.txt',
-               'rex_csv_iris.txt','rex_columns_penguins.txt'];
+const FILES = ['python/ex_csv_iris.txt','python/ex_columns_penguins.txt',
+               'r/rex_csv_iris.txt','r/rex_columns_penguins.txt'];
 
 for (const f of FILES) {
   test('load directive parses: ' + f, () => {
