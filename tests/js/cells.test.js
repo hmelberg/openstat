@@ -116,6 +116,15 @@ test('parseCells: uten markører → én implisitt preambelcelle', () => {
   assert.strictEqual(p.cells[0].source, 'print(1)\nprint(2)');
 });
 
+test('markørløst dokument samler ingen tag-varsler', () => {
+  // Et markørløst dokument er ETT plain-skript — dets implisitte preambel
+  // skannes for tags (cell.tags/scanTagBlock direkte, f.eks. #tag.import),
+  // men INGEN konsument viser parseCells sine warnings for et slikt
+  // dokument, så de skal ikke samles i utgangspunktet.
+  const parsed = C.parseCells('#tag.id = kan-ikke-vare-dokument-default\nx = 1\n');
+  assert.equal(parsed.warnings.length, 0);
+});
+
 test('parseCells: preambel + to celler, spans og kilder', () => {
   const doc = '# load x\n\n#%% md\n# Tittel\n\n#%% python id=a\n1 + 1';
   const p = C.parseCells(doc);
@@ -140,6 +149,18 @@ test('parseCells: dokument som starter med markør har ingen preambel', () => {
 test('parseCells: duplisert id gir advarsel', () => {
   const p = C.parseCells('#%% python id=a\n1\n#%% r id=a\n2');
   assert.ok(p.warnings.some(w => /duplisert id/.test(w)));
+});
+
+test('#tag.id duplisert mot header-id gir varsel', () => {
+  const doc = '#%% python id=alpha\nx = 1\n#%% python\n#tag.id = alpha\ny = 2\n';
+  const parsed = C.parseCells(doc);
+  assert.ok(parsed.warnings.some(w => /duplisert id: alpha/.test(w)));
+});
+
+test('#tag.id duplisert mot annen #tag.id gir varsel', () => {
+  const doc = '#%% python\n#tag.id = beta\nx = 1\n#%% python\n#tag.id = beta\ny = 2\n';
+  const parsed = C.parseCells(doc);
+  assert.ok(parsed.warnings.some(w => /duplisert id: beta/.test(w)));
 });
 
 test('round-trip: serialize(parse(t)) === t — eksakt', () => {
@@ -1084,6 +1105,16 @@ test('slidePlan: tom celleliste → tom plan', () => {
   const sp = C.slidePlan([]);
   assert.deepStrictEqual(sp.slides, []);
   assert.deepStrictEqual(sp.byCell, []);
+});
+
+test('slidePlan: alle celler skip → presentStart-gaten skal avvise', () => {
+  // Karakteriseringstest: slidePlan gir allerede én slide med tom cellIdxs
+  // for et all-skip-dokument (skip-celler har alltid vært utelatt fra
+  // cellIdxs, se testen over) — dette er premisset presentStart-fiksen
+  // (cells-dom.test.js) bygger på, ikke en endring i slidePlan selv.
+  const doc = '#%% skip\nx\n#%% skip\ny\n';
+  const plan = C.slidePlan(C.parseCells(doc).cells);
+  assert.ok(plan.slides.every(s => s.cellIdxs.length === 0));
 });
 
 // ---------- editor-konvergens: rene hjelpere (spec 2026-07-17 §1/§2) ----------

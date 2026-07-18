@@ -221,6 +221,23 @@
     return keep;
   }
 
+  /** Lone-'''-blokk-skann: returnerer {rest, close} når HELE innholdet
+   *  (etter første ikke-blanke linje) er én lukket triple-quoted streng,
+   *  ellers null. Delt av sniffType (verdikt) og renderContent (uttrekk). */
+  function loneStringScan(lines) {
+    var first = -1;
+    for (var i = 0; i < lines.length; i++) {
+      if (lines[i].trim() !== '') { first = i; break; }
+    }
+    if (first === -1) return null;
+    if (lines[first].slice(0, 3) !== '"""') return null;
+    var rest = lines.slice(first).join('\n').slice(3);
+    var close = rest.indexOf('"""');
+    if (close === -1) return null;
+    if (rest.slice(close + 3).trim() !== '') return null;
+    return { rest: rest, close: close };
+  }
+
   // Innholds-sniffing for UMERKEDE celler (spec §3): '<' som første tegn på
   // første ikke-blanke linje → html ('<' kan aldri starte gyldig python/r/
   // sql). ÉN trippel-sitert streng ALENE → md: '"""' i kolonne 0, FØRSTE
@@ -234,14 +251,8 @@
     for (var i = 0; i < lines.length; i++) {
       if (lines[i].trim() !== '') { first = i; break; }
     }
-    if (first === -1) return null;
-    if (/^\s*</.test(lines[first])) return 'html';
-    if (lines[first].slice(0, 3) !== '"""') return null;
-    var rest = lines.slice(first).join('\n').slice(3);
-    var close = rest.indexOf('"""');
-    if (close === -1) return null;
-    if (rest.slice(close + 3).trim() !== '') return null;
-    return 'md';
+    if (first !== -1 && /^\s*</.test(lines[first])) return 'html';
+    return loneStringScan(lines) ? 'md' : null;
   }
 
   // Kjørbar cellekropp (spec §4): tag-linjene blankes PÅ PLASS (linjetall
@@ -267,17 +278,8 @@
     var kept = linesWithoutTags(source, scan.tagLines);
     var out = kept.join('\n');
     if (type === 'md' && sniffed === 'md') {
-      var first = -1;
-      for (var i = 0; i < kept.length; i++) {
-        if (kept[i].trim() !== '') { first = i; break; }
-      }
-      if (first !== -1 && kept[first].slice(0, 3) === '"""') {
-        var rest = kept.slice(first).join('\n').slice(3);
-        var close = rest.indexOf('"""');
-        if (close !== -1 && rest.slice(close + 3).trim() === '') {
-          out = rest.slice(0, close).replace(/^\n/, '').replace(/\n$/, '');
-        }
-      }
+      var scan2 = loneStringScan(kept);
+      if (scan2) out = scan2.rest.slice(0, scan2.close).replace(/^\n/, '').replace(/\n$/, '');
     }
     return out;
   };
@@ -327,6 +329,12 @@
     // Merge baker effektive attrs/type inn i celleobjektet — round-trip
     // røres ikke (serialisering bruker headerRaw + source, aldri attrs).
     var defaults = { type: null, attrs: {} };
+    // Markørløse dokumenter (plain-skript) har ingen konsument som viser
+    // parseCells sine warnings — deres implisitte preambel skannes likevel
+    // for tags (cell.tags/scanTagBlock er lastbærende, f.eks. #tag.import),
+    // men VARSLENE fra det skannet skal ikke samles opp i tomrommet.
+    // Beregnes ÉN gang (ikke per celle — hasMarkers er dokumentnivå).
+    var collectTagWarnings = C.hasMarkers(text);
     for (var ci = 0; ci < cells.length; ci++) {
       var cell = cells[ci];
       var isPre = cell.headerRaw === null;
@@ -336,6 +344,7 @@
       cell.sniffed = null;
       var bodyBase = isPre ? cell.startLine : cell.startLine + 1;
       for (var wi = 0; wi < scan.warnings.length; wi++) {
+        if (!collectTagWarnings) break;
         warnings.push('linje ' + (bodyBase + scan.warnings[wi].line + 1) + ': ' + scan.warnings[wi].msg);
       }
       if (isPre) {
@@ -372,6 +381,14 @@
         if (mk === 'import') {
           warnings.push('linje ' + lineNo + ': #tag.import gjelder bare i preambelen');
           continue;
+        }
+        // #tag.id dekkes av samme duplikat-id-varsel som header-id (linje
+        // 314-317 over) — ids-mappet er delt, «sist vinner» gjelder likt.
+        if (mk === 'id') {
+          if (ids[ent.value] !== undefined && ids[ent.value] !== ci) {
+            warnings.push('linje ' + lineNo + ': duplisert id: ' + ent.value);
+          }
+          ids[ent.value] = ci; // sist vinner — samme regel som header-id
         }
         if (Object.prototype.hasOwnProperty.call(cell.attrs, mk)) {
           warnings.push('linje ' + lineNo + ': #tag.' + mk + ' overstyrt av #%%-attributt');
@@ -1144,7 +1161,8 @@
       if (!NB.activeFlag || !NB.root) return false;
       if (NB.present) return true;                       // idempotent
       var plan = C.slidePlan(NB.cells);
-      if (!plan.slides.length) return false;
+      var hasVisible = plan.slides.some(function (s) { return s.cellIdxs.length > 0; });
+      if (!plan.slides.length || !hasVisible) return false;
       // prevLayout fanges fra LIVE app-tilstand (appLayout()), ikke NB.layout:
       // visningsmenyens direkte primitiv-kall (mdSetInputHidden/
       // mdSetLayoutMode) er en meny-bypass som ikke oppdaterer NB.layout, så
@@ -1408,7 +1426,8 @@
       // nytt (dokumentet kan ha endret seg), klem cur, bygg overlegget på nytt.
       if (NB.present) {
         var _plan = C.slidePlan(NB.cells);
-        if (!_plan.slides.length) {
+        var _hasVisible = _plan.slides.some(function (s) { return s.cellIdxs.length > 0; });
+        if (!_plan.slides.length || !_hasVisible) {
           C.presentExit();
         } else {
           NB.present.slides = _plan.slides;
@@ -2105,11 +2124,17 @@
         return Promise.resolve();
       }
       if (typeof global.mdRunNotebookCell !== 'function') return Promise.resolve();
+      var blankedSel = blankTagLinesInText(selText);
+      if (!blankedSel.trim()) {
+        // Seleksjonen var kun tag-/direktivlinjer — ingenting å kjøre.
+        // Bevisst no-op (før falt vi til HELE cellen via ||-fallbacken nedstrøms).
+        return null;
+      }
       var out = c._out;
       var payload = {
         kind: kind,
         text: C.execCellSource(c) || '',
-        selText: blankTagLinesInText(selText),
+        selText: blankedSel,
         uses: [],
         nb: { echo: false, last: true },
         cellIdx: idx

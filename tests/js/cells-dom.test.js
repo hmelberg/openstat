@@ -1390,6 +1390,19 @@ test('presentStart: no-op uten aktiv notatbok', () => {
   assert.strictEqual(C.presenting(), false);
 });
 
+test('presentStart: alle celler skip → avvises som "ingen slides" (index.html viser eksisterende notis)', () => {
+  // slidePlan bygger nums FØR skip-filtrering (se slidePlan-testen i
+  // cells.test.js) — et all-skip-dokument gir derfor ÉN slide med tom
+  // cellIdxs, ikke en tom slides-liste. Den gamle '!plan.slides.length'-
+  // gaten alene sluk igjennom denne og åpnet en blank presentasjon.
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% skip\nx\n#%% skip\ny\n';
+  C.init('python');
+  assert.strictEqual(C.active(), true, 'sanity: dokumentet er aktivt (kun ikke-kjørbart)');
+  assert.strictEqual(C.presentStart(), false, 'ingen synlig celle i noen slide — presentStart skal avvise');
+  assert.strictEqual(C.presenting(), false);
+});
+
 test('contentLoaded: #options.view = present auto-starter presentasjonen', () => {
   const { C, scriptInputEl } = freshEnv();
   C.init('python');
@@ -1916,6 +1929,23 @@ test('runSelection: nekter mens mdIsScriptRunning() er true / for en md-celle (i
   global.mdIsScriptRunning = () => true;
   await C.runSelection(1, '1');
   assert.strictEqual(called, false, 'skal nekte å kjøre mens en annen kjøring pågår');
+});
+
+test('runSelection: seleksjon med kun tag-linjer er no-op (ikke helcelle-fallback)', () => {
+  const { C, scriptInputEl } = freshEnv();
+  scriptInputEl.value = '#%% md\nhei\n#%% python\nx = 1\n';
+  C.init('python');
+  let called = false;
+  global.mdIsScriptRunning = () => false;
+  global.mdRunNotebookCell = () => { called = true; return Promise.resolve({}); };
+
+  // seleksjonen er KUN en tag-linje — blankTagLinesInText gjør den tom, og
+  // i dag faller den tomme selText'en tilbake til å kjøre HELE cellen via
+  // index.html sin '|| payload.text'-fallback (se runSelection-kommentaren).
+  const res = C.runSelection(1, '#tag.style = "note"');
+
+  assert.strictEqual(called, false, 'kun tag-/direktivlinjer i seleksjonen skal ikke trigge en kjøring');
+  assert.strictEqual(res, null, 'bevisst no-op returnerer null, ikke et promise');
 });
 
 // ---- C.rerenderCell ----
