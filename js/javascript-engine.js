@@ -168,11 +168,180 @@
     return String(v);
   }
 
-  // (Runtime-halvdelen — scope, kjøring, lib-lasting, run/notebookSession —
-  // fylles ut i Task 2.)
+  // ── Runtime-halvdel ────────────────────────────────────────────────────
+
+  // Scope-proxy: has() → true gjør at ALLE navneoppslag i with-blokken går
+  // via proxyen — get faller tilbake til window-globaler, og oppslag som
+  // ikke finnes noe sted kaster ReferenceError (ellers ville skrivefeil
+  // stille blitt undefined; prisen er at også `typeof x` kaster for ukjente
+  // navn — akseptert, analysescripts bruker sjelden typeof-guards). set
+  // skriver alltid til scope-objektet — det er persistensen mellom celler.
+  var LIB_HINT = ' — bibliotekglobalene i JavaScript-modus er aq, op, ss, jStat, ML, Plot og Plotly';
+  function makeScope() {
+    var vars = Object.create(null);
+    var proxy = new Proxy(vars, {
+      has: function () { return true; },
+      get: function (t, k) {
+        if (k === Symbol.unscopables) return undefined;
+        if (k in t) return t[k];
+        if (k in global) return global[k];
+        throw new ReferenceError(String(k) + ' er ikke definert' +
+          (LIB_REGISTRY[k] || k === 'op' ? LIB_HINT : ''));
+      },
+      set: function (t, k, v) { t[k] = v; return true; }
+    });
+    return { vars: vars, proxy: proxy };
+  }
+
+  async function execIn(scope, code) {
+    var split = splitLastExpr(code);
+    var body = split.expr ? split.body + '\nreturn (' + split.expr + '\n);' : code;
+    // INGEN 'use strict' her — with() er forbudt i strict mode.
+    var fn = new AsyncFunction('__scope', 'with (__scope) {\n' + body + '\n}');
+    return fn(scope.proxy);
+  }
+
+  function captureConsole(buf) {
+    var keys = ['log', 'info', 'warn', 'error'];
+    var orig = {};
+    keys.forEach(function (k) {
+      orig[k] = console[k];
+      console[k] = function () {
+        var parts = [];
+        for (var i = 0; i < arguments.length; i++) {
+          parts.push(typeof arguments[i] === 'string' ? arguments[i] : prettyPrint(arguments[i]));
+        }
+        buf.push(parts.join(' '));
+        try { orig[k].apply(console, arguments); } catch (e) {}
+      };
+    });
+    return function restore() { keys.forEach(function (k) { console[k] = orig[k]; }); };
+  }
+
+  var __jsLoaded = {};   // url → Promise (delt på tvers av registernøkler)
+  function addScript(src) {
+    return new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      s.src = src;
+      s.onload = resolve;
+      s.onerror = function () { reject(new Error('Kunne ikke laste ' + src)); };
+      document.head.appendChild(s);
+    });
+  }
+  function loadJsDep(dep) {
+    if (global[dep.global]) return Promise.resolve();
+    if (!__jsLoaded[dep.url]) {
+      __jsLoaded[dep.url] = addScript(dep.url).catch(function (e) {
+        delete __jsLoaded[dep.url];
+        throw e;
+      });
+    }
+    return __jsLoaded[dep.url];
+  }
+  function ensureLibs(keys) {
+    return keys.reduce(function (p, k) {
+      return p.then(function () {
+        return LIB_REGISTRY[k].js.reduce(function (pp, dep) {
+          return pp.then(function () { return loadJsDep(dep); });
+        }, Promise.resolve());
+      }).then(function () {
+        if (k === 'aq' && global.aq && global.op === undefined) global.op = global.aq.op;
+      });
+    }, Promise.resolve());
+  }
+
+  async function tableFromLoad(l) {
+    var aq = global.aq;
+    if (l.format === 'csv') return aq.fromCSV(new TextDecoder().decode(l.bytes));
+    if (l.format === 'json') {
+      var parsed = JSON.parse(new TextDecoder().decode(l.bytes));
+      return Array.isArray(parsed) ? aq.from(parsed) : aq.table(parsed);
+    }
+    if (l.format === 'parquet') {
+      if (typeof global.__brythonParquetColumns !== 'function') {
+        throw new Error('parquet-kilden «' + l.alias + '» støttes ikke: DuckDB-hjelperen mangler');
+      }
+      return aq.table(await global.__brythonParquetColumns(l.bytes));
+    }
+    throw new Error('formatet «' + l.format + '» (' + l.alias + ') støttes ikke i JavaScript-modus — bruk python/r');
+  }
+  async function bindLoads(scope, loads) {
+    var withBytes = (loads || []).filter(function (l) { return l && l.bytes; });
+    if (!withBytes.length) return;
+    await ensureLibs(['aq']);
+    for (var i = 0; i < withBytes.length; i++) {
+      scope.vars[withBytes[i].alias] = await tableFromLoad(withBytes[i]);
+    }
+  }
+
+  // "# use <navn> from duckdb" — parquet-bytes fra forrige duckdb-kjørings
+  // wasm-katalog (window.__duckUseBytes, eksponert av index.html) →
+  // arquero-tabell. Samme økt-semantikk som use from duckdb i python/r.
+  async function bindDuckUses(scope, script) {
+    var names = scanDuckUses(script);
+    if (!names.length) return;
+    if (typeof global.__duckUseBytes !== 'function') {
+      throw new Error('use … from duckdb er ikke tilgjengelig her');
+    }
+    await ensureLibs(['aq']);
+    for (var i = 0; i < names.length; i++) {
+      var bytes = await global.__duckUseBytes(names[i]);
+      scope.vars[names[i]] = global.aq.table(await global.__brythonParquetColumns(bytes));
+    }
+  }
+
+  // Kontrakt: resolver ALLTID {text, error} — aldri reject (som Brython).
+  async function runIn(scope, script, loads) {
+    var buf = [], restore = null;
+    try {
+      await ensureLibs(scanLibs(script));
+      await bindLoads(scope, loads);
+      await bindDuckUses(scope, script);
+      var code = prepass(script);
+      restore = captureConsole(buf);
+      var value = await execIn(scope, code);
+      restore(); restore = null;
+      var text = buf.join('\n');
+      var disp = valueToOutput(value);
+      if (disp) text += (text ? '\n' : '') + disp;
+      return { text: text, error: null };
+    } catch (e) {
+      if (restore) restore();
+      return { text: buf.join('\n'), error: (e && e.message) || String(e) };
+    }
+  }
+
+  function load() { return Promise.resolve(); }
+
+  async function run(script, opts) {
+    return runIn(makeScope(), script, (opts && opts.loads) || []);
+  }
+
+  // ── Notatbok-sesjon (Fase C-kontrakten, som Brython/MicroPython) ───────
+  var __nb = { live: false, scope: null };
+  async function nbEnsure(loads) {
+    if (__nb.live) return;
+    var scope = makeScope();
+    await bindLoads(scope, loads);
+    __nb.scope = scope;
+    __nb.live = true;
+  }
+  async function nbRunCell(source) {
+    if (!__nb.live) {
+      return { text: '', error: 'notebookSession.ensure() må kalles før runCell()' };
+    }
+    return runIn(__nb.scope, source, []);
+  }
+  async function nbReset() { __nb.live = false; __nb.scope = null; }
+  function nbInvalidate() { __nb.live = false; __nb.scope = null; }
+  function nbIsLive() { return __nb.live; }
 
   global.JsEngine = {
+    load: load, run: run,
+    notebookSession: { ensure: nbEnsure, runCell: nbRunCell, reset: nbReset,
+                       invalidate: nbInvalidate, isLive: nbIsLive },
     _prepass: prepass, _splitLastExpr: splitLastExpr, _scanLibs: scanLibs,
-    _scanDuckUses: scanDuckUses, _prettyPrint: prettyPrint, _valueToOutput: valueToOutput
+    _scanDuckUses: scanDuckUses, _prettyPrint: prettyPrint,
+    _valueToOutput: valueToOutput, _makeScope: makeScope, _runIn: runIn
   };
 })(typeof window !== 'undefined' ? window : globalThis);

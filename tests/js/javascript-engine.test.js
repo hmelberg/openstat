@@ -104,3 +104,80 @@ test('prettyPrint: sirkulær referanse og Map/Set', () => {
   assert.ok(E._prettyPrint(o).includes('[Circular]'));
   assert.ok(E._prettyPrint(new Map([['k', 1]])).includes('[Map]'));
 });
+
+// ── Runtime-halvdel (kjøres i node: AsyncFunction + scope-proxy er DOM-frie) ──
+
+test('runIn: variabler overlever i samme scope, siste uttrykk vises', async () => {
+  const scope = E._makeScope();
+  const r1 = await E._runIn(scope, 'const x = 21;', []);
+  assert.strictEqual(r1.error, null);
+  const r2 = await E._runIn(scope, 'x * 2', []);
+  assert.strictEqual(r2.error, null);
+  assert.strictEqual(r2.text, '42');
+});
+
+test('runIn: console.log fanges, kommer før siste-uttrykk-visningen', async () => {
+  const r = await E._runIn(E._makeScope(), 'console.log("a", {b: 1});\n"slutt"', []);
+  assert.strictEqual(r.error, null);
+  assert.strictEqual(r.text, 'a {\n  "b": 1\n}\nslutt');
+});
+
+test('runIn: feil gir {error}, console gjenopprettes', async () => {
+  const before = console.log;
+  const r = await E._runIn(E._makeScope(), 'kastes_ikke_definert_feil()', []);
+  assert.ok(r.error && /kastes_ikke_definert_feil/.test(r.error));
+  assert.strictEqual(console.log, before);
+});
+
+test('runIn: ukjent identifikator gir ReferenceError, lib-navn får hint', async () => {
+  const r = await E._runIn(E._makeScope(), 'helt_ukjent_navn', []);
+  assert.ok(/helt_ukjent_navn/.test(r.error));
+});
+
+test('runIn: await på toppnivå virker', async () => {
+  const r = await E._runIn(E._makeScope(), 'const v = await Promise.resolve(7);\nv', []);
+  assert.strictEqual(r.text, '7');
+});
+
+test('runIn: funksjonsdeklarasjon overlever til neste kjøring', async () => {
+  const scope = E._makeScope();
+  await E._runIn(scope, 'function dobbel(n) {\n  return n * 2;\n}', []);
+  const r = await E._runIn(scope, 'dobbel(5)', []);
+  assert.strictEqual(r.text, '10');
+});
+
+test('run: ferskt scope per kall (ingen lekkasje)', async () => {
+  await E.run('const lekk = 1;', {});
+  // NB: også `typeof lekk` ville kastet her — alle oppslag går via proxyen,
+  // som kaster ReferenceError for ukjente navn (bevisst: høylytte skrivefeil).
+  const r = await E.run('lekk', {});
+  assert.ok(r.error && /lekk/.test(r.error));
+});
+
+test('notebookSession: ensure/runCell/reset-livssyklus', async () => {
+  const sess = E.notebookSession;
+  assert.strictEqual(sess.isLive(), false);
+  const r0 = await sess.runCell('1 + 1');
+  assert.ok(r0.error);                       // runCell før ensure → kontraktsfeil
+  await sess.ensure([]);
+  assert.strictEqual(sess.isLive(), true);
+  await sess.runCell('const c = 3;');
+  const r = await sess.runCell('c + 1');
+  assert.strictEqual(r.text, '4');
+  await sess.reset();
+  assert.strictEqual(sess.isLive(), false);
+});
+
+test('bindLoads: csv-load blir arquero-tabell i scopet (stubbet aq)', async () => {
+  globalThis.aq = {
+    fromCSV: (txt) => ({ _csv: txt, toHTML: () => '<table></table>', objects: () => [], numRows: () => 1 }),
+    from: (rows) => ({ rows }), table: (cols) => ({ cols }), op: {}
+  };
+  try {
+    const scope = E._makeScope();
+    const bytes = new TextEncoder().encode('a,b\n1,2');
+    const r = await E._runIn(scope, 'iris._csv.length', [{ alias: 'iris', bytes, format: 'csv' }]);
+    assert.strictEqual(r.error, null);
+    assert.strictEqual(r.text, String('a,b\n1,2'.length));
+  } finally { delete globalThis.aq; delete globalThis.op; }
+});
