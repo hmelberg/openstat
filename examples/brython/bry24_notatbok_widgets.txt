@@ -21,7 +21,7 @@ iris[iris["species"] == art].head(n)
 
 #%% brython id=plot
 # Denne cellen BRUKER n/art fra cellen over (delt sesjon), men har ingen
-# egne widgets — Oppdater-knappen under kjører den på nytt (rerun="plot").
+# egne widgets — ui.run_button-knappen under kjører den (target="plot").
 import pandas_brython as pd
 import plotly_express_brython as pe
 
@@ -32,7 +32,7 @@ pe.scatter(sub, x="sepal_length", y="petal_length",
 #%% brython
 import ui
 
-ui.button("Oppdater", rerun="plot")
+ui.run_button("Oppdater", target="plot")
 
 #%% md
 `#@param` virker også — skjemaet skriver verdien inn i kildelinjen:

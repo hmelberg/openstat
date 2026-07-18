@@ -421,3 +421,12 @@ version-pin smoke).
   story; ipywidgets is "for Jupyter/Colab users").
 - Widget reruns amplify any B1 session bugs; W1 inherits B1's test suite as
   its regression floor.
+
+## Addendum 2026-07-18: ui.run_button
+
+Brukervalgt alias-form (mot kwarg-/dok-alternativene): `ui.run_button(label="Kjør", target="all")`
+i alle fire fasader (`ui_run_button()` i R) = ren sukker over
+`ui.button(label, on_click=target)`. `target` er "all" (hele dokumentet),
+en celle-id eller liste av id-er. Motivasjon: ÉN felles kjør-knapp i
+kontrollstripen i stedet for én per widget. Widgets-eksemplene
+(py_widgets_ui, bry24, mpy 05, rex_widgets_ui) bruker den.

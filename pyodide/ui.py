@@ -9,6 +9,8 @@ verdilageret og kjører cellen (eller et annet mål-id via `rerun=`) på nytt
 gjennom den vanlige per-celle-kjøremaskinen - scriptet leser da UT den nye
 verdien neste gang det kaller `ui.*`. Ingen tilstand lever i Python: en
 celle er en ren funksjon av (kode, lagret verdi et sted i js/ui.js).
+`ui.run_button(label, target=)` (2026-07-18) gir én felles kjør-knapp for
+stripen — sukker over `ui.button(label, on_click=target)`, default "all".
 
 I et vanlig script - ingen notatbok, ingen aktiv celle-kjørekontekst -
 finnes det ingen `window.mdUiRunCtx()` å registrere kontrollen mot:

@@ -1,6 +1,6 @@
 # ui - widget-fasade for webR (R-modus notatbøker, spec 2 ui-widgets, W2).
 # Offentlig API: ui_slider, ui_dropdown, ui_checkbox, ui_switch, ui_number,
-# ui_text, ui_button, ui_play (funksjonerer; W5.1 on_change=/on_click=-
+# ui_text, ui_button, ui_run_button, ui_play (funksjonerer; W5.1 on_change=/on_click=-
 # aliaser; ui_play: dash-absorpsjon 5a Task 3 - registry-spec only, INGEN
 # payload-byggere (kpi/markdown/image) i R - se ui_play sin egen docstring),
 # ui_html/ui_sl/ui_pico/ui_widget (høflige notiser), ui_value

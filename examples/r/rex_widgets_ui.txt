@@ -35,4 +35,4 @@ plot(iris$sepal_length, iris$petal_length,
      xlab = "sepal_length", ylab = "petal_length")
 
 #%% r
-ui_button("Oppdater", rerun = "plot")
+ui_run_button("Oppdater", target = "plot")
