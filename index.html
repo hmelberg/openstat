@@ -8152,10 +8152,12 @@ json.dumps(out)
       host.appendChild(buildROutputNodes(outputParts));
     }
 
-    // Per-celle-varianten (R per-celle-attribusjon, spec 2026-07-18): APPEND
-    // uten wipe — beginRun-purgen (js/cells.js) har allerede tømt slottene
-    // med bevart strip/[data-ui-shown]-kontrakt (5b); en innerHTML=''-wipe
-    // her ville radert kontrollstriper og [data-ui-shown]-noder i cellen.
+    // Per-celle-varianten (R per-celle-attribusjon, spec 2026-07-18): append
+    // (uten wipe) fordi beginRun-purgen allerede har tømt sloten ved
+    // kjøringsstart, og flere segmenter kan i prinsippet dele slot ved
+    // plan-varianter — én wipe per append ville radert tidligere segmenters
+    // output i samme kjøring. renderCellResult-stiens wipe ved målrettet
+    // rerun er derimot trygg og bevisst.
     function appendROutputParts(outputParts, host) {
       if (!host || !outputParts.length) return;
       host.appendChild(buildROutputNodes(outputParts));

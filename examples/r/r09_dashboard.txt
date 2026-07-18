@@ -15,13 +15,13 @@ et base-plott, fanget som bilde slik R-motoren alltid gjør det.
 
 R har per-celle output-attribusjon i «Kjør alle» (som python/brython/
 micropython): hver celles tekst og plot lander i cellens egen output-slot,
-og et målrettet on_change (her: "plott") rerunner KUN mål-cellen og
-erstatter dens slot — ingen foreldede duplikater. on_change = "all" er
-fortsatt gyldig når hele dokumentet skal rekjøres.
+og et målrettet on_change (her: c("stats", "plott")) rerunner KUN
+mål-cellene og erstatter deres sloter — ingen foreldede duplikater.
+on_change = "all" er fortsatt gyldig når hele dokumentet skal rekjøres.
 
 #%% r id=kontroller
 mu <- ui_slider(-5, 5, value = 0, step = 1, label = "Forventning (mu)",
-                name = "mu", on_change = "plott", sync_to = "mu")
+                name = "mu", on_change = c("stats", "plott"), sync_to = "mu")
 sigma <- ui_slider(1, 4, value = 1, step = 1, label = "Standardavvik (sigma)",
                    name = "sigma", on_change = "all", sync_to = "sigma")
 terskel <- ui_play(-5, 10, value = -5, step = 1, label = "Terskel (spill av)",
