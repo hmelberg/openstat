@@ -1194,3 +1194,11 @@ test('sameStructure: samme headerRaw-sekvens → true; endret antall/markør →
   assert.strictEqual(C.sameStructure(a, c), false);  // markørlinje endret
   assert.strictEqual(C.sameStructure(a, d), false);  // antall endret
 });
+
+test('javascript er en kjørbar celletype med engine-kind', () => {
+  assert.strictEqual(C.normalizeType('javascript'), 'javascript');
+  assert.strictEqual(C.normalizeType('js'), 'javascript');
+  assert.strictEqual(C.KIND_FOR_TYPE.javascript, 'javascript');
+  assert.strictEqual(C.isRunnableType('javascript'), true);
+  assert.strictEqual(C.paramLangForType('javascript'), null);
+});

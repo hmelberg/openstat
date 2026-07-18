@@ -9,9 +9,9 @@
   // ---------- ren halvdel ----------
 
   var MARKER_RE = /^#\s?%%(?:\s+(.*))?\s*$/;
-  var TYPES = ['python', 'r', 'duckdb', 'brython', 'micropython', 'microdata',
+  var TYPES = ['python', 'r', 'duckdb', 'brython', 'micropython', 'javascript', 'microdata',
                'statx', 'md', 'html', 'skip'];
-  var ALIASES = { py: 'python', pyodide: 'python', markdown: 'md', text: 'md' };
+  var ALIASES = { py: 'python', pyodide: 'python', js: 'javascript', markdown: 'md', text: 'md' };
   var NONCODE = { md: 1, html: 1, skip: 1 };
   // slide/speak/rerun/sync er reservert for spec 2/3 — parses, brukes ikke ennå.
   // widgets (widget-plassering-fasen): styrer hvor .param-form/.ui-controls-
@@ -595,7 +595,8 @@
   // bare med kjøretidens kind-navn i stedet for legacy-markørteksten.
   var KIND_FOR_TYPE = { python: 'pyodide', r: 'r', duckdb: 'duckdb',
                         microdata: 'microdata',
-                        brython: 'brython', micropython: 'micropython' };
+                        brython: 'brython', micropython: 'micropython',
+                        javascript: 'javascript' };
   C.KIND_FOR_TYPE = KIND_FOR_TYPE;
 
   // Ren avledning av "er denne cellen faktisk kjørbar" (review Minor 3):
