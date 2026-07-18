@@ -877,6 +877,20 @@ def test_normalize_class_underscore_to_attrs_class(monkeypatch):
     assert norm["attrs"]["class"] == "box"
 
 
+def test_normalize_kwargs_cls_og_class_samtidig_varsler(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    norm, handlers, warnings = mod._normalize_kwargs({"cls": "a", "class_": "b"})
+    assert norm["attrs"]["class"] == "b"  # siste vinner (kwargs-rekkefølge)
+    assert any("cls=" in w and "class_=" in w for w in warnings)
+
+
+def test_normalize_kwargs_kun_cls_ingen_varsel(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    norm, _, warnings = mod._normalize_kwargs({"cls": "a"})
+    assert norm["attrs"]["class"] == "a"
+    assert warnings == []
+
+
 def test_normalize_style_string_passthrough(monkeypatch):
     mod, _ = _load_ui(monkeypatch)
     norm, _, _ = mod._normalize_kwargs({"style": "color:red"})

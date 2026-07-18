@@ -342,7 +342,8 @@ def button(label, *, rerun='self', on_click=None, name=None, placement=None):
     on_click= kan OGSÅ være en python-callable (ui-html-fasen, Task 2,
     spec §3): da bindes den som en handler (klikket rerunner ALDRI) i
     stedet for rerun-alias-stien; handleren mottar alltid None (knapper
-    har ingen lagret verdi)."""
+    har ingen lagret verdi) - (derfor kan heller ikke ui.widget()
+    adressere knapper)."""
     rerun = _alias_rerun(rerun, on_click)
     spec = _spec("button", label=label, name=name, rerun=rerun, placement=placement)
     _register_value(spec, on_click)
@@ -572,7 +573,12 @@ def widget(name):
 
     None ved: ingen window/Ui (ikke i nettleser/ikke lastet ennå), ELLER
     ukjent navn (console.warn via broen - "aldri en kastet feil for et
-    skrivefeil-navn", speiler resten av fila)."""
+    skrivefeil-navn", speiler resten av fila).
+
+    Knapper kan ALDRI adresseres her: en button har ingen lagret verdi
+    (ingen _values-oppføring JS-side, se js/ui.js _lookupKeyByName), så
+    ui.widget("knappnavn") returnerer alltid None med "ukjent navn"-
+    varselet."""
     u = _ui()
     if u is None:
         return None
@@ -675,8 +681,9 @@ def _normalize_kwargs(kwargs):
       denne funksjonen 100% sideeffekt-fri og enkel å enhetsteste).
 
     Regler (spec §1, "unified kwargs standard"):
-    - cls=/class_= -> attrs["class"] (BEGGE aksepteres; class MÅ gå
-      setAttribute-veien, se elCreate sin _setAttrValue).
+    - cls=/class_= -> attrs["class"] (BEGGE aksepteres; angis begge
+      samtidig vinner den siste i kall-rekkefølgen + advarsel; class MÅ
+      gå setAttribute-veien, se elCreate sin _setAttrValue).
     - style= streng -> style-strengen uendret (cssText); style= dict ->
       dict med nøklene snake_case->camelCase (construction og
       Element.set_style er nå SAMME regel, code2web-varten spec §1
@@ -687,6 +694,9 @@ def _normalize_kwargs(kwargs):
     - attrs={...} merges verbatim inn i attrs (escape hatch for
       vilkårlige attributt-navn) - MÅ være en dict, ellers TypeError
       (klar programmeringsfeil, ikke en "mistenkelig verdi"-advarsel).
+      Ved samme attributt-navn fra data_x=/aria_x= og attrs={} vinner
+      den som kommer SIST i kall-rekkefølgen (attrs merges på sin
+      plass) - udefinert var det aldri, men nå er det dokumentert.
     - on_<event>=callable -> samlet i handlers; on_<event>=<ikke-callable>
       (typisk en streng) -> IKKE eksekvert (motsatt av code2web sin
       exec()-vane) - droppet med en advarsel i stedet (spec §1: "a string
@@ -707,6 +717,10 @@ def _normalize_kwargs(kwargs):
     warnings = []
     for key, raw_value in kwargs.items():
         if key in ("cls", "class_"):
+            if "class" in attrs:
+                warnings.append(
+                    "ui.html: bade cls= og class_= angitt - siste vinner (her: " + key + "=)"
+                )
             attrs["class"] = raw_value
             continue
         if key == "style":

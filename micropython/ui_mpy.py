@@ -438,7 +438,8 @@ def button(label, *, rerun='self', on_click=None, name=None, placement=None):
     on_click= kan OGSÅ være en python-callable (ui-html-fasen, Task 3,
     spec §3): da bindes den som en handler (klikket rerunner ALDRI) i
     stedet for rerun-alias-stien; handleren mottar alltid None (knapper
-    har ingen lagret verdi)."""
+    har ingen lagret verdi) - (derfor kan heller ikke ui.widget()
+    adressere knapper)."""
     rerun = _alias_rerun(rerun, on_click)
     spec = _spec("button", label=label, name=name, rerun=rerun, placement=placement)
     _register_value(spec, on_click)
@@ -676,7 +677,12 @@ def widget(name):
 
     None ved: ingen window/Ui (ikke i nettleser/ikke lastet ennå), ELLER
     ukjent navn (console.warn via broen - "aldri en kastet feil for et
-    skrivefeil-navn", speiler resten av fila)."""
+    skrivefeil-navn", speiler resten av fila).
+
+    Knapper kan ALDRI adresseres her: en button har ingen lagret verdi
+    (ingen _values-oppføring JS-side, se js/ui.js _lookupKeyByName), så
+    ui.widget("knappnavn") returnerer alltid None med "ukjent navn"-
+    varselet."""
     u = _ui()
     if u is None:
         return None
@@ -766,7 +772,14 @@ def _normalize_kwargs(kwargs):
     - propsdict: {"props": {...}, "attrs": {...}} (+ "style" hvis gitt).
     - handlers: [(event, callable), ...] samlet fra on_<event>=callable.
     - warnings: menneskelesbare advarsel-strenger - PUR, ingen
-      console.warn-kall her; kalleren emitter dem via _warn()."""
+      console.warn-kall her; kalleren emitter dem via _warn().
+
+    To presedens-punkter (identisk med pyodide/ui.py, se der for det
+    fulle regelsettet): cls=/class_= - BEGGE aksepteres; angis begge
+    samtidig vinner den siste i kall-rekkefølgen + advarsel. Ved samme
+    attributt-navn fra data_x=/aria_x= og attrs={} vinner den som kommer
+    SIST i kall-rekkefølgen (attrs merges på sin plass) - udefinert var
+    det aldri, men nå er det dokumentert."""
     props = {}
     attrs = {}
     style = None
@@ -774,6 +787,10 @@ def _normalize_kwargs(kwargs):
     warnings = []
     for key, raw_value in kwargs.items():
         if key in ("cls", "class_"):
+            if "class" in attrs:
+                warnings.append(
+                    "ui.html: bade cls= og class_= angitt - siste vinner (her: " + key + "=)"
+                )
             attrs["class"] = raw_value
             continue
         if key == "style":
