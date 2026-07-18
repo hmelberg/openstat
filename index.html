@@ -1522,6 +1522,7 @@
           // Nytt dokument levert (samme- og kryssmodus): eksplisitt signal så
           // notatbok-dokumenter auto-åpnes (tick-heuristikken alene ser ikke
           // kryssmodus-lasting — switchEditorMode resynker basislinjen).
+          window.mdUserLoadedDoc = true; // undertrykk startup-auto-kjør når runtime blir klar
           if (window.Cells) window.Cells.contentLoaded();
           dropdown.classList.remove('open');
           scriptInput.focus();
@@ -1790,6 +1791,7 @@
           if (window.updateLineNumbers) window.updateLineNumbers();
           // Nytt dokument via Last-menyen: samme innlastingssignal som
           // eksempler/GitHub — auto-åpner notatbok og invaliderer sesjonen.
+          window.mdUserLoadedDoc = true; // undertrykk startup-auto-kjør når runtime blir klar
           if (window.Cells) window.Cells.contentLoaded();
         };
         r.readAsText(f);
@@ -9507,14 +9509,15 @@ options(width = 200)
       // on the user's in-flight run (see the click handler below).
       var _nbCls = window.NotebookLinks ? window.NotebookLinks.classifyHash(location.hash) : null;
       var _nbFrag = !!(_nbCls && _nbCls.kind !== 'share');
-      if (!scriptRunInProgress && !_nbFrag) {
+      if (!scriptRunInProgress) {
         setRunButtonsUi('idle');
-        // Auto-kjør starteksempelet hvis brukeren ikke har endret teksten
-        if (STARTUP_EXAMPLES[activeEditorMode] && scriptInput.value.trim() === STARTUP_EXAMPLES[activeEditorMode].trim()) {
+        // Auto-kjør starteksempelet hvis brukeren ikke har endret teksten —
+        // men aldri etter en brukerinitiert dokumentlast (auto-klikk-racet,
+        // 5b-sluttreviewens backlog): klikket kunne treffe et nylastet dokument.
+        if (!_nbFrag && !window.mdUserLoadedDoc
+            && STARTUP_EXAMPLES[activeEditorMode] && scriptInput.value.trim() === STARTUP_EXAMPLES[activeEditorMode].trim()) {
           document.getElementById('btnRun').click();
         }
-      } else if (!scriptRunInProgress) {
-        setRunButtonsUi('idle');
       }
       if (py) schedulePrefetchLazyPackages(py);
     }
@@ -10152,18 +10155,17 @@ async def _m2py_run_segment(_seg_json):
       scriptRunInProgress = true;
       setRunButtonsUi('running');
       try {
+        // '#tag.import' (ui-html-fasen, Task 4, spec §4) — hver kjøring,
+        // idempotent: imports lagt til i preambelen mens sesjonen er LIVE
+        // virker uten restart (samme kontrakt som pyodide-per-celle-stien,
+        // ~10277, og plain-runSelf, 3216/3268/3293/3357).
+        try { await window.mdEnsureTagImports(rightStatus); }
+        catch (e) { console.warn('#tag.import (motor-notatbok):', e); }
         if (!sess.isLive()) {
           setStatus(rightStatus, t('Starter økt…'));
           var _dl = await window.DataLoader.resolveAndFetchLoads(scriptInput.value,
             { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey });
           await sess.ensure(_dl.loads);
-          // '#tag.import' (ui-html-fasen, Task 4, spec §4) — motor-
-          // notatbok-øktstart (engine notebook loop entry): kjøres ÉN gang
-          // her (isLive()-gaten over), FØR preambelcellen kjøres, slik at
-          // ui.sl/ui.pico er tilgjengelig fra og med den aller første
-          // brukercelle-kjøringen i denne økten.
-          try { await window.mdEnsureTagImports(rightStatus); }
-          catch (e) { console.warn('#tag.import (motor-notatbok):', e); }
           // Preambel (celle 0, headerRaw === null) inn i den ferske økten —
           // med mindre målcellen ER preambelen (da kjøres den under, med
           // synlig output i sin egen slot).
