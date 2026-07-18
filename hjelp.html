@@ -194,6 +194,7 @@
   <a href="#modes">Moduser</a>
   <a href="#python">Python (Pyodide)</a>
   <a href="#r">R (WebR)</a>
+  <a href="#javascript">JavaScript</a>
   <a href="#hybrid">Hybrid-skript</a>
   <div class="nav-section">Referanse</div>
   <a href="#tab-full">Tab-autocomplete (detalj)</a>
@@ -686,6 +687,10 @@ summarize kjonn
         <div class="card-title"><span class="badge badge-r">R</span> WebR</div>
         <div class="card-body">Komplett R i nettleseren. Tidyverse, ggplot2, dplyr, survival m.m. installeres automatisk ved bruk.</div>
       </div>
+      <div class="card">
+        <div class="card-title"><span class="badge badge-py">JavaScript</span> Native</div>
+        <div class="card-body">JavaScript direkte i nettleseren — ingen nedlasting. Arquero (dataframes), simple-statistics, jStat, ml.js og Observable Plot/Plotly lastes automatisk ved bruk.</div>
+      </div>
     </div>
   </section>
 
@@ -715,6 +720,20 @@ summarize kjonn
     <h2>R (WebR)</h2>
     <p>R kjøres via <a href="https://docs.r-wasm.org/webr/latest/" target="_blank" rel="noopener">WebR</a> (WebAssembly). Pakker installeres automatisk første gang de brukes (<code>library(dplyr)</code> osv.).</p>
 
+  </section>
+
+  <!-- ── JAVASCRIPT ── -->
+  <section id="javascript">
+    <h2>JavaScript</h2>
+    <p>Kjører JavaScript direkte i nettleseren — ingen nedlasting av runtime, klar umiddelbart. Bibliotekene lastes automatisk fra CDN når koden bruker dem:</p>
+    <ul>
+      <li><code>aq</code> / <code>op</code> — <a href="https://idl.uw.edu/arquero/" target="_blank" rel="noopener">Arquero</a>: dataframes (filter, groupby, rollup, join, pivot)</li>
+      <li><code>ss</code> — <a href="https://simple-statistics.github.io/" target="_blank" rel="noopener">simple-statistics</a>: deskriptiv statistikk, t-tester, lineær regresjon</li>
+      <li><code>jStat</code> — <a href="https://jstat.github.io/" target="_blank" rel="noopener">jStat</a>: sannsynlighetsfordelinger og p-verdier</li>
+      <li><code>ML</code> — <a href="https://github.com/mljs/ml" target="_blank" rel="noopener">ml.js</a>: regresjon, PCA, k-means, random forest</li>
+      <li><code>Plot</code> — <a href="https://observablehq.com/plot/" target="_blank" rel="noopener">Observable Plot</a> og <code>Plotly</code> — grafikk</li>
+    </ul>
+    <p>Data inn med <code># load &lt;url&gt; as &lt;navn&gt;</code> (blir en Arquero-tabell), og <code># use &lt;navn&gt; from duckdb</code> henter en tabell fra forrige SQL-kjøring. Variabler overlever mellom celler; siste uttrykk i en celle vises automatisk (tabeller som HTML, <code>{data, layout}</code>-objekter som Plotly-figur, DOM-noder som HTML). <code>#%%</code>-celler og notatbokvisningen virker som i Python-modus.</p>
   </section>
 
   <!-- ── HYBRID ── -->
