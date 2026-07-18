@@ -43,8 +43,14 @@ def xakse(mu, sigma):
     n = 120
     return [lo + i * (hi - lo) / n for i in range(n + 1)]
 
+def tetthet(xs, mu, sigma):
+    ut = []
+    for x in xs:
+        ut.append(float(norm.pdf(x, loc=mu, scale=sigma)))
+    return ut
+
 xs = xakse(mu, sigma)
-ys = [float(norm.pdf(x, loc=mu, scale=sigma)) for x in xs]
+ys = tetthet(xs, mu, sigma)
 fig = pe.line(x=xs, y=ys, title="Tetthet")
 fig.add_vline(x=terskel)
 fig

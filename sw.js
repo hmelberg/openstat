@@ -100,8 +100,12 @@ async function cacheFirst(req) {
     // our CDN (jsdelivr) sends CORS, so res.ok is the right gate.
     if (res && res.ok) {
       cache.put(req, res.clone()).catch(() => {});
+      return res;
     }
-    return res;
+    // Transient 4xx/5xx (CDN-blipp): prøv cachet kopi før vi gir feilen videre —
+    // en resolved !ok-respons nådde aldri catch-fallbacken under.
+    const stale = await cache.match(req, { ignoreSearch: true });
+    return stale || res;
   } catch (err) {
     const fallback = await cache.match(req, { ignoreSearch: true });
     if (fallback) return fallback;

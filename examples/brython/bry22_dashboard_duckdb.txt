@@ -30,10 +30,15 @@ oversikt = duckdb.sql("""
 
 ARTER = oversikt["species"].tolist()
 
-detalj = {art: duckdb.sql(
-              "SELECT sepal_length, petal_length FROM iris "
-              "WHERE species = '" + art + "'").df()
-          for art in ARTER}
+def bygg_detalj(arter):
+    d = {}
+    for art in arter:
+        d[art] = duckdb.sql(
+            "SELECT sepal_length, petal_length FROM iris "
+            "WHERE species = '" + art + "'").df()
+    return d
+
+detalj = bygg_detalj(ARTER)
 
 totalt = int(duckdb.sql("SELECT count(*) AS n FROM iris").df()["n"][0])
 
