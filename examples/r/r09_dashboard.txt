@@ -13,22 +13,15 @@ bygge kort av — spec §3/§6) — «KPI-kortene» under er derfor to vanlige
 tekstlinjer fra `cat()`/`sprintf()`, ikke et eget kort-vokabular. Kurven er
 et base-plott, fanget som bilde slik R-motoren alltid gjør det.
 
-Kontrollcellen bruker `on_change = "all"` (den innebygde
-"kjør hele dokumentet på nytt"-sentinelen) OG `sync_to =` på hver kontroll.
-**R-begrensning** (ærlig pedagogikk): R sin "Kjør alle" har IKKE per-celle
-output-attribusjon slik python/brython/mpy har (all utdata fra én kjøring
-samles i én delt sone) — et `on_change` som kun retter seg mot
-ENKELTCELLER (f.eks. `c("stats", "plott")`, slik andre motorers eksempler
-gjør) etterlater derfor en foreldet duplikat-blokk ved siden av den ferske
-etter første interaksjon. `on_change = "all"` unngår dette ved å kjøre HELE
-dokumentet på nytt (samme mekanisme som toppmenyens Kjør-knapp) i stedet
-for kun mål-cellene — litt tyngre per interaksjon, men alltid
-duplikatfritt, og slider-verdiene bevares (siste synkroniserte verdi, ikke
-default) takket være `sync_to`.
+R har per-celle output-attribusjon i «Kjør alle» (som python/brython/
+micropython): hver celles tekst og plot lander i cellens egen output-slot,
+og et målrettet on_change (her: "plott") rerunner KUN mål-cellen og
+erstatter dens slot — ingen foreldede duplikater. on_change = "all" er
+fortsatt gyldig når hele dokumentet skal rekjøres.
 
 #%% r id=kontroller
 mu <- ui_slider(-5, 5, value = 0, step = 1, label = "Forventning (mu)",
-                name = "mu", on_change = "all", sync_to = "mu")
+                name = "mu", on_change = "plott", sync_to = "mu")
 sigma <- ui_slider(1, 4, value = 1, step = 1, label = "Standardavvik (sigma)",
                    name = "sigma", on_change = "all", sync_to = "sigma")
 terskel <- ui_play(-5, 10, value = -5, step = 1, label = "Terskel (spill av)",
