@@ -163,6 +163,17 @@ test('#tag.id duplisert mot annen #tag.id gir varsel', () => {
   assert.ok(parsed.warnings.some(w => /duplisert id: beta/.test(w)));
 });
 
+test('#tag.id avvist av header-override gir IKKE falskt duplisert-id-varsel', () => {
+  // Celle A har header-id=a OG en #tag.id = shared som blir avvist (header
+  // vinner). ids-mappet skal derfor ALDRI se A's tag-id — cellen B som
+  // legitimt bruker id=shared skal ikke straffes for A's avviste forsøk.
+  const doc = '#%% python id=a\n#tag.id = shared\nx = 1\n#%% python id=shared\ny = 2\n';
+  const parsed = C.parseCells(doc);
+  assert.ok(!parsed.warnings.some(w => /duplisert id: shared/.test(w)));
+  assert.ok(parsed.warnings.some(w => /#tag\.id overstyrt av #%%-attributt/.test(w)));
+  assert.strictEqual(parsed.cells[0].attrs.id, 'a');
+});
+
 test('round-trip: serialize(parse(t)) === t — eksakt', () => {
   const docs = [
     'print(1)',

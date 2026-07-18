@@ -382,17 +382,23 @@
           warnings.push('linje ' + lineNo + ': #tag.import gjelder bare i preambelen');
           continue;
         }
+        // Header-attributtet vinner alltid over #tag — sjekkes FØR duplikat-
+        // id-registrering, ellers ville en avvist #tag.id (som aldri blir
+        // cellens effektive id) likevel besette ids-mappet og utløse et
+        // falskt duplisert-id-varsel på en senere celle som legitimt bruker
+        // samme id.
+        if (Object.prototype.hasOwnProperty.call(cell.attrs, mk)) {
+          warnings.push('linje ' + lineNo + ': #tag.' + mk + ' overstyrt av #%%-attributt');
+          continue;
+        }
         // #tag.id dekkes av samme duplikat-id-varsel som header-id (linje
         // 314-317 over) — ids-mappet er delt, «sist vinner» gjelder likt.
+        // Registreres først nå, når vi vet tag-iden faktisk anvendes.
         if (mk === 'id') {
           if (ids[ent.value] !== undefined && ids[ent.value] !== ci) {
             warnings.push('linje ' + lineNo + ': duplisert id: ' + ent.value);
           }
           ids[ent.value] = ci; // sist vinner — samme regel som header-id
-        }
-        if (Object.prototype.hasOwnProperty.call(cell.attrs, mk)) {
-          warnings.push('linje ' + lineNo + ': #tag.' + mk + ' overstyrt av #%%-attributt');
-          continue;
         }
         cell.attrs[mk] = ent.value;
       }
