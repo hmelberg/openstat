@@ -715,12 +715,14 @@ def _normalize_kwargs(kwargs):
     style = None
     handlers = []
     warnings = []
+    class_key_seen = None
     for key, raw_value in kwargs.items():
         if key in ("cls", "class_"):
-            if "class" in attrs:
+            if class_key_seen is not None:
                 warnings.append(
                     "ui.html: bade cls= og class_= angitt - siste vinner (her: " + key + "=)"
                 )
+            class_key_seen = key
             attrs["class"] = raw_value
             continue
         if key == "style":

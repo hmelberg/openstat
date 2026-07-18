@@ -877,6 +877,13 @@ def test_normalize_kwargs_kun_cls_ingen_varsel(monkeypatch):
     assert warnings == []
 
 
+def test_normalize_kwargs_attrs_class_pluss_cls_gir_ikke_cls_class_varsel(monkeypatch):
+    mod, _ = _load_ui(monkeypatch)
+    result, handlers, warnings = mod._normalize_kwargs({"attrs": {"class": "x"}, "cls": "y"})
+    assert result["attrs"]["class"] == "y"  # siste vinner, dokumentert presedens
+    assert warnings == []  # attrs-vs-cls er dok-dekket, IKKE cls/class_-varselet
+
+
 def test_normalize_style_string_passthrough(monkeypatch):
     mod, _ = _load_ui(monkeypatch)
     norm, _, _ = mod._normalize_kwargs({"style": "color:red"})
