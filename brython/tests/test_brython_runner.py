@@ -256,6 +256,50 @@ def test_reset_keeps_registered_modules():
     assert '7' in out
 
 
+class _HostileDict(dict):
+    """Dict-subklasse hvis __delitem__ kaster for én navngitt "forgiftet"
+    nøkkel - simulerer exit gate-funnet (2026-07-18): bry17s bare
+    generator-uttrykk (`sum(rad[...] for rad in ...)`) lekker løkkevariabelen
+    `rad` inn i _shared_vars via en Brython 3.12-scoping-bug, og _reset()s
+    per-nøkkel del-loop kastet (KeyError) midt i loopet FØR gjenopprettings-
+    loopet (som restaurerer 'show' m.fl.) fikk kjøre - sesjonen forble
+    korrupt for resten av nettleserøkta (bry19 rendret blankt etter
+    bry17->bry18->bry19). Kan ikke reprodusere Brythons EGEN dict-felle i
+    CPython, men effekten (en del som kaster for én nøkkel) er identisk og
+    testbar via denne hostile __delitem__."""
+    def __init__(self, *a, poison_key=None, **kw):
+        super().__init__(*a, **kw)
+        self._poison_key = poison_key
+
+    def __delitem__(self, key):
+        if key == self._poison_key:
+            raise KeyError(key)  # speiler det faktiske browser-symptomet
+        super().__delitem__(key)
+
+
+def test_reset_survives_poisoned_key_that_raises_on_del():
+    # Regresjonstest for exit gate-funn 1 (2026-07-18): _reset()s per-nøkkel
+    # del-loop skal ALDRI abortere pga én forgiftet/lekket nøkkel - og skal
+    # fortsatt kjøre gjenopprettingsloopet (restaurerer baseline-vars som
+    # 'show') selv om én nøkkel ikke lot seg slette.
+    orig = br._shared_vars
+    try:
+        hostile = _HostileDict(orig, poison_key='rad_leaked')
+        hostile['rad_leaked'] = 42     # ikke i baseline -> del forsøkes -> kaster
+        hostile['other_stray'] = 'x'   # ikke i baseline -> del skal lykkes normalt
+        br._shared_vars = hostile
+        err = br._reset()
+        assert err == ''  # reset lykkes uansett (ikke traceback-kontrakten)
+        assert 'other_stray' not in br._shared_vars       # normal opprydning fortsetter
+        assert 'rad_leaked' in br._shared_vars             # forgiftet nøkkel overlever (harmløst levn)
+        assert br._shared_vars['show'] is br._baseline_vars['show']  # gjenopprettingsloopet KJØRTE
+        # sesjonen er brukbar etter reset (ikke korrupt for senere dokumentbytter):
+        out = br._execute_code("show('post-reset-ok')")
+        assert 'post-reset-ok' in out
+    finally:
+        br._shared_vars = orig
+
+
 # ── ui sync_to (fase 3): _sync_var ─────────────────────────────────────────
 
 def test_sync_var_writes_shared_vars():

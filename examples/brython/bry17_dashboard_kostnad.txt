@@ -26,22 +26,47 @@ def kohort(pris, pasienter, opptak_pst):
     return rader
 
 def kumulativ(rader):
-    """Lokal funksjonsscope med vilje (unngaar ogsaa lekkasje av
-    løkkevariabelen til sesjonsglobalene). Løkkevariabelen heter bevisst
-    IKKE «r» - Brython-motoren (denne bygningen) lekker "r" spesifikt til
-    modulnivaa fra en generator-/for-løkkevariabel (verifisert), selv om
-    list-/dict-comprehensions med samme navn er trygge - «rad» unngaar
-    fallgruven helt uansett uttrykksform."""
+    """Lokal funksjonsscope med vilje (unngaar lekkasje av løkkevariabelen
+    til sesjonsglobalene - se total_kostnad() under for detaljene rundt
+    HVORFOR: exit gate-funn 2026-07-18, browser-verifisert)."""
     kum, s = [], 0.0
     for rad in rader:
         s += rad["mill_kr"]
         kum.append(round(s, 2))
     return kum
 
+def total_kostnad(rader):
+    """Sum av mill_kr over en radliste. EN EKTE FUNKSJON med vilje - IKKE
+    en bar generator-/comprehension-uttrykk direkte på celletoppnivå.
+    Exit gate-funn (2026-07-18): en bar generator-uttrykk på celletoppnivå
+    (f.eks. `sum(rad["mill_kr"] for rad in rader)` rett i en celle) kan
+    lekke løkkevariabelen `rad` inn i _shared_vars via en Brython 3.12
+    dict-felle (samme felle som brython_runner.py sin _reset()/_rollback()
+    dokumenterer) - browser-verifisert: dette utløste _reset()s
+    "kunne ikke tilbakestille ... rad"-varsel etter en «Kjør»/dokumentbytte,
+    og korrumperte tidligere HELE sesjonen for RESTEN av nettleserøkta
+    (bry17->bry18->bry19-kjeden rendret bry19 blankt). En vanlig def-
+    funksjon har derimot en EKTE, isolert Python-funksjonsscope (som
+    kohort()/kumulativ() over, aldri observert å lekke) - løkkevariabelen
+    kan aldri nå _shared_vars uansett Brython-versjon eller dict-implementasjon."""
+    tot = 0.0
+    for rad in rader:
+        tot += rad["mill_kr"]
+    return tot
+
+def kolonne(rader, felt):
+    """Plukk ut én kolonne fra radlisten (samme funksjonsscope-begrunnelse
+    som total_kostnad() over) - brukt av tabell-cellen i stedet for en
+    bar list comprehension direkte på celletoppnivå."""
+    ut = []
+    for rad in rader:
+        ut.append(rad[felt])
+    return ut
+
 # Referanse: totalkostnad ved 50 % opptak (i stedet for default 10 %) - et
 # naturlig "hva om opptaket blir stort"-anker. Delta-pilen (ned = bra) viser
 # om dagens innstilling er billigere eller dyrere enn det.
-REF_TOTAL = round(sum(rad["mill_kr"] for rad in kohort(5000, 200, 50)), 1)
+REF_TOTAL = round(total_kostnad(kohort(5000, 200, 50)), 1)
 
 #%% brython id=kontroller
 import ui
@@ -69,7 +94,7 @@ avansert = ui.checkbox(label="Avansert (vis opptaksrate)", value=True, name="ava
 import ui
 
 rader = kohort(pris, pasienter, opptak_pst)
-show(ui.kpi(round(sum(rad["mill_kr"] for rad in rader), 1), unit="mill. kr",
+show(ui.kpi(round(total_kostnad(rader), 1), unit="mill. kr",
             label="Totalkostnad 5 aar", fmt=",.1f", ref=REF_TOTAL, bra="ned"),
      ui.kpi(rader[-1]["pasienter"], unit="stk", label="Pasienter i aar 5"))
 
@@ -84,5 +109,5 @@ import pandas_brython as pd
 
 rader = kohort(pris, pasienter, opptak_pst)
 pd.DataFrame({"Aar": AAR,
-              "Pasienter": [rad["pasienter"] for rad in rader],
-              "Mill. kr": [rad["mill_kr"] for rad in rader]})
+              "Pasienter": kolonne(rader, "pasienter"),
+              "Mill. kr": kolonne(rader, "mill_kr")})

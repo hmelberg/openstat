@@ -273,6 +273,20 @@ def _sync_var(name, value_json):
 # muterte objekter DELES med baselinen; grunne kopier er kontrakten her).
 _baseline_vars = dict(_shared_vars)
 
+def _warn(msg):
+    """console.warn via broen, GUARDET (ingen js-modul i CPython-pytest) -
+    speiler ui_mpy.py sin _warn semantisk (samme "aldri stille, men aldri
+    en krasj for en advarsel"-linje). Importerer INNI funksjonen (ikke på
+    modulnivå, i motsetning til ui_mpy.py sin `from js import window`)
+    fordi micropython_runner.py - ulikt ui_mpy.py - lastes direkte under
+    CPython i pytest (ingen js-modul-garanti der)."""
+    try:
+        from js import window
+        window.console.warn(msg)
+    except Exception:
+        pass
+
+
 def _reset():
     """Spol brukerglobals tilbake til boot-baseline; ''/traceback-kontrakt.
     Per-nøkkel med vilje — SAMME Brython 3.12-felle som _rollback over
@@ -285,14 +299,41 @@ def _reset():
     modulen (browser-verifisert 2026-07-16: et modulnivå-`import traceback`
     her feilet ALL sesjonsboot med "ImportError: no module named
     'traceback'"); _format_exc() dekker begge dialekter via
-    sys.print_exception()."""
+    sys.print_exception().
+    HERDET (exit gate-funn 2026-07-18, speiler Brython-tvillingens fiks for
+    paritet — se brython_runner.py sin _reset()-docstring for hele
+    historikken): robusthetsprinsippet gjelder her selv om MicroPython selv
+    IKKE har Brython 3.12s scoping-bug (bar generator-uttrykk lekker ikke
+    løkkevariabelen i denne dialekten) — en fremtidig forgiftet/lekket
+    nøkkel av en HELT ANNEN årsak skal likevel aldri kunne abortere det
+    hele per-nøkkel-loopet og hoppe over gjenopprettingsloopet (som
+    restaurerer 'show' m.fl. fra _baseline_vars), og dermed korrumpere
+    sesjonen for resten av nettleserøkta. NÅ: hver enkelt del/set-operasjon
+    er sitt EGET try/except - én forgiftet nøkkel kan aldri stoppe loopet
+    for de andre nøklene, og kan aldri hindre gjenopprettingsloopet i å
+    kjøre. Mislykkede nøkler samles og varsles ÉN gang via _warn() (samme
+    console.warn-bro som ui_mpy.py bruker), så resten fortsetter uansett -
+    reset returnerer fortsatt '' (suksess) selv om én nøkkel ikke lot seg
+    slette/sette; den forblir da værende i _shared_vars som et harmløst
+    levn, i stedet for å korrumpere hele sesjonen."""
     global _last_error
     try:
+        _failed = []
         for k in list(_shared_vars.keys()):
             if k not in _baseline_vars:
-                del _shared_vars[k]
+                try:
+                    del _shared_vars[k]
+                except BaseException:
+                    _failed.append(k)
         for k in list(_baseline_vars.keys()):
-            _shared_vars[k] = _baseline_vars[k]
+            try:
+                _shared_vars[k] = _baseline_vars[k]
+            except BaseException:
+                _failed.append(k)
+        if _failed:
+            _warn('_reset(): ' + str(len(_failed)) + ' nøkkel(er) kunne ikke '
+                  'tilbakestilles (fortsetter likevel, se _reset()-docstring): ' +
+                  ', '.join(sorted(set(_failed))))
         _last_error = ''
         return ''
     except BaseException as e:

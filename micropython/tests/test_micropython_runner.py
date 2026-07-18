@@ -134,6 +134,44 @@ def test_reset_keeps_registered_modules(capsys):
     assert '7' in out
 
 
+class _HostileDict(dict):
+    """Dict-subklasse hvis __delitem__ kaster for én navngitt "forgiftet"
+    nøkkel - speiler brython_runner.py sin tvilling-test (samme exit gate-
+    funn 2026-07-18, paritetsherding: MicroPython har ikke selve Brython
+    3.12-scoping-bugen, men robusthetsprinsippet - én kastende nøkkel skal
+    aldri abortere hele per-nøkkel del-loopet - gjelder likt her)."""
+    def __init__(self, *a, poison_key=None, **kw):
+        super().__init__(*a, **kw)
+        self._poison_key = poison_key
+
+    def __delitem__(self, key):
+        if key == self._poison_key:
+            raise KeyError(key)
+        super().__delitem__(key)
+
+
+def test_reset_survives_poisoned_key_that_raises_on_del(capsys):
+    # Regresjonstest for exit gate-funn 1s paritetsherding (2026-07-18):
+    # _reset()s per-nøkkel del-loop skal aldri abortere pga én forgiftet
+    # nøkkel, og gjenopprettingsloopet (restaurerer 'show' m.fl.) skal
+    # alltid kjøre uansett.
+    orig = mr._shared_vars
+    try:
+        hostile = _HostileDict(orig, poison_key='rad_leaked_mpy')
+        hostile['rad_leaked_mpy'] = 42
+        hostile['other_stray_mpy'] = 'x'
+        mr._shared_vars = hostile
+        err = mr._reset()
+        assert err == ''
+        assert 'other_stray_mpy' not in mr._shared_vars
+        assert 'rad_leaked_mpy' in mr._shared_vars
+        assert mr._shared_vars['show'] is mr._baseline_vars['show']
+        out = run(capsys, "show('post-reset-ok-mpy')")
+        assert 'post-reset-ok-mpy' in out
+    finally:
+        mr._shared_vars = orig
+
+
 # ── ui sync_to (fase 3): _sync_var ─────────────────────────────────────────
 
 def test_sync_var_writes_shared_vars():
