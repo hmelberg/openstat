@@ -2303,11 +2303,16 @@
       // res.rparts-grenen er dermed urørt.
       var hasUiShown = !!(out.querySelector && out.querySelector('[data-ui-shown]'));
       if (res && res.rparts) {
-        if (typeof global.renderROutputParts === 'function') {
-          global.renderROutputParts(res.rparts, out);
-        } else {
+        // Paritet med pyodide/brython/mpy (Hans, 2026-07-18): per-celle ▶ på
+        // en celle uten output etterlater sloten TOM — cellen forblir skjult
+        // av tomcelle-regelen i app.css. «(ingen output)»-plassholderen
+        // (buildROutputNodes' tomme-fallback) er forbeholdt plain-visningens
+        // #outputArea, der eksplisitt feedback gir mening.
+        if (!res.rparts.length || typeof global.renderROutputParts !== 'function') {
           purge(out);
           out.innerHTML = '';
+        } else {
+          global.renderROutputParts(res.rparts, out);
         }
       } else if (res && res.notice) {
         if (!hasUiShown) { purge(out); out.innerHTML = ''; }

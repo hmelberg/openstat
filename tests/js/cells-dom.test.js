@@ -927,6 +927,25 @@ test('runCell: {rparts} → rendres via window.renderROutputParts inn i cellens 
   delete global.renderROutputParts;
 });
 
+test('runCell: tom {rparts} → sloten forblir TOM (paritet med pyodide-familien — ingen «ingen output»-plassholder)', async () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% r\nsummary(x)\n#%% r\nx <- 5\n';
+  C.init('r');
+
+  let renderCalled = false;
+  global.renderROutputParts = () => { renderCalled = true; };
+  global.mdIsScriptRunning = () => false;
+  global.mdRunNotebookCell = () => Promise.resolve({ rparts: [] });
+
+  await C.runCell(1);
+
+  const cell0 = cellParts(containerEl, 1);
+  assert.strictEqual(renderCalled, false, 'renderROutputParts skal IKKE kalles for tom rparts (plassholderen er plain-visningens)');
+  assert.strictEqual(cell0.out.children.length, 0, 'sloten skal være tom så tomcelle-regelen i app.css skjuler cellen');
+
+  delete global.renderROutputParts;
+});
+
 test('runCell: {notice} → pre.nb-notice (ikke pre.error) i cellens egen slot (mixed-mode begrensningsmeldinger)', async () => {
   const { C, scriptInputEl, containerEl } = freshEnv();
   scriptInputEl.value = '#%% r\nprint("x")\n';
