@@ -1,5 +1,8 @@
 # Unified document model — decisions (pre-spec, complete)
 
+**KOMPLETT 2026-07-18:** alle fem faser levert (#tag+sniffing, presentasjon,
+plain-script-widgets+sync_to, editor-konvergens m/ cellelistefjerning,
+dash absorbert og fjernet) — pluss ui.html/#tag.import/ui.widget-fasen.
 **Status:** APPROVED direction, all open questions resolved by Hans
 2026-07-16 (two brainstorm rounds + a nine-question closing round).
 This document is the durable record; each phase below still gets its own

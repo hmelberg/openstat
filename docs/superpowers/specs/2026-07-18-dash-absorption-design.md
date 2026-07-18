@@ -2,6 +2,8 @@
 
 **Status 5a:** DELIVERED 2026-07-18 (plan 2026-07-18-dash-absorption-5a.md).
 
+**Status 5b:** DELIVERED 2026-07-18 — dash fjernet; HELE MÅLBILDET KOMPLETT.
+
 Phase 5 — the FINAL phase of the unified document model
 (`2026-07-16-unified-document-model-notes.md` §5, decision 8; user
 waiver: backwards compatibility is explicitly NOT a constraint — dash
