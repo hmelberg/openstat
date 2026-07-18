@@ -5414,6 +5414,7 @@ json.dumps(out)
       var idx = window.Cells.cellAtLineInDoc(line);
       if (idx === -1) return { idx: -1 };
       var cell = window.Cells.parseCells(ta.value).cells[idx];
+      if (!cell) return { idx: -1 }; // stale NB-idx vs. nytt dokumentinnhold (modusbytte i tikk-vinduet)
       var type = window.Cells.resolveType(cell, activeEditorMode);
       return { idx: idx, cell: cell, type: type, code: window.Cells.isCodeType(type) };
     }
@@ -5529,7 +5530,9 @@ json.dumps(out)
             }
           }
           if (!nextCell) return; // siste (kjørbare) celle — markøren blir stående
-          nbMoveCursorToLine(sTa, nbFirstBodyLine(nextCell));
+          // Tom celle (hasBody=false): startLine+1 er neste celles header — bli på headerlinjen.
+          var lineIdx = (nextCell.hasBody || nextCell.headerRaw === null) ? nbFirstBodyLine(nextCell) : nextCell.startLine;
+          nbMoveCursorToLine(sTa, lineIdx);
         };
         if (sAt.code) {
           Promise.resolve(window.Cells.runCell(sAt.idx)).then(advance);
@@ -10514,7 +10517,9 @@ async def _m2py_run_segment(_seg_json):
       } finally {
         if (py && typeof py.setStdout === 'function') py.setStdout();
         if (py && typeof py.setStderr === 'function') py.setStderr();
-        if (isMicrodataReplay) setStatus(rightStatus, '');
+        // Sesjonsboot (nbEnsureSession→bootNotebookSession) setter 'Running...'
+        // uten å tømme selv — tøm alltid her, ikke bare for microdata-replay.
+        setStatus(rightStatus, '');
         nbUiRunCtx = null;
         // ui-widgets (Task 3): stale-sopp for cellens kontrollstripe. Denne
         // delte finally'en dekker BEGGE grener (replay og direkte enkelt-

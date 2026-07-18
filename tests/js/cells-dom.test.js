@@ -2186,6 +2186,31 @@ test('docCellNode: klikk på en plot/chart-flate (svg/canvas/.js-plotly-plot) in
   assert.deepStrictEqual(jumpCalls, [0]);
 });
 
+// Task 2 (backlog-sweep): matplotlib-output rendres ofte som <img> (PNG-data-
+// URL, jf. index.html ~8103-8108) inni cellens .nb-output-body — et klikk på
+// selve bildet skal IKKE hoppe editor-markøren, samme resonnement som svg/
+// canvas-plotflatene over (et bilde-resultat er ikke en interaktiv kontroll,
+// men brukeren klikker på det for å se det, ikke for å hoppe i editoren).
+test('klikk på <img> i slot stjeler ikke fokus (mdJumpToCell kalles ikke)', () => {
+  const { C, scriptInputEl, containerEl } = freshEnv();
+  scriptInputEl.value = '#%% python\nplot()\n';
+  const jumpCalls = [];
+  global.mdJumpToCell = (idx) => jumpCalls.push(idx);
+  C.init('python');
+
+  const wrap0 = C.cellElementAt(0);
+  const out0 = cellParts(containerEl, 0).out;
+
+  const img = global.document.createElement('img');
+  out0.appendChild(img);
+  wrap0.dispatchEvent({ type: 'click', target: img });
+  assert.deepStrictEqual(jumpCalls, [], 'klikk på <img> i output-body hopper ikke');
+
+  // Klikk på sloten selv fortsatt normalt — filteret er spesifikt.
+  wrap0.dispatchEvent({ type: 'click', target: wrap0 });
+  assert.deepStrictEqual(jumpCalls, [0]);
+});
+
 test('docCellNode: klikk-lytteren krasjer ikke uten en window.mdJumpToCell (guardet tverr-IIFE-bro)', () => {
   const { C, scriptInputEl } = freshEnv();
   scriptInputEl.value = '#%% python\na = 1\n';

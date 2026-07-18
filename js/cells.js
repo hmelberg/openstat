@@ -1257,13 +1257,16 @@
     // Important 2): svg/canvas er tegne-overflater for Plotly/matplotlib-
     // aktige resultater, og js-plotly-plot er Plotlys egen rot-container —
     // et klikk/dra INNI et diagram (zoom, hover, legend-toggle) skal IKKE
-    // stjele fokus til editoren, akkurat som en slider ikke skal. Ekte
-    // browser-DOM har Element.prototype.closest; test-harnessets FakeEl har
+    // stjele fokus til editoren, akkurat som en slider ikke skal. Samme
+    // resonnement dekker også <img> (Task 2, backlog-sweep): matplotlib-
+    // output rendres ofte som et <img> (PNG-data-URL) — et klikk på selve
+    // bildet skal heller ikke hoppe markøren. Ekte browser-DOM har
+    // Element.prototype.closest; test-harnessets FakeEl har
     // den ikke (samme "utestbar uten en manuell forelder-vandring"-
     // situasjon som resten av filen løser med egne hjelpere i stedet for
     // DOM-native APIer) — egen forelder-vandring fungerer identisk i begge
     // miljøer.
-    var CLICK_IGNORE_TAGS = { input: 1, button: 1, select: 1, textarea: 1, a: 1, svg: 1, canvas: 1 };
+    var CLICK_IGNORE_TAGS = { input: 1, button: 1, select: 1, textarea: 1, a: 1, svg: 1, canvas: 1, img: 1 };
     var CLICK_IGNORE_CLASSES = ['ui-controls', 'param-form', 'nb-present-nav', 'js-plotly-plot'];
     function isIgnorableClickTarget(node, stopAt) {
       var n = node;
