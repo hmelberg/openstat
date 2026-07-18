@@ -56,6 +56,20 @@
     .container.layout-stacked { flex-direction: column; }
     /* Output-only: hide the input panel; the output (panel-right, flex:1) fills the space. */
     .container.input-hidden .panel-left, .container.input-hidden #resizer { display: none; }
+    /* Kun output (brukerønske 2026-07-19): på brede skjermer sentreres
+       innholdet i en lesbar kolonne (900px default) i stedet for full
+       skjermbredde — #options.max_width = <tall|'900px'|'full'> overstyrer
+       (mdApplyOutputViewOpts setter --outonly-maxw/klassene på .container).
+       Aktiv-celle-stripen og kopier-hoveren er AV i Kun output (rolig
+       leseflate) — #options.show_active_cell / #options.show_copy = true
+       slår dem på igjen. Kommando-echo er allerede AV der by default
+       (getShowCommandsEffectiveDefault, ee39d1c). */
+    .container.input-hidden:not(.outonly-fullwidth) .output-area {
+      max-width: var(--outonly-maxw, 900px);
+      margin-left: auto; margin-right: auto;
+    }
+    .container.input-hidden:not(.outonly-show-active) .doc-cell.doc-active { box-shadow: none; }
+    .container.input-hidden:not(.outonly-show-copy) .output-copy-btn { display: none; }
     .panel { display: flex; flex-direction: column; min-width: 120px; min-height: 0; flex: 1; overflow: hidden; }
     .container.layout-columns .panel-left {
       border-right: 1px dotted var(--border);

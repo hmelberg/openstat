@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="preconnect" href="https://cdn.plot.ly" crossorigin>
   <link rel="preload" as="script" href="https://cdn.jsdelivr.net/pyodide/v314.0.2/full/pyodide.js">
-  <link rel="stylesheet" href="app.css?v=2026-07-19a">
+  <link rel="stylesheet" href="app.css?v=2026-07-19b">
 </head>
 <body data-theme="light">
   <header class="topbar">
@@ -1212,6 +1212,24 @@
       }
       window.mdSetInputHidden = setInputHidden;
       window.mdIsInputHidden = isInputHidden;
+      // Kun output-innstillinger fra #options (brukerønske 2026-07-19):
+      // max_width (tall, '900px' eller 'full'), show_active_cell, show_copy.
+      // Defaults i Kun output (CSS, .container.input-hidden): sentrert
+      // lesekolonne (900px), aktiv-celle-stripe AV, kopier-hover AV; echo er
+      // allerede AV der via getShowCommandsEffectiveDefault. Kalles fra
+      // BEGGE view-prosesserings-grenene i btnRun ved hver kjøring —
+      // manglende opts nullstiller til defaults (klasser av, var fjernet).
+      function applyOutputViewOpts(opts) {
+        opts = opts || {};
+        var mw = opts.max_width;
+        container.classList.toggle('outonly-fullwidth', String(mw).toLowerCase() === 'full');
+        var mwPx = parseInt(String(mw || '').replace(/px$/i, ''), 10);
+        if (isFinite(mwPx) && mwPx > 0) container.style.setProperty('--outonly-maxw', mwPx + 'px');
+        else container.style.removeProperty('--outonly-maxw');
+        container.classList.toggle('outonly-show-active', opts.show_active_cell === true);
+        container.classList.toggle('outonly-show-copy', opts.show_copy === true);
+      }
+      window.mdApplyOutputViewOpts = applyOutputViewOpts;
 
       function onMouseDown(e) {
         startX = e.clientX;
@@ -10656,6 +10674,8 @@ async def _m2py_run_segment(_seg_json):
           // publishStandaloneDashboard sin output-only-injeksjon) blitt
           // lest av extractScriptOptions, men aldri hatt noen synlig effekt.
           var _engScriptOpts = extractScriptOptions(scriptInput.value);
+          // Kun output-opsjonene — speiler den generiske grenen (ubetinget).
+          if (window.mdApplyOutputViewOpts) window.mdApplyOutputViewOpts(_engScriptOpts);
           if (_engScriptOpts.view !== undefined && window.mdSetInputHidden) {
             var _engVw = String(_engScriptOpts.view).toLowerCase().replace(/[\s_]+/g, '-');
             if (_engVw === 'present' || _engVw === 'presentasjon') {
@@ -10743,6 +10763,9 @@ async def _m2py_run_segment(_seg_json):
         //    kode-echo skal vises i output for R og Python.
         // Presedens: script-direktiv > Innstillinger > true.
         var _scriptOpts = extractScriptOptions(effectiveScript);
+        // Kun output-opsjonene (max_width/show_active_cell/show_copy) —
+        // ubetinget: gjelder også når brukeren har valgt Kun output manuelt.
+        if (window.mdApplyOutputViewOpts) window.mdApplyOutputViewOpts(_scriptOpts);
         // #options.view = output-only | split | present → visnings-tilstand fra scriptet
         if (_scriptOpts.view !== undefined && window.mdSetInputHidden) {
           var _vw = String(_scriptOpts.view).toLowerCase().replace(/[\s_]+/g, '-');
