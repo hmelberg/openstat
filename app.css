@@ -541,6 +541,15 @@
       object-fit: contain;
       display: block;
       margin: 8px 0;
+      /* Figur-kort (brukerfeedback 2026-07-18): PNG-ene har innbakt hvit
+         bakgrunn som skar stygt mot cellens --bg-panel — gi figuren en
+         bevisst hvit kort-flate med luft og runde hjørner i stedet, så
+         kontrasten ser designet ut (samme grep i begge temaer; Plotly
+         (.plotly-container) temaer seg selv og røres ikke). */
+      background: #fff;
+      border-radius: 6px;
+      padding: 6px;
+      box-sizing: border-box;
     }
     .output-area table.output-table .total-col,
     .output-area table.output-table .total-col-header { font-weight: 700; border-left: 2px solid var(--text-muted); }
@@ -1081,6 +1090,23 @@
   transition: box-shadow .15s ease, border-color .15s ease, background-color .15s ease; }
 .nb-cell:hover { border-color: color-mix(in srgb, var(--accent) 25%, var(--border));
   box-shadow: 0 2px 6px rgba(0,0,0,.12); }
+/* Kodecelle uten output og uten kontrollstriper: ingen tom rammeboks i
+   dokumentet (brukeravgjørelse 2026-07-18, Jupyter-aktig) — preamble-/
+   assignment-celler ga ellers tomme grå bokser og «tynne streker» øverst.
+   Unntak som holder boksen synlig: md/html (nb-rendered-only), kjørende
+   puls (nb-running), celler med ikke-tom kontrollstripe (param-form/
+   ui-controls), og enhver celle med faktisk innhold i .nb-output-body
+   (inkl. «(ingen output)»-preen fra eksplisitt per-celle ▶). doc-active
+   unntas BEVISST IKKE: markøren står på linje 1 ved last, så preamble-
+   cellen ble stående som en 6px-sliver øverst (brukerfunn ×2) — editorens
+   markør/gutter viser aktiv celle godt nok. :has()-presedens:
+   .nb-output-gap-regelen under. Kroppene er GARANTERT tomme uten innhold
+   (beginRun-purge/innerHTML=''), så :empty treffer presist. */
+.nb-cell.doc-cell:not(.nb-rendered-only):not(.nb-running):has(.nb-output-body:empty):not(:has(.param-form:not(:empty))):not(:has(.ui-controls:not(:empty))) { display: none; }
+/* Samme logikk for hide-output-celler: .nb-output er skjult (regelen under),
+   så boksen er ALLTID en tom ramme — skjul hele cellen (samme kjørende-
+   unntak). */
+.nb-cell.doc-cell.nb-hide-output:not(.nb-running) { display: none; }
 /* W-issue 3: fokus vises KUN som en kant-fargeendring (ingen inset venstre-
    strek lenger — se removed .nb-cell:focus-within box-shadow left accent). */
 .nb-cell:focus-within { border-color: var(--accent);
@@ -1381,13 +1407,21 @@
    oppmerksomhet nettopp var (skjema-stripa), i TILLEGG til, ikke i stedet
    for, celle-hodets ▶ (Colab har ingen tilsvarende knapp). */
 .param-form-runchip {
-  align-self: flex-start;
+  /* Brukerfeedback 2026-07-18: chippen lå som egen rad UNDER kontrollene
+     (.param-form er flex-kolonne) — plasser den i stedet oppe til høyre i
+     stripa, på linje med (første) kontrollrad. DOM-en er uendret (chippen
+     appendes fortsatt sist i stripa — chip-testene består); kun posisjonen
+     er absolutt. :has()-regelen under reserverer plass så chippen aldri
+     overlapper en bred kontrollrad. */
+  position: absolute; top: 6px; right: 8px;
   display: inline-flex; align-items: center; gap: 4px;
   background: transparent; color: var(--accent);
   border: 1px solid var(--accent); border-radius: 999px;
   padding: 2px 10px; font-size: 11.5px; line-height: 1.6;
   cursor: pointer;
 }
+.param-form { position: relative; }
+.param-form:has(.param-form-runchip) { padding-right: 76px; }
 .param-form-runchip:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .param-form-runchip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 

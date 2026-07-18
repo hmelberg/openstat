@@ -236,6 +236,15 @@ ui_button <- function(label, rerun = "self", on_click = NULL, name = NULL,
   invisible(NULL)
 }
 
+#' Felles kjør-knapp for kontrollstripen (brukerønske 2026-07-18): ÉN knapp
+#' som kjører target (default "all" = hele dokumentet; ellers en celle-id
+#' eller vektor av id-er) i stedet for én knapp per widget. Ren sukker over
+#' ui_button(label, on_click = target).
+ui_run_button <- function(label = "Kjør", target = "all", name = NULL,
+                          placement = NULL) {
+  ui_button(label, on_click = target, name = name, placement = placement)
+}
+
 #' Avspillings-glidebryter (dash-absorpsjon 5a Task 3, spec §3 - dash sin
 #' play()-widget, absorbert): som ui_slider, men med en innebygd play/pause-
 #' knapp (js/ui.js sin _buildPlay) som stepper verdien med `step` per

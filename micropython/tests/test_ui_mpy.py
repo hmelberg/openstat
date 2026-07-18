@@ -204,6 +204,20 @@ def test_on_click_alias_wins_over_rerun(monkeypatch):
     assert fake.calls[-1]["rerun"] == "plot"
 
 
+def test_run_button_default_er_kjor_all(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=None)
+    assert mod.run_button() is None
+    assert fake.calls[-1]["label"] == "Kjør"
+    assert fake.calls[-1]["rerun"] == "all"
+
+
+def test_run_button_target_celle_id(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=None)
+    mod.run_button("Oppdater", target="plott")
+    assert fake.calls[-1]["label"] == "Oppdater"
+    assert fake.calls[-1]["rerun"] == "plott"
+
+
 def test_on_change_alias_on_slider(monkeypatch):
     mod, fake = _load_ui(monkeypatch, next_result=None)
     mod.slider(1, 10, on_change="plot")

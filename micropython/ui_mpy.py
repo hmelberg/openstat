@@ -446,6 +446,16 @@ def button(label, *, rerun='self', on_click=None, name=None, placement=None):
     return None
 
 
+def run_button(label="Kjør", *, target="all", name=None, placement=None):
+    """ui.run_button() - felles kjør-knapp for kontrollstripen (brukerønske
+    2026-07-18): ÉN knapp som kjører target (default "all" = hele
+    dokumentet; ellers en celle-id eller liste av id-er) i stedet for én
+    knapp per widget. Ren sukker over ui.button(label, on_click=target) -
+    samme knapp-mekanikk, samme None-retur, samme "knapper har ingen
+    verdi"-regler (inkl. at ui.widget() ikke kan adressere den)."""
+    return button(label, on_click=target, name=name, placement=placement)
+
+
 def play(min, max, *, value=None, step=1, interval=600, loop=False, label=None,
          name=None, rerun='self', on_change=None, placement=None, sync_to=None):
     """Avspillings-glidebryter (dash-absorpsjon 5a Task 3, spec §3 - dash sin

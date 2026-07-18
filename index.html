@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="preconnect" href="https://cdn.plot.ly" crossorigin>
   <link rel="preload" as="script" href="https://cdn.jsdelivr.net/pyodide/v314.0.2/full/pyodide.js">
-  <link rel="stylesheet" href="app.css?v=2026-07-13a">
+  <link rel="stylesheet" href="app.css?v=2026-07-18a">
 </head>
 <body data-theme="light">
   <header class="topbar">
@@ -594,7 +594,7 @@
     window.t = window.t || function (s) { return s; };
     window.i18nField = window.i18nField || function (obj, field) { return obj && obj[field]; };
 
-    window.M2PY_VERSION = '2026-07-18a';
+    window.M2PY_VERSION = '2026-07-18b';
 
     // One-time migration: remove obsolete localStorage keys from previous milestones
     // Safe to delete this snippet after a few months when most users have re-loaded
@@ -3267,7 +3267,7 @@
           // element/skript kan likevel dra nytte av at CSS/JS er lastet.
           try { await window.mdEnsureTagImports(ctx.rightStatus); }
           catch (e) { console.warn('#tag.import (R runSelf):', e); }
-          await runHybridR(script, ctx.py, { showCommands: ctx.showCommands, profile: ctx.profile });
+          await runHybridR(script, ctx.py, { showCommands: ctx.showCommands, profile: ctx.profile, displayAll: ctx.displayAll });
         } },
       statx: { id: 'statx', label: 'Statx',
         hlConfig: STATA_HL_CFG,
@@ -6295,6 +6295,15 @@ json.dumps(out)
         pre.textContent = text;
         frag.appendChild(pre);
       }
+      // Whitespace-only <pre> (typisk rest-newlines rundt en plot-markør som
+      // ble til figur-div): .output-area pre har bakgrunn/padding, så en tom
+      // pre rendres som en grå stripe — og kopier-forsterkeren ga den til og
+      // med en hover-knapp (brukerfunn 2026-07-18). Fjern dem her, i den ENE
+      // builderen begge stiene (renderOutput + appendOutput) deler. Pre-er
+      // med embed-innhold uten tekst finnes ikke (embeds er egne div-er).
+      frag.querySelectorAll('pre').forEach(function (p) {
+        if (!p.textContent.trim() && !p.querySelector('img, svg, canvas, table')) p.remove();
+      });
       return frag;
     }
 
@@ -6431,6 +6440,12 @@ json.dumps(out)
       var candidates = container.querySelectorAll(RESULT_COPY_SELECTOR);
       candidates.forEach(function(el) {
         if (el.hasAttribute('data-copybtn-done')) return;
+        // Whitespace-only pre (ingen tekst å kopiere): aldri en kopierknapp —
+        // builderen fjerner slike selv nå, dette er beltet for andre stier.
+        if (el.tagName === 'PRE' && !el.textContent.trim()) {
+          el.setAttribute('data-copybtn-done', '1');
+          return;
+        }
         // Tabeller som allerede er pakket av det eksisterende mikrodata-mønsteret
         // (.output-table-wrap, se attachTableCopyHandler) har sin egen knapp.
         if (el.tagName === 'TABLE' && el.closest('.output-table-wrap')) {
@@ -8192,7 +8207,7 @@ json.dumps(out)
     // FORHÅNDS-INJISERT `.ui_values` - se webr/ui.R sin filhode-kommentar.
     // UI_R_REGEX gater ALT arbeidet under (både her og i runNotebookRCell/
     // runHybridR) - vanlige R-kjøringer uten ui_*-kall betaler ingenting.
-    var UI_R_REGEX = /\bui_(slider|dropdown|checkbox|switch|number|text|button|html|sl|pico|value|widget)\s*\(/;
+    var UI_R_REGEX = /\bui_(slider|dropdown|checkbox|switch|number|text|button|run_button|html|sl|pico|value|widget)\s*\(/;
 
     // fase 3-fiks: husker at forrige rene R-kjøring rendret doc-kontroller,
     // så en kjøring UTEN ui_-tekst fortsatt får én opprydningssweep.
@@ -8352,16 +8367,17 @@ json.dumps(out)
       // Verifisert i nettleser: dette var ROTÅRSAKEN til at rex_widgets_ui.txt
       // sin Kjør alle ikke rendret kontroller under selve implementeringen.
       //
-      // Gates på Cells.active() OG UI_R_REGEX (ikke bare Cells.active()):
-      // et ui-fritt notatbok-dokument skal fortsatt kjøre BYTE-IDENTISK med
-      // før (verifiseringskravet i planen) — inkludert den (i teorien mulige,
-      // om enn ingen dagens eksempel gjør det) legitime bruken av en
-      // FAKTISK microdata-DSL-preambel i et R-modus-notatbok. Denne
-      // omklassifiseringen trengs KUN for at ui-verdi-injeksjonen (under)
-      // skal finne en celleindeks — uten ui_*() i scriptet er det uansett
-      // ingenting å injisere/lese, så det er tryggest å la den gamle
-      // heuristikken stå urørt der.
-      var _rNbActiveForDefault = !!(window.Cells && window.Cells.active()) && UI_R_REGEX.test(src);
+      // Gates KUN på Cells.active() (UI_R_REGEX-tillegget fjernet 2026-07-18):
+      // den gamle ekstra-gaten fantes for plasserings-fasens «byte-identisk
+      // med før»-krav, men R per-celle-attribusjonen (spec 2026-07-18) gjør
+      // kind-klassifiseringen LASTBÆRENDE for alle notatbøker — med gaten på
+      // fikk et ui-FRITT notatbok-dokument preamblen klassifisert 'microdata',
+      // alignPlan feilet, og beginRun purget cellene men returnerte null →
+      // tomme cellebokser + alt output i trailing (brukerrapportert). I et
+      // #%%-notatbok-dokument i R-modus er en umarkert preambel R (samme
+      // docMode-default som pyodide-familien) — legacy ##-hybridskript uten
+      // Cells.active() beholder microdata-heuristikken uendret.
+      var _rNbActiveForDefault = !!(window.Cells && window.Cells.active());
       const segments = parseHybridScript(normalized, _rNbActiveForDefault ? 'r' : (hasMarkers ? 'microdata' : 'r'));
 
       // Segmentnivå-use (plan 2026-07-11 i safestat): parse/strip use-linjene
@@ -8406,6 +8422,19 @@ json.dumps(out)
       var _rSinks = (window.Cells && window.Cells.active())
         ? window.Cells.beginRun(_rSegsAll.map(function (s) { return s.kind; }))
         : null;
+      // Notatbok-visningspolicy, paritet med pyodide-løkka (spec §4 / fase
+      // A-addendumet): celle-attribuert segment → kode-echo AV (den rå
+      // editoren viser allerede koden ved siden av dokumentet; echo her ga
+      // rene kode-ekko-bokser for assignment-celler uten output) — med
+      // mindre '#options.display = all' ber om vis-alt-oppførselen, samme
+      // escape-luke som pyodide-stien. showCommands (plain/trailing-stien)
+      // er uendret.
+      // displayAll kommer trådd fra btnRun-stien (runOpts) — #options.*-
+      // linjene er allerede strippet fra src der, så lokal re-parse er død
+      // for den stien; fallback-parsen dekker kallere som sender rå tekst.
+      var _rDisplayAll = (runOpts.displayAll !== undefined)
+        ? !!runOpts.displayAll
+        : String(((typeof extractScriptOptions === 'function') ? extractScriptOptions(src) : {}).display || '').toLowerCase() === 'all';
 
       // ── Phase 1: run all microdata segments with a shared interpreter ────
       // Runs silently (setup). Datasets exported to WebR as typed tibbles via
@@ -8604,7 +8633,11 @@ json.dumps(out)
         for (var si = 0; si < statements.length; si++) {
           var stmt = statements[si];
           try {
-            if (showCommands) {
+            // Echo kun når segmentet IKKE er celle-attribuert (eller
+            // display=all) — se _rDisplayAll-kommentaren ved _rSinks over.
+            var _segEcho = showCommands
+              && (!(_rSinks && _rSinks[rSegOrigIdx[ri]]) || _rDisplayAll);
+            if (_segEcho) {
               var _echoStmt = stripCodeComments(stmt, '#'); // ikke vis #-kommentarer i output
               if (_echoStmt) segParts.push({ type: 'code', text: _echoStmt });
             }
@@ -10736,7 +10769,10 @@ async def _m2py_run_segment(_seg_json):
         // settes aldri, _m2py_run_segment sin _nb-fallback er identisk til før).
         var _displayLast = String(_scriptOpts.display || '').toLowerCase() === 'last';
         var _mr = currentMode();
-        var _ctx = { py: py, rightStatus: rightStatus, showCommands: _showCmds, profile: _scriptOpts.profile };
+        // displayAll må TRÅDES hit: #options.*-linjene er strippet fra
+        // effectiveScript over, så runHybridR kan ikke re-parse dem selv
+        // (display=all-escapen var ellers død for R — smoke-funn 2026-07-18).
+        var _ctx = { py: py, rightStatus: rightStatus, showCommands: _showCmds, profile: _scriptOpts.profile, displayAll: _displayAll };
         if (_mr.runSelf) { await _mr.runSelf(effectiveScript, _ctx); return; }
         if (_mr.preRun)  await _mr.preRun(effectiveScript, _ctx);
         // Fase 1 (plan 2026-07-11-phase1-duckdb-native.md i safestat): ren SQL
