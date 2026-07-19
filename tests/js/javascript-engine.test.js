@@ -181,3 +181,53 @@ test('bindLoads: csv-load blir arquero-tabell i scopet (stubbet aq)', async () =
     assert.strictEqual(r.text, String('a,b\n1,2'.length));
   } finally { delete globalThis.aq; delete globalThis.op; }
 });
+
+// ── Publisering: datasett-spec-cache + innbakte jsdata_-tags ──────────────
+
+test('getLastDatasetSpec: caches csv-load fra siste kjøring', async () => {
+  globalThis.aq = {
+    fromCSV: (txt) => ({ _csv: txt, toHTML: () => '', objects: () => [] }),
+    from: (rows) => ({ rows }), table: (cols) => ({ cols }), op: {}
+  };
+  try {
+    const bytes = new TextEncoder().encode('a,b\n1,2');
+    const r = await E.run('iris._csv.length', { loads: [{ alias: 'iris', bytes, format: 'csv' }] });
+    assert.strictEqual(r.error, null);
+    const spec = E.getLastDatasetSpec();
+    assert.deepStrictEqual(spec, { iris: { kind: 'csv', payload: 'a,b\n1,2' } });
+  } finally { delete globalThis.aq; delete globalThis.op; }
+});
+
+test('innbakte jsdata_-tags bindes når det ikke finnes # load (publisert side)', async () => {
+  globalThis.aq = {
+    fromCSV: (txt) => ({ _csv: txt }), from: (rows) => ({ rows }),
+    table: (cols) => ({ cols }), op: {}
+  };
+  globalThis.document = {
+    querySelectorAll: (sel) => sel.indexOf('jsdata_') !== -1
+      ? [{ id: 'jsdata_folk', textContent: JSON.stringify({ kind: 'csv', payload: 'x,y\n5,6' }) }]
+      : [],
+  };
+  try {
+    const r = await E.run('folk._csv', {});
+    assert.strictEqual(r.error, null);
+    assert.strictEqual(r.text, 'x,y\n5,6');
+  } finally { delete globalThis.aq; delete globalThis.op; delete globalThis.document; }
+});
+
+test('eksplisitt # load vinner over innbakt tag med samme navn', async () => {
+  globalThis.aq = {
+    fromCSV: (txt) => ({ _csv: txt }), from: (rows) => ({ rows }),
+    table: (cols) => ({ cols }), op: {}
+  };
+  globalThis.document = {
+    querySelectorAll: (sel) => sel.indexOf('jsdata_') !== -1
+      ? [{ id: 'jsdata_iris', textContent: JSON.stringify({ kind: 'csv', payload: 'GAMMEL' }) }]
+      : [],
+  };
+  try {
+    const bytes = new TextEncoder().encode('NY');
+    const r = await E.run('iris._csv', { loads: [{ alias: 'iris', bytes, format: 'csv' }] });
+    assert.strictEqual(r.text, 'NY');
+  } finally { delete globalThis.aq; delete globalThis.op; delete globalThis.document; }
+});

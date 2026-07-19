@@ -250,27 +250,71 @@
     }, Promise.resolve());
   }
 
-  async function tableFromLoad(l) {
-    var aq = global.aq;
-    if (l.format === 'csv') return aq.fromCSV(new TextDecoder().decode(l.bytes));
+  // ── Datasett-spec ({navn: {kind:'csv'|'columns', payload}}) ────────────
+  // Samme tag-/spec-format som Brython-motorens buildDatasetSpec: «Publiser
+  // dokument (HTML)» (index.html) leser getLastDatasetSpec() og baker
+  // entriene inn som <script type="application/json" id="jsdata_<navn>">-
+  // tags; ved lasting av den publiserte sida binder collectSpec() dem igjen.
+  async function specFromLoad(l) {
+    if (l.format === 'csv') {
+      return { kind: 'csv', payload: new TextDecoder().decode(l.bytes) };
+    }
     if (l.format === 'json') {
-      var parsed = JSON.parse(new TextDecoder().decode(l.bytes));
-      return Array.isArray(parsed) ? aq.from(parsed) : aq.table(parsed);
+      return { kind: 'columns', payload: JSON.parse(new TextDecoder().decode(l.bytes)) };
     }
     if (l.format === 'parquet') {
       if (typeof global.__brythonParquetColumns !== 'function') {
         throw new Error('parquet-kilden «' + l.alias + '» støttes ikke: DuckDB-hjelperen mangler');
       }
-      return aq.table(await global.__brythonParquetColumns(l.bytes));
+      return { kind: 'columns', payload: await global.__brythonParquetColumns(l.bytes) };
     }
     throw new Error('formatet «' + l.format + '» (' + l.alias + ') støttes ikke i JavaScript-modus — bruk python/r');
   }
+
+  function tableFromSpec(entry) {
+    var aq = global.aq;
+    if (entry.kind === 'csv') return aq.fromCSV(entry.payload);
+    return Array.isArray(entry.payload) ? aq.from(entry.payload) : aq.table(entry.payload);
+  }
+
+  // Innbakte datablokker (publiserte dokumenter). Etter # load, slik at en
+  // eksplisitt load vinner over en innbakt kopi med samme navn. En parsed
+  // verdi UTEN kind-felt tolkes som rå kolonner (samme bakoverkompatibilitet
+  // som brython-tagene). document-guard: node-testene har ingen DOM.
+  function collectEmbedded(spec) {
+    if (typeof document === 'undefined' || !document.querySelectorAll) return;
+    var nodes = document.querySelectorAll('script[type="application/json"][id^="jsdata_"], script[id^="jsdata_"]');
+    for (var i = 0; i < nodes.length; i++) {
+      var name = nodes[i].id.slice('jsdata_'.length);
+      if (spec[name]) continue;
+      var parsed = JSON.parse(nodes[i].textContent);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) &&
+          (parsed.kind === 'csv' || parsed.kind === 'columns')) {
+        spec[name] = { kind: parsed.kind, payload: parsed.payload };
+      } else {
+        spec[name] = { kind: 'columns', payload: parsed };
+      }
+    }
+  }
+
+  // Siste kjørings resolverte spec — «Publiser dokument» leser herfra uten å
+  // kjøre scriptet på nytt. Overskrives kun når en kjøring faktisk
+  // resolverte datasett (per-celle-kjøringer med tomme loads beholder
+  // ensure-tidens spec).
+  var __lastSpec = {};
+
   async function bindLoads(scope, loads) {
+    var spec = {};
     var withBytes = (loads || []).filter(function (l) { return l && l.bytes; });
-    if (!withBytes.length) return;
-    await ensureLibs(['aq']);
     for (var i = 0; i < withBytes.length; i++) {
-      scope.vars[withBytes[i].alias] = await tableFromLoad(withBytes[i]);
+      spec[withBytes[i].alias] = await specFromLoad(withBytes[i]);
+    }
+    collectEmbedded(spec);
+    if (!Object.keys(spec).length) return;
+    __lastSpec = spec;
+    await ensureLibs(['aq']);
+    for (var name in spec) {
+      scope.vars[name] = tableFromSpec(spec[name]);
     }
   }
 
@@ -286,7 +330,11 @@
     await ensureLibs(['aq']);
     for (var i = 0; i < names.length; i++) {
       var bytes = await global.__duckUseBytes(names[i]);
-      scope.vars[names[i]] = global.aq.table(await global.__brythonParquetColumns(bytes));
+      var columns = await global.__brythonParquetColumns(bytes);
+      // Inn i spec-cachen også — «Publiser dokument» skal kunne bake inn
+      // duck-hentede tabeller på lik linje med # load-datasett.
+      __lastSpec[names[i]] = { kind: 'columns', payload: columns };
+      scope.vars[names[i]] = global.aq.table(columns);
     }
   }
 
@@ -338,6 +386,7 @@
 
   global.JsEngine = {
     load: load, run: run,
+    getLastDatasetSpec: function () { return __lastSpec; },
     notebookSession: { ensure: nbEnsure, runCell: nbRunCell, reset: nbReset,
                        invalidate: nbInvalidate, isLive: nbIsLive },
     _prepass: prepass, _splitLastExpr: splitLastExpr, _scanLibs: scanLibs,
