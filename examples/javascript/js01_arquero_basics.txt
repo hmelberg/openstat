@@ -1,0 +1,21 @@
+// label: Arquero — dataframes (filter, groupby, rollup)
+// Example: Arquero-tabeller — last CSV, filtrer, grupper og aggreger
+# load https://raw.githubusercontent.com/hmelberg/openstat/main/data/iris.csv as iris
+
+// Datasettet er klart som Arquero-tabell under navnet du valgte:
+console.log("rader:", iris.numRows(), "kolonner:", iris.numCols());
+
+// Filter + ny kolonne (derive) + gruppering + aggregering (rollup):
+const oppsummert = iris
+  .filter(d => d.sepal_length > 4.5)
+  .derive({ ratio: d => d.petal_length / d.sepal_length })
+  .groupby("species")
+  .rollup({
+    n: op.count(),
+    snitt_sepal: op.mean("sepal_length"),
+    snitt_ratio: op.mean("ratio"),
+  })
+  .orderby(aq.desc("snitt_sepal"));
+
+// Siste uttrykk i scriptet vises automatisk — tabeller som HTML:
+oppsummert

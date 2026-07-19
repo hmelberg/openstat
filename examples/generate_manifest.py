@@ -24,7 +24,7 @@ SKIP_DIRS = {"tests"}
 # datamappe som examples/lsj/) skal IKKE bli med i manifestet.
 KNOWN_MODES = frozenset({
     "microdata", "python", "r", "statx", "jamovi", "duckdb",
-    "brython", "micropython", "safestat",
+    "brython", "micropython", "javascript", "safestat",
 })
 
 

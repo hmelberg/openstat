@@ -183,6 +183,33 @@
       "group": null
     }
   ],
+  "javascript": [
+    {
+      "file": "javascript/js01_arquero_basics.txt",
+      "label": "Arquero — dataframes (filter, groupby, rollup)",
+      "group": null
+    },
+    {
+      "file": "javascript/js02_statistikk.txt",
+      "label": "Statistikk — t-test, konfidensintervall, fordelinger",
+      "group": null
+    },
+    {
+      "file": "javascript/js03_regresjon_ml.txt",
+      "label": "Regresjon og maskinlæring (ml.js)",
+      "group": null
+    },
+    {
+      "file": "javascript/js04_plotly_plot.txt",
+      "label": "Grafikk — Plotly og Observable Plot",
+      "group": null
+    },
+    {
+      "file": "javascript/js05_notatbok.txt",
+      "label": "Notatbok — #%%-celler med delte variabler",
+      "group": null
+    }
+  ],
   "microdata": [
     {
       "file": "microdata/01_beskrivende_statistikk.txt",

@@ -1,0 +1,27 @@
+// label: Notatbok — #%%-celler med delte variabler
+// Example: notatbokdokument i JavaScript-modus — celler, markdown og økt-persistens
+# load https://raw.githubusercontent.com/hmelberg/openstat/main/data/iris.csv as iris
+#%% md
+# Iris-analyse i JavaScript
+
+Variabler definert i én celle er tilgjengelige i de neste —
+kjør cellene enkeltvis (▶) eller alle med **Kjør**.
+#%%
+const terskel = 5.0;
+const store = iris.filter(aq.escape(d => d.sepal_length > terskel));
+console.log(store.numRows() + " av " + iris.numRows() + " rader over terskelen");
+#%%
+// Bygger videre på `store` fra forrige celle:
+store
+  .groupby("species")
+  .rollup({ n: op.count(), snitt: op.mean("petal_length") })
+#%%
+// Siste celle: Plotly-figur av det filtrerte utvalget
+({ data: [{
+    x: Array.from(store.array("sepal_length")),
+    y: Array.from(store.array("petal_length")),
+    mode: "markers", type: "scatter",
+    text: Array.from(store.array("species")),
+  }],
+  layout: { title: "Iris (sepal_length > " + terskel + ")",
+            xaxis: { title: "sepal_length" }, yaxis: { title: "petal_length" } } })
