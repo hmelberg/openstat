@@ -39,3 +39,18 @@ Deno.test("coerceMode validates the enum, defaulting to microdata", () => {
   assertEquals(coerceMode("bogus"), "microdata");
   assertEquals(coerceMode(undefined), "microdata");
 });
+
+Deno.test("javascript prefix has JS environment, omits catalog/#micro/command blocks", () => {
+  const out = assemblePrefix("javascript", PARTS);
+  assertEquals(out.includes("JavaScript-miljø"), true);
+  assertEquals(out.includes("# load"), true);
+  assertEquals(out.includes("#micro-bro"), false);
+  assertEquals(out.includes("CATX"), false);
+  assertEquals(out.includes("KOMX"), false);
+  assertEquals(out.includes("CMDX"), false);
+  assertEquals(out.includes("FNX"), false);
+});
+
+Deno.test("coerceMode accepts javascript", () => {
+  assertEquals(coerceMode("javascript"), "javascript");
+});

@@ -733,10 +733,10 @@ const RULE_BLOCKS = [
 //    module scope so warm invocations reuse them; the rendered prefix is
 //    byte-stable across instances, so Anthropic's cache hits across requests.
 
-export type GenMode = "microdata" | "python" | "r";
+export type GenMode = "microdata" | "python" | "r" | "javascript";
 
 export function coerceMode(m: unknown): GenMode {
-  return m === "python" || m === "r" ? m : "microdata";
+  return m === "python" || m === "r" || m === "javascript" ? m : "microdata";
 }
 
 const SYSTEM_INTRO_PY = `\
@@ -855,12 +855,67 @@ interface PrefixParts {
   functionBlock?: string;
 }
 
+// ── JavaScript-modus (openstat js-mode) ────────────────────────────────
+// JS-modusen har INGEN #micro-bro (enspråklige dokumenter, ingen Pyodide) —
+// data hentes med `# load <url>`-direktiver eller `# use <navn> from duckdb`.
+// Microdata-katalogen er derfor irrelevant og utelates helt fra prefikset.
+
+const SYSTEM_INTRO_JS = `\
+Du er en ekspert-assistent som skriver JAVASCRIPT-kode for statistisk analyse i
+OpenStat sin JavaScript-modus (kjører native i nettleseren). Du svarer på norsk
+og engelsk, i brukerens språk. Lag et komplett, kjørbart script som følger
+modusens konvensjoner nedenfor. Data hentes fra åpne URL-er med
+\`# load <url> as <navn>\` (CSV/JSON/parquet — blir en Arquero-tabell) eller fra
+forrige SQL-kjøring med \`# use <navn> from duckdb\`. Finn ikke opp URL-er —
+bruk kun URL-er brukeren har oppgitt, som alt står i scriptet, eller be brukeren
+om en datakilde.`;
+
+const LANG_PREAMBLE_JS = `\
+## JavaScript-miljø
+
+Ferdig tilgjengelige globaler (lastes automatisk ved bruk — ingen import):
+- \`aq\` / \`op\` — Arquero: dataframes. \`t.filter(d => …)\`, \`t.derive({ny: d => …})\`,
+  \`t.groupby("kol").rollup({n: op.count(), snitt: op.mean("x")})\`, \`t.orderby()\`,
+  \`t.join()\`, \`t.objects()\` (radobjekter), \`t.array("kol")\` (kolonne).
+  VIKTIG: lukkinger over ytre variabler i filter/derive krever \`aq.escape(d => …)\`.
+- \`ss\` — simple-statistics: \`ss.mean\`, \`ss.standardDeviation\`, \`ss.tTestTwoSample\`,
+  \`ss.linearRegression\`/\`ss.linearRegressionLine\`/\`ss.rSquared\`, \`ss.sampleCorrelation\`.
+- \`jStat\` — fordelinger/p-verdier: \`jStat.normal.cdf/inv\`, \`jStat.studentt.cdf\`,
+  \`jStat.chisquare\`, \`jStat.centralF\`.
+- \`ML\` — ml.js: \`ML.KMeans(X, k)\`, \`new ML.PCA(X)\`, random forest, KNN.
+- \`Plot\` — Observable Plot: \`Plot.dot(data, {x, y, stroke}).plot()\` returnerer
+  en SVG-node som vises direkte.
+- \`Plotly\` — eller enklere: la siste uttrykk være et \`{data, layout}\`-objekt,
+  så rendres det som interaktiv Plotly-figur.
+
+Kjøremodell:
+- Variabler overlever mellom celler (økt-scope). Skriv toppnivå-deklarasjoner
+  med \`const\`/\`let\` som vanlig.
+- SISTE uttrykk i scriptet/cellen vises automatisk: Arquero-tabell → HTML-tabell,
+  \`{data, layout}\` → Plotly-figur, DOM-node → HTML, ellers tekst/JSON.
+- \`console.log(...)\` vises som tekstoutput. Toppnivå-\`await\` er lov.
+- \`#%%\`-linjer deler dokumentet i notatbokceller; \`#%% md\`-celler er markdown.
+- Interaktive parametre: \`navn = 5  //@param {type:"slider", min:0, max:10, run:"auto"}\`
+  (ren tilordning uten const, ingen semikolon på param-linjer).`;
+
+const OUTPUT_JS = `\
+## Svarformat
+
+Svar i markdown, på brukerens språk. Gi en kort forklaring (1–3 setninger),
+deretter ÉN kjørbar kodeblokk i en \`\`\`javascript-blokk med eventuelle
+\`# load\`-linjer øverst. La siste uttrykk være resultatet som skal vises
+(tabell eller figur). Ikke pakk svaret i JSON.`;
+
 // Pure prefix assembly. microdata uses the exact legacy composition (byte-stable
 // v1 parity). python/r use shared data blocks + language preamble + #micro bridge
 // and omit the microdata command/function reference and analysis grammar.
+// javascript uses ONLY the JS blocks — no catalog/kommune (no #micro bridge).
 export function assemblePrefix(mode: GenMode, parts: PrefixParts): string {
   const cat = parts.catalogBlock ?? "";
   const kom = parts.kommuneBlock ?? "";
+  if (mode === "javascript") {
+    return [SYSTEM_INTRO_JS, LANG_PREAMBLE_JS, OUTPUT_JS].join("\n\n");
+  }
   if (mode === "python" || mode === "r") {
     const isPy = mode === "python";
     const blocks = [
@@ -880,7 +935,7 @@ export function assemblePrefix(mode: GenMode, parts: PrefixParts): string {
     .join("\n\n");
 }
 
-const _cachedPrefix: Record<GenMode, string | null> = { microdata: null, python: null, r: null };
+const _cachedPrefix: Record<GenMode, string | null> = { microdata: null, python: null, r: null, javascript: null };
 
 const DATABANK_ALIAS: Record<string, string> = {
   "no.ssb.fdb": "db",
@@ -1209,6 +1264,14 @@ async function fetchText(origin: string, path: string): Promise<string> {
 export async function buildCachedPrefix(origin: string, mode: GenMode = "microdata"): Promise<string> {
   const cached = _cachedPrefix[mode];
   if (cached !== null) return cached;
+
+  // javascript-prefikset er rent statisk (ingen katalog/kommune/kommando-
+  // blokker) — hopp over alle fetchene.
+  if (mode === "javascript") {
+    const jsPrefix = assemblePrefix(mode, {});
+    _cachedPrefix[mode] = jsPrefix;
+    return jsPrefix;
+  }
 
   let catalogBlock = "";
   let kommuneBlock = "";

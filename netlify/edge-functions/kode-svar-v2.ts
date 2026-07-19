@@ -129,8 +129,10 @@ export default async (request: Request): Promise<Response> => {
   const errors = (body.errors ?? "").trim();
 
   // ── Pass 1: pick relevant variables (best-effort; degrade to no block). ──
+  // javascript-modus har ingen microdata-katalog å plukke fra (# load-URL-er,
+  // ikke registervariabler) — hopp over plukkeren helt.
   let focusedBlock = "";
-  try {
+  if (mode !== "javascript") try {
     const { meta, nameList } = await loadCatalog(origin);
     const pickPromptParts = [
       `Spørsmål: ${question}`,
