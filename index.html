@@ -7515,7 +7515,9 @@ def _exec_pyodide_block(code, g, show_commands=False, only_last=False):
     only_last=True (notatbok-celler, spec §4 "Display policy"): kun SISTE
     topp-nivå Expr-setnings verdi vises (Jupyter-konvensjon) — print()/plot
     vises som før, uendret. Hver setning evalueres/kjøres i dokumentrekkefølge
-    som i dag; kun visningen endres."""
+    som i dag; kun visningen endres. Display policy v2 (spec 2026-07-20):
+    _-prefiks-navn, ';'-etterheng og nakne ui.*-kontrollkall dempes i begge
+    moduser."""
     code = (code or "").strip()
     if not code:
         return
@@ -7532,6 +7534,35 @@ def _exec_pyodide_block(code, g, show_commands=False, only_last=False):
         print(">>> " + _lines[0])
         for _ln in _lines[1:]:
             print("... " + _ln)
+    _UI_CONTROL_NAMES = ("slider", "dropdown", "checkbox", "switch", "number", "text", "button", "run_button", "play")
+    _plines = code.split("\\n")
+    def _expr_suppressed(stmt):
+        # Display policy v2 (spec 2026-07-20 §Phase 1, regel 2-4; regel 1 =
+        # None-filteret i visnings-if'en under). Gjelder BEGGE moduser
+        # (all og only_last).
+        _val = stmt.value
+        # Regel 2: nakent navn med _-prefiks (KUN ast.Name — _df.head() vises).
+        if isinstance(_val, ast.Name) and _val.id.startswith("_"):
+            return True
+        # Regel 3: ';' rett etter uttrykket demper. end_col_offset er
+        # BYTE-offset (utf-8) — slice i bytes, ikke i str (norske tegn!).
+        try:
+            _ln = _plines[stmt.end_lineno - 1]
+            _rest = _ln.encode("utf-8")[stmt.end_col_offset:].decode("utf-8", "replace").lstrip()
+            if _rest.startswith(";"):
+                return True
+        except Exception:
+            pass
+        # Regel 4: nakent ui.<kontroll>(...)-kall — kontrollen registreres av
+        # evalueringen (pull-modellen), men skalar-ekkoet er støy. Kun det
+        # bokstavelige navnet `ui` (import ui as u dekkes ikke — dokumentert
+        # hjørne, `;` er utveien). ui.html.* har Attribute-verdi, ikke Name —
+        # matcher ikke og beholder selvvisningen via _show_one.
+        if isinstance(_val, ast.Call):
+            _f = _val.func
+            if isinstance(_f, ast.Attribute) and isinstance(_f.value, ast.Name) and _f.value.id == "ui" and _f.attr in _UI_CONTROL_NAMES:
+                return True
+        return False
     try:
         try:
             tree = ast.parse(code, mode="exec")
@@ -7554,7 +7585,7 @@ def _exec_pyodide_block(code, g, show_commands=False, only_last=False):
             _echo(_src)
             if isinstance(stmt, ast.Expr):
                 _v = eval(compile(ast.Expression(stmt.value), "<pyodide>", "eval"), g)
-                if _v is not None and (not only_last or _i == _last_expr_i):
+                if _v is not None and (not only_last or _i == _last_expr_i) and not _expr_suppressed(stmt):
                     _show_one(_v)
             else:
                 exec(compile(ast.Module(body=[stmt], type_ignores=[]), "<pyodide>", "exec"), g)
