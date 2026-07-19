@@ -61,9 +61,12 @@ along cheaply; R is frozen at today's widget behavior.
   run; the static `htmlTrusted` gate for `#%% html` cells untouched.
 - **mdRunNotebookCell contract untouched.** ES5 var-style JS,
   Norwegian comments, `t()` + en.js.
-- **No new hand-rolled web components.** Polished components come
-  from `#tag.import` (shoelace/pico) — building our own is explicit
-  non-goal (YAGNI).
+- **Web components are not an aim in this round.** Polished
+  components come from `#tag.import` (shoelace/pico). Building our
+  own custom elements stays open as a future option — and may be
+  used within this plan if a concrete case turns up where a custom
+  element is the natural fit (e.g. a control wrapper that needs
+  encapsulated markup/styling) — but no phase depends on it.
 
 ## Phase 1 — Display policy v2
 
@@ -221,7 +224,11 @@ Each phase gets its own implementation plan
 ## Non-goals
 
 - Removing or deprecating the `ui.*` API, `#@param`, or ipywidgets.
-- New hand-rolled web components.
+- Web components as a goal in themselves. Not ruled out — a phase
+  MAY reach for a custom element where it is clearly the best fit,
+  and the re-platformed engine deliberately keeps that door open
+  (custom-element factories already exist via `#tag.import`) — but
+  this round succeeds without any.
 - `ui.html` support in R.
 - All-expression display in brython/micropython (trailing-expr
   divergence accepted and documented).
