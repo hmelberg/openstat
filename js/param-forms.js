@@ -36,7 +36,10 @@
   //   1 indent, 2 varName, 3 mellomrom-før-op, 4 assignOp (= | <-),
   //   5 mellomrom-etter-op, 6 valueRaw (ikke-grådig), 7 mellomrom-før-kommentar,
   //   8 hele kommentaren ("#...@param..."), 9 metadata-teksten etter "@param".
-  var LINE_RE = /^(\s*)([A-Za-z_]\w*)(\s*)(=|<-)(\s*)(.+?)(\s*)(#\s*@param\b(.*))?$/;
+  // Kommentarformen er #@param (python/r/microdata-familien) ELLER //@param
+  // (javascript-modus — # er ikke kommentar i JS, // er). Gruppetallene er
+  // uendret: (?:#|\/\/) er ikke-fangende.
+  var LINE_RE = /^(\s*)([A-Za-z_]\w*)(\s*)(=|<-)(\s*)(.+?)(\s*)((?:#|\/\/)\s*@param\b(.*))?$/;
 
   var VALID_TYPES = { string: 1, boolean: 1, number: 1, integer: 1, slider: 1, date: 1, raw: 1 };
 
@@ -318,7 +321,9 @@
         return quoteAndEscape(newValue);
       case 'boolean': {
         var truthy = isTruthyBoolInput(newValue);
-        return lang === 'r' ? (truthy ? 'TRUE' : 'FALSE') : (truthy ? 'True' : 'False');
+        if (lang === 'r') return truthy ? 'TRUE' : 'FALSE';
+        if (lang === 'javascript') return truthy ? 'true' : 'false';
+        return truthy ? 'True' : 'False';
       }
       case 'integer':
         return String(Math.round(Number(newValue)));

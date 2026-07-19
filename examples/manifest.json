@@ -208,6 +208,11 @@
       "file": "javascript/js05_notatbok.txt",
       "label": "Notatbok — #%%-celler med delte variabler",
       "group": null
+    },
+    {
+      "file": "javascript/js06_params.txt",
+      "label": "Parametre — //@param-skjemaer i celler",
+      "group": null
     }
   ],
   "microdata": [

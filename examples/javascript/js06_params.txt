@@ -1,0 +1,20 @@
+// label: Parametre — //@param-skjemaer i celler
+// Example: interaktive parametre — slider/tekst/boolean med auto-rekjøring
+# load https://raw.githubusercontent.com/hmelberg/openstat/main/data/iris.csv as iris
+#%% md
+# Parametre i JavaScript-celler
+
+En tilordning med en `//@param`-kommentar får et skjema i cellen.
+`run:"auto"` kjører cellen på nytt når verdien endres.
+NB: ingen semikolon på param-linjer — verdien byttes ut byte-nøyaktig.
+#%%
+terskel = 5  //@param {type:"slider", min:4, max:8, step:0.5, run:"auto"}
+art = 'setosa'  //@param {type:"string", run:"auto"}
+inkluder_alle = false  //@param {type:"boolean", run:"auto"}
+
+utvalg = inkluder_alle
+  ? iris.filter(aq.escape(d => d.sepal_length > terskel))
+  : iris.filter(aq.escape(d => d.sepal_length > terskel && d.species === art));
+console.log(utvalg.numRows() + " rader (terskel=" + terskel +
+            (inkluder_alle ? ", alle arter)" : ", art=" + art + ")"));
+utvalg.groupby("species").rollup({ n: op.count(), snitt: op.mean("sepal_length") })

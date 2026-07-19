@@ -618,7 +618,8 @@
   // Global Constraints ("microdata/duckdb cells: out of scope for W4"):
   // ParamForms.decorate hoppes bevisst over for disse celletypene, samme
   // "null → inert" prinsipp som KIND_FOR_TYPE bruker for ikke-kjørbare typer.
-  var PARAM_LANG_FOR_TYPE = { python: 'python', brython: 'python', micropython: 'python', r: 'r' };
+  var PARAM_LANG_FOR_TYPE = { python: 'python', brython: 'python', micropython: 'python', r: 'r',
+                              javascript: 'javascript' };
   C.paramLangForType = function (type) { return PARAM_LANG_FOR_TYPE[type] || null; };
 
   // Juster planen mot de faktiske segment-kindene fra kjøretiden: hvis

@@ -545,3 +545,31 @@ test('formatLiteral: trailing backslash doubled (would otherwise escape the clos
 test('formatLiteral: integer rounds to nearest', () => {
   assert.strictEqual(PF.formatLiteral(3.9, 'integer', 'python'), '4');
 });
+
+// ===== javascript-modus: //@param-kommentarform =====
+
+test('parse: //@param-linjer gjenkjennes (javascript)', () => {
+  const src = 'terskel = 5  //@param {type:"slider", min:0, max:10}';
+  const entries = PF.parse(src, 'javascript');
+  assert.strictEqual(entries.length, 1);
+  assert.strictEqual(entries[0].varName, 'terskel');
+  assert.strictEqual(entries[0].meta.type, 'slider');
+});
+
+test('writeValue: //@param-kommentaren bevares byte-nøyaktig (javascript)', () => {
+  const src = '  navn = \'iris\'  //@param {type:"string"}';
+  const entries = PF.parse(src, 'javascript');
+  const out = PF.writeValue(src, entries[0], 'penguins', 'javascript');
+  assert.strictEqual(out, "  navn = 'penguins'  //@param {type:\"string\"}");
+});
+
+test('formatLiteral: boolean → true/false for javascript', () => {
+  assert.strictEqual(PF.formatLiteral(true, 'boolean', 'javascript'), 'true');
+  assert.strictEqual(PF.formatLiteral(false, 'boolean', 'javascript'), 'false');
+});
+
+test('currentValue: javascript-boolean true gjenkjennes', () => {
+  const src = 'flagg = true  //@param {type:"boolean"}';
+  const entries = PF.parse(src, 'javascript');
+  assert.strictEqual(PF.currentValue(entries[0], 'javascript'), true);
+});
