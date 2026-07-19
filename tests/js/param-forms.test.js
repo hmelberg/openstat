@@ -122,14 +122,30 @@ test('parse: standard quoted JSON meta also works', () => {
   assert.strictEqual(entries[0].meta.max, 10);
 });
 
-test('parse: run:"auto" sets runAuto', () => {
+test('parse: run:"auto" sets runAuto (eksplisitt, samme som default)', () => {
   const entries = PF.parse('x = 3  #@param {type:"slider", min:0, max:10, run:"auto"}', 'python');
   assert.strictEqual(entries[0].meta.runAuto, true);
 });
 
-test('parse: no run key → runAuto not set', () => {
+test('parse: ingen run-nøkkel → runAuto er DEFAULT (auto)', () => {
   const entries = PF.parse('x = 3  #@param {type:"slider", min:0, max:10}', 'python');
-  assert.ok(!entries[0].meta.runAuto);
+  assert.strictEqual(entries[0].meta.runAuto, true);
+});
+
+test('parse: bare #@param uten metadata → runAuto default', () => {
+  const entries = PF.parse('x = 3  #@param', 'python');
+  assert.strictEqual(entries[0].meta.runAuto, true);
+});
+
+test('parse: run:"manual" slår av auto-kjøring', () => {
+  const entries = PF.parse('x = 3  #@param {type:"slider", run:"manual"}', 'python');
+  assert.strictEqual(entries[0].meta.runAuto, false);
+});
+
+test('parse: ugyldig run-verdi → advarsel, beholder auto-default', () => {
+  const entries = PF.parse('x = 3  #@param {type:"slider", run:"nei"}', 'python');
+  assert.strictEqual(entries[0].meta.runAuto, true);
+  assert.ok(entries[0].warnings.some((w) => w.includes('run')));
 });
 
 // ===== parse: placement (Task 3, per-kontroll plassering) =====

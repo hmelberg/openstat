@@ -895,8 +895,9 @@ Kjøremodell:
   \`{data, layout}\` → Plotly-figur, DOM-node → HTML, ellers tekst/JSON.
 - \`console.log(...)\` vises som tekstoutput. Toppnivå-\`await\` er lov.
 - \`#%%\`-linjer deler dokumentet i notatbokceller; \`#%% md\`-celler er markdown.
-- Interaktive parametre: \`navn = 5  //@param {type:"slider", min:0, max:10, run:"auto"}\`
-  (ren tilordning uten const, ingen semikolon på param-linjer).`;
+- Interaktive parametre: \`navn = 5  //@param {type:"slider", min:0, max:10}\`
+  (ren tilordning uten const, ingen semikolon på param-linjer; auto-rekjøring
+  ved endring er default, \`run:"manual"\` skrur den av).`;
 
 const OUTPUT_JS = `\
 ## Svarformat

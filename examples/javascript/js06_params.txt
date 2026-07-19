@@ -5,12 +5,12 @@
 # Parametre i JavaScript-celler
 
 En tilordning med en `//@param`-kommentar får et skjema i cellen.
-`run:"auto"` kjører cellen på nytt når verdien endres.
+Cellen kjøres automatisk på nytt når verdien endres (skru av med `run:"manual"`).
 NB: ingen semikolon på param-linjer — verdien byttes ut byte-nøyaktig.
 #%%
-terskel = 5  //@param {type:"slider", min:4, max:8, step:0.5, run:"auto"}
-art = 'setosa'  //@param {type:"string", run:"auto"}
-inkluder_alle = false  //@param {type:"boolean", run:"auto"}
+terskel = 5  //@param {type:"slider", min:4, max:8, step:0.5}
+art = 'setosa'  //@param {type:"string"}
+inkluder_alle = false  //@param {type:"boolean", run:"manual"}  // krever klikk på Kjør-chippen
 
 utvalg = inkluder_alle
   ? iris.filter(aq.escape(d => d.sepal_length > terskel))

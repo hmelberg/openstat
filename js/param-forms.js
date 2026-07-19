@@ -132,7 +132,10 @@
   function parseMetaText(raw) {
     var warnings = [];
     var text = (raw == null ? '' : String(raw)).trim();
-    var meta = {};
+    // run:auto er DEFAULT (Hans' avgjørelse 2026-07-19): en #@param-kontroll
+    // kjører cellen sin på nytt ved endring med mindre linja eksplisitt sier
+    // run:"manual". Gjelder alle språk/moduser.
+    var meta = { runAuto: true };
     if (!text) return { meta: meta, warnings: warnings };
 
     var remainder = text;
@@ -195,7 +198,11 @@
         if (key === 'type') meta.type = String(val);
         else if (key === 'min' || key === 'max' || key === 'step') numKey(key, val);
         else if (key === 'allow-input') meta.allowInput = Boolean(val);
-        else if (key === 'run') { if (val === 'auto') meta.runAuto = true; }
+        else if (key === 'run') {
+          if (val === 'auto') meta.runAuto = true;              // eksplisitt = default
+          else if (val === 'manual') meta.runAuto = false;
+          else warnings.push('ugyldig run i @param-metadata: ' + val + ' (auto|manual; auto er default)');
+        }
         else if (key === 'placement') {
           // Per-kontroll plassering (Task 3): gyldig verdi OVERSTYRER
           // cellens widgets=top|bottom|left-default for DENNE ene

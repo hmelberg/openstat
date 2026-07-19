@@ -83,6 +83,14 @@ function wait(ms) {
 // ui.js/cells.js sine DOM-halvdeler; et fersk require er nødvendig per test).
 function freshEnv(opts) {
   opts = opts || {};
+  // Kanseller FORRIGE testmiljøs ventende run:auto-debounce-timere før vi
+  // bytter global.Cells — en 150ms-timer fra en tidligere test ville ellers
+  // fyre inn i DENNE testens runCell-stub (reelt etter at run:auto ble
+  // default 2026-07-19: også bare slider-linjer skedulerer nå kjøringer).
+  const prev = require.cache[require.resolve(PF_PATH)];
+  if (prev && prev.exports && typeof prev.exports.resetDocument === 'function') {
+    try { prev.exports.resetDocument(); } catch (_) {}
+  }
   delete require.cache[require.resolve(PF_PATH)];
   global.document = { createElement: (tag) => new FakeEl(tag) };
 
@@ -233,9 +241,9 @@ test('slider-endring (run:auto): updateCellSource kalles med KORREKT spliset tek
   assert.deepStrictEqual(runCellCalls, [2], 'debouncet run:auto-rerun fyrte etter 150ms');
 });
 
-test('dropdown-endring UTEN run:auto: updateCellSource kalles, runCell ALDRI (kun stale-tint kommuniserer, se cells.js)', async () => {
+test('dropdown-endring med run:"manual": updateCellSource kalles, runCell ALDRI (kun stale-tint + Kjør-chip kommuniserer)', async () => {
   const { ParamForms, cellEl, outEl, updateCellSourceCalls, runCellCalls } = freshEnv();
-  const src = 'name = \'a\'  #@param ["a", "b", "c"]';
+  const src = 'name = \'a\'  #@param ["a", "b", "c"] {run:"manual"}';
   ParamForms.decorate(1, cellEl, src, 'python');
   const strip = outEl.children[0];
   const select = strip.children[0].children[1];
@@ -244,8 +252,8 @@ test('dropdown-endring UTEN run:auto: updateCellSource kalles, runCell ALDRI (ku
   select.dispatchEvent({ type: 'change' });
   await wait(220);
 
-  assert.deepStrictEqual(updateCellSourceCalls, [[1, 'name = \'b\'  #@param ["a", "b", "c"]']]);
-  assert.deepStrictEqual(runCellCalls, [], 'uten run:auto skal runCell ALDRI kalles');
+  assert.deepStrictEqual(updateCellSourceCalls, [[1, 'name = \'b\'  #@param ["a", "b", "c"] {run:"manual"}']]);
+  assert.deepStrictEqual(runCellCalls, [], 'med run:"manual" skal runCell ALDRI kalles');
 });
 
 test('checkbox-endring (run:auto, IKKE slider) → UMIDDELBAR runCell, ingen debounce-ventetid', async () => {
@@ -669,7 +677,7 @@ test('mixed placements i én celle (topp-slider + venstre-dropdown + bunn-checkb
   const { ParamForms, cellEl, outEl } = freshEnv();
   const src = [
     'n = 3  #@param {type:"slider", min:0, max:10}',
-    'name = \'a\'  #@param ["a", "b"] {placement:"left"}',
+    'name = \'a\'  #@param ["a", "b"] {placement:"left", run:"manual"}',
     'flag = True  #@param {type:"boolean", placement:"bottom"}',
   ].join('\n');
   ParamForms.decorate(0, cellEl, src, 'python');
@@ -694,7 +702,7 @@ test('sweep: fjerner ALLE #@param-linjer (spredt over topp+bunn+venstre samtidig
   const { ParamForms, cellEl, outEl } = freshEnv();
   const src = [
     'n = 3  #@param {type:"slider", min:0, max:10}',
-    'name = \'a\'  #@param ["a", "b"] {placement:"left"}',
+    'name = \'a\'  #@param ["a", "b"] {placement:"left", run:"manual"}',
     'flag = True  #@param {type:"boolean", placement:"bottom"}',
   ].join('\n');
   ParamForms.decorate(0, cellEl, src, 'python');
@@ -718,7 +726,7 @@ test('sweep: fjerner ALLE #@param-linjer (spredt over topp+bunn+venstre samtidig
 
 test('Kjør-chip: ikke-auto commit → chip vises som SISTE barn i stripa, med "Kjør"/▶ i teksten', () => {
   const { ParamForms, cellEl, outEl } = freshEnv();
-  const src = 'name = \'a\'  #@param ["a", "b", "c"]';
+  const src = 'name = \'a\'  #@param ["a", "b", "c"] {run:"manual"}';
   ParamForms.decorate(0, cellEl, src, 'python');
   const strip = outEl.children[0];
   assert.strictEqual(strip.children.length, 1, 'ingen chip før noen endring');
@@ -739,7 +747,7 @@ test('Kjør-chip: mixed-plassering (topp-slider run:auto + venstre-dropdown ikke
   const { ParamForms, cellEl, outEl } = freshEnv();
   const src = [
     'n = 3  #@param {type:"slider", min:0, max:10, run:"auto"}',
-    'name = \'a\'  #@param ["a", "b"] {placement:"left"}',
+    'name = \'a\'  #@param ["a", "b"] {placement:"left", run:"manual"}',
   ].join('\n');
   ParamForms.decorate(0, cellEl, src, 'python');
 
@@ -769,7 +777,7 @@ test('Kjør-chip: celle med KUN en run:auto-kontroll → chip vises ALDRI', asyn
 
 test('Kjør-chip: klikk kaller Cells.runCell(idx)', () => {
   const { ParamForms, cellEl, outEl, runCellCalls } = freshEnv();
-  const src = 'name = \'a\'  #@param ["a", "b"]';
+  const src = 'name = \'a\'  #@param ["a", "b"] {run:"manual"}';
   ParamForms.decorate(5, cellEl, src, 'python');
   const strip = outEl.children[0];
   const select = strip.children[0].children[1];
@@ -783,7 +791,7 @@ test('Kjør-chip: klikk kaller Cells.runCell(idx)', () => {
 
 test('Kjør-chip: klikk nektes stille mens mdIsScriptRunning() er true (samme guard-mønster som resten av fila)', () => {
   const { ParamForms, cellEl, outEl, runCellCalls } = freshEnv({ scriptRunning: true });
-  const src = 'name = \'a\'  #@param ["a", "b"]';
+  const src = 'name = \'a\'  #@param ["a", "b"] {run:"manual"}';
   ParamForms.decorate(0, cellEl, src, 'python');
   const strip = outEl.children[0];
   const select = strip.children[0].children[1];
@@ -797,7 +805,7 @@ test('Kjør-chip: klikk nektes stille mens mdIsScriptRunning() er true (samme gu
 
 test('Kjør-chip: ParamForms.onCellRan(idx) skjuler en synlig chip (speiler js/cells.js sin C._afterCellRun/clearAllStale)', () => {
   const { ParamForms, cellEl, outEl } = freshEnv();
-  const src = 'name = \'a\'  #@param ["a", "b"]';
+  const src = 'name = \'a\'  #@param ["a", "b"] {run:"manual"}';
   ParamForms.decorate(2, cellEl, src, 'python');
   const strip = outEl.children[0];
   const select = strip.children[0].children[1];
@@ -820,7 +828,7 @@ test('Kjør-chip: ParamForms.onCellRan for en cellIdx uten (eller uten synlig) c
 
 test('Kjør-chip: strukturell ombygging (ParamForms.refresh → full _build) resetter en synlig chip', () => {
   const { ParamForms, cellEl, outEl } = freshEnv();
-  const src = 'name = \'a\'  #@param ["a", "b"]';
+  const src = 'name = \'a\'  #@param ["a", "b"] {run:"manual"}';
   ParamForms.decorate(0, cellEl, src, 'python');
   const strip = outEl.children[0];
   const select = strip.children[0].children[1];
@@ -839,7 +847,7 @@ test('Kjør-chip: strukturell ombygging (ParamForms.refresh → full _build) res
 
 test('Kjør-chip: resetDocument glemmer chip-tilstanden — en fersk decorate for samme cellIdx starter uten synlig chip', () => {
   const { ParamForms, cellEl, outEl } = freshEnv();
-  const src = 'name = \'a\'  #@param ["a", "b"]';
+  const src = 'name = \'a\'  #@param ["a", "b"] {run:"manual"}';
   ParamForms.decorate(0, cellEl, src, 'python');
   const strip = outEl.children[0];
   const select = strip.children[0].children[1];
