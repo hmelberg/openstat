@@ -47,6 +47,7 @@ Deno.test("resolve: alias expansion, registry id, proxy flags", () => {
     viaProxy: false,
     key: undefined,
     exec: undefined,
+    kind: undefined,   // kind()-opsjonen (safestat-synk 23ad822) er alltid med i resolved form
   });
   assertEquals(r[1].viaProxy, true);   // fred: auth + no CORS
   assertEquals(r[1].url, "https://api.stlouisfed.org/fred/series/observations?series_id=UNRATE&file_type=json");
@@ -54,13 +55,18 @@ Deno.test("resolve: alias expansion, registry id, proxy flags", () => {
   assertEquals(r[3].viaProxy, true);   // explicit /api/hent
 });
 
-Deno.test("resolve: unknown alias errors; unknown registry id errors", () => {
+Deno.test("resolve: unknown alias errors; unknown registry id routes as named source", () => {
   const p = DD.parse("# load ukjent/sti.csv as x\n# connect finnesikke");
   const r = DD.resolve(p, REG);
   if (!r[0].error) throw new Error("ventet feil for ukjent alias");
+  // safestat-synk 23ad822 (spec §1 regel 3): et connect-navn utenfor
+  // web-registeret er ikke lenger en resolve-feil — det rutes som navngitt
+  // (Anvil-)kilde og feiler først i data-loader («ingen API-base
+  // konfigurert») i denne offentlige liten-utgaven.
   const p2 = DD.parse("# connect finnesikke as fk\n# load fk/x.csv as y");
   const r2 = DD.resolve(p2, REG);
-  if (!r2[0].error) throw new Error("ventet feil for ukjent register-id");
+  if (r2[0].error) throw new Error("ukjent register-id skal anvil-rutes, ikke feile: " + r2[0].error);
+  assertEquals(r2[0].anvil, "finnesikke");
 });
 
 Deno.test("options: key() and exec() parse on connect and load", () => {
@@ -75,7 +81,7 @@ Deno.test("options: key() and exec() parse on connect and load", () => {
   assertEquals(p.loads[0].options, { key: "abcDEF123" });
 });
 
-Deno.test("resolve: bare name not in registry errors", () => {
+Deno.test("resolve: bare name not in registry routes as named source, registry id still resolves", () => {
   const script = [
     "# connect helse2025 as h, key(ask)",
     "# load h as df",
@@ -83,7 +89,10 @@ Deno.test("resolve: bare name not in registry errors", () => {
     "# load s/tables as t",
   ].join("\n");
   const r = DD.resolve(DD.parse(script), REG);
-  if (!r[0].error) throw new Error("ventet feil for ukjent kilde «helse2025»");
+  // Samme anvil-ruting som testen over — key() fra connect-linja følger med.
+  if (r[0].error) throw new Error("bart navn skal anvil-rutes, ikke feile: " + r[0].error);
+  assertEquals(r[0].anvil, "helse2025");
+  assertEquals(r[0].key, "ask");
   assertEquals(r[1].viaProxy, false);            // ssb stays a registry source
   if (r[1].error) throw new Error("registry-id skal fortsatt løses");
 });

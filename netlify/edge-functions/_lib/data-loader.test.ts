@@ -28,15 +28,21 @@ Deno.test("resolveAndFetchLoads: fetches, sniffs format, proxy fallback on CORS"
   if (!proxyCall?.includes("[auth]")) throw new Error("proxy-fallback mangler auth: " + calls.join(" | "));
 });
 
+// NB (testisolasjon): js/data-loader.js har en modul-scoped byte-cache per
+// resolved URL (_bufCache, «page reload is the reset, by design») — testene i
+// denne fila deler prosess, så hver test MÅ bruke URL-er ingen tidligere test
+// har lastet, ellers ser den cachede bytes og null fetch-kall. Cache-
+// semantikken pinnes eksplisitt av testen nederst.
+
 Deno.test("resolveAndFetchLoads: BYOK-nøkkel sendes som X-Anthropic-Key på proxy-kall når token mangler", async () => {
   const calls: { url: string; headers: Record<string, string> }[] = [];
   const fetchImpl = ((input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     calls.push({ url, headers: (init?.headers as Record<string, string>) ?? {} });
-    if (url.startsWith("https://blocked.example/")) return Promise.reject(new TypeError("CORS"));
+    if (url.startsWith("https://blocked-byok.example/")) return Promise.reject(new TypeError("CORS"));
     return Promise.resolve(new Response("x,y\n1,2", { status: 200, headers: { "content-type": "text/csv" } }));
   }) as typeof fetch;
-  const script = "# load https://blocked.example/d.csv as sperret";
+  const script = "# load https://blocked-byok.example/d.csv as sperret";
   await DL.resolveAndFetchLoads(script, { fetchImpl, registry: [], anthropicKey: "sk-ant-test123" });
   const proxy = calls.find((c) => c.url.includes("/api/hent?url="));
   if (!proxy) throw new Error("ingen proxy-kall: " + calls.map((c) => c.url).join(" | "));
@@ -75,10 +81,12 @@ function jsonResp(obj: unknown, status = 200) {
 Deno.test("resolveAndFetchLoads: connect/load to an unregistered name errors", async () => {
   const fetchImpl = (() =>
     Promise.resolve(new Response("", { status: 200 }))) as typeof fetch;
+  // Etter safestat-synk 23ad822 anvil-rutes ukjente navn i resolve; i den
+  // offentlige liten-utgaven (ingen Anvil-API-base) feiler de her i stedet.
   await assertRejects(
     () => DL.resolveAndFetchLoads("# connect ukjent as u\n# load u as df",
       { fetchImpl, registry: [] }),
-    Error, "ukjent kilde");
+    Error, "ingen API-base konfigurert for kilden «ukjent»");
 });
 
 Deno.test("url envelope + key literal decrypts", async () => {
@@ -96,11 +104,26 @@ Deno.test("envelope without key prompts via promptKey(ask)", async () => {
   const { envelope, key } = await EC.encryptBytes(plain, "csv");
   const fetchImpl = (() => Promise.resolve(jsonResp(envelope))) as typeof fetch;
   let asked = "";
+  // Egen URL (d-ask.enc.json): testen over cachet alt bytes for d.enc.json —
+  // samme URL her ville dekryptert FEIL envelope («feil nøkkel eller ødelagt fil»).
   const out = await DL.resolveAndFetchLoads(
-    "# load https://x.example/d.enc.json as df, key(ask)",
+    "# load https://x.example/d-ask.enc.json as df, key(ask)",
     { fetchImpl, registry: [], promptKey: (alias: string) => { asked = alias; return Promise.resolve(key); } });
   assertEquals(asked, "df");
   assertEquals(new TextDecoder().decode(out.loads[0].bytes), "q\n1\n");
+});
+
+Deno.test("byte-cache: samme URL hentes ikke på nytt i samme økt (page reload = reset)", async () => {
+  let fetches = 0;
+  const fetchImpl = (() => {
+    fetches++;
+    return Promise.resolve(new Response("a,b\n1,2", { status: 200, headers: { "content-type": "text/csv" } }));
+  }) as typeof fetch;
+  const script = "# load https://cachetest.example/d.csv as df";
+  await DL.resolveAndFetchLoads(script, { fetchImpl, registry: [] });
+  const out = await DL.resolveAndFetchLoads(script, { fetchImpl, registry: [] });
+  assertEquals(fetches, 1);   // andre kjøring traff _bufCache
+  assertEquals(new TextDecoder().decode(out.loads[0].bytes), "a,b\n1,2");
 });
 
 Deno.test("resolveAndAssemble: fetches spec sources + returns spec", async () => {
