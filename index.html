@@ -10511,6 +10511,9 @@ async def _m2py_run_segment(_seg_json):
           catch (e) { console.warn('ipywidgets-bro (per-celle):', e); }
         }
         var _displayAll = String(_scriptOpts.display || '').toLowerCase() === 'all';
+        // Display policy v2: '#options.display = last' gjenoppretter
+        // siste-uttrykk-visningen (opt-out fra vis-alle-defaulten).
+        var _displayLast = String(_scriptOpts.display || '').toLowerCase() === 'last';
         // Segmentoppløsning: samme vei som "Kjør alle" (bootNotebookSession),
         // så cellens "# use" og #options.* leses fra HELE dokumentet, aldri
         // fra cellens egen (potensielt ufullstendige) tekst.
@@ -10585,7 +10588,8 @@ async def _m2py_run_segment(_seg_json):
                 // akkurat som "Kjør alle" gjør.
                 var _targetCellForNb = _cells[payload.cellIdx];
                 if (_targetCellForNb && _targetCellForNb.headerRaw !== null) {
-                  _rseg._nb = payload.nb || { echo: false, last: true };
+                  _rseg._nb = payload.nb || { echo: false };
+                  if (_displayLast) _rseg._nb = { echo: _rseg._nb.echo, last: true };
                 }
               }
               if (_rseg.kind === 'duckdb') {
@@ -10690,7 +10694,8 @@ async def _m2py_run_segment(_seg_json):
           // samme EKSPLISITT-sjekk gjelder for enkelt-segment-kjøring også.
           var _targetCell = _cells[payload.cellIdx];
           if (_targetCell && _targetCell.headerRaw !== null) {
-            targetSeg._nb = payload.nb || { echo: false, last: true };
+            targetSeg._nb = payload.nb || { echo: false };
+            if (_displayLast) targetSeg._nb = { echo: targetSeg._nb.echo, last: true };
           }
         }
         if (targetSeg.kind === 'duckdb') {
@@ -11006,11 +11011,11 @@ async def _m2py_run_segment(_seg_json):
             await _bindUseIntoPy(py, _u4.name, await _useBytesFromRuntime(_u4));
           }
           // Notatbok-visningspolicy (spec §4): eksplisitt celle + pyodide-
-          // segment → echo av, kun siste uttrykk vises — med mindre
-          // '#options.display = all' ber om dagens vis-alt-oppførsel.
+          // segment → echo av, alle nakne uttrykk vises (policy v2);
+          // '#options.display = last' gjenoppretter siste-uttrykk.
           if (segments[i].kind === 'pyodide' && _nbActive && !_displayAll) {
             var _sd = window.Cells.segmentDisplay(i);
-            if (_sd && _sd.explicit) segments[i]._nb = { echo: false, last: true };
+            if (_sd && _sd.explicit) segments[i]._nb = { echo: false, last: _displayLast };
           } else if (segments[i].kind === 'pyodide' && !_nbActive && _displayLast) {
             // Umerket script (Task 4, B2): '#options.display = last' uten
             // notatbok-kontekst — samme siste-uttrykk-visning, men echo

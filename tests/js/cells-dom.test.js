@@ -761,7 +761,10 @@ test('runCell: eksplisitt python-celle → riktig payload (kind/cellIdx/nb), ren
   assert.ok(capturedPayload, 'mdRunNotebookCell skal kalles for en kjørbar celle');
   assert.strictEqual(capturedPayload.kind, 'pyodide');
   assert.strictEqual(capturedPayload.cellIdx, 1);
-  assert.deepStrictEqual(capturedPayload.nb, { echo: false, last: true });
+  // Display policy v2 (spec 2026-07-20 §Phase 1): cellene tvinger ikke
+  // lenger last:true — alle nakne uttrykk vises; '#options.display = last'
+  // legges på av index.html, ikke av cells.js.
+  assert.deepStrictEqual(capturedPayload.nb, { echo: false });
 
   const cell0 = cellParts(containerEl, 0);
   const cell1 = cellParts(containerEl, 1);
@@ -1844,7 +1847,9 @@ test('runSelection: payload har text (hele cellekroppen), selText (seleksjonen) 
   assert.strictEqual(captured.cellIdx, 0);
   assert.strictEqual(captured.text, 'a = 1\nb = 2\nc = 3\n', 'text er HELE (tag-blanket) cellekroppen, som runCell');
   assert.strictEqual(captured.selText, 'b = 2', 'selText er seleksjonen');
-  assert.deepStrictEqual(captured.nb, { echo: false, last: true });
+  // Display policy v2 (spec 2026-07-20 §Phase 1): samme flip som runCell —
+  // ingen tvunget last:true fra cells.js lenger.
+  assert.deepStrictEqual(captured.nb, { echo: false });
 
   const { out } = cellParts(containerEl, 0);
   assert.strictEqual(out.textContent, '2', 'resultatet rendres i cellens egen slot, som runCell');

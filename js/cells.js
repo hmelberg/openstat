@@ -2022,11 +2022,12 @@
         kind: kind,
         text: C.execCellSource(c) || '',
         uses: [],
-        // Eksplisitt celle (spec §4 "Display policy"): echo av, kun siste
-        // uttrykk vises — index.html overstyrer/dropper dette selv når
-        // dokumentet har '#options.display = all' (leses fra HELE dokumentet,
-        // aldri fra cellen).
-        nb: { echo: false, last: true },
+        // Display policy v2 (spec 2026-07-20 §Phase 1): echo av, ALLE nakne
+        // uttrykk vises (dempingsreglene håndheves i _exec_pyodide_block).
+        // index.html legger selv på last:true ved '#options.display = last',
+        // og dropper hele _nb ved '#options.display = all' (leses fra HELE
+        // dokumentet, aldri fra cellen).
+        nb: { echo: false },
         cellIdx: idx
       };
       // Task 5: kjøre-livssyklusen driver den kjørende cellens .nb-running-
@@ -2151,7 +2152,7 @@
         text: C.execCellSource(c) || '',
         selText: blankedSel,
         uses: [],
-        nb: { echo: false, last: true },
+        nb: { echo: false },
         cellIdx: idx
       };
       setRunningUi(idx, true);
