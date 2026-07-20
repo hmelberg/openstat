@@ -15,5 +15,5 @@ show(pe.bar(df, x="aar", y="antall", color="region", title="Antall per år og re
 show(pe.line(df, x="aar", y="antall", color="region", title="Utvikling over tid"))
 show(pe.box(df, x="region", y="antall", title="Fordeling per region"))
 
-# The last expression is displayed automatically:
+# A bare expression on its own line is displayed automatically:
 pe.pie(df, names="region", values="antall", title="Andel per region")

@@ -80,7 +80,10 @@ expression displays via `_show_one`, EXCEPT:
    suppressed. Rationale: loop temps and "private" intermediates.
    Only bare names — `_df.describe()` still displays (it's a call,
    author asked for it).
-3. The statement's source line ends with `;` → suppressed. General
+3. The expression is immediately followed by `;` → suppressed
+   (so `a; b` mutes `a` and shows `b`; `df.head(); # kommentar` is
+   muted; `df.head() # note;` is shown — implemented via the
+   expression's `end_col_offset`, not line-level text). General
    escape hatch (IPython/MATLAB convention), works for any
    expression, and is the documented answer when `_`-prefix
    collides with a name someone wants shown.
@@ -100,10 +103,11 @@ expression displays via `_show_one`, EXCEPT:
 ### Where
 
 - **pyodide** (reference): `_exec_pyodide_block`
-  (index.html:7511). The `only_last` flag becomes a display-policy
-  object; notebook cells and script segments use the same "all bare
-  expressions" policy. The per-segment flag wiring around
-  index.html:9969 simplifies accordingly.
+  (index.html:7511). The `only_last` boolean is kept as-is (YAGNI —
+  no policy object needed): the "all"-policy is simply `only_last=False`
+  plus the suppression rules, which apply in both modes; notebook cells
+  and script segments now both default to it. The per-segment flag
+  wiring around index.html:9969 simplifies accordingly.
 - **brython/micropython**: their runners use statement-aware TEXT
   heuristics (no `ast` available — brython_runner.py:69,
   micropython_runner.py:85) that detect only the TRAILING
