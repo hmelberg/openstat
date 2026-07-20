@@ -340,42 +340,14 @@ def button(label, *, rerun='self', on_click=None, name=None, placement=None):
     return None
 
 
-def run_button(label="Kjør", *, target="all", name=None, placement=None):
-    """ui.run_button() - felles kjør-knapp for kontrollstripen (brukerønske
-    2026-07-18): ÉN knapp som kjører target (default "all" = hele
-    dokumentet; ellers en celle-id eller liste av id-er) i stedet for én
-    knapp per widget. Ren sukker over ui.button(label, on_click=target) -
-    samme knapp-mekanikk, samme None-retur, samme "knapper har ingen
-    verdi"-regler (inkl. at ui.widget() ikke kan adressere den)."""
-    return button(label, on_click=target, name=name, placement=placement)
-
-
-def play(min, max, *, value=None, step=1, interval=600, loop=False, label=None,
-         name=None, rerun='self', on_change=None, placement=None, sync_to=None):
-    """Avspillings-glidebryter (dash-absorpsjon 5a Task 3, spec §3 - dash sin
-    play()-widget, absorbert): som slider, men med en innebygd play/pause-
-    knapp (js/ui.js sin _buildPlay) som stepper value+step per interval-ms,
-    med dash sin EKSAKTE tre-veis timerhygiene (pause-klikk/manuell slider-
-    endring/frakoblet-i-selve-tick-en - se der). interval gulves til 200ms;
-    loop=True wrapper til min ved max i stedet for å stoppe.
-
-    Fallback (ingen notatbok): value hvis gitt, ellers min - samme regel som
-    slider(). on_change= er kanonisk alias for rerun= (W5.1) - aliaset
-    vinner. on_change= kan OGSÅ være en python-callable: da bindes den som
-    en handler (kontrollen rerunner ALDRI via rerun=) - men HVER tick fyrer
-    likevel handleren, akkurat som en manuell brukerendring ville gjort
-    (js/ui.js sin _wireChange/_buildPlay: "hver tick går gjennom SAMME sti
-    som en brukerendring").
-    sync_to= pusher verdien inn i live-sesjonsvariabelen ved hver
-    endring/tick, uten rerun."""
-    rerun = _alias_rerun(rerun, on_change)
-    spec = _spec("play", min=min, max=max, value=value, step=step,
-                 interval=interval, loop=bool(loop), label=label, name=name,
-                 rerun=rerun, placement=placement, sync_to=sync_to)
-    result = _register_value(spec, on_change)
-    if result is None:
-        return _scalar(value) if value is not None else _scalar(min)
-    return _num(result)
+# fase 3 (Task 3): run_button/play er byte-identiske på tvers av fasadene
+# - flyttet til shared/ui_core.py. Rebindes her (etter at button/_num/
+# _alias_rerun/_register_value er definert lenger nede/over) - selve
+# configure()-kallet som injiserer dialektsymbolene ligger samlet et
+# stykke ned i fila (se kommentaren der), ETTER at ALLE navnene disse (og
+# resten av Task 3-settet) refererer til faktisk finnes i denne fila.
+run_button = _core.run_button
+play = _core.play
 
 
 def on(selector, event, handler, *, target=None):
@@ -404,19 +376,8 @@ def on(selector, event, handler, *, target=None):
     return None
 
 
-def run_cell(selector, event, cell_id):
-    """Kjør en navngitt celle (id= i #%%-headeren) når HTML-eventen
-    fyrer - cellevarianten av on() (eget navn, ingen overloading)."""
-    u = _ui()
-    if u is None:
-        return None
-    try:
-        u.bindRunCell(json.dumps({"selector": str(selector), "event": str(event), "cellId": str(cell_id)}))
-    except Exception:
-        # Samme defensive konvensjon som _register: en utdatert js/ui.js
-        # (uten bindRunCell) skal degradere stille til no-op, ikke kaste.
-        return None
-    return None
+# fase 3 (Task 3): run_cell flyttet til shared/ui_core.py (byte-identisk).
+run_cell = _core.run_cell
 
 
 def _is_js_null(raw):
@@ -585,30 +546,8 @@ class WidgetHandle:
             return None
 
 
-def widget(name):
-    """ui.widget("navn") - håndtaket til en ALLEREDE DEKLARERT kontroll
-    (spec §1, dash-absorpsjon 5a Task 2). Ettlinjeregel: ui.slider(...)
-    DEKLARERER kontrollen og gir verdien; ui.widget("navn") gir HÅNDTAKET.
-
-    None ved: ingen window/Ui (ikke i nettleser/ikke lastet ennå), ELLER
-    ukjent navn (console.warn via broen - "aldri en kastet feil for et
-    skrivefeil-navn", speiler resten av fila).
-
-    Knapper kan ALDRI adresseres her: en button har ingen lagret verdi
-    (ingen _values-oppføring JS-side, se js/ui.js _lookupKeyByName), så
-    ui.widget("knappnavn") returnerer alltid None med "ukjent navn"-
-    varselet."""
-    u = _ui()
-    if u is None:
-        return None
-    try:
-        key = u.widgetLookup(str(name))
-    except Exception:
-        return None
-    if not key:
-        _warn('ui.widget: ukjent navn "' + str(name) + '"')
-        return None
-    return WidgetHandle(str(name), str(key))
+# fase 3 (Task 3): widget flyttet til shared/ui_core.py (byte-identisk).
+widget = _core.widget
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -619,14 +558,24 @@ def widget(name):
 # fila allerede gjør for on()/run_cell()/_bind_handler_if_callable).
 # ══════════════════════════════════════════════════════════════════════════
 
-def _warn(msg):
-    """console.warn via broen, GUARDET (ingen window/console i CPython-
-    pytest eller et vanlig script uten js/ui.js lastet ennå) - "aldri
-    stille, men aldri en krasj for en advarsel" (spec: error handling)."""
-    try:
-        window.console.warn(msg)
-    except Exception:
-        pass
+# fase 3 (Task 3): _warn flyttet til shared/ui_core.py (byte-identisk;
+# kjernens kopi refererer `_window` i stedet for bare `window` - injisert
+# under, se configure()-kallet).
+_warn = _core._warn
+
+
+def _warn_sink(msg):
+    """BRO, ALDRI flyttet (Task 3) - widget()/_append_children()/
+    _tag_builder() er nå flyttet til shared/ui_core.py og kaller
+    `_warn_sink(...)`, ikke bare `_warn(...)`: et bart `_warn(...)`-kall
+    INNI dem ville løst seg mot ui_core.py sin EGEN `_warn`-global (siden
+    de nå er DEFINERT der), og ville derfor ALDRI se en test sin
+    `monkeypatch.setattr(mod, "_warn", ...)` (som bare ombinder DENNE
+    fasadens `_warn`-navn). Denne funksjonen blir i fasaden nettopp for at
+    kallet `_warn(msg)` under er et FRISKT oppslag i FASADENS EGET
+    navnerom hver gang - samme trick som `_ui()` alt brukte for
+    `window`-monkeypatching."""
+    _warn(msg)
 
 
 def _normalize_kwargs(kwargs):
@@ -706,35 +655,10 @@ def _normalize_kwargs(kwargs):
     return result, handlers, warnings
 
 
-def _append_children(el_id, children):
-    """Legg til `children` (Element.add/tag-byggeren sin *children) under
-    el_id via Ui.elAppend, ETT nivå flatet (spec §1: "lists flatten one
-    level") - str -> tekstnode, Element -> el-referanse, None -> hoppet
-    over, en GJENVÆRENDE liste/tuple etter flatingen (dvs. nøstet mer enn
-    ett nivå) -> advarsel + hoppet over (aldri gjettet på som tekst)."""
-    u = _ui()
-    if u is None or el_id is None:
-        return
-    flat = []
-    for child in children:
-        if isinstance(child, (list, tuple)):
-            flat.extend(child)
-        else:
-            flat.append(child)
-    for child in flat:
-        if child is None:
-            continue
-        if isinstance(child, Element):
-            payload = {"el": child._openstat_el_id}
-        elif isinstance(child, (list, tuple)):
-            _warn("ui.html: nøstet liste (mer enn ett flatingsnivå) i children - hoppet over")
-            continue
-        else:
-            payload = {"text": str(child)}
-        try:
-            u.elAppend(el_id, json.dumps(payload))
-        except Exception:
-            pass
+# fase 3 (Task 3): _append_children flyttet til shared/ui_core.py (byte-
+# identisk; kjernens kopi refererer `_element_cls` i stedet for bare
+# `Element` - injisert under, se configure()-kallet).
+_append_children = _core._append_children
 
 
 class Element:
@@ -898,39 +822,25 @@ def _clean_num(v):
     return v
 
 
-def kpi(value, delta=None, *, unit=None, fmt=None, ref=None, bra="opp", label=None):
-    """ui.kpi(...) -> Element (dash-absorpsjon 5a Task 3, spec §2 - dash sin
-    'number'-payload/dashboard.add(tall)-kort, som en EGEN Element-bygger i
-    stedet for en add()-dispatch): kort-node med verdi/enhet/delta.
-
-    delta= er DIREKTE-formen (forrang når gitt); ref= beregner delta MOT en
-    referanseverdi (dash sin regel: diff = value - ref). bra= ("opp"/"ned")
-    avgjør hvilken retning som fargelegges "god" (js/ui.js sin
-    deltaFromDiff). Bygget via Ui.elPayload (kind "kpi") - SAMME
-    rendrings-vokabular som en ui.on()-handler sin returverdi (et tall)
-    rendres med."""
-    payload = {"kind": "kpi", "value": _clean_num(value)}
-    if unit is not None:
-        payload["unit"] = str(unit)
-    if fmt is not None:
-        payload["fmt"] = str(fmt)
-    if label is not None:
-        payload["label"] = str(label)
-    if delta is not None:
-        payload["delta"] = _clean_num(delta)
-    elif ref is not None:
-        payload["ref"] = _clean_num(ref)
-    if bra is not None:
-        payload["bra"] = str(bra)
-    return _payload_element(payload)
-
-
-def markdown(text):
-    """ui.markdown(text) -> Element (<div class="ui-md"> via mdToHtml,
-    JS-side - samme markdown-renderer ui.on()-handlere sin markdown-
-    payload bruker; uten markdown-it lastet faller Ui.renderPayload
-    tilbake til ren <pre>, se der)."""
-    return _payload_element({"kind": "markdown", "text": str(text)})
+# fase 3 (Task 3): kpi/markdown/_tag_builder (under, etter _figure_spec/
+# image) er byte-identiske - flyttet til shared/ui_core.py. Alle
+# dialektsymbolene Task 3-settet (kpi/markdown/_tag_builder OG de
+# tidligere flyttede _warn/_append_children/run_button/play/run_cell/
+# widget over) refererer, er nå definert i DENNE fila (button, WidgetHandle,
+# _normalize_kwargs, Element, _payload_element, _clean_num - alle over;
+# _num/_alias_rerun/_register_value/_ui/_scalar/window også over) - DETTE
+# er derfor det tryggeste stedet i fila for det ETT konsoliderte
+# configure()-kallet som injiserer dem (configure() er additiv, se
+# shared/ui_core.py: rører ikke scalar= satt av det tidligere kallet).
+_core.configure(
+    register_value=_register_value, ui=_ui, alias_rerun=_alias_rerun,
+    num=_num, normalize_kwargs=_normalize_kwargs, element_cls=Element,
+    clean_num=_clean_num, payload_element=_payload_element,
+    window=window, button=button, widget_handle_cls=WidgetHandle,
+    warn_sink=_warn_sink,
+)
+kpi = _core.kpi
+markdown = _core.markdown
 
 
 def _figure_spec(x):
@@ -994,33 +904,10 @@ def image(src, alt=None):
     return _payload_element({"kind": "image", "src": str(src)})
 
 
-def _tag_builder(tag):
-    """Fabrikk: bygg en `f(*children, **kwargs) -> Element`-funksjon for
-    én HTML-tag - selve elementet opprettes JS-side (Ui.elCreate) med de
-    normaliserte kwargs-ene (_normalize_kwargs), barn appendes
-    (_append_children), on_<event>=callable-oppføringer bindes
-    (Element.on)."""
-    def _build(*children, **kwargs):
-        norm, handlers, warnings = _normalize_kwargs(kwargs)
-        for w in warnings:
-            _warn(w)
-        u = _ui()
-        el_id = None
-        if u is not None:
-            try:
-                el_id = u.elCreate(tag, json.dumps(norm))
-            except Exception:
-                el_id = None
-        el = Element(el_id, tag=tag)
-        cls_attr = norm.get("attrs", {}).get("class")
-        if cls_attr:
-            el._classes.update(str(cls_attr).split())
-        if children:
-            el.add(*children)
-        for event, handler in handlers:
-            el.on(event, handler)
-        return el
-    return _build
+# fase 3 (Task 3): _tag_builder flyttet til shared/ui_core.py (byte-
+# identisk; kjernens kopi refererer `_element_cls` i stedet for bare
+# `Element`, injisert av configure()-kallet over).
+_tag_builder = _core._tag_builder
 
 
 class _HtmlNamespace:
