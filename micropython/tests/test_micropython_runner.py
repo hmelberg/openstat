@@ -249,3 +249,50 @@ def test_show_element_mounts_no_blank_line(capsys):
     out = capsys.readouterr().out
     assert out == 'før' + chr(10) + 'etter' + chr(10)
     assert mr._shared_vars['_el_arg'].shown == 1
+
+
+# ---- display policy v2 (spec 2026-07-20 §Phase 1) på trailing-uttrykket ----
+
+def test_underscore_bare_name_trailing_not_displayed(capsys):
+    run(capsys, '_hemmelig = 123')
+    out = run(capsys, '_hemmelig')
+    assert '123' not in out
+    assert mr._get_last_error() == ''
+
+
+def test_call_on_underscore_name_still_displayed(capsys):
+    run(capsys, '_tekst = "abc"')
+    out = run(capsys, '_tekst.upper()')
+    assert 'ABC' in out
+
+
+def test_trailing_semicolon_mutes_display(capsys):
+    out = run(capsys, 'sv = 7\nsv;')
+    assert '7' not in out
+    assert mr._get_last_error() == ''
+
+
+def test_ui_control_call_evaluated_but_not_echoed(capsys):
+    run(capsys,
+        'class FakeUi:\n'
+        '    def __init__(self):\n'
+        '        self.calls = []\n'
+        '    def slider(self, *a, **k):\n'
+        '        self.calls.append(a)\n'
+        '        return 42\n'
+        'ui = FakeUi()')
+    out = run(capsys, 'ui.slider(0, 100)')
+    assert '42' not in out
+    assert mr._get_last_error() == ''
+    out2 = run(capsys, 'len(ui.calls)')
+    assert '1' in out2
+
+
+def test_non_control_ui_call_still_displayed(capsys):
+    run(capsys,
+        'class FakeUi2:\n'
+        '    def value(self, name):\n'
+        '        return 99\n'
+        'ui = FakeUi2()')
+    out = run(capsys, 'ui.value("n")')
+    assert '99' in out

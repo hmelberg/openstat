@@ -60,6 +60,35 @@ def _fmt(obj):
     return repr(obj)
 
 
+_UI_CONTROLS = ('slider', 'dropdown', 'checkbox', 'switch', 'number', 'text',
+                'button', 'run_button', 'play')
+
+
+def _tail_suppressed(tail):
+    """Display policy v2 (spec 2026-07-20 §Phase 1) på trailing-uttrykket:
+    demp visningen når det er (a) et nakent navn med _-prefiks eller (b) et
+    nakent ui.<kontroll>(...)-kall (kontrollen registreres av evalueringen —
+    pull-modellen; skalar-ekkoet er støy). Evalueringen skjer UANSETT
+    (sideeffekter bevart). ';'-demping trenger ingen kode her: en hale med
+    ';' kompilerer ikke i eval-modus, så kandidaten forkastes og hele koden
+    plain-exec'es uten visning. Ingen `ast` — string-sjekker (samme grunn
+    som kandidat-skanningen i _execute_code)."""
+    if tail.startswith('_'):
+        _ok = True
+        for _ch in tail:
+            if not (_ch == '_' or _ch.isalpha() or _ch.isdigit()):
+                _ok = False
+                break
+        if _ok:
+            return True
+    if tail.startswith('ui.'):
+        _rest = tail[3:]
+        for _name in _UI_CONTROLS:
+            if _rest.startswith(_name + '('):
+                return True
+    return False
+
+
 def _show(*objs):
     for o in objs:
         # Speiler `if shown: print(shown)`-vakten i _execute_code (~linje
@@ -125,6 +154,7 @@ def _execute_code(code):
             lines.pop()
         result = None
         displayed = False
+        suppressed = False
         if lines:
             candidates = []
             for i in range(len(lines) - 1, -1, -1):
@@ -152,10 +182,13 @@ def _execute_code(code):
                 exec(head_code, _shared_vars)
                 result = eval(tail_code, _shared_vars)
                 displayed = True
+                suppressed = _tail_suppressed(tail_stripped)
                 break
         if not displayed:
             exec(compile(code, '<micropython>', 'exec'), _shared_vars)
         shown = _fmt(result) if displayed else ''
+        if suppressed:
+            shown = ''
         if shown:
             print(shown)
         return ''
