@@ -375,6 +375,51 @@ def test_show_element_mounts_no_blank_line():
     assert br._shared_vars['_el_arg'].shown == 1
 
 
+# ---- display policy v2 (spec 2026-07-20 §Phase 1) på trailing-uttrykket ----
+
+def test_underscore_bare_name_trailing_not_displayed():
+    br._execute_code('_hemmelig = 123')
+    out = br._execute_code('_hemmelig')
+    assert '123' not in out
+    assert br._get_last_error() == ''
+
+def test_call_on_underscore_name_still_displayed():
+    br._execute_code('_tekst = "abc"')
+    out = br._execute_code('_tekst.upper()')
+    assert 'ABC' in out
+
+def test_trailing_semicolon_mutes_display():
+    # ';' i halen kompilerer ikke i eval-modus → kandidaten forkastes og
+    # hele koden plain-exec'es uten visning. Pinner den naturlige dempingen.
+    out = br._execute_code('sv = 7\nsv;')
+    assert '7' not in out
+    assert br._get_last_error() == ''
+
+def test_ui_control_call_evaluated_but_not_echoed():
+    br._execute_code(
+        'class FakeUi:\n'
+        '    def __init__(self):\n'
+        '        self.calls = []\n'
+        '    def slider(self, *a, **k):\n'
+        '        self.calls.append(a)\n'
+        '        return 42\n'
+        'ui = FakeUi()')
+    out = br._execute_code('ui.slider(0, 100)')
+    assert '42' not in out
+    assert br._get_last_error() == ''
+    out2 = br._execute_code('len(ui.calls)')
+    assert '1' in out2
+
+def test_non_control_ui_call_still_displayed():
+    br._execute_code(
+        'class FakeUi2:\n'
+        '    def value(self, name):\n'
+        '        return 99\n'
+        'ui = FakeUi2()')
+    out = br._execute_code('ui.value("n")')
+    assert '99' in out
+
+
 if __name__ == '__main__':
     # NOTE: iterate in declaration order (not sorted alphabetically) — several
     # tests share state via module globals (e.g. test_figure_embed_marker
