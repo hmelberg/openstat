@@ -193,41 +193,50 @@ the regression risk of the whole plan; the tests are the contract.
 
 ## Phase 3 — Slim the facades
 
-### What changes
+### Corrected premise and revised strategy (Hans 2026-07-20)
 
-Move all per-control logic that is duplicated 4× python-side into
-`js/ui.js`:
+Function-level analysis during phase-3 planning invalidated two
+assumptions in the original text above the fold: (a) the facades'
+per-control functions are ALREADY thin — js/ui.js's `normalizeSpec`
+owns defaults/validation since W1, so there is no fat per-control
+logic to move; (b) the heavy shared functions the twins' docstrings
+call "mirrored byte for byte" are in fact dialect-ENTANGLED
+(`_normalize_kwargs` 0.69 similarity, `_make_event_wrapper` 0.16,
+`_register` 0.58, `Element` 0.87 — ffi differences run through the
+bodies, not just the imports). Only ~260 code lines are provably
+identical across all three, ~220 more near-identical.
 
-- Spec building + defaults (min/max/step/label/name/rerun/…).
-- Kwargs normalization for elements (`_normalize_kwargs`,
-  pyodide/ui.py:680: `cls`→`class`, style dict + snake→camel,
-  `data_`/`aria_`, booleans, attrs escape hatch).
-- Value coercion/validation.
+Decision (two rounds with Hans 2026-07-20): drop the
+JS-migration/`callControl` design. Instead: **incremental shared
+Python core + drift tripwire**:
 
-A facade then does exactly: serialize the call (name + positional +
-kwargs as JSON) → `window.Ui.callControl(...)` /
-`window.Ui.callElement(...)` → unwrap the return. Target size
-~100–150 lines per facade; the `Element` wrapper class keeps its
-python ergonomics (`.add`, `.on`, `.show`, …) but each method is a
-one-line bridge call.
-
-- **pyodide/ui.py** is rewritten first and is the reference.
-- **brython/micropython** facades follow the same shape; their only
-  legitimate differences are the js-bridge dialect (`import js` vs
-  `from browser import window` vs jsffi). Drift becomes structurally
-  impossible because there is no logic left to drift.
+- **`shared/ui_core.py`** — ONE file holding the provably-identical
+  set: tag/accepts tables (`HTML_TAGS`, `_SL_ACCEPTS`, `PICO_*`),
+  pure helpers (`_snake_to_camel`, `_json_safe`, `_spec`), and the
+  identical API functions (`kpi`, `markdown`, `play`, `run_button`,
+  `run_cell`, `widget`, `_tag_builder`, `_append_children`, …).
+  Dialect symbols the moved functions need (`_register`,
+  `_register_value`, window access, …) are INJECTED by each facade
+  via `ui_core.configure(...)` — the core never imports
+  `js`/`browser`/jsffi itself.
+- **Loading**: brython/micropython engines' existing lib registries
+  gain an optional per-entry `path` field so `ui_core` can resolve
+  to `shared/ui_core.py` and be declared as `deps` of the ui entry;
+  pyodide's `__ensureUi` fetches the core file alongside ui.py.
+- **Dialect-entangled functions stay per-facade** (`_normalize_kwargs`,
+  `Element`, event wrappers, `_register`, `value`, `image`, `lib`,
+  namespaces) — extracting them means refactoring the ffi out of
+  their bodies, which is the risk this decision declines.
+- **Twin-drift tripwire**: a pytest that ast-extracts the still-
+  mirrored functions from the three facades and fails when a
+  one-sided edit lowers their normalized similarity below recorded
+  floors (synchronized edits keep similarity high and pass). Public
+  API name parity across the three is asserted exactly.
 - **webr/ui.R**: FROZEN. Keeps today's widget behavior against the
   stable `registerControl`/`registerFromRegistry` contract. Header
   comment + user docs mark it legacy ("fryst 2026-07-20; ui.html og
   nye kontroller kommer ikke til R uten ny beslutning"). Revisit
   only on user demand.
-
-### Error handling
-
-JS-side validation errors return a structured
-`{error: "..."}`; facades raise it as a normal python exception with
-the original call site in the message. No silent fallbacks (matches
-the `ui.html` "warn loudly" decision).
 
 ## Phasing & dependencies
 
@@ -249,9 +258,10 @@ Each phase gets its own implementation plan
   rule tests in their suites.
 - Phase 2: characterization suite (above) + existing
   `FakeUiJs`-based facade suites + `js/param-forms` suite unchanged.
-- Phase 3: facade suites shrink to bridge-contract tests; a shared
-  JSON fixture of call→spec pairs is asserted identically from
-  pyodide and brython/mpy to prove the pipes are equivalent.
+- Phase 3 (revised): existing facade suites stay the behavioral
+  contract and must pass unchanged after the core extraction; the
+  new twin-drift tripwire test guards the functions that remain
+  mirrored per-facade.
 
 ## Non-goals
 
