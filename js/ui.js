@@ -404,10 +404,10 @@
     var _cellRuns = {};
 
     function _el(tag, cls, text) {
-      var n = document.createElement(tag);
-      if (cls) n.className = cls;
-      if (text != null) n.textContent = text;
-      return n;
+      var props = {};
+      if (cls) props.className = cls;
+      if (text != null) props.textContent = text;
+      return Ui.makeNode(tag, { props: props });
     }
 
     function _labelText(spec) {
@@ -562,10 +562,7 @@
       var wrap = _el('label', 'ui-widget');
       var labelEl = _el('span', 'ui-widget-label', _labelText(spec));
       wrap.appendChild(labelEl);
-      var input = document.createElement('input');
-      input.type = 'range';
-      input.min = spec.min; input.max = spec.max; input.step = spec.step;
-      input.value = value;
+      var input = Ui.makeNode('input', { props: { type: 'range', min: spec.min, max: spec.max, step: spec.step, value: value } });
       var readout = _el('span', 'ui-widget-value', String(value));
       var change = _wireChange(key, function () { return Number(input.value); });
       input.addEventListener('input', function () {
@@ -581,11 +578,9 @@
       var wrap = _el('label', 'ui-widget');
       var labelEl = _el('span', 'ui-widget-label', _labelText(spec));
       wrap.appendChild(labelEl);
-      var input = document.createElement('select');
+      var input = Ui.makeNode('select');
       spec.options.forEach(function (opt) {
-        var o = document.createElement('option');
-        o.value = opt; o.textContent = opt;
-        input.appendChild(o);
+        input.appendChild(Ui.makeNode('option', { props: { value: opt, textContent: opt } }));
       });
       input.value = value;
       input.addEventListener('change', _wireChange(key, function () { return input.value; }));
@@ -600,10 +595,9 @@
       var wrap = _el('label', isSwitch ? 'ui-widget ui-widget--check ui-widget--switch' : 'ui-widget ui-widget--check');
       var labelEl = _el('span', 'ui-widget-label', _labelText(spec));
       wrap.appendChild(labelEl);
-      var input = document.createElement('input');
-      input.type = 'checkbox';
-      if (isSwitch) input.setAttribute('role', 'switch');
-      input.checked = !!value;
+      var input = Ui.makeNode('input', isSwitch
+        ? { props: { type: 'checkbox', checked: !!value }, attrs: { role: 'switch' } }
+        : { props: { type: 'checkbox', checked: !!value } });
       input.addEventListener('change', _wireChange(key, function () { return input.checked; }));
       // Avkrysningsboksen/svitsjen konvensjonelt FØR etiketten (speiler
       // js/dash.js sin dash-widget--check, dash.js:369-370).
@@ -615,12 +609,11 @@
       var wrap = _el('label', 'ui-widget');
       var labelEl = _el('span', 'ui-widget-label', _labelText(spec));
       wrap.appendChild(labelEl);
-      var input = document.createElement('input');
-      input.type = 'number';
-      if (spec.min != null) input.min = spec.min;
-      if (spec.max != null) input.max = spec.max;
-      if (spec.step != null) input.step = spec.step;
-      input.value = value;
+      var nprops = { type: 'number', value: value };
+      if (spec.min != null) nprops.min = spec.min;
+      if (spec.max != null) nprops.max = spec.max;
+      if (spec.step != null) nprops.step = spec.step;
+      var input = Ui.makeNode('input', { props: nprops });
       input.addEventListener('change', _wireChange(key, function () { return Number(input.value); }));
       wrap.appendChild(input);
       return { wrap: wrap, input: input, labelEl: labelEl };
@@ -630,9 +623,7 @@
       var wrap = _el('label', 'ui-widget');
       var labelEl = _el('span', 'ui-widget-label', _labelText(spec));
       wrap.appendChild(labelEl);
-      var input = document.createElement('input');
-      input.type = 'text';
-      input.value = value;
+      var input = Ui.makeNode('input', { props: { type: 'text', value: value } });
       input.addEventListener('change', _wireChange(key, function () { return String(input.value); }));
       wrap.appendChild(input);
       return { wrap: wrap, input: input, labelEl: labelEl };
@@ -739,6 +730,7 @@
       return { wrap: btn, input: btn };
     }
 
+    // fase 2 (spec 2026-07-20): all konstruksjon går via Ui.makeNode — byggerne eier ingen egne DOM-idiomer lenger.
     var _BUILDERS = {
       slider: _buildSlider,
       dropdown: _buildDropdown,

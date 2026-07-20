@@ -3028,3 +3028,70 @@ test('fase 2: makeNode — opts utelatt gir naken node; ugyldig tag gir null', (
   assert.ok(bare);
   assert.strictEqual(bare.tagName.toLowerCase(), 'span');
 });
+
+// ---- fase 2: byggernes DOM-form pinnes FØR re-plattformingen --------------
+// (disse skal passere UENDRET både før og etter makeNode-swapen — de ER
+// paritetskontrakten for konstruksjonslaget.)
+
+test('fase 2 pin: slider — wrap/label/input/readout-form', () => {
+  const { Ui, outEl } = freshEnv();
+  Ui.registerControl(JSON.stringify({ type: 'slider', name: 'x', min: 0, max: 10, step: 2, value: 4 }));
+  const strip = outEl.children[0];
+  const wrap = strip.children[0];
+  assert.strictEqual(wrap.tagName.toLowerCase(), 'label');
+  assert.strictEqual(wrap.className, 'ui-widget');
+  const [labelEl, input, readout] = wrap.children;
+  assert.strictEqual(labelEl.className, 'ui-widget-label');
+  assert.strictEqual(input.type, 'range');
+  assert.strictEqual(input.min, 0);
+  assert.strictEqual(input.max, 10);
+  assert.strictEqual(input.step, 2);
+  assert.strictEqual(String(input.value), '4');
+  assert.strictEqual(readout.className, 'ui-widget-value');
+  assert.strictEqual(readout.textContent, '4');
+});
+
+test('fase 2 pin: dropdown — select med options i rekkefølge', () => {
+  const { Ui, outEl } = freshEnv();
+  Ui.registerControl(JSON.stringify({ type: 'dropdown', name: 'd', options: ['a', 'b'], value: 'b' }));
+  const strip = outEl.children[0];
+  const wrap = strip.children[0];
+  const input = wrap.children[1];
+  assert.strictEqual(input.tagName.toLowerCase(), 'select');
+  assert.strictEqual(input.children.length, 2);
+  assert.strictEqual(input.children[0].value, 'a');
+  assert.strictEqual(input.children[1].textContent, 'b');
+  assert.strictEqual(input.value, 'b');
+});
+
+test('fase 2 pin: checkbox/switch — input FØR label, switch-klasse + role', () => {
+  const { Ui, outEl } = freshEnv();
+  Ui.registerControl(JSON.stringify({ type: 'switch', name: 's', value: true }));
+  const strip = outEl.children[0];
+  const wrap = strip.children[0];
+  assert.strictEqual(wrap.className, 'ui-widget ui-widget--check ui-widget--switch');
+  const input = wrap.children[0]; // insertBefore(input, firstChild)
+  assert.strictEqual(input.type, 'checkbox');
+  assert.strictEqual(input.getAttribute('role'), 'switch');
+  assert.strictEqual(input.checked, true);
+});
+
+test('fase 2 pin: number — min/max/step kun når satt', () => {
+  const { Ui, outEl } = freshEnv();
+  Ui.registerControl(JSON.stringify({ type: 'number', name: 'n', value: 7 }));
+  const strip = outEl.children[0];
+  const input = strip.children[0].children[1];
+  assert.strictEqual(input.type, 'number');
+  assert.ok(!('min' in input) || input.min === undefined || input.min === '',
+    'min settes IKKE når spec utelater den');
+  assert.strictEqual(String(input.value), '7');
+});
+
+test('fase 2 pin: text — type=text, strengverdi', () => {
+  const { Ui, outEl } = freshEnv();
+  Ui.registerControl(JSON.stringify({ type: 'text', name: 't', value: 'hei' }));
+  const strip = outEl.children[0];
+  const input = strip.children[0].children[1];
+  assert.strictEqual(input.type, 'text');
+  assert.strictEqual(input.value, 'hei');
+});
