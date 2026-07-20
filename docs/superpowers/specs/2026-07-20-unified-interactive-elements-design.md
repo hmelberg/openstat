@@ -125,14 +125,40 @@ uttrykk alene på en linje vises. Demp med `_`-prefiks eller `;`."*
 
 ## Phase 2 — Re-platform controls onto the element engine
 
+### Corrected premise (Hans 2026-07-20, scope decision)
+
+Code inspection during phase-2 planning found the original premise
+wrong: `js/param-forms.js` does NOT call `js/ui.js`'s builders — it
+has its OWN `_BUILDERS` (param-forms.js:605, deliberately duplicated
+in W4, documented at :461-464 as the deferred "B2 dedup"). So there
+are THREE DOM-construction paths (ui.js builders, param-forms
+builders, element engine), and nothing inherits "for free".
+Decision: phase 2 unifies the CONSTRUCTION of both builder sets onto
+one shared core; each system's WIRING (ui.js: value store + rerun;
+param-forms: source-text write-back) is the essence of its feature
+and stays untouched.
+
 ### What changes
 
-Each control builder (`_buildSlider` … `_buildButton`,
-js/ui.js:561–743, dispatch table :743) is reimplemented as a recipe
-that composes the element engine: `elCreate('input', …)` /
-`elSetProps` / label + wrapper markup, then hands the node to the
-EXISTING register/refresh core (`_registerInto`, js/ui.js:983).
-After parity is proven, the old `_build*` functions are deleted.
+A shared construction core `Ui.makeNode(tag, opts)` is extracted
+from the element engine (`elCreate` minus JSON parsing and `_els`
+registration — same `_applyElProps` props/attrs/style semantics,
+real object in, raw node out, no lifecycle). `Ui.elCreate` becomes
+makeNode + registry. Both builder sets then compose it:
+
+- `js/ui.js` `_buildSlider` … `_buildButton` (:561–743): `_el` and
+  every direct `document.createElement` + property-assignment idiom
+  is replaced by `Ui.makeNode` recipes; the returned
+  `{wrap, input, labelEl, readout}` contract, `_wireChange`, play
+  timers, and `_registerInto` (:983) are untouched.
+- `js/param-forms.js` `_build*` (:505–603): same treatment via the
+  now-shared `Ui.makeNode` (load order index.html:583–584 already
+  puts ui.js first; the `_commit` write-back wiring untouched).
+
+The builders survive as thin recipes; what is deleted is their
+private DOM idioms — after this phase, every element the app
+constructs for controls, forms, and `ui.html` flows through ONE
+props-application path.
 
 What explicitly does NOT change:
 
@@ -141,9 +167,9 @@ What explicitly does NOT change:
 - Keying/update-in-place, ~150 ms slider debounce, play-timer
   semantics, placement strips (top/bottom/left, cell `widgets=`
   attr), `sync_to` push.
-- `#@param`: `js/param-forms.js` keeps calling the same builder
-  entry points; it gets the new rendering with zero syntax changes.
-  Its test suite doubles as an acceptance gate.
+- `#@param`: syntax, parsing, write-back and run:auto semantics
+  untouched — only its builders' node construction moves to
+  `Ui.makeNode`. Its test suite doubles as an acceptance gate.
 
 ### Method: characterization first
 
