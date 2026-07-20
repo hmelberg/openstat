@@ -1,3 +1,10 @@
+# FRYST 2026-07-20 (spec 2026-07-20-unified-interactive-elements-design.md,
+# fase 3): denne fasaden beholder dagens widget-oppførsel mot den stabile
+# registerControl/registerFromRegistry-kontrakten, men får IKKE ui.html
+# eller nye kontroller uten ny beslutning. Delingen med python-fasadene
+# (shared/ui_core.py) omfatter ikke R. Endringer her skal være rene
+# vedlikeholdsfikser.
+#
 # ui - widget-fasade for webR (R-modus notatbøker, spec 2 ui-widgets, W2).
 # Offentlig API: ui_slider, ui_dropdown, ui_checkbox, ui_switch, ui_number,
 # ui_text, ui_button, ui_run_button, ui_play (funksjonerer; W5.1 on_change=/on_click=-
