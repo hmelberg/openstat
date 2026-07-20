@@ -130,24 +130,20 @@ def _scalar(value):
     return value
 
 
-def _spec(type_, **kwargs):
-    """type + gitte kwargs, None-verdier droppes (matcher js/ui.js sin
-    normalizeSpec, som selv fyller inn defaults for det som mangler).
-    Numeriske kwargs (min/max/value/step) koerseres via _scalar, slik at
-    f.eks. `max=df['x'].max()` (numpy-skalar) overlever json.dumps.
-
-    placement (Task 3, per-kontroll plassering) og sync_to (Task 4,
-    synkronisering til live-sesjonsvariabel) er rene gjennomstrøms-kwargs
-    her - selve valideringen skjer på JS-siden (js/ui.js sin normalizeSpec),
-    akkurat som rerun allerede er. None (ikke gitt) droppes av løkka under
-    som vanlig, og kontrollen faller da tilbake til cellens widgets=-default."""
-    spec = {"type": type_}
-    for k, v in kwargs.items():
-        if k in ("min", "max", "value", "step"):
-            v = _scalar(v)
-        if v is not None:
-            spec[k] = v
-    return spec
+# fase 3: injeksjonsfrie tabeller/hjelpere flyttet til shared/ui_core.py
+# (dedup pyodide/brython/micropython) - _spec sin _scalar-koersjon er
+# fasade-spesifikk (numpy), derfor injisert via configure(scalar=_scalar).
+import ui_core as _core
+_core.configure(scalar=_scalar)
+HTML_TAGS = _core.HTML_TAGS
+_HTML_TAG_SET = _core._HTML_TAG_SET
+_SL_ACCEPTS = _core._SL_ACCEPTS
+PICO_COMPONENT_CLASSES = _core.PICO_COMPONENT_CLASSES
+PICO_HTML_ELEMENTS = _core.PICO_HTML_ELEMENTS
+PICO_UTILITY_CLASSES = _core.PICO_UTILITY_CLASSES
+_snake_to_camel = _core._snake_to_camel
+_json_safe = _core._json_safe
+_spec = _core._spec
 
 
 def _num(value):
@@ -715,27 +711,6 @@ def widget(name):
 # _bind_handler_if_callable).
 # ══════════════════════════════════════════════════════════════════════════
 
-# Standard HTML-tagger for den generiske ui.html.<tag>(...)-fabrikken.
-# Kopiert ORDRETT fra pyodide/ui.py (som selv kopierte den ordrett fra
-# code2web/ui.py:4481-4495) - samme kilde, samme duplisering av "table".
-HTML_TAGS = (
-    "head link meta style title body "
-    "address article aside footer header h1 h2 h3 h4 h5 h6 main nav section "
-    "blockquote dd div dl dt figcaption figure hr li ol p pre table ul "
-    "a abbr b bdi bdo br cite code data dfn em i kbd mark q rp rt ruby s samp small span strong sub sup time u var wbr "
-    "area audio img map track video "
-    "embed iframe object param picture portal source "
-    "svg math "
-    "canvas noscript script "
-    "del ins "
-    "caption col colgroup table tbody td tfoot th thead tr "
-    "button datalist fieldset form input label legend meter optgroup option output progress select textarea "
-    "details dialog menu summary "
-    "slot template "
-)
-_HTML_TAG_SET = frozenset(HTML_TAGS.split())
-
-
 def _warn(msg):
     """console.warn via broen, GUARDET (ingen window/console i CPython-
     pytest eller et vanlig script uten js/ui.js lastet ennå) - "aldri
@@ -744,33 +719,6 @@ def _warn(msg):
         window.console.warn(msg)
     except Exception:
         pass
-
-
-def _snake_to_camel(name):
-    """snake_case -> camelCase, for style-dict-nøkler og generiske
-    DOM-egenskapsnavn (IKKE for class/data_/aria_/attrs - de har egne
-    regler i _normalize_kwargs). Navn UTEN understrek er uendret. Et
-    ENKELT etterslengt understrek (f.eks. "for_" for å unngå å kollidere
-    med et python-nøkkelord) strippes til "for" som et harmløst biprodukt."""
-    if "_" not in name:
-        return name
-    head, *rest = name.split("_")
-    return head + "".join(p[:1].upper() + p[1:] for p in rest if p)
-
-
-def _json_safe(value):
-    """True hvis `value` er trygg å json.dumps rett over broen (samme
-    primitiv-familie som JSON selv - str/int/float/bool/None/dict/list),
-    rekursivt for dict/list. Brukes av _normalize_kwargs til å fange opp
-    "mistenkelige" propsverdier FØR de når json.dumps (som ville kastet
-    en rå TypeError midt inne i et elCreate-kall)."""
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return True
-    if isinstance(value, dict):
-        return all(isinstance(k, str) and _json_safe(v) for k, v in value.items())
-    if isinstance(value, (list, tuple)):
-        return all(_json_safe(v) for v in value)
-    return False
 
 
 def _normalize_kwargs(kwargs):
@@ -1288,51 +1236,6 @@ class _LibNamespace:
         tag = self._prefix + "-" + kebab
         return _lib_tag_builder(tag, prefix=self._prefix, name=name,
                                  accepted=self._accepts.get(kebab))
-
-
-# shoelace sin accepts-whitelist (spec §4, portert ORDRETT fra
-# code2web/ui.py:3320-3380 — se pyodide/ui.py for den fulle kommentaren).
-_SL_ACCEPTS = {
-    "select": ["sl-option"],
-    "dropdown": ["sl-menu-item"],
-    "button-group": ["sl-button", "button"],
-    "card": ["sl-card-header", "sl-card-body", "sl-card-footer",
-             "div", "p", "h1", "h2", "h3", "h4", "h5", "h6"],
-    "form": ["sl-input", "sl-textarea", "sl-select", "sl-checkbox",
-             "sl-radio", "sl-button", "sl-button-group"],
-    "dialog": ["sl-dialog-header", "sl-dialog-body", "sl-dialog-footer",
-               "div", "p"],
-    "tabs": ["sl-tab", "sl-tab-panel"],
-    "accordion": ["sl-accordion-item"],
-}
-
-
-# Pico-navnerommet — portert ORDRETT fra code2web/ui.py:3751-3808 (se
-# pyodide/ui.py for den fulle "bevisst forenkling"-kommentaren om
-# input/textarea/select-placeholder-varten som er DROPPET her med vilje).
-PICO_HTML_ELEMENTS = frozenset((
-    "button input textarea select form fieldset legend label article aside "
-    "footer header main nav section"
-).split())
-
-PICO_COMPONENT_CLASSES = {
-    "button": "btn", "input": "form-control", "textarea": "form-control",
-    "select": "form-control", "checkbox": "form-check-input",
-    "radio": "form-check-input", "range": "form-range", "progress": "progress",
-    "card": "card", "modal": "modal", "nav": "nav", "accordion": "accordion",
-    "tabs": "tabs", "dropdown": "dropdown", "form": "form",
-    "fieldset": "fieldset", "legend": "legend", "label": "form-label",
-    "group": "form-group", "grid": "grid", "container": "container",
-    "article": "article", "aside": "aside", "footer": "footer",
-    "header": "header", "main": "main", "section": "section",
-}
-
-PICO_UTILITY_CLASSES = {
-    "primary": "btn-primary", "secondary": "btn-secondary",
-    "contrast": "btn-contrast", "outline": "btn-outline", "ghost": "btn-ghost",
-    "small": "btn-sm", "large": "btn-lg", "full": "btn-full",
-    "loading": "btn-loading", "disabled": "btn-disabled",
-}
 
 
 def _pico_component(name):

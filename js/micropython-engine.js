@@ -27,8 +27,15 @@
     // under hopper allerede over enhver url der window[global] finnes, så
     // denne oppføringen kan ALDRI dobbel-kjøre IIFE-en og nullstille
     // Ui-tilstand.
-    ui_mpy:             { aliases: ['ui'], deps: [],
-                          js: [{ url: 'js/ui.js', global: 'Ui' }] }
+    // deps: ['ui_core'] — fase 3: ui_mpy.py importerer selv shared/ui_core.py
+    // (dedup pyodide/brython/micropython), må derfor registreres FØR ui_mpy
+    // selv (deps kjøres først, se ensureLibs).
+    ui_mpy:             { aliases: ['ui'], deps: ['ui_core'],
+                          js: [{ url: 'js/ui.js', global: 'Ui' }] },
+    // fase 3 (spec 2026-07-20): delt fasadekjerne — én fil for alle tre
+    // python-runtimene; path-feltet overstyrer katalogkonvensjonen.
+    ui_core:            { aliases: [], deps: [], js: [],
+                          path: 'shared/ui_core.py' }
   };
 
   function scanImports(code) {
@@ -147,7 +154,9 @@
       _visiting[name] = true;
       await ensureLibs(mod, entry.deps, _visiting);
       for (var j = 0; j < entry.js.length; j++) await loadJsDep(entry.js[j]);
-      var source = await fetchText('micropython/' + name + '.py');
+      // entry.path overstyrer katalogkonvensjonen (fase 3: ui_core deles fra
+      // shared/, ikke fra micropython/ — se ui_core-oppføringen i LIB_REGISTRY).
+      var source = await fetchText(entry.path || ('micropython/' + name + '.py'));
       var err = mod._register_module(name, source);
       if (err) throw new Error(String(err));
       for (var a = 0; a < entry.aliases.length; a++) {
