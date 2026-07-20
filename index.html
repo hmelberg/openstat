@@ -8924,7 +8924,26 @@ json.dumps(out)
     function __ensureUi(py) {
       if (__uiP) return __uiP;
       var base = window.location.href.replace(/[^/]+$/, '');
-      __uiP = fetch(base + 'pyodide/ui.py?v=' + (window.M2PY_VERSION || '1'))
+      // fase 3: shared/ui_core.py MÅ registreres som modulen "ui_core"
+      // FØR pyodide/ui.py kjøres — fasaden gjør en import ui_core ved
+      // eksekvering. Samme fetch/materialize-idiom som ui.py-steget under,
+      // samme "fail gracefully" (ingen abort — kalleren fanger og
+      // console.warn i stedet, se preRun/effectiveScript-kallstedene).
+      __uiP = fetch(base + 'shared/ui_core.py?v=' + (window.M2PY_VERSION || '1'))
+        .then(function (r) { if (!r.ok) throw new Error('shared/ui_core.py: ' + r.status); return r.text(); })
+        .then(function (code) {
+          return py.runPythonAsync(
+            'import sys, importlib.util\n' +
+            'def _reg_ui_core(src):\n' +
+            '    spec = importlib.util.spec_from_loader("ui_core", loader=None)\n' +
+            '    mod = importlib.util.module_from_spec(spec)\n' +
+            '    sys.modules["ui_core"] = mod\n' +
+            '    exec(compile(src, "ui_core.py", "exec"), mod.__dict__)\n' +
+            '_reg_ui_core(' + JSON.stringify(code) + ')');
+        })
+        .then(function () {
+          return fetch(base + 'pyodide/ui.py?v=' + (window.M2PY_VERSION || '1'));
+        })
         .then(function (r) { if (!r.ok) throw new Error('pyodide/ui.py: ' + r.status); return r.text(); })
         .then(function (code) {
           return py.runPythonAsync(

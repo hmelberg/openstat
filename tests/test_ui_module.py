@@ -9,6 +9,12 @@ import types
 
 import pytest
 
+# fase 3: fasaden importerer ui_core fra shared/ — gjør den importerbar
+# FØR fasade-lastingen (samme mekanisme i alle tre fasade-suitene).
+_SHARED = str(pathlib.Path(__file__).resolve().parents[1] / "shared")
+if _SHARED not in sys.path:
+    sys.path.insert(0, _SHARED)
+
 
 class FakeUiJs:
     """window.Ui-stubben. `next_result` speiler ekte Ui.registerControl sin
@@ -1626,3 +1632,13 @@ def test_kpi_markdown_image_uten_ui_returnerer_inert_element(monkeypatch):
     assert mod.kpi(1)._openstat_el_id is None
     assert mod.markdown("x")._openstat_el_id is None
     assert mod.image("x.png")._openstat_el_id is None
+
+
+def test_fase3_core_delt_kilde(monkeypatch):
+    """Fasaden re-eksporterer kjernesymbolene fra ui_core — samme objekt,
+    ikke en kopi (dedup-beviset)."""
+    import ui_core
+    mod, _ = _load_ui(monkeypatch)
+    assert mod.HTML_TAGS is ui_core.HTML_TAGS
+    assert mod._snake_to_camel is ui_core._snake_to_camel
+    assert mod._spec is ui_core._spec
