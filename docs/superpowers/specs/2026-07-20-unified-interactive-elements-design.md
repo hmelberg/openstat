@@ -1,7 +1,8 @@
 # Unified interactive elements: display policy v2 + one engine under `ui.*` (design)
 
 **Status:** APPROVED 2026-07-20 (discussion with Hans 2026-07-19/20);
-Phase 1 DELIVERED 2026-07-20 (plan 2026-07-20-display-policy-v2.md).
+Phase 1 DELIVERED 2026-07-20 (plan 2026-07-20-display-policy-v2.md);
+Phase 2 DELIVERED 2026-07-20 (plan 2026-07-20-shared-node-core.md).
 Three-phase plan. Follows the unified-document-model line
 (`2026-07-15-notebook-widgets-design.md`,
 `2026-07-17-ui-html-design.md`).
