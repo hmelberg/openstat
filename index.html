@@ -7555,8 +7555,8 @@ def _exec_pyodide_block(code, g, show_commands=False, only_last=False):
             pass
         # Regel 4: nakent ui.<kontroll>(...)-kall — kontrollen registreres av
         # evalueringen (pull-modellen), men skalar-ekkoet er støy. Kun det
-        # bokstavelige navnet `ui` (import ui as u dekkes ikke — dokumentert
-        # hjørne, `;` er utveien). ui.html.* har Attribute-verdi, ikke Name —
+        # bokstavelige navnet 'ui' (import ui as u dekkes ikke — dokumentert
+        # hjørne, ';' er utveien). ui.html.* har Attribute-verdi, ikke Name —
         # matcher ikke og beholder selvvisningen via _show_one.
         if isinstance(_val, ast.Call):
             _f = _val.func
