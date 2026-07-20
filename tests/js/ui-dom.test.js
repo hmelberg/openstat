@@ -3095,3 +3095,28 @@ test('fase 2 pin: text — type=text, strengverdi', () => {
   assert.strictEqual(input.type, 'text');
   assert.strictEqual(input.value, 'hei');
 });
+
+test('fase 2 pin: play — wrap-klasse, input/readout/knapp i rekkefølge, aria-label', () => {
+  const { Ui, outEl } = freshEnv();
+  Ui.registerControl(JSON.stringify({ type: 'play', name: 'p', min: 0, max: 10, step: 1, value: 0, interval: 600 }));
+  const strip = outEl.children[0];
+  const wrap = strip.children[0];
+  assert.strictEqual(wrap.className, 'ui-widget ui-widget--play');
+  const [labelEl, input, readout, btn] = wrap.children;
+  assert.strictEqual(input.type, 'range');
+  assert.strictEqual(readout.className, 'ui-widget-value');
+  assert.strictEqual(btn.className, 'ui-play-btn');
+  assert.strictEqual(btn.textContent, '▶');
+  assert.strictEqual(btn.type, 'button');
+  assert.strictEqual(btn.getAttribute('aria-label'), 'Spill av');
+});
+
+test('fase 2 pin: button — wrap ER knappen, klasse + type', () => {
+  const { Ui, outEl } = freshEnv();
+  Ui.registerControl(JSON.stringify({ type: 'button', name: 'b', label: 'Trykk' }));
+  const strip = outEl.children[0];
+  const btn = strip.children[0];
+  assert.strictEqual(btn.className, 'ui-widget ui-widget--button');
+  assert.strictEqual(btn.type, 'button');
+  assert.strictEqual(btn.textContent, 'Trykk');
+});

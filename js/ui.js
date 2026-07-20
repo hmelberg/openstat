@@ -648,14 +648,9 @@
       var wrap = _el('label', 'ui-widget ui-widget--play');
       var labelEl = _el('span', 'ui-widget-label', _labelText(spec));
       wrap.appendChild(labelEl);
-      var input = document.createElement('input');
-      input.type = 'range';
-      input.min = spec.min; input.max = spec.max; input.step = spec.step;
-      input.value = value;
+      var input = Ui.makeNode('input', { props: { type: 'range', min: spec.min, max: spec.max, step: spec.step, value: value } });
       var readout = _el('span', 'ui-widget-value', String(value));
-      var btn = _el('button', 'ui-play-btn', '▶');
-      btn.type = 'button';
-      btn.setAttribute('aria-label', 'Spill av');
+      var btn = Ui.makeNode('button', { props: { className: 'ui-play-btn', textContent: '▶', type: 'button' }, attrs: { 'aria-label': 'Spill av' } });
       var change = _wireChange(key, function () { return Number(input.value); });
 
       function stopPlay() {
@@ -717,8 +712,7 @@
 
     function _buildButton(key, cellIdx, spec) {
       var label = spec.label || (typeof t === 'function' ? t('Kjør') : 'Kjør');
-      var btn = _el('button', 'ui-widget ui-widget--button', label);
-      btn.type = 'button';
+      var btn = Ui.makeNode('button', { props: { className: 'ui-widget ui-widget--button', textContent: label, type: 'button' } });
       // Ingen debounce: et knappeklikk skal rerunne UMIDDELBART — MED
       // MINDRE en handler er bundet (widget-callable-kanalen, Task 1): da
       // fyres handleren i stedet (knapper har ingen lagret verdi, se
@@ -798,9 +792,7 @@
       } else if (newSpec.type === 'dropdown') {
         while (ctrl.input.firstChild) ctrl.input.removeChild(ctrl.input.firstChild);
         newSpec.options.forEach(function (opt) {
-          var o = document.createElement('option');
-          o.value = opt; o.textContent = opt;
-          ctrl.input.appendChild(o);
+          ctrl.input.appendChild(Ui.makeNode('option', { props: { value: opt, textContent: opt } }));
         });
       } else if (newSpec.type === 'number') {
         // N3-fiksen (final-review): min/max/step er VALGFRIE for number
