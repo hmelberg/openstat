@@ -12,6 +12,7 @@ const assert = require('node:assert');
 const path = require('path');
 
 const PF_PATH = path.join(__dirname, '..', '..', 'js', 'param-forms.js');
+const UI_PATH = path.join(__dirname, '..', '..', 'js', 'ui.js');
 
 class FakeEl {
   constructor(tag) {
@@ -93,6 +94,11 @@ function freshEnv(opts) {
   }
   delete require.cache[require.resolve(PF_PATH)];
   global.document = { createElement: (tag) => new FakeEl(tag) };
+
+  // fase 2: param-forms' byggere konstruerer nå via window.Ui.makeNode —
+  // last den EKTE js/ui.js mot samme fake-DOM (samme mønster som
+  // ui-dom.test.js), aldri en stub av kjernen.
+  require(UI_PATH);
 
   const cellEl = new FakeEl('div');
   cellEl.className = 'nb-cell';
@@ -918,4 +924,57 @@ test('_commit: bruker Cells.updateCellSource sin returnerte FERSKE kilde til å 
     [3, '# reconciled\nn = 9  #@param\nm = 42  #@param'],
     'den andre commiten splicer mot den RETURNERTE ferske kilden (med den forsonede linja intakt)'
   );
+});
+
+// ---------- fase 2 (spec 2026-07-20): pin-tester FØR Ui.makeNode-svitsjen ----
+// Disse tre pinner byggernes OBSERVERBARE DOM-form (input-type,
+// min/max/step, seedet verdi, readout-klasse, list-attributt/datalist,
+// integer-step-tvangen) MOT dagens document.createElement-baserte byggere —
+// de må stå (uendret assertions) etter Steg 4 sin ombygging til
+// global.Ui.makeNode også, som bevis på at swappen er en ren
+// konstruksjons-ombygging, ingen oppførselsendring.
+
+test('fase 2 pin: param-slider — range-input med param-form-value-readout', () => {
+  const { ParamForms, cellEl, outEl } = freshEnv();
+  const src = 'x = 4  #@param {type:"slider", min:0, max:10, step:2}';
+  ParamForms.decorate(0, cellEl, src, 'python');
+  const strip = outEl.children[0];
+  const row = strip.children[0];
+  const input = row.children[1];
+  const readout = row.children[2];
+
+  assert.strictEqual(input.type, 'range');
+  assert.strictEqual(input.min, 0);
+  assert.strictEqual(input.max, 10);
+  assert.strictEqual(input.step, 2);
+  assert.strictEqual(String(input.value), '4', 'seedet fra currentValue');
+  assert.strictEqual(readout.className, 'param-form-value');
+  assert.strictEqual(readout.textContent, '4');
+});
+
+test('fase 2 pin: param-dropdown med allowInput — text-input + datalist-extra', () => {
+  const { ParamForms, cellEl, outEl } = freshEnv();
+  const src = 'name = \'a\'  #@param ["a", "b", "c"] {allow-input:true}';
+  ParamForms.decorate(0, cellEl, src, 'python');
+  const strip = outEl.children[0];
+  const row = strip.children[0];
+  const input = row.children[1];
+  const datalist = row.children[2];
+
+  assert.strictEqual(input.type, 'text');
+  assert.strictEqual(input.getAttribute('list'), datalist.id);
+  assert.strictEqual(datalist.tag, 'datalist');
+  assert.deepStrictEqual(datalist.children.map((o) => o.value), ['a', 'b', 'c'],
+    'options i samme rekkefølge som kildens array-literal');
+});
+
+test('fase 2 pin: param-number integer — step tvunget til 1', () => {
+  const { ParamForms, cellEl, outEl } = freshEnv();
+  const src = 'n = 5  #@param {type:"integer"}';
+  ParamForms.decorate(0, cellEl, src, 'python');
+  const strip = outEl.children[0];
+  const input = strip.children[0].children[1];
+
+  assert.strictEqual(input.type, 'number');
+  assert.strictEqual(input.step, 1, 'integer tvinger step til 1 uansett meta.step');
 });

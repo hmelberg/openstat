@@ -480,11 +480,14 @@
     var _forms = {};      // cellIdx -> { cellEl, lang, source, entries, builtEntries, strip, controls }
     var _runTimers = {};  // "cellIdx:lineIdx" -> debounce-timer-håndtak (run:auto slider)
 
+    // fase 2 (spec 2026-07-20): all konstruksjon via Ui.makeNode (js/ui.js
+    // lastes FØR denne filen, index.html:583-584) — W4-duplikatet ("B2
+    // dedup") er dermed pensjonert.
     function _el(tag, cls, text) {
-      var n = document.createElement(tag);
-      if (cls) n.className = cls;
-      if (text != null) n.textContent = text;
-      return n;
+      var props = {};
+      if (cls) props.className = cls;
+      if (text != null) props.textContent = text;
+      return global.Ui.makeNode(tag, { props: props });
     }
 
     function _sliderMeta(entry) {
@@ -503,9 +506,7 @@
     // (datalist for dropdown+allow-input).
 
     function _buildText(cellIdx, entry, value, lang) {
-      var input = document.createElement('input');
-      input.type = 'text';
-      input.value = value == null ? '' : String(value);
+      var input = global.Ui.makeNode('input', { props: { type: 'text', value: value == null ? '' : String(value) } });
       input.addEventListener('change', function () { _commit(cellIdx, entry, input.value, lang); });
       return { input: input };
     }
@@ -517,10 +518,9 @@
     // streng) — kontrollen her gjør derfor ingen sanering utover det
     // tekstfeltet i seg selv naturlig gir.
     function _buildRaw(cellIdx, entry, value, lang) {
-      var input = document.createElement('input');
-      input.type = 'text';
-      input.className = 'param-form-raw';
-      input.value = value == null ? '' : String(value);
+      var input = global.Ui.makeNode('input', { props: {
+        type: 'text', className: 'param-form-raw', value: value == null ? '' : String(value)
+      } });
       input.addEventListener('change', function () { _commit(cellIdx, entry, input.value, lang); });
       return { input: input };
     }
@@ -529,26 +529,24 @@
       var meta = entry.meta;
       var options = meta.options || [];
       if (meta.allowInput) {
-        var input = document.createElement('input');
-        input.type = 'text';
-        input.value = value == null ? '' : String(value);
         var listId = 'param-form-list-' + cellIdx + '-' + entry.lineIdx;
-        input.setAttribute('list', listId);
-        var datalist = document.createElement('datalist');
-        datalist.id = listId;
+        // 'list' er attributt-ONLY i ekte DOM (input.list er en skrivebeskyttet
+        // IDL-egenskap) — må derfor gå via attrs, ALDRI props (props-veien ville
+        // stille mislykkes/warne i en ekte nettleser, se Ui.makeNode/_applyOneElProp).
+        var input = global.Ui.makeNode('input', {
+          props: { type: 'text', value: value == null ? '' : String(value) },
+          attrs: { list: listId }
+        });
+        var datalist = global.Ui.makeNode('datalist', { props: { id: listId } });
         options.forEach(function (opt) {
-          var o = document.createElement('option');
-          o.value = opt;
-          datalist.appendChild(o);
+          datalist.appendChild(global.Ui.makeNode('option', { props: { value: opt } }));
         });
         input.addEventListener('change', function () { _commit(cellIdx, entry, input.value, lang); });
         return { input: input, extra: datalist };
       }
-      var select = document.createElement('select');
+      var select = global.Ui.makeNode('select');
       options.forEach(function (opt) {
-        var o = document.createElement('option');
-        o.value = opt; o.textContent = opt;
-        select.appendChild(o);
+        select.appendChild(global.Ui.makeNode('option', { props: { value: opt, textContent: opt } }));
       });
       select.value = value;
       select.addEventListener('change', function () { _commit(cellIdx, entry, select.value, lang); });
@@ -556,39 +554,31 @@
     }
 
     function _buildCheckbox(cellIdx, entry, value, lang) {
-      var input = document.createElement('input');
-      input.type = 'checkbox';
-      input.checked = !!value;
+      var input = global.Ui.makeNode('input', { props: { type: 'checkbox', checked: !!value } });
       input.addEventListener('change', function () { _commit(cellIdx, entry, input.checked, lang); });
       return { input: input };
     }
 
     function _buildNumber(cellIdx, entry, value, lang) {
-      var input = document.createElement('input');
-      input.type = 'number';
-      if (entry.meta.type === 'integer') input.step = 1;
-      else if (entry.meta.step !== undefined) input.step = entry.meta.step;
-      if (entry.meta.min !== undefined) input.min = entry.meta.min;
-      if (entry.meta.max !== undefined) input.max = entry.meta.max;
-      input.value = value;
+      var nprops = { type: 'number', value: value };
+      if (entry.meta.type === 'integer') nprops.step = 1;
+      else if (entry.meta.step !== undefined) nprops.step = entry.meta.step;
+      if (entry.meta.min !== undefined) nprops.min = entry.meta.min;
+      if (entry.meta.max !== undefined) nprops.max = entry.meta.max;
+      var input = global.Ui.makeNode('input', { props: nprops });
       input.addEventListener('change', function () { _commit(cellIdx, entry, input.value, lang); });
       return { input: input };
     }
 
     function _buildDate(cellIdx, entry, value, lang) {
-      var input = document.createElement('input');
-      input.type = 'date';
-      input.value = value == null ? '' : String(value);
+      var input = global.Ui.makeNode('input', { props: { type: 'date', value: value == null ? '' : String(value) } });
       input.addEventListener('change', function () { _commit(cellIdx, entry, input.value, lang); });
       return { input: input };
     }
 
     function _buildSlider(cellIdx, entry, value, lang) {
       var range = _sliderMeta(entry);
-      var input = document.createElement('input');
-      input.type = 'range';
-      input.min = range.min; input.max = range.max; input.step = range.step;
-      input.value = value;
+      var input = global.Ui.makeNode('input', { props: { type: 'range', min: range.min, max: range.max, step: range.step, value: value } });
       var readout = _el('span', 'param-form-value', String(value));
       // 'input' (ikke 'change'): live oppdatering av readout OG av kilden
       // mens brukeren drar — run:auto sin faktiske kjøring debounces separat
