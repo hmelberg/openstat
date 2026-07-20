@@ -1925,6 +1925,26 @@
     }
 
     /**
+     * Ui.makeNode(tag, opts) → rå DOM-node eller null — den DELTE
+     * konstruksjonskjernen (fase 2, spec 2026-07-20): samme props/attrs/
+     * style-applisering som elCreate (_applyElProps), men tar et EKTE
+     * objekt (aldri JSON), registrerer INGENTING i _els (ingen livssyklus,
+     * ingen kjørekontekst) og er ment for JS-interne kallere — kontroll-
+     * byggerne her og i js/param-forms.js. elCreate er nå sugar over den.
+     */
+    Ui.makeNode = function (tag, opts) {
+      var node;
+      try {
+        node = document.createElement(tag);
+      } catch (e) {
+        console.warn('Ui.makeNode: klarte ikke å opprette <' + tag + '>: ' + ((e && e.message) || e));
+        return null;
+      }
+      if (opts) _applyElProps(node, opts);
+      return node;
+    };
+
+    /**
      * Ui.elCreate(tag, propsJson) → elId (streng, "el<n>") eller null ved
      * ugyldig tag/JSON. Oppretter en EKTE DOM-node (document.createElement)
      * og registrerer den under en fersk, monotont voksende id — python-
@@ -1936,14 +1956,8 @@
         try { opts = JSON.parse(propsJson); }
         catch (e) { console.warn('Ui.elCreate: ugyldig JSON-props: ' + ((e && e.message) || e)); }
       }
-      var node;
-      try {
-        node = document.createElement(tag);
-      } catch (e) {
-        console.warn('Ui.elCreate: klarte ikke å opprette <' + tag + '>: ' + ((e && e.message) || e));
-        return null;
-      }
-      if (opts) _applyElProps(node, opts);
+      var node = Ui.makeNode(tag, opts);
+      if (!node) return null;
       var id = 'el' + (_elCounter++);
       // Task 1 (revidert): cellIdx løses via SAMME mekanisme som
       // _registerInto sine kallere bruker (_resolveCellIdx — elOn/elShow sin

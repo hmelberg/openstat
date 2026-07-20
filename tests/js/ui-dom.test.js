@@ -38,6 +38,11 @@ class FakeEl {
     // rått tilbake).
     this.style = {};
   }
+  // fase 2 (spec 2026-07-20): ekte DOM sin tagName er alltid store bokstaver
+  // for HTML-elementer — speiler det her (avledet av this.tag, ingen egen
+  // tilstand) slik at Ui.makeNode-testens `.tagName.toLowerCase()`-sjekk
+  // stemmer med et ekte nettlesermiljø.
+  get tagName() { return String(this.tag).toUpperCase(); }
   // Task 1: real-DOM sin isConnected — "er denne noden (transitivt) en del
   // av det som vises akkurat nå". Stubben har ingen ekte `document`-node å
   // teste mot, så et enkelt __docRoot-flagg (satt på et lite knippe
@@ -2993,4 +2998,33 @@ test('Task 3 review-fiks: re-registrert MENS den spiller, max 2→10 → avanser
   assert.strictEqual(Number(input.value), 3, 'tick 3: 2 → 3 — forbi den GAMLE grensen (2), beviser levende spec brukes');
   assert.strictEqual(btn.textContent, '⏸', 'fortsatt spiller — ikke stoppet ved den gamle max');
   btn.dispatchEvent({ type: 'click' }); // pause, rydd opp
+});
+
+// ---- fase 2 (spec 2026-07-20): Ui.makeNode — delt konstruksjonskjerne ----
+
+test('fase 2: makeNode — rå node med props/attrs/style, INGEN _els-registrering', () => {
+  const { Ui } = freshEnv();
+  const before = Ui.elCreate('div'); // registrerer én — måler tellerens ståsted
+  const node = Ui.makeNode('input', {
+    props: { type: 'range', min: 0, max: 10, value: 5 },
+    attrs: { role: 'switch' },
+    style: { color: 'red' }
+  });
+  assert.ok(node, 'makeNode returnerer en node');
+  assert.strictEqual(node.type, 'range');
+  assert.strictEqual(node.min, 0);
+  assert.strictEqual(node.max, 10);
+  assert.strictEqual(node.value, 5);
+  assert.strictEqual(node.getAttribute('role'), 'switch');
+  const after = Ui.elCreate('div');
+  // elId-telleren har KUN rykket ett hakk (de to elCreate-kallene) — makeNode
+  // registrerte ingenting i _els.
+  assert.strictEqual(Number(after.slice(2)) - Number(before.slice(2)), 1);
+});
+
+test('fase 2: makeNode — opts utelatt gir naken node; ugyldig tag gir null', () => {
+  const { Ui } = freshEnv();
+  const bare = Ui.makeNode('span');
+  assert.ok(bare);
+  assert.strictEqual(bare.tagName.toLowerCase(), 'span');
 });
