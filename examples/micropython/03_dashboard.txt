@@ -1,53 +1,53 @@
 #options.mode = micropython
-# label: Dashboard — salg
-#options.title = "Salgs-dashboard (celle/ui-modellen)"
-#options.description = "KPI-fliser i en cols=2-celle, to plott-kort med hver sin kontroll — ingen eksterne data"
+# label: Dashboard — sales
+#options.title = "Sales dashboard (cell/ui model)"
+#options.description = "KPI tiles in a cols=2 cell, two plot cards each with its own control — no external data"
 
 #%% md
-## Salg 2026
+## Sales 2026
 
-Samme salgstall som dash-demoen, nå som `#%%`-celler: KPI-flisene ligger i
-én `cols=2`-celle (`ui.kpi` + `show(...)` for å montere begge kortene i
-samme celle), og de to kurve-kortene under har HVER SIN region-/
-kumulativt-kontroll — `rerun="self"` (standarden) betyr at hvert kort
-kjører seg selv på nytt når egen kontroll endres, akkurat som
-`d.add(kurve, region=..., kumulativ=...)` ga hvert dash-kort sin egen
-widget-stripe.
+The same sales figures as the dash demo, now as `#%%` cells: the KPI
+tiles sit in a single `cols=2` cell (`ui.kpi` + `show(...)` to mount
+both cards in the same cell), and the two curve cards below each have
+THEIR OWN region/cumulative control — `rerun="self"` (the default) means
+each card reruns itself when its own control changes, just as
+`d.add(curve, region=..., cumulative=...)` gave each dash card its own
+widget strip.
 
 #%% micropython
 import plotly_express_mpy as pe
 
-mnd = ["jan", "feb", "mar", "apr", "mai", "jun"]
-salg = {"Nord": [120, 135, 150, 160, 172, 190],
-        "Soer": [200, 210, 190, 240, 260, 255]}
+months = ["jan", "feb", "mar", "apr", "may", "jun"]
+sales = {"North": [120, 135, 150, 160, 172, 190],
+         "South": [200, 210, 190, 240, 260, 255]}
 
-def kurve(region, kumulativ, tittel):
-    verdier = salg[region]
-    if kumulativ:
-        ut = []
-        s = 0
-        for v in verdier:
-            s += v
-            ut.append(s)
-        verdier = ut
-    return pe.line(x=mnd, y=verdier, title=tittel)
+def curve(region, cumulative, title):
+    values = sales[region]
+    if cumulative:
+        result = []
+        total = 0
+        for v in values:
+            total += v
+            result.append(total)
+        values = result
+    return pe.line(x=months, y=values, title=title)
 
 #%% micropython id=kpi cols=2
 import ui
 
-show(ui.kpi(sum(salg["Nord"]) + sum(salg["Soer"]), unit="stk", label="Totalt salg"),
-     ui.kpi(max(salg["Soer"]), unit="stk", label="Beste maaned (Soer)"))
+show(ui.kpi(sum(sales["North"]) + sum(sales["South"]), unit="units", label="Total sales"),
+     ui.kpi(max(sales["South"]), unit="units", label="Best month (South)"))
 
 #%% micropython id=plot1
 import ui
 
-region = ui.dropdown(["Nord", "Soer"], label="Region", name="region1")
-kumulativ = ui.checkbox(label="Kumulativt", value=False, name="kumulativ1")
-kurve(region, kumulativ, "Utvikling")
+region = ui.dropdown(["North", "South"], label="Region", name="region1")
+cumulative = ui.checkbox(label="Cumulative", value=False, name="cumulative1")
+curve(region, cumulative, "Trend")
 
 #%% micropython id=plot2
 import ui
 
-region = ui.dropdown(["Nord", "Soer"], label="Region", name="region2")
-kumulativ = ui.checkbox(label="Kumulativt", value=False, name="kumulativ2")
-kurve(region, kumulativ, "Utvikling (kopi med egne kontroller)")
+region = ui.dropdown(["North", "South"], label="Region", name="region2")
+cumulative = ui.checkbox(label="Cumulative", value=False, name="cumulative2")
+curve(region, cumulative, "Trend (copy with its own controls)")

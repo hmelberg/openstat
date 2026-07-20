@@ -3,12 +3,12 @@
 # executor and loaded into R as data.frames before the analysis runs.
 
 # connect https://raw.githubusercontent.com/mwaskom/seaborn-data/master/penguins.csv as pen
-# load pen as pingviner
+# load pen as penguins
 
-aggregate(body_mass_g ~ island, data = pingviner, FUN = function(x) mean(x, na.rm = TRUE))
+aggregate(body_mass_g ~ island, data = penguins, FUN = function(x) mean(x, na.rm = TRUE))
 
 # ── Import + join (sources with a common key) ──
 # connect https://x.example/personer.csv as p
 # create-dataset panel, key(pid)
-# import p/inntekt, p/region into panel
-# aggregate(inntekt ~ region, data = panel, FUN = mean)
+# import p/income, p/region into panel
+# aggregate(income ~ region, data = panel, FUN = mean)

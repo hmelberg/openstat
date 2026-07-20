@@ -1,24 +1,24 @@
-// label: Statistikk — t-test, konfidensintervall, fordelinger
-// Example: simple-statistics (ss) og jStat — deskriptiv statistikk og tester
+// label: Statistics — t-test, confidence interval, distributions
+// Example: simple-statistics (ss) and jStat — descriptive statistics and tests
 # load https://raw.githubusercontent.com/hmelberg/openstat/main/data/iris.csv as iris
 
 const setosa = Array.from(iris.filter(d => d.species === "setosa").array("sepal_length"));
 const virginica = Array.from(iris.filter(d => d.species === "virginica").array("sepal_length"));
 
-// Deskriptiv statistikk (simple-statistics):
-console.log("setosa:    snitt =", ss.mean(setosa).toFixed(3),
+// Descriptive statistics (simple-statistics):
+console.log("setosa:    mean =", ss.mean(setosa).toFixed(3),
             " sd =", ss.standardDeviation(setosa).toFixed(3));
-console.log("virginica: snitt =", ss.mean(virginica).toFixed(3),
+console.log("virginica: mean =", ss.mean(virginica).toFixed(3),
             " sd =", ss.standardDeviation(virginica).toFixed(3));
 
-// t-test (to utvalg) — ss gir t-observatoren, jStat gir p-verdien:
+// t-test (two samples) — ss gives the t statistic, jStat gives the p-value:
 const t = ss.tTestTwoSample(setosa, virginica);
 const df = setosa.length + virginica.length - 2;
 const p = 2 * jStat.studentt.cdf(-Math.abs(t), df);
 console.log("t =", t.toFixed(2), " p =", p.toExponential(2));
 
-// 95 % konfidensintervall for snittet (normal-tilnærming):
+// 95% confidence interval for the mean (normal approximation):
 const se = ss.standardDeviation(setosa) / Math.sqrt(setosa.length);
 const z = jStat.normal.inv(0.975, 0, 1);
-({ snitt: ss.mean(setosa),
-   ki95: [ss.mean(setosa) - z * se, ss.mean(setosa) + z * se] })
+({ mean: ss.mean(setosa),
+   ci95: [ss.mean(setosa) - z * se, ss.mean(setosa) + z * se] })

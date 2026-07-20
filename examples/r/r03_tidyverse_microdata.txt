@@ -6,17 +6,17 @@
 #micro
 require no.ssb.fdb:54 as fd
 create-dataset folk
-import fd/BEFOLKNING_KJOENN as kjonn
-import fd/INNTEKT_WLONN 2022-01-01 as inntekt
+import fd/BEFOLKNING_KJOENN as gender
+import fd/INNTEKT_WLONN 2022-01-01 as income
 
 #r
 # use folk
 library(dplyr)
 
 folk %>%
-  group_by(kjonn) %>%
+  group_by(gender) %>%
   summarise(
-    snitt  = mean(inntekt, na.rm = TRUE),
-    median = median(inntekt, na.rm = TRUE),
-    antall = n()
+    mean_income   = mean(income, na.rm = TRUE),
+    median_income = median(income, na.rm = TRUE),
+    n             = n()
   )

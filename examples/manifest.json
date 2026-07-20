@@ -62,52 +62,52 @@
     },
     {
       "file": "brython/bry13_matplotlib.txt",
-      "label": "matplotlib — plt-API (Plotly-rendret)",
+      "label": "matplotlib — plt API (rendered as Plotly)",
       "group": null
     },
     {
       "file": "brython/bry14_scipy_stats.txt",
-      "label": "scipy.stats — tester og fordelinger",
+      "label": "scipy.stats — tests and distributions",
       "group": null
     },
     {
       "file": "brython/bry15_regresjon.txt",
-      "label": "Regresjon — smf.ols / smf.logit",
+      "label": "Regression — smf.ols / smf.logit",
       "group": null
     },
     {
       "file": "brython/bry16_numpy.txt",
-      "label": "numpy — arrays og tilfeldige tall",
+      "label": "numpy — arrays and random numbers",
       "group": null
     },
     {
       "file": "brython/bry17_dashboard_kostnad.txt",
-      "label": "Dashboard — kostnadsmodell",
+      "label": "Dashboard — cost model",
       "group": null
     },
     {
       "file": "brython/bry17_seaborn.txt",
-      "label": "seaborn — statistisk grafikk",
+      "label": "seaborn — statistical graphics",
       "group": null
     },
     {
       "file": "brython/bry18_dashboard_fordeling.txt",
-      "label": "Dashboard — fordelingsutforsker",
+      "label": "Dashboard — distribution explorer",
       "group": null
     },
     {
       "file": "brython/bry19_dashboard_regresjon.txt",
-      "label": "Dashboard — regresjon",
+      "label": "Dashboard — regression",
       "group": null
     },
     {
       "file": "brython/bry20_dashboard_rapport.txt",
-      "label": "Dashboard — rapport",
+      "label": "Dashboard — report",
       "group": null
     },
     {
       "file": "brython/bry21_duckdb.txt",
-      "label": "duckdb — SQL i Brython (.sql → .df)",
+      "label": "duckdb — SQL in Brython (.sql → .df)",
       "group": null
     },
     {
@@ -117,17 +117,17 @@
     },
     {
       "file": "brython/bry23_sklearn.txt",
-      "label": "sklearn — KMeans, PCA, regresjon",
+      "label": "sklearn — KMeans, PCA, regression",
       "group": null
     },
     {
       "file": "brython/bry24_notatbok_widgets.txt",
-      "label": "Notatbok — widgets og #@param (Brython)",
+      "label": "Notebook — widgets and #@param (Brython)",
       "group": null
     },
     {
       "file": "brython/bry25_widget_events.txt",
-      "label": "Widget-events — ui.on og ui.run_cell (Brython)",
+      "label": "Widget events — ui.on and ui.run_cell (Brython)",
       "group": null
     }
   ],
@@ -191,27 +191,27 @@
     },
     {
       "file": "javascript/js02_statistikk.txt",
-      "label": "Statistikk — t-test, konfidensintervall, fordelinger",
+      "label": "Statistics — t-test, confidence interval, distributions",
       "group": null
     },
     {
       "file": "javascript/js03_regresjon_ml.txt",
-      "label": "Regresjon og maskinlæring (ml.js)",
+      "label": "Regression and machine learning (ml.js)",
       "group": null
     },
     {
       "file": "javascript/js04_plotly_plot.txt",
-      "label": "Grafikk — Plotly og Observable Plot",
+      "label": "Graphics — Plotly and Observable Plot",
       "group": null
     },
     {
       "file": "javascript/js05_notatbok.txt",
-      "label": "Notatbok — #%%-celler med delte variabler",
+      "label": "Notebook — #%% cells with shared variables",
       "group": null
     },
     {
       "file": "javascript/js06_params.txt",
-      "label": "Parametre — //@param-skjemaer i celler",
+      "label": "Parameters — //@param forms in cells",
       "group": null
     }
   ],
@@ -700,27 +700,27 @@
     },
     {
       "file": "micropython/02_plotly.txt",
-      "label": "plotly_express_mpy — grafer",
+      "label": "plotly_express_mpy — charts",
       "group": null
     },
     {
       "file": "micropython/03_dashboard.txt",
-      "label": "Dashboard — salg",
+      "label": "Dashboard — sales",
       "group": null
     },
     {
       "file": "micropython/04_csv_url.txt",
-      "label": "Les en CSV fra en URL",
+      "label": "Read a CSV from a URL",
       "group": null
     },
     {
       "file": "micropython/05_notatbok_widgets.txt",
-      "label": "Notatbok — widgets og #@param (MicroPython)",
+      "label": "Notebook — widgets and #@param (MicroPython)",
       "group": null
     },
     {
       "file": "micropython/06_widget_events.txt",
-      "label": "Widget-events — ui.on og ui.run_cell (MicroPython)",
+      "label": "Widget events — ui.on and ui.run_cell (MicroPython)",
       "group": null
     }
   ],
@@ -767,52 +767,52 @@
     },
     {
       "file": "python/py06_dashboard.txt",
-      "label": "Dashboard — fordelingsutforsker",
+      "label": "Dashboard — distribution explorer",
       "group": null
     },
     {
       "file": "python/py_ipywidgets.txt",
-      "label": "ipywidgets — ekte Jupyter-widgets (pyodide)",
+      "label": "ipywidgets — real Jupyter widgets (pyodide)",
       "group": null
     },
     {
       "file": "python/py_notatbok_celler.txt",
-      "label": "Notatbok — celler med #%% (python + markdown)",
+      "label": "Notebook — cells with #%% (python + markdown)",
       "group": null
     },
     {
       "file": "python/py_param_forms.txt",
-      "label": "#@param-skjemaer (Colab-kompatible)",
+      "label": "#@param forms (Colab-compatible)",
       "group": null
     },
     {
       "file": "python/py_plain_widgets.txt",
-      "label": "Widgets i rent skript — pull, rerun=\"all\" og sync_to",
+      "label": "Widgets in a plain script — pull, rerun=\"all\" and sync_to",
       "group": null
     },
     {
       "file": "python/py_presentasjon.txt",
-      "label": "Notatbok — presentasjon (slides)",
+      "label": "Notebook — presentation (slides)",
       "group": null
     },
     {
       "file": "python/py_tag_direktiver.txt",
-      "label": "Notatbok — #tag-direktiver og innholds-sniffing",
+      "label": "Notebook — #tag directives and content sniffing",
       "group": null
     },
     {
       "file": "python/py_ui_html.txt",
-      "label": "ui.html — bygg sider med elementer, biblioteker og callbacks",
+      "label": "ui.html — build pages with elements, libraries, and callbacks",
       "group": null
     },
     {
       "file": "python/py_widget_events.txt",
-      "label": "Widget-events — ui.on og ui.run_cell",
+      "label": "Widget events — ui.on and ui.run_cell",
       "group": null
     },
     {
       "file": "python/py_widgets_ui.txt",
-      "label": "Widgets — ui.slider/dropdown (notatbok)",
+      "label": "Widgets — ui.slider/dropdown (notebook)",
       "group": null
     }
   ],
@@ -859,7 +859,7 @@
     },
     {
       "file": "r/r09_dashboard.txt",
-      "label": "Dashboard — fordelingsutforsker",
+      "label": "Dashboard — distribution explorer",
       "group": null
     },
     {
@@ -879,12 +879,12 @@
     },
     {
       "file": "r/rex_param_forms.txt",
-      "label": "#@param-skjemaer i R (Colab-kompatible)",
+      "label": "#@param forms in R (Colab-compatible)",
       "group": null
     },
     {
       "file": "r/rex_widgets_ui.txt",
-      "label": "Widgets — ui_slider/ui_dropdown (R-notatbok)",
+      "label": "Widgets — ui_slider/ui_dropdown (R notebook)",
       "group": null
     }
   ],

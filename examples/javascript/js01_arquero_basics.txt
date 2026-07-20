@@ -1,21 +1,21 @@
 // label: Arquero — dataframes (filter, groupby, rollup)
-// Example: Arquero-tabeller — last CSV, filtrer, grupper og aggreger
+// Example: Arquero tables — load CSV, filter, group and aggregate
 # load https://raw.githubusercontent.com/hmelberg/openstat/main/data/iris.csv as iris
 
-// Datasettet er klart som Arquero-tabell under navnet du valgte:
-console.log("rader:", iris.numRows(), "kolonner:", iris.numCols());
+// The dataset is ready as an Arquero table under the name you chose:
+console.log("rows:", iris.numRows(), "columns:", iris.numCols());
 
-// Filter + ny kolonne (derive) + gruppering + aggregering (rollup):
-const oppsummert = iris
+// Filter + new column (derive) + grouping + aggregation (rollup):
+const summary = iris
   .filter(d => d.sepal_length > 4.5)
   .derive({ ratio: d => d.petal_length / d.sepal_length })
   .groupby("species")
   .rollup({
     n: op.count(),
-    snitt_sepal: op.mean("sepal_length"),
-    snitt_ratio: op.mean("ratio"),
+    mean_sepal: op.mean("sepal_length"),
+    mean_ratio: op.mean("ratio"),
   })
-  .orderby(aq.desc("snitt_sepal"));
+  .orderby(aq.desc("mean_sepal"));
 
-// Siste uttrykk i scriptet vises automatisk — tabeller som HTML:
-oppsummert
+// The last expression in the script is displayed automatically — tables as HTML:
+summary

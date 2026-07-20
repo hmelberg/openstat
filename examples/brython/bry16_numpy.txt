@@ -1,30 +1,30 @@
-# label: numpy — arrays og tilfeldige tall
-# Example: numpy i Brython-modus — arrays, statistikk og tilfeldige tall
-# Ren-Python-subsett; samme seed gir samme tall hver gang.
+# label: numpy — arrays and random numbers
+# Example: numpy in Brython mode — arrays, statistics, and random numbers
+# Pure-Python subset; the same seed gives the same numbers every time.
 import numpy as np
 import matplotlib.pyplot as plt
 
 np.random.seed(42)
 
-# Simulert utvalg: inntekt ~ normalfordelt
-inntekt = np.random.normal(550.0, 80.0, 200)
-print("Gjennomsnitt:", round(inntekt.mean(), 1))
-print("Standardavvik:", round(inntekt.std(), 1))
-print("Median:", round(np.median(inntekt), 1))
-print("90. persentil:", round(np.percentile(inntekt, 90), 1))
+# Simulated sample: income ~ normally distributed
+income = np.random.normal(550.0, 80.0, 200)
+print("Mean:", round(income.mean(), 1))
+print("Std dev:", round(income.std(), 1))
+print("Median:", round(np.median(income), 1))
+print("90th percentile:", round(np.percentile(income, 90), 1))
 
-# Boolsk maskering: hvor mange over 600?
-hoy = inntekt[inntekt > 600.0]
-print("Andel over 600:", round(len(hoy) / len(inntekt), 3))
+# Boolean masking: how many above 600?
+high_income = income[income > 600.0]
+print("Share above 600:", round(len(high_income) / len(income), 3))
 
-plt.hist(inntekt, bins=20, color="steelblue")
-plt.title("Simulert inntektsfordeling (n=200)")
-plt.xlabel("Inntekt (1000 kr)")
+plt.hist(income, bins=20, color="steelblue")
+plt.title("Simulated income distribution (n=200)")
+plt.xlabel("Income (NOK 1,000s)")
 plt.show()
 
-# linspace + elementvis regning = glatte kurver
+# linspace + elementwise math = smooth curves
 x = np.linspace(0.0, 4.0, 60)
 y = np.exp(-x) * 100.0
 plt.plot(x, y, "b-")
-plt.title("Eksponentiell avtakning")
+plt.title("Exponential decay")
 plt.show()

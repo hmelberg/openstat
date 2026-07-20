@@ -1,18 +1,19 @@
-# label: Dashboard — rapport
+# label: Dashboard — report
 #options.mode = brython
-#options.title = "Dashboard — rapport (celle/ui-modellen)"
-#options.description = "ui.html bygger et grid-kort med KPI-er og figurer i én celle — eksplisitt layout i stedet for cols="
+#options.title = "Dashboard — report (cell/ui model)"
+#options.description = "ui.html builds a grid card with KPIs and figures in one cell — explicit layout instead of cols="
 # load https://raw.githubusercontent.com/hmelberg/safestat/master/data/iris.csv as iris
 
 #%% md
-# Iris — datarapport
+# Iris — data report
 
-Klassikeren fra 1936: 150 blomster, tre arter, fire mål. Kort-raden under er
-bygget med ETT `ui.html.div(style={"display": "grid", ...})`-kall som holder
-tre `ui.kpi(...)`-kort og to figurer (`ui.image(fig)`, som gjenkjenner en
-plotly-figur og rendrer den nativt i stedet for et bilde). Dette er
-`ui.html`-layout-idiomet — du bygger rutenettet selv i python, i stedet for
-å bruke cellens `cols=`-attributt (se bry10/bry17/bry18/bry22 for det).
+The classic from 1936: 150 flowers, three species, four measurements. The
+card row below is built with ONE `ui.html.div(style={"display": "grid",
+...})` call that holds three `ui.kpi(...)` cards and two figures
+(`ui.image(fig)`, which recognizes a plotly figure and renders it natively
+instead of as an image). This is the `ui.html` layout idiom — you build the
+grid yourself in Python, instead of using the cell's `cols=` attribute (see
+bry10/bry17/bry18/bry22 for that).
 
 #%% brython id=kort
 import ui
@@ -20,14 +21,14 @@ import pandas_brython as pd
 import plotly_express_brython as pe
 
 vc = iris["species"].value_counts()
-kake = pe.pie(values=list(vc.values), names=list(vc.index), title="Fordeling av arter")
-hist = pe.histogram(iris, x="petal_length", title="Petal-lengde")
+pie_chart = pe.pie(values=list(vc.values), names=list(vc.index), title="Distribution of species")
+hist = pe.histogram(iris, x="petal_length", title="Petal length")
 
 ui.html.div(
-    ui.kpi(len(iris), unit="stk", label="Blomster"),
-    ui.kpi(len(iris["species"].unique()), label="Arter"),
-    ui.kpi(round(iris["sepal_length"].mean(), 2), unit="cm", label="Snitt sepal-lengde"),
-    ui.image(kake),
+    ui.kpi(len(iris), unit="pcs", label="Flowers"),
+    ui.kpi(len(iris["species"].unique()), label="Species"),
+    ui.kpi(round(iris["sepal_length"].mean(), 2), unit="cm", label="Mean sepal length"),
+    ui.image(pie_chart),
     ui.image(hist),
     style={"display": "grid", "grid_template_columns": "repeat(3, 1fr)", "gap": "16px"},
 )

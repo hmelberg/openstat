@@ -5,9 +5,9 @@
 #micro
 require no.ssb.fdb:54 as fd
 create-dataset folk
-import fd/INNTEKT_WLONN 2022-01-01 as inntekt
-import fd/BEFOLKNING_KJOENN as kjonn
-import fd/BEFOLKNING_FOEDSELS_AAR_MND as fodt
+import fd/INNTEKT_WLONN 2022-01-01 as income
+import fd/BEFOLKNING_KJOENN as gender
+import fd/BEFOLKNING_FOEDSELS_AAR_MND as birth_ym
 
 #r
 # use folk
@@ -15,13 +15,13 @@ library(dplyr)
 
 folk <- folk |>
   mutate(
-    alder = 2022 - floor(fodt / 100),
-    mann  = ifelse(kjonn == 1, 1, 0)
+    age  = 2022 - floor(birth_ym / 100),
+    male = ifelse(gender == 1, 1, 0)
   )
 
 # Linear regression of income on age and sex
-lm(inntekt ~ alder + mann, data = folk)
+lm(income ~ age + male, data = folk)
 
 # Logistic regression: probability of high income
-folk <- folk |> mutate(hoyinntekt = ifelse(inntekt > 600000, 1, 0))
-glm(hoyinntekt ~ alder + mann, family = binomial(), data = folk)
+folk <- folk |> mutate(high_income = ifelse(income > 600000, 1, 0))
+glm(high_income ~ age + male, family = binomial(), data = folk)

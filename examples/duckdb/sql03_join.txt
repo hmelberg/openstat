@@ -1,24 +1,24 @@
 # label: SQL — JOIN
--- JOIN: link two tables on a common key (fnr).
+-- JOIN: link two tables on a common key (id).
 
-CREATE OR REPLACE TABLE personer AS
+CREATE OR REPLACE TABLE people AS
 SELECT * FROM (VALUES
-  (1, 'Mann',   25, 'Oslo'),
-  (2, 'Kvinne', 34, 'Bergen'),
-  (3, 'Mann',   52, 'Oslo'),
-  (4, 'Kvinne', 41, 'Trondheim')
-) AS t(fnr, kjonn, alder, kommune);
+  (1, 'Male',   25, 'Oslo'),
+  (2, 'Female', 34, 'Bergen'),
+  (3, 'Male',   52, 'Oslo'),
+  (4, 'Female', 41, 'Trondheim')
+) AS t(id, gender, age, municipality);
 
-CREATE OR REPLACE TABLE jobber AS
+CREATE OR REPLACE TABLE jobs AS
 SELECT * FROM (VALUES
-  (1, 'Lærer',      550000),
-  (2, 'Lege',       900000),
-  (3, 'Snekker',    600000),
-  (4, 'Sykepleier', 520000)
-) AS t(fnr, yrke, lonn);
+  (1, 'Teacher',   550000),
+  (2, 'Doctor',    900000),
+  (3, 'Carpenter', 600000),
+  (4, 'Nurse',     520000)
+) AS t(id, occupation, wage);
 
 -- People with occupation and wage.
-SELECT p.fnr, p.kjonn, p.alder, p.kommune, j.yrke, j.lonn
-FROM personer p
-JOIN jobber j USING (fnr)
-ORDER BY j.lonn DESC;
+SELECT p.id, p.gender, p.age, p.municipality, j.occupation, j.wage
+FROM people p
+JOIN jobs j USING (id)
+ORDER BY j.wage DESC;

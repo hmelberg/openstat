@@ -1,5 +1,5 @@
-# label: sklearn — KMeans, PCA, regresjon
-# Eksempel: maskinlæring i Brython-modus — sklearn-subsett (ren Python)
+# label: sklearn — KMeans, PCA, regression
+# Example: machine learning in Brython mode — sklearn subset (pure Python)
 # load https://raw.githubusercontent.com/hmelberg/openstat/main/data/iris.csv as iris
 import plotly_express_brython as pe
 from sklearn.cluster import KMeans
@@ -8,43 +8,43 @@ from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, confusion_matrix
 
-def str_kolonne(verdier):
-    ut = []
-    for k in verdier:
-        ut.append(str(k))
-    return ut
+def to_str_column(values):
+    out = []
+    for k in values:
+        out.append(str(k))
+    return out
 
-def kolonne(matrise, idx):
-    ut = []
-    for rad in matrise:
-        ut.append(rad[idx])
-    return ut
+def column(matrix, idx):
+    out = []
+    for row in matrix:
+        out.append(row[idx])
+    return out
 
-def merk_virginica(arter):
-    ut = []
-    for s in arter:
-        ut.append(1 if s == "virginica" else 0)
-    return ut
+def flag_virginica(species_values):
+    out = []
+    for s in species_values:
+        out.append(1 if s == "virginica" else 0)
+    return out
 
 X = iris[["sepal_length", "sepal_width", "petal_length", "petal_width"]]
 
-# KMeans: finn 3 klynger uten fasit
+# KMeans: find 3 clusters with no ground truth
 km = KMeans(n_clusters=3, random_state=1).fit(X)
-iris["klynge"] = str_kolonne(km.labels_.tolist())
-show(pe.scatter(iris, x="petal_length", y="petal_width", color="klynge",
-                title="KMeans-klynger (uten fasit)"))
+iris["cluster"] = to_str_column(km.labels_.tolist())
+show(pe.scatter(iris, x="petal_length", y="petal_width", color="cluster",
+                title="KMeans clusters (unsupervised)"))
 
-# PCA: fire mål ned til to hovedkomponenter
+# PCA: four measurements down to two principal components
 pc = PCA(n_components=2).fit_transform(X).tolist()
-iris["pc1"] = kolonne(pc, 0)
-iris["pc2"] = kolonne(pc, 1)
-show(pe.scatter(iris, x="pc1", y="pc2", color="species", title="PCA av iris"))
+iris["pc1"] = column(pc, 0)
+iris["pc2"] = column(pc, 1)
+show(pe.scatter(iris, x="pc1", y="pc2", color="species", title="PCA of iris"))
 
-# Klassifisering: er blomsten virginica?
-y = merk_virginica(iris["species"])
-X_tren, X_test, y_tren, y_test = train_test_split(X, y, test_size=0.3, random_state=1)
-modell = LogisticRegression().fit(X_tren, y_tren)
-pred = modell.predict(X_test)
-print("Treffsikkerhet:", round(accuracy_score(y_test, pred), 3))
-print("Forvirringsmatrise (rader = fasit):")
+# Classification: is the flower virginica?
+y = flag_virginica(iris["species"])
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=1)
+model = LogisticRegression().fit(X_train, y_train)
+pred = model.predict(X_test)
+print("Accuracy:", round(accuracy_score(y_test, pred), 3))
+print("Confusion matrix (rows = actual):")
 print(confusion_matrix(y_test, pred).tolist())

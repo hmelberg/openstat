@@ -1,42 +1,42 @@
-# label: Notatbok — widgets og #@param (Brython)
+# label: Notebook — widgets and #@param (Brython)
 #options.mode = brython
-#options.title = "Notatbok med widgets (Brython)"
-#options.description = "Celle-notatbok i Brython-modus: ui-widgets (pull-modellen) og #@param-skjema"
+#options.title = "Notebook with widgets (Brython)"
+#options.description = "Cell notebook in Brython mode: ui widgets (the pull model) and the #@param form"
 # load https://raw.githubusercontent.com/hmelberg/openstat/main/data/iris.csv as iris
 
 #%% md
-# Widgets i Brython-notatbok
+# Widgets in a Brython notebook
 
-Brython kjører på hovedtråden, så `ui`-modulen bruker samme pull-modell
-som python-modus: hvert `ui.*`-kall leser kontrollens gjeldende verdi, og
-endringer kjører cellen (eller en navngitt celle via `rerun=`) på nytt.
+Brython runs on the main thread, so the `ui` module uses the same pull
+model as Python mode: every `ui.*` call reads the control's current value,
+and changes rerun the cell (or a named cell via `rerun=`).
 
 #%% brython
 import ui
 
-n = ui.slider(1, 20, value=5, label="Antall rader")
-art = ui.dropdown(sorted(set(iris["species"])), label="Art")
+n = ui.slider(1, 20, value=5, label="Number of rows")
+species = ui.dropdown(sorted(set(iris["species"])), label="Species")
 
-iris[iris["species"] == art].head(n)
+iris[iris["species"] == species].head(n)
 
 #%% brython id=plot
-# Denne cellen BRUKER n/art fra cellen over (delt sesjon), men har ingen
-# egne widgets — ui.run_button-knappen under kjører den (target="plot").
+# This cell USES n/species from the cell above (shared session), but has no
+# widgets of its own — the ui.run_button below reruns it (target="plot").
 import pandas_brython as pd
 import plotly_express_brython as pe
 
-sub = iris[iris["species"] == art].head(n)
+sub = iris[iris["species"] == species].head(n)
 pe.scatter(sub, x="sepal_length", y="petal_length",
-           title="Iris — " + art + ", første " + str(n) + " rader")
+           title="Iris — " + species + ", first " + str(n) + " rows")
 
 #%% brython
 import ui
 
-ui.run_button("Oppdater", target="plot")
+ui.run_button("Update", target="plot")
 
 #%% md
-`#@param` virker også — skjemaet skriver verdien inn i kildelinjen:
+`#@param` also works — the form writes the value into the source line:
 
 #%% brython
-antall = 50 #@param {type:"slider", min:10, max:150, step:10, run:"auto"}
-len(iris.head(antall))
+count = 50 #@param {type:"slider", min:10, max:150, step:10, run:"auto"}
+len(iris.head(count))

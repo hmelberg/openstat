@@ -2,9 +2,9 @@
 -- Variable-level assembly in DuckDB mode. Two ways:
 -- (1) The shared assembly verbs (same as python/r):
 -- connect https://raw.githubusercontent.com/mwaskom/seaborn-data/master/penguins.csv as pen
--- load pen as pingviner
-SELECT island, avg(body_mass_g) AS snitt_masse
-FROM pingviner
+-- load pen as penguins
+SELECT island, avg(body_mass_g) AS mean_mass
+FROM penguins
 GROUP BY island
 ORDER BY island;
 
@@ -12,6 +12,6 @@ ORDER BY island;
 --     computed columns are expressed directly in SQL (sources are registered as views):
 -- connect https://x.example/personer.csv as p
 -- connect https://x.example/salg.csv as s
--- SELECT p.region, avg(s.belop) AS snitt_belop
+-- SELECT p.region, avg(s.amount) AS mean_amount
 -- FROM p JOIN s ON p.pid = s.pid
 -- GROUP BY p.region;

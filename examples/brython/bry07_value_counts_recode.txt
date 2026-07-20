@@ -8,15 +8,15 @@ import plotly_express_brython as pe
 show(iris["species"].value_counts())
 
 # Recode with apply — classify by sepal length:
-iris = iris.assign(storrelse=iris["sepal_length"].apply(
-    lambda x: "lang" if x >= 6.0 else "kort"))
+iris = iris.assign(size=iris["sepal_length"].apply(
+    lambda x: "long" if x >= 6.0 else "short"))
 
-show(iris["storrelse"].value_counts())
+show(iris["size"].value_counts())
 
 # Note: filter step by step (masks cannot be combined with & in Brython mode):
-lange = iris[iris["storrelse"] == "lang"]
-lange = lange[lange["species"] != "setosa"]
-show("Lange, ikke-setosa: " + str(len(lange)))
+long_ones = iris[iris["size"] == "long"]
+long_ones = long_ones[long_ones["species"] != "setosa"]
+show("Long, non-setosa: " + str(len(long_ones)))
 
-pe.histogram(iris, x="sepal_length", color="storrelse",
-             title="Sepal-lengde — kort vs lang")
+pe.histogram(iris, x="sepal_length", color="size",
+             title="Sepal length — short vs long")

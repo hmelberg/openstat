@@ -1,42 +1,42 @@
-# label: Notatbok — widgets og #@param (MicroPython)
+# label: Notebook — widgets and #@param (MicroPython)
 #options.mode = micropython
-#options.title = "Notatbok med widgets (MicroPython)"
-#options.description = "Celle-notatbok i MicroPython-modus: ui-widgets (pull-modellen) og #@param-skjema"
+#options.title = "Notebook with widgets (MicroPython)"
+#options.description = "Cell notebook in MicroPython mode: ui widgets (the pull model) and the #@param form"
 # load https://raw.githubusercontent.com/hmelberg/openstat/main/data/iris.csv as iris
 
 #%% md
-# Widgets i MicroPython-notatbok
+# Widgets in a MicroPython notebook
 
-MicroPython kjører på hovedtråden, så `ui`-modulen bruker samme pull-modell
-som python-modus: hvert `ui.*`-kall leser kontrollens gjeldende verdi, og
-endringer kjører cellen (eller en navngitt celle via `rerun=`) på nytt.
+MicroPython runs on the main thread, so the `ui` module uses the same
+pull model as python mode: each `ui.*` call reads the control's current
+value, and changes rerun the cell (or a named cell via `rerun=`).
 
 #%% micropython
 import ui
 
-n = ui.slider(1, 20, value=5, label="Antall rader")
-art = ui.dropdown(sorted(set(iris["species"])), label="Art")
+n = ui.slider(1, 20, value=5, label="Number of rows")
+species = ui.dropdown(sorted(set(iris["species"])), label="Species")
 
-iris[iris["species"] == art].head(n)
+iris[iris["species"] == species].head(n)
 
 #%% micropython id=plot
-# Denne cellen BRUKER n/art fra cellen over (delt sesjon), men har ingen
-# egne widgets — ui.run_button-knappen under kjører den (target="plot").
+# This cell USES n/species from the cell above (shared session), but has
+# no widgets of its own — the ui.run_button below runs it (target="plot").
 import pandas_mpy as pd
 import plotly_express_mpy as pe
 
-sub = iris[iris["species"] == art].head(n)
+sub = iris[iris["species"] == species].head(n)
 pe.scatter(sub, x="sepal_length", y="petal_length",
-           title="Iris — " + art + ", første " + str(n) + " rader")
+           title="Iris — " + species + ", first " + str(n) + " rows")
 
 #%% micropython
 import ui
 
-ui.run_button("Oppdater", target="plot")
+ui.run_button("Update", target="plot")
 
 #%% md
-`#@param` virker også — skjemaet skriver verdien inn i kildelinjen:
+`#@param` works too — the form writes the value into the source line:
 
 #%% micropython
-antall = 50 #@param {type:"slider", min:10, max:150, step:10, run:"auto"}
-len(iris.head(antall))
+count = 50 #@param {type:"slider", min:10, max:150, step:10, run:"auto"}
+len(iris.head(count))

@@ -1,57 +1,57 @@
-# label: ui.html — bygg sider med elementer, biblioteker og callbacks
+# label: ui.html — build pages with elements, libraries, and callbacks
 #options.mode = python
-#options.title = "ui.html — elementer og biblioteker"
-#options.description = "Bygg DOM direkte fra python: ui.html.div(...), #tag.import = shoelace → ui.sl.button, widget-callbacks uten rerun og ui.value"
+#options.title = "ui.html — elements and libraries"
+#options.description = "Build DOM directly from python: ui.html.div(...), #tag.import = shoelace → ui.sl.button, widget callbacks without rerun, and ui.value"
 #tag.import = shoelace
 
 #%% md
-# `ui.html` — HTML fra python
+# `ui.html` — HTML from python
 
-`ui.html.ELEMENT(...)` bygger ekte DOM-elementer: posisjonsargumenter er
-barn (tekst eller andre elementer), nøkkelord er attributter
-(`cls=`/`class_=`, `style=` som streng eller dict, `data_x=` → `data-x`).
-Siste uttrykk i en celle monteres i cellens slot — eller bruk
-`.show(target="en-id")` for å plassere i en html-celle.
+`ui.html.ELEMENT(...)` builds real DOM elements: positional arguments
+are children (text or other elements), keywords are attributes
+(`cls=`/`class_=`, `style=` as a string or dict, `data_x=` → `data-x`).
+The last expression in a cell is mounted in the cell's slot — or use
+`.show(target="an-id")` to place it in an html cell.
 
 #%% python
 import ui
 
-kort = ui.html.div(
-    ui.html.h3("Et kort"),
-    ui.html.p("Bygget med ", ui.html.b("ui.html"), "."),
-    cls="kort", style={"border": "1px solid #ccc", "padding": "12px", "border_radius": "8px"},
-    data_kilde="ui-html-eksempel",
+card = ui.html.div(
+    ui.html.h3("A card"),
+    ui.html.p("Built with ", ui.html.b("ui.html"), "."),
+    cls="card", style={"border": "1px solid #ccc", "padding": "12px", "border_radius": "8px"},
+    data_source="ui-html-example",
 )
-kort
+card
 
 #%% md
-`#tag.import = shoelace` i preambelen lastet Shoelace — da finnes
-`ui.sl.*` som web-komponenter:
+`#tag.import = shoelace` in the preamble loaded Shoelace — so
+`ui.sl.*` is now available as web components:
 
 #%% python
 import ui
 
-teller = {"n": 0}
-visning = ui.html.span("0", id="teller-visning")
+counter = {"n": 0}
+display = ui.html.span("0", id="counter-display")
 
-def klikk(event):
-    teller["n"] += 1
-    visning.clear()
-    visning.add(str(teller["n"]))
+def click(event):
+    counter["n"] += 1
+    display.clear()
+    display.add(str(counter["n"]))
 
-knapp = ui.sl.button("Klikk meg", variant="primary")
-knapp.on("click", klikk)
-ui.html.div(knapp, ui.html.p("Antall klikk: ", visning))
+button = ui.sl.button("Click me", variant="primary")
+button.on("click", click);
+ui.html.div(button, ui.html.p("Click count: ", display))
 
 #%% python
 import ui
 
-# Widget-callback UTEN rerun: handleren får den nye verdien direkte.
-melding = ui.html.div("Flytt slideren …")
+# Widget callback WITHOUT rerun: the handler gets the new value directly.
+message = ui.html.div("Move the slider …")
 
-def endret(v):
-    melding.clear()
-    melding.add("Verdien er nå " + str(v) + " (lest via ui.value: " + str(ui.value("s")) + ")")
+def handle_change(v):
+    message.clear()
+    message.add("The value is now " + str(v) + " (read via ui.value: " + str(ui.value("s")) + ")")
 
-ui.slider(0, 100, value=25, name="s", label="Prøv meg", on_change=endret)
-melding
+ui.slider(0, 100, value=25, name="s", label="Try me", on_change=handle_change);
+message

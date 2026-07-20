@@ -1,34 +1,36 @@
-# label: Widget-events — ui.on og ui.run_cell (MicroPython)
+# label: Widget events — ui.on and ui.run_cell (MicroPython)
 #options.mode = micropython
-#options.title = "Widget-events (ui.on / ui.run_cell) (MicroPython)"
-#options.description = "HTML-events på vilkårlige DOM-elementer: micropython-callbacks med target-rendering, og celle-kjøring fra HTML-knapper"
+#options.title = "Widget events (ui.on / ui.run_cell) (MicroPython)"
+#options.description = "HTML events on arbitrary DOM elements: micropython callbacks with target rendering, and cell execution from HTML buttons"
 # load https://raw.githubusercontent.com/hmelberg/openstat/main/data/iris.csv as iris
 
 #%% md
-# Events på HTML-elementer (MicroPython)
+# Events on HTML elements (MicroPython)
 
-`ui.on(selector, event, funksjon, target=…)` binder en micropython-funksjon
-til en HTML-event; returverdien rendres i `target`-elementet (tekst →
-`<pre>`, DataFrame → tabell, plotly-figur → graf). Utelates `target`,
-appendes resultatet i cellens egen output-slot. `ui.run_cell(selector,
-event, celle_id)` kjører i stedet en navngitt celle på nytt.
+`ui.on(selector, event, function, target=…)` binds a micropython
+function to an HTML event; the return value is rendered in the `target`
+element (text → `<pre>`, DataFrame → table, plotly figure → chart). If
+`target` is omitted, the result is appended to the cell's own output
+slot. `ui.run_cell(selector, event, cell_id)` instead reruns a named
+cell.
 
-Dette er **push-modellen**: knappen dytter en event inn i MicroPython, i
-motsetning til `ui.slider`/`ui.dropdown` som er pull (cellen leser verdien).
+This is the **push model**: the button pushes an event into MicroPython,
+unlike `ui.slider`/`ui.dropdown`, which are pull (the cell reads the
+value).
 
 #%% html
-<button id="beregnBtn">Vis rader</button>
-<button id="plotBtn">Tegn plott på nytt</button>
-<div id="resultat"></div>
+<button id="showBtn">Show rows</button>
+<button id="plotBtn">Redraw plot</button>
+<div id="result"></div>
 
 #%% micropython
 import ui
 
-def vis(evt):
+def show_rows(evt):
     return iris.head(5)
 
-ui.on("#beregnBtn", "click", vis, target="resultat")
-ui.run_cell("#plotBtn", "click", "plot")
+ui.on("#showBtn", "click", show_rows, target="result");
+ui.run_cell("#plotBtn", "click", "plot");
 
 #%% micropython id=plot
 import plotly_express_mpy as pe

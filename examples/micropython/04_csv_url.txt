@@ -1,18 +1,19 @@
 #options.mode = micropython
-# label: Les en CSV fra en URL
-# MicroPython: les en CSV fra en URL med `# load`-direktivet.
-# Fila hentes i nettleseren og bindes som en pandas_mpy-DataFrame under
-# navnet du velger — ingen DuckDB trengs for CSV (kun parquet krever det).
+# label: Read a CSV from a URL
+# MicroPython: read a CSV from a URL with the `# load` directive.
+# The file is fetched in the browser and bound as a pandas_mpy DataFrame
+# under the name you choose — no DuckDB is needed for CSV (only parquet
+# requires it).
 # load https://raw.githubusercontent.com/hmelberg/openstat/main/data/iris.csv as iris
 import pandas_mpy as pd
 import plotly_express_mpy as pe
 
-# Ramma er klar under navnet du valgte:
+# The frame is ready under the name you chose:
 show(iris.head())
 
-# En oppsummeringstabell — velg kolonner, så grupper:
+# A summary table — pick columns, then group:
 show(iris[["species", "sepal_length", "petal_length"]].groupby("species").mean())
 
-# Et interaktivt punktdiagram:
+# An interactive scatter plot:
 pe.scatter(iris, x="sepal_length", y="petal_length", color="species",
-           title="Iris — begerblad vs kronblad")
+           title="Iris — sepal vs petal")

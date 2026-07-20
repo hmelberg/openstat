@@ -1,56 +1,56 @@
-# label: Dashboard — fordelingsutforsker
+# label: Dashboard — distribution explorer
 #options.mode = brython
-#options.title = "Dashboard — fordelingsutforsker (Brython, celle/ui-modellen)"
-#options.description = "scipy.stats i et interaktivt dashboard — normalfordeling med terskel (samme oppskrift som py06/r09, Brython-dialekten)"
+#options.title = "Dashboard — distribution explorer (Brython, cell/ui model)"
+#options.description = "scipy.stats in an interactive dashboard — normal distribution with a threshold (same recipe as py06/r09, the Brython dialect)"
 
 #%% md
-# Dashboard — fordelingsutforsker
+# Dashboard — distribution explorer
 
-Normalfordelingen N(mu, sigma): flytt kontrollene under, så oppdaterer
-tetthetskurven, andelen over terskelen og 97,5 %-kvantilen seg sammen.
-`terskel` har en innebygd avspillingsknapp (`ui.play`) som stepper verdien
-automatisk. Kontrollcellen setter `on_change=["kpi", "plott"]` (en liste med
-to celle-id-er) OG `sync_to=` på hver kontroll — samme oppskrift som
-`py06_dashboard.txt`/`r09_dashboard.txt`, her i Brython-dialekten (kpi-cellen
-bruker `show(...)` i stedet for et tuppel-uttrykk, se `03_dashboard.txt` for
-hvorfor).
+The normal distribution N(mu, sigma): move the controls below and the
+density curve, the share above the threshold, and the 97.5% quantile all
+update together. `threshold` has a built-in play button (`ui.play`) that
+steps the value automatically. The control cell sets `on_change=["kpi",
+"plott"]` (a list of two cell ids) AND `sync_to=` on each control — the
+same recipe as `py06_dashboard.txt`/`r09_dashboard.txt`, here in the
+Brython dialect (the kpi cell uses `show(...)` instead of a tuple
+expression — see `03_dashboard.txt` for why).
 
 #%% brython id=kontroller
 import ui
 
-mu = ui.slider(-5, 5, value=0, step=1, label="Forventning (mu)", name="mu",
+mu = ui.slider(-5, 5, value=0, step=1, label="Mean (mu)", name="mu",
                on_change=["kpi", "plott"], sync_to="mu")
-sigma = ui.slider(1, 4, value=1, step=1, label="Standardavvik (sigma)", name="sigma",
+sigma = ui.slider(1, 4, value=1, step=1, label="Std dev (sigma)", name="sigma",
                    on_change=["kpi", "plott"], sync_to="sigma")
-terskel = ui.play(-5, 10, value=-5, step=1, label="Terskel (spill av)", name="terskel",
-                   on_change=["kpi", "plott"], sync_to="terskel")
+threshold = ui.play(-5, 10, value=-5, step=1, label="Threshold (play)", name="threshold",
+                     on_change=["kpi", "plott"], sync_to="threshold")
 
 #%% brython id=kpi cols=2
 import ui
 from scipy.stats import norm
 
-show(ui.kpi(round(100 * float(norm.sf(terskel, loc=mu, scale=sigma)), 1),
-            unit="%", label="P(X > terskel)"),
+show(ui.kpi(round(100 * float(norm.sf(threshold, loc=mu, scale=sigma)), 1),
+            unit="%", label="P(X > threshold)"),
      ui.kpi(round(float(norm.ppf(0.975, loc=mu, scale=sigma)), 2),
-            label="97,5 %-kvantilen"))
+            label="97.5% quantile"))
 
 #%% brython id=plott
 import plotly_express_brython as pe
 from scipy.stats import norm
 
-def xakse(mu, sigma):
+def x_axis(mu, sigma):
     lo, hi = mu - 4 * sigma, mu + 4 * sigma
     n = 120
     return [lo + i * (hi - lo) / n for i in range(n + 1)]
 
-def tetthet(xs, mu, sigma):
-    ut = []
+def density(xs, mu, sigma):
+    out = []
     for x in xs:
-        ut.append(float(norm.pdf(x, loc=mu, scale=sigma)))
-    return ut
+        out.append(float(norm.pdf(x, loc=mu, scale=sigma)))
+    return out
 
-xs = xakse(mu, sigma)
-ys = tetthet(xs, mu, sigma)
-fig = pe.line(x=xs, y=ys, title="Tetthet")
-fig.add_vline(x=terskel)
+xs = x_axis(mu, sigma)
+ys = density(xs, mu, sigma)
+fig = pe.line(x=xs, y=ys, title="Density")
+fig.add_vline(x=threshold);
 fig

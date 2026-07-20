@@ -1,45 +1,46 @@
-# label: Widgets — ui.slider/dropdown (notatbok)
+# label: Widgets — ui.slider/dropdown (notebook)
 #options.mode = python
 #options.title = "Widgets — ui.slider/dropdown"
-#options.description = "ui-modulen: glidebryter og nedtrekksmeny som styrer output i en notatbokcelle"
+#options.description = "the ui module: a slider and a dropdown driving output in a notebook cell"
 # load https://raw.githubusercontent.com/hmelberg/openstat/main/data/iris.csv as iris
 
 #%% md
-# Widgets med `ui`
+# Widgets with `ui`
 
-`ui`-modulen gir kontroller (glidebryter, nedtrekksmeny, knapp m.fl.) som
-lever i cellens output-slot, sammen med resultatet under. Dette er en
-**pull-modell**: verdien kontrollen har akkurat nå ligger lagret i
-nettleseren (ikke i Python), og hvert `ui.*`-kall i cellen leser den ut
-igjen. Endrer du en kontroll, kjøres cellen (eller en annen navngitt celle
-via `rerun=`) på nytt automatisk — scriptet leser da ut den nye verdien
-neste gang det kaller `ui.*`. Legg til `placement="left"` (eller
-`"top"`/`"bottom"`) på et enkelt `ui.*`-kall for å plassere akkurat den
-kontrollen i en annen stripe enn cellens standard. Trenger du én
-felles kjør-knapp i stripen, gir `ui.run_button(target=...)` deg det —
-`target="all"` (default) kjører hele dokumentet, en celle-id kjører kun
-den cellen.
+The `ui` module provides controls (slider, dropdown, button, and more)
+that live in the cell's output slot, alongside the result below. This
+is a **pull model**: the control's current value is stored in the
+browser (not in Python), and each `ui.*` call in the cell reads it back
+out. When you change a control, the cell (or another named cell via
+`rerun=`) reruns automatically — the script then reads out the new
+value the next time it calls `ui.*`. Add `placement="left"` (or
+`"top"`/`"bottom"`) to a single `ui.*` call to place that particular
+control in a different strip than the cell's default. If you need one
+shared run button in the strip, `ui.run_button(target=...)` gives you
+that — `target="all"` (default) runs the whole document, a cell id
+runs only that cell.
 
 #%% python
 import ui
 
-n = ui.slider(1, 20, value=5, label="Antall rader")
-art = ui.dropdown(sorted(iris["species"].unique()), label="Art")
+n = ui.slider(1, 20, value=5, label="Number of rows")
+species = ui.dropdown(sorted(iris["species"].unique()), label="Species")
 
-iris[iris["species"] == art].head(n)
+iris[iris["species"] == species].head(n)
 
 #%% python id=plot
-# Denne cellen BRUKER widget-verdiene (n og art fra cellen over — cellene
-# deler sesjon), men har ingen egne widgets: den oppdateres derfor ikke av
-# seg selv når du endrer kontrollene. Det er ui.run_button-knappen under
-# som kjører den på nytt (target="plot" peker på id-en i denne headeren).
+# This cell USES the widget values (n and species from the cell above —
+# cells share a session), but has no widgets of its own: it therefore
+# doesn't update by itself when you change the controls. It's the
+# ui.run_button below that reruns it (target="plot" points at the id in
+# this header).
 import plotly.express as px
 
-sub = iris[iris["species"] == art].head(n)
+sub = iris[iris["species"] == species].head(n)
 px.scatter(sub, x="sepal_length", y="petal_length",
-           title=f"Iris — {art}, første {n} rader")
+           title=f"Iris — {species}, first {n} rows")
 
 #%% python
 import ui
 
-ui.run_button("Oppdater", target="plot")
+ui.run_button("Update", target="plot")

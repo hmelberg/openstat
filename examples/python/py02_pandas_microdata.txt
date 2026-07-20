@@ -5,11 +5,11 @@
 
 #micro
 require no.ssb.fdb:54 as fd
-create-dataset folk
-import fd/BEFOLKNING_KJOENN as kjonn
-import fd/INNTEKT_WLONN 2022-01-01 as inntekt
+create-dataset people
+import fd/BEFOLKNING_KJOENN as gender
+import fd/INNTEKT_WLONN 2022-01-01 as income
 
 #python
-folk.head()
+people.head()
 
-folk.groupby("kjonn")["inntekt"].agg(["mean", "median", "count"])
+people.groupby("gender")["income"].agg(["mean", "median", "count"])

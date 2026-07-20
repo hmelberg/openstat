@@ -1,63 +1,62 @@
 # label: Dashboard — DuckDB (SQL)
 #options.mode = brython
-#options.title = "Dashboard — DuckDB (SQL) (celle/ui-modellen)"
-#options.description = "SQL-aggregering i DuckDB + interaktivt dashboard. Sporringene kjores i en egen celle (replay-trygt per celle); dropdown-valgene er forhandskjort sa kontrollcellen treffer cachen."
+#options.title = "Dashboard — DuckDB (SQL) (cell/ui model)"
+#options.description = "SQL aggregation in DuckDB + an interactive dashboard. The queries run in their own cell (replay-safe per cell); the dropdown options are pre-queried so the control cell always hits the cache."
 # load https://raw.githubusercontent.com/hmelberg/safestat/master/data/iris.csv as iris
 
 #%% md
 # Iris via DuckDB
 
-`import duckdb` lever i «data»-cellen under — hver celle har sin egen
-replay-trygge DuckDB-bro (samme mekanikk som `bry21_duckdb.txt`, bare
-per-celle i stedet for per-skript): et cache-miss kjører sporringen
-asynkront og cellen kjøres på nytt automatisk. Sporringen forhaandskjores
-for HVER dropdown-verdi her, slik at selve kontrollendringen alltid treffer
-cachen med det samme.
+`import duckdb` lives in the "data" cell below — each cell has its own
+replay-safe DuckDB bridge (the same mechanism as `bry21_duckdb.txt`, just
+per-cell instead of per-script): a cache miss runs the query asynchronously
+and the cell reruns automatically. The query is pre-run for EVERY dropdown
+value here, so the control change itself always hits the cache immediately.
 
 #%% brython id=data
 import duckdb
 import pandas_brython as pd
 
-oversikt = duckdb.sql("""
+overview = duckdb.sql("""
     SELECT species,
-           round(avg(sepal_length), 2) AS snitt_sepal,
-           round(avg(petal_length), 2) AS snitt_petal,
+           round(avg(sepal_length), 2) AS mean_sepal,
+           round(avg(petal_length), 2) AS mean_petal,
            count(*) AS n
     FROM iris
     GROUP BY species
-    ORDER BY snitt_sepal DESC
+    ORDER BY mean_sepal DESC
 """).df()
 
-ARTER = oversikt["species"].tolist()
+SPECIES = overview["species"].tolist()
 
-def bygg_detalj(arter):
+def build_detail(species_list):
     d = {}
-    for art in arter:
-        d[art] = duckdb.sql(
+    for species in species_list:
+        d[species] = duckdb.sql(
             "SELECT sepal_length, petal_length FROM iris "
-            "WHERE species = '" + art + "'").df()
+            "WHERE species = '" + species + "'").df()
     return d
 
-detalj = bygg_detalj(ARTER)
+detail = build_detail(SPECIES)
 
-totalt = int(duckdb.sql("SELECT count(*) AS n FROM iris").df()["n"][0])
+total = int(duckdb.sql("SELECT count(*) AS n FROM iris").df()["n"][0])
 
 #%% brython id=kontroller
 import ui
 
-art = ui.dropdown(ARTER, label="Art", name="art", on_change=["spred"], sync_to="art")
+species = ui.dropdown(SPECIES, label="Species", name="species", on_change=["spred"], sync_to="species")
 
 #%% brython id=kpi cols=2
 import ui
 
-show(ui.kpi(totalt, unit="stk", label="Blomster i basen"),
-     ui.kpi(len(ARTER), label="Arter"))
+show(ui.kpi(total, unit="pcs", label="Flowers in the dataset"),
+     ui.kpi(len(SPECIES), label="Species"))
 
 #%% brython id=spred
 import plotly_express_brython as pe
 
-pe.scatter(detalj[art], x="sepal_length", y="petal_length",
-           title="Sepal mot petal — " + art)
+pe.scatter(detail[species], x="sepal_length", y="petal_length",
+           title="Sepal vs petal — " + species)
 
 #%% brython id=tabell
-oversikt
+overview

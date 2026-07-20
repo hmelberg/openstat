@@ -1,14 +1,15 @@
-# label: Notatbok — celler med #%% (python + markdown)
+# label: Notebook — cells with #%% (python + markdown)
 #options.mode = python
-#options.title = "Notatbok-celler"
-#options.description = "Celler skilles med #%% — markdown, kode og attrs som hide-code"
+#options.title = "Notebook cells"
+#options.description = "Cells are separated by #%% — markdown, code, and attrs like hide-code"
 # load https://raw.githubusercontent.com/hmelberg/openstat/main/data/iris.csv as iris
 
 #%% md
-# Iris-notatbok
-Dette dokumentet er en **notatbok**: celler skilles med `#%%`.
-Kolonner-visning legger output ved siden av hver celle; Stablet under;
-Kun output viser bare resultatene. Knappen «Rå tekst» gir vanlig editor.
+# Iris notebook
+This document is a **notebook**: cells are separated by `#%%`.
+Columns view places output next to each cell; Stacked puts it below;
+Output only shows just the results. The «Raw text» button gives you the
+plain editor.
 
 #%% python
 iris.groupby("species")["sepal_length"].mean()
@@ -17,9 +18,9 @@ iris.groupby("species")["sepal_length"].mean()
 iris.describe()
 
 #%% md style=note
-Cellen over har `hide-code` — bare resultatet vises.
+The cell above has `hide-code` — only the result is shown.
 
 #%% md
-▶-knappen på hver kodecelle kjører kun den cellen; Shift+Enter kjører og
-hopper videre, Ctrl/Cmd+Enter kjører på stedet. «Restart & kjør alle»
-nullstiller sesjonen og kjører alt på nytt fra toppen.
+The ▶ button on each code cell runs only that cell; Shift+Enter runs and
+moves on, Ctrl/Cmd+Enter runs in place. «Restart & run all» resets the
+session and reruns everything from the top.

@@ -1,113 +1,115 @@
-# label: Dashboard — kostnadsmodell
+# label: Dashboard — cost model
 #options.mode = brython
-#options.title = "Dashboard — kostnadsmodell (celle/ui-modellen)"
-#options.description = "Budsjettvirkning med delte kontroller (on_change-liste til tre mål-celler) + et ui.widget(...)-håndtak som skjuler/viser en kontroll"
+#options.title = "Dashboard — cost model (cell/ui model)"
+#options.description = "Budget impact with shared controls (an on_change list to three target cells) + a ui.widget(...) handle that hides/shows a control"
 
 #%% md
-# Budsjettvirkning — nytt legemiddel
+# Budget impact — new drug
 
-Tre glidebrytere styrer tre mål-celler samtidig: `on_change=["kpi", "kurve",
-"tabell"]` (én liste, TRE mål) + `sync_to=` på hver av dem. Avkrysningsboksen
-«Avansert» bruker i stedet `ui.widget("opptak_pst")` — HÅNDTAKET til en
-allerede deklarert kontroll — og kaller `.hide()`/`.show()` på den. Det er en
-push-callback (ingen rerun): den endrer bare synligheten til
-opptak-glidebryteren, selve verdien lever videre uendret (`sync_to`) enten
-den vises eller ei.
+Three sliders drive three target cells at once: `on_change=["kpi", "kurve",
+"tabell"]` (one list, THREE targets) + `sync_to=` on each of them. The
+"Advanced" checkbox instead uses `ui.widget("uptake_pct")` — the HANDLE to
+an already-declared control — and calls `.hide()`/`.show()` on it. That's a
+push callback (no rerun): it only changes the visibility of the uptake
+slider; the value itself lives on unchanged (`sync_to`) whether it's shown
+or not.
 
 #%% brython
-AAR = [1, 2, 3, 4, 5]
+YEARS = [1, 2, 3, 4, 5]
 
-def kohort(pris, pasienter, opptak_pst):
-    """Enkel opptakskurve: andelen naas gradvis over tre aar."""
-    rader = []
-    for t in AAR:
-        n = round(pasienter * min(1.0, (opptak_pst / 100) * t / 3))
-        rader.append({"aar": t, "pasienter": n, "mill_kr": round(n * pris / 1e6, 2)})
-    return rader
+def cohort(price, patients, uptake_pct):
+    """Simple uptake curve: the share is reached gradually over three years."""
+    rows = []
+    for t in YEARS:
+        n = round(patients * min(1.0, (uptake_pct / 100) * t / 3))
+        rows.append({"year": t, "patients": n, "mill_nok": round(n * price / 1e6, 2)})
+    return rows
 
-def kumulativ(rader):
-    """Lokal funksjonsscope med vilje (unngaar lekkasje av løkkevariabelen
-    til sesjonsglobalene - se total_kostnad() under for detaljene rundt
-    HVORFOR: exit gate-funn 2026-07-18, browser-verifisert)."""
-    kum, s = [], 0.0
-    for rad in rader:
-        s += rad["mill_kr"]
-        kum.append(round(s, 2))
-    return kum
+def cumulative(rows):
+    """Deliberately local function scope (avoids leaking the loop variable
+    into the session globals — see total_cost() below for the WHY details:
+    exit-gate finding 2026-07-18, browser-verified)."""
+    cum, s = [], 0.0
+    for row in rows:
+        s += row["mill_nok"]
+        cum.append(round(s, 2))
+    return cum
 
-def total_kostnad(rader):
-    """Sum av mill_kr over en radliste. EN EKTE FUNKSJON med vilje - IKKE
-    en bar generator-/comprehension-uttrykk direkte på celletoppnivå.
-    Exit gate-funn (2026-07-18): en bar generator-uttrykk på celletoppnivå
-    (f.eks. `sum(rad["mill_kr"] for rad in rader)` rett i en celle) kan
-    lekke løkkevariabelen `rad` inn i _shared_vars via en Brython 3.12
-    dict-felle (samme felle som brython_runner.py sin _reset()/_rollback()
-    dokumenterer) - browser-verifisert: dette utløste _reset()s
-    "kunne ikke tilbakestille ... rad"-varsel etter en «Kjør»/dokumentbytte,
-    og korrumperte tidligere HELE sesjonen for RESTEN av nettleserøkta
-    (bry17->bry18->bry19-kjeden rendret bry19 blankt). En vanlig def-
-    funksjon har derimot en EKTE, isolert Python-funksjonsscope (som
-    kohort()/kumulativ() over, aldri observert å lekke) - løkkevariabelen
-    kan aldri nå _shared_vars uansett Brython-versjon eller dict-implementasjon."""
-    tot = 0.0
-    for rad in rader:
-        tot += rad["mill_kr"]
-    return tot
+def total_cost(rows):
+    """Sum of mill_nok over a list of rows. A REAL FUNCTION on purpose — NOT
+    a bare generator/comprehension expression directly at cell top level.
+    Exit-gate finding (2026-07-18): a bare generator expression at cell top
+    level (e.g. `sum(row["mill_nok"] for row in rows)` right in a cell) can
+    leak the loop variable `row` into _shared_vars via a Brython 3.12 dict
+    trap (the same trap that brython_runner.py's _reset()/_rollback()
+    documents) — browser-verified: this triggered _reset()'s "could not
+    reset ... row" warning after a Run/document switch, and corrupted the
+    ENTIRE prior session for the REST of the browser session (the
+    bry17->bry18->bry19 chain rendered bry19 blank). A regular def function,
+    however, has a REAL, isolated Python function scope (like
+    cohort()/cumulative() above, never observed to leak) — the loop variable
+    can never reach _shared_vars regardless of Brython version or dict
+    implementation."""
+    total = 0.0
+    for row in rows:
+        total += row["mill_nok"]
+    return total
 
-def kolonne(rader, felt):
-    """Plukk ut én kolonne fra radlisten (samme funksjonsscope-begrunnelse
-    som total_kostnad() over) - brukt av tabell-cellen i stedet for en
-    bar list comprehension direkte på celletoppnivå."""
-    ut = []
-    for rad in rader:
-        ut.append(rad[felt])
-    return ut
+def column(rows, field):
+    """Pick out a single column from the row list (same function-scope
+    rationale as total_cost() above) — used by the table cell instead of a
+    bare list comprehension directly at cell top level."""
+    out = []
+    for row in rows:
+        out.append(row[field])
+    return out
 
-# Referanse: totalkostnad ved 50 % opptak (i stedet for default 10 %) - et
-# naturlig "hva om opptaket blir stort"-anker. Delta-pilen (ned = bra) viser
-# om dagens innstilling er billigere eller dyrere enn det.
-REF_TOTAL = round(total_kostnad(kohort(5000, 200, 50)), 1)
+# Reference: total cost at 50% uptake (instead of the 10% default) — a
+# natural "what if uptake turns out large" anchor. The delta arrow (down =
+# good) shows whether the current setting is cheaper or more expensive than
+# that.
+REF_TOTAL = round(total_cost(cohort(5000, 200, 50)), 1)
 
 #%% brython id=kontroller
 import ui
 
-pris = ui.slider(5000, 50000, value=5000, step=5000, label="Pris per pasient (kr)",
-                  name="pris", on_change=["kpi", "kurve", "tabell"], sync_to="pris")
-pasienter = ui.slider(200, 2000, value=200, step=200, label="Aktuelle pasienter",
-                       name="pasienter", on_change=["kpi", "kurve", "tabell"], sync_to="pasienter")
-opptak_pst = ui.slider(10, 90, value=10, step=10, label="Opptak (%)",
-                        name="opptak_pst", on_change=["kpi", "kurve", "tabell"], sync_to="opptak_pst")
+price = ui.slider(5000, 50000, value=5000, step=5000, label="Price per patient (NOK)",
+                   name="price", on_change=["kpi", "kurve", "tabell"], sync_to="price")
+patients = ui.slider(200, 2000, value=200, step=200, label="Eligible patients",
+                      name="patients", on_change=["kpi", "kurve", "tabell"], sync_to="patients")
+uptake_pct = ui.slider(10, 90, value=10, step=10, label="Uptake (%)",
+                        name="uptake_pct", on_change=["kpi", "kurve", "tabell"], sync_to="uptake_pct")
 
-def _veksle_avansert(vis):
-    w = ui.widget("opptak_pst")
+def _toggle_advanced(visible):
+    w = ui.widget("uptake_pct")
     if w is None:
         return
-    if vis:
+    if visible:
         w.show()
     else:
         w.hide()
 
-avansert = ui.checkbox(label="Avansert (vis opptaksrate)", value=True, name="avansert",
-                        on_change=_veksle_avansert)
+advanced = ui.checkbox(label="Advanced (show uptake rate)", value=True, name="advanced",
+                        on_change=_toggle_advanced)
 
 #%% brython id=kpi cols=2
 import ui
 
-rader = kohort(pris, pasienter, opptak_pst)
-show(ui.kpi(round(total_kostnad(rader), 1), unit="mill. kr",
-            label="Totalkostnad 5 aar", fmt=",.1f", ref=REF_TOTAL, bra="ned"),
-     ui.kpi(rader[-1]["pasienter"], unit="stk", label="Pasienter i aar 5"))
+rows = cohort(price, patients, uptake_pct)
+show(ui.kpi(round(total_cost(rows), 1), unit="mill. NOK",
+            label="Total cost, 5 years", fmt=",.1f", ref=REF_TOTAL, bra="ned"),
+     ui.kpi(rows[-1]["patients"], unit="pcs", label="Patients in year 5"))
 
 #%% brython id=kurve
 import plotly_express_brython as pe
 
-pe.line(x=AAR, y=kumulativ(kohort(pris, pasienter, opptak_pst)),
-        title="Kumulativ kostnad (mill. kr)")
+pe.line(x=YEARS, y=cumulative(cohort(price, patients, uptake_pct)),
+        title="Cumulative cost (mill. NOK)")
 
 #%% brython id=tabell
 import pandas_brython as pd
 
-rader = kohort(pris, pasienter, opptak_pst)
-pd.DataFrame({"Aar": AAR,
-              "Pasienter": kolonne(rader, "pasienter"),
-              "Mill. kr": kolonne(rader, "mill_kr")})
+rows = cohort(price, patients, uptake_pct)
+pd.DataFrame({"Year": YEARS,
+              "Patients": column(rows, "patients"),
+              "Mill. NOK": column(rows, "mill_nok")})

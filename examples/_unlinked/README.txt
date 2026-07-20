@@ -1,26 +1,26 @@
-Eksempelskript for Microdata
-===========================
-Kommentarer i microdata bruker // (ikke #).
+Example scripts for Microdata
+==============================
+Comments in microdata use // (not #).
 
-Disse .txt-filene kan lastes inn i Microdata script runner (Hamburger-meny → Last inn script, eller dra-fra-eksempler hvis tilgjengelig).
+These .txt files can be loaded into the Microdata script runner (Hamburger menu → Load script, or drag-and-drop examples if available).
 
 01_beskrivende_statistikk.txt
-  Opprett datasett, importer variabler (kjønn, inntekt, kommune), summarize med og uten gini/iqr og if-betingelse.
+  Create dataset, import variables (gender, income, municipality), summarize with and without gini/iqr and an if condition.
 
 02_tabeller_og_kategorier.txt
-  define-labels, assign-labels, list-labels, tabulate (frekvens, radprosent, top n), aggregate + tabulate med summarize.
+  define-labels, assign-labels, list-labels, tabulate (frequency, row percent, top n), aggregate + tabulate with summarize.
 
 03_visualiseringer.txt
-  barchart, histogram, boxplot (med over()), scatter, piechart, hexbin. Bruker kodelister for lesbare etiketter.
+  barchart, histogram, boxplot (with over()), scatter, piechart, hexbin. Uses code lists for readable labels.
 
 04_aggregat_og_generate.txt
-  generate (nye variabler), sample, aggregate (mean/count by kommune), collapse (aggregering til høyere nivå).
+  generate (new variables), sample, aggregate (mean/count by municipality), collapse (aggregation to a higher level).
 
 05_regresjon.txt
-  ci (konfidensintervall), correlate (med sig), regress (OLS), regress-predict med predicted(pred).
+  ci (confidence interval), correlate (with sig), regress (OLS), regress-predict with predicted(pred).
 
 06_avansert_analyse.txt
   normaltest, anova, import-panel, summarize-panel, tabulate-panel, transitions-panel.
 
-Variabler brukt: fd/BEFOLKNING_KJOENN (kjonn), fd/INNTEKT_WLONN (inntekt), fd/BOSATT_KOMMUNE (kommune).
-For panel: tidspunkter 2010-01-01, 2011-01-01, 2012-01-01.
+Variables used: fd/BEFOLKNING_KJOENN (gender), fd/INNTEKT_WLONN (income), fd/BOSATT_KOMMUNE (municipality).
+For panel: time points 2010-01-01, 2011-01-01, 2012-01-01.

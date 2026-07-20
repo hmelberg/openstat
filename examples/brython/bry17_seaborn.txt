@@ -1,32 +1,32 @@
-# label: seaborn — statistisk grafikk
-# Example: seaborn i Brython-modus — statistisk grafikk på én linje
-# sns-funksjonene tegner i samme figur som plt, akkurat som ekte seaborn.
+# label: seaborn — statistical graphics
+# Example: seaborn in Brython mode — statistical graphics in one line
+# The sns functions draw on the same figure as plt, just like real seaborn.
 import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
 
 np.random.seed(7)
 data = {
-    "inntekt": np.random.normal(550.0, 80.0, 120).tolist(),
-    "alder":   np.random.uniform(25.0, 60.0, 120).tolist(),
-    "region":  (["Nord", "Sor", "Ost"] * 40),
+    "income": np.random.normal(550.0, 80.0, 120).tolist(),
+    "age":    np.random.uniform(25.0, 60.0, 120).tolist(),
+    "region": (["North", "South", "East"] * 40),
 }
 
-# Histogram med fargegrupper:
-sns.histplot(data=data, x="inntekt", hue="region", bins=15)
-plt.title("Inntektsfordeling per region")
+# Histogram with color groups:
+sns.histplot(data=data, x="income", hue="region", bins=15)
+plt.title("Income distribution per region")
 plt.show()
 
-# Gjennomsnitt med usikkerhet (som seaborn: mean + CI):
-sns.barplot(data=data, x="region", y="inntekt")
-plt.title("Gjennomsnittsinntekt per region")
+# Mean with uncertainty (as in seaborn: mean + CI):
+sns.barplot(data=data, x="region", y="income")
+plt.title("Mean income per region")
 plt.show()
 
-# Spredning med regresjonslinje:
-sns.regplot(data=data, x="alder", y="inntekt")
-plt.title("Inntekt mot alder (OLS-linje)")
+# Scatter with a regression line:
+sns.regplot(data=data, x="age", y="income")
+plt.title("Income vs age (OLS line)")
 plt.show()
 
-# Fordeling per gruppe:
-sns.boxplot(data=data, x="region", y="inntekt")
+# Distribution per group:
+sns.boxplot(data=data, x="region", y="income")
 plt.show()

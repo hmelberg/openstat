@@ -5,11 +5,11 @@
 
 #micro
 require no.ssb.fdb:54 as fd
-create-dataset folk
-import fd/BEFOLKNING_KJOENN as kjonn
-import fd/INNTEKT_WLONN 2022-01-01 as inntekt
+create-dataset people
+import fd/BEFOLKNING_KJOENN as gender
+import fd/INNTEKT_WLONN 2022-01-01 as income
 
 #stata
-generate loginnt = log(inntekt)
-egen meaninnt = mean(inntekt)
-summarize loginnt meaninnt
+generate log_income = log(income)
+egen mean_income = mean(income)
+summarize log_income mean_income

@@ -5,12 +5,12 @@
 #micro
 require no.ssb.fdb:54 as fd
 create-dataset reg
-import fd/BEFOLKNING_KJOENN as kjonn
-import fd/INNTEKT_WLONN 2022-01-01 as inntekt
+import fd/BEFOLKNING_KJOENN as gender
+import fd/INNTEKT_WLONN 2022-01-01 as income
 
 #python
 import statsmodels.formula.api as smf
 
-reg["inntekt_tusen"] = reg["inntekt"] / 1000
-modell = smf.ols("inntekt_tusen ~ C(kjonn)", data=reg).fit()
-modell.summary()
+reg["income_thousand"] = reg["income"] / 1000
+model = smf.ols("income_thousand ~ C(gender)", data=reg).fit()
+model.summary()

@@ -1,16 +1,16 @@
-// label: Grafikk — Plotly og Observable Plot
-// Example: interaktiv Plotly-figur og deklarativ Observable Plot-grafikk
+// label: Graphics — Plotly and Observable Plot
+// Example: interactive Plotly figure and declarative Observable Plot graphics
 # load https://raw.githubusercontent.com/hmelberg/openstat/main/data/penguins.csv as penguins
 
-// Plotly: et {data, layout}-objekt som siste uttrykk blir en interaktiv figur.
-const arter = ["Adelie", "Chinstrap", "Gentoo"];
-const snitt = arter.map(a =>
+// Plotly: a {data, layout} object as the last expression becomes an interactive figure.
+const speciesList = ["Adelie", "Chinstrap", "Gentoo"];
+const meanWeights = speciesList.map(a =>
   ss.mean(Array.from(penguins.filter(aq.escape(d => d.species === a && d.body_mass_g != null))
                              .array("body_mass_g"))));
-console.log("snittvekt (g):", Object.fromEntries(arter.map((a, i) => [a, Math.round(snitt[i])])));
+console.log("mean weight (g):", Object.fromEntries(speciesList.map((a, i) => [a, Math.round(meanWeights[i])])));
 
-// Observable Plot: returnerer en SVG-node — vises direkte i output.
-// (Bytt ut med Plotly-objektet nederst for en interaktiv variant.)
+// Observable Plot: returns an SVG node — shown directly in the output.
+// (Swap in the Plotly object below for an interactive version.)
 Plot.dot(penguins.objects(), {
   x: "flipper_length_mm",
   y: "body_mass_g",

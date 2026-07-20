@@ -5,15 +5,15 @@ import pandas_brython as pd
 import plotly_express_brython as pe
 
 df = pd.DataFrame({
-    "aar":     [2020, 2021, 2022, 2023, 2020, 2021, 2022, 2023],
-    "region":  ["Nord", "Nord", "Nord", "Nord", "Sor", "Sor", "Sor", "Sor"],
-    "antall":  [120, 135, 150, 162, 210, 205, 230, 244],
+    "year":    [2020, 2021, 2022, 2023, 2020, 2021, 2022, 2023],
+    "region":  ["North", "North", "North", "North", "South", "South", "South", "South"],
+    "count":   [120, 135, 150, 162, 210, 205, 230, 244],
 })
 
 # show() renders each chart in turn:
-show(pe.bar(df, x="aar", y="antall", color="region", title="Antall per år og region"))
-show(pe.line(df, x="aar", y="antall", color="region", title="Utvikling over tid"))
-show(pe.box(df, x="region", y="antall", title="Fordeling per region"))
+show(pe.bar(df, x="year", y="count", color="region", title="Count per year and region"))
+show(pe.line(df, x="year", y="count", color="region", title="Trend over time"))
+show(pe.box(df, x="region", y="count", title="Distribution per region"))
 
 # A bare expression on its own line is displayed automatically:
-pe.pie(df, names="region", values="antall", title="Andel per region")
+pe.pie(df, names="region", values="count", title="Share per region")

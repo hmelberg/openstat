@@ -1,44 +1,44 @@
-# label: #@param-skjemaer i R (Colab-kompatible)
+# label: #@param forms in R (Colab-compatible)
 #options.mode = r
-#options.title = "#@param-skjemaer (R)"
-#options.description = "Colab-stil #@param-kommentarer i R-celler: skjemaet skriver verdien inn i kildelinjen og kjører cellen på nytt"
+#options.title = "#@param forms (R)"
+#options.description = "Colab-style #@param comments in R cells: the form writes the value straight into the source line and reruns the cell"
 # load https://raw.githubusercontent.com/hmelberg/openstat/main/data/iris.csv as iris
 
 #%% md
-# `#@param`-skjemaer i R
+# `#@param` forms in R
 
-En `#@param`-kommentar bak en tilordning gjør linjen til et skjemafelt:
-skjemaet **skriver den nye verdien rett inn i kildelinjen** (sjekk gjerne
-via «Rå tekst») og kjører cellen på nytt når metaen har `run:"auto"` — uten
-`run:"auto"` markeres cellen som endret (stale), og du kjører den selv med ▶.
-Begge tilordningsoperatorene virker (`<-` og `=`), og R-litteraler skrives
-riktig (`TRUE`/`FALSE`, tall uten anførselstegn). Notebooks laget i Google
-Colab med `#@param` virker dermed også her.
-
-#%% r
-antall <- 50 #@param {type:"slider", min:10, max:150, step:10, run:"auto"}
-utvalg <- iris[seq_len(antall), ]
-paste("Utvalg:", nrow(utvalg), "rader — snitt sepal_length:",
-      round(mean(utvalg$sepal_length), 2))
+A `#@param` comment after an assignment turns the line into a form field:
+the form **writes the new value straight into the source line** (check via
+"Raw text" if you like) and reruns the cell when the meta has `run:"auto"`
+— without `run:"auto"` the cell is marked as changed (stale), and you run it
+yourself with ▶. Both assignment operators work (`<-` and `=`), and R
+literals are written correctly (`TRUE`/`FALSE`, numbers without quotes).
+Notebooks made in Google Colab with `#@param` therefore also work here.
 
 #%% r
-# Uten run:"auto": endringen skrives i teksten og cellen blir stale — kjør selv.
-farge <- 'steelblue' #@param ["steelblue", "firebrick", "seagreen"]
-vis_rutenett <- TRUE #@param {type:"boolean"}
+n <- 50 #@param {type:"slider", min:10, max:150, step:10, run:"auto"}
+sample_rows <- iris[seq_len(n), ]
+paste("Sample:", nrow(sample_rows), "rows — mean sepal_length:",
+      round(mean(sample_rows$sepal_length), 2))
+
+#%% r
+# Without run:"auto": the change is written into the text and the cell goes stale — run it yourself.
+color <- 'steelblue' #@param ["steelblue", "firebrick", "seagreen"]
+show_grid <- TRUE #@param {type:"boolean"}
 {
-  plot(utvalg$sepal_length, utvalg$petal_length,
-       col = farge, pch = 19,
-       main = paste("Iris — første", antall, "rader"),
+  plot(sample_rows$sepal_length, sample_rows$petal_length,
+       col = color, pch = 19,
+       main = paste("Iris — first", n, "rows"),
        xlab = "sepal_length", ylab = "petal_length")
-  if (vis_rutenett) grid()
+  if (show_grid) grid()
 }
 
 #%% md
-Tips: `placement:"left"` i metaen legger akkurat det feltet i en kolonne til
-venstre for resultatet — f.eks.
-`terskel <- 5 #@param {type:"number", placement:"left"}`.
+Tip: `placement:"left"` in the meta places exactly that field in a column to
+the left of the result — e.g.
+`threshold <- 5 #@param {type:"number", placement:"left"}`.
 
-Merk: «Kjør alle» evaluerer R setning for setning — hold flertrinns plott
-(`plot()` + `grid()`/`abline()` osv.) samlet i én `{ }`-blokk, slik cellen
-over gjør, ellers feiler etterfølgende plott-setninger med «plot.new has
-not been called yet».
+Note: "Run all" evaluates R statement by statement — keep multi-step plots
+(`plot()` + `grid()`/`abline()` etc.) together in one `{ }` block, like the
+cell above does, otherwise later plot statements fail with "plot.new has
+not been called yet".

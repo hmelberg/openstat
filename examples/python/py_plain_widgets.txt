@@ -1,22 +1,22 @@
-# label: Widgets i rent skript — pull, rerun="all" og sync_to
+# label: Widgets in a plain script — pull, rerun="all" and sync_to
 #options.mode = python
-#options.title = "Widgets uten celler"
-#options.description = "ui-kontroller i et vanlig skript: verdiene leses ved neste Kjør (pull); rerun=\"all\" kjører hele skriptet på nytt ved endring; sync_to holder en variabel oppdatert uten kjøring"
+#options.title = "Widgets without cells"
+#options.description = "ui controls in a plain script: values are read on the next Run (pull); rerun=\"all\" reruns the whole script on change; sync_to keeps a variable updated without running"
 # load https://raw.githubusercontent.com/hmelberg/openstat/main/data/iris.csv as iris
 
 import ui
 
-# Kontrollene havner i en stripe øverst i output-området. Standard i rene
-# skript er rerun="none": du endrer verdiene og trykker Kjør når du vil.
-n = ui.slider(1, 50, value=10, label="Antall rader", name="n")
-art = ui.dropdown(["setosa", "versicolor", "virginica"], label="Art", name="art")
+# The controls land in a strip at the top of the output area. The default
+# in plain scripts is rerun="none": you change the values and press Run when you want.
+n = ui.slider(1, 50, value=10, label="Number of rows", name="n")
+species = ui.dropdown(["setosa", "versicolor", "virginica"], label="Species", name="species")
 
-# rerun="all": endres denne, kjøres HELE skriptet på nytt (debounced).
-vis_snitt = ui.checkbox(label="Vis gjennomsnitt", value=False, name="snitt", rerun="all")
+# rerun="all": when this changes, the WHOLE script reruns (debounced).
+show_mean = ui.checkbox(label="Show mean", value=False, name="mean", rerun="all")
 
-# sync_to: holder python-variabelen `terskel` oppdatert i sesjonen uten
-# å kjøre noe — nyttig for ui.on-handlere.
-terskel = ui.slider(0, 10, value=5, step=0.5, label="Terskel", name="t", sync_to="terskel")
+# sync_to: keeps the python variable `threshold` updated in the session
+# without running anything — useful for ui.on handlers.
+threshold = ui.slider(0, 10, value=5, step=0.5, label="Threshold", name="t", sync_to="threshold")
 
-utvalg = iris[iris["species"] == art].head(n)
-utvalg if not vis_snitt else utvalg.describe()
+selection = iris[iris["species"] == species].head(n)
+selection if not show_mean else selection.describe()

@@ -4,12 +4,12 @@
 import pandas_brython as pd
 import plotly_express_brython as pe
 
-antall = len(iris)
-snitt = round(iris["sepal_length"].mean(), 2)
-maks = iris["sepal_length"].max()
+count = len(iris)
+mean_val = round(iris["sepal_length"].mean(), 2)
+max_val = iris["sepal_length"].max()
 
-show(pe.indicator(value=antall, title="Antall blomster"))
-show(pe.indicator(value=snitt, title="Snitt sepal-lengde"))
-show(pe.indicator(value=maks, title="Lengste sepal"))
+show(pe.indicator(value=count, title="Number of flowers"))
+show(pe.indicator(value=mean_val, title="Mean sepal length"))
+show(pe.indicator(value=max_val, title="Longest sepal"))
 
-pe.pie(iris, names="species", title="Fordeling av arter")
+pe.pie(iris, names="species", title="Distribution of species")

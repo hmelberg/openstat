@@ -1,46 +1,47 @@
-# label: Dashboard — fordelingsutforsker
+# label: Dashboard — distribution explorer
 #options.mode = r
-#options.title = "Dashboard — fordelingsutforsker (R, celle/ui-modellen)"
-#options.description = "Samme dashboard som py06/bry18, i R — ingen ui_kpi()/ui_markdown() finnes i R, så «kort»-tallene er vanlig tekstoutput (cat/sprintf) i stedet"
+#options.title = "Dashboard — distribution explorer (R, cell/ui model)"
+#options.description = "Same dashboard as py06/bry18, in R — R has no ui_kpi()/ui_markdown(), so the \"card\" numbers are plain text output (cat/sprintf) instead"
 #options.show_commands = False
 
 #%% md
-# Dashboard — fordelingsutforsker (R)
+# Dashboard — distribution explorer (R)
 
-Normalfordelingen N(mu, sigma). R-fasaden har INGEN `ui_kpi()`/
-`ui_markdown()`-byggere (kun python/mpy/brython har `ui.html`-elementer å
-bygge kort av — spec §3/§6) — «KPI-kortene» under er derfor to vanlige
-tekstlinjer fra `cat()`/`sprintf()`, ikke et eget kort-vokabular. Kurven er
-et base-plott, fanget som bilde slik R-motoren alltid gjør det.
+The normal distribution N(mu, sigma). The R facade has NO `ui_kpi()`/
+`ui_markdown()` builders (only python/mpy/brython have `ui.html` elements to
+build cards from — spec §3/§6) — the "KPI cards" below are therefore two
+plain text lines from `cat()`/`sprintf()`, not a separate card vocabulary.
+The curve is a base plot, captured as an image the way the R engine always
+does it.
 
-R har per-celle output-attribusjon i «Kjør alle» (som python/brython/
-micropython): hver celles tekst og plot lander i cellens egen output-slot,
-og et målrettet on_change (her: c("stats", "plott")) rerunner KUN
-mål-cellene og erstatter deres sloter — ingen foreldede duplikater.
-on_change = "all" er fortsatt gyldig når hele dokumentet skal rekjøres.
+R has per-cell output attribution in "Run all" (like python/brython/
+micropython): each cell's text and plot land in the cell's own output slot,
+and a targeted on_change (here: c("stats", "plott")) reruns ONLY the
+target cells and replaces their slots — no stale duplicates.
+on_change = "all" is still valid when the whole document should be rerun.
 
 #%% r id=kontroller
-mu <- ui_slider(-5, 5, value = 0, step = 1, label = "Forventning (mu)",
+mu <- ui_slider(-5, 5, value = 0, step = 1, label = "Mean (mu)",
                 name = "mu", on_change = c("stats", "plott"), sync_to = "mu")
-sigma <- ui_slider(1, 4, value = 1, step = 1, label = "Standardavvik (sigma)",
+sigma <- ui_slider(1, 4, value = 1, step = 1, label = "Standard deviation (sigma)",
                    name = "sigma", on_change = "all", sync_to = "sigma")
-terskel <- ui_play(-5, 10, value = -5, step = 1, label = "Terskel (spill av)",
-                   name = "terskel", on_change = "all", sync_to = "terskel")
+threshold <- ui_play(-5, 10, value = -5, step = 1, label = "Threshold (play)",
+                   name = "threshold", on_change = "all", sync_to = "threshold")
 
 #%% r id=stats
-# Ingen ui_kpi()/ui_markdown() i R (spec §3/§6) — to tekstlinjer i stedet
-# for kort.
-cat(sprintf("P(X > terskel): %.1f %%\n",
-            100 * pnorm(terskel, mean = mu, sd = sigma, lower.tail = FALSE)))
-cat(sprintf("97,5%%-kvantilen: %.2f\n", qnorm(0.975, mean = mu, sd = sigma)))
+# No ui_kpi()/ui_markdown() in R (spec §3/§6) — two text lines instead
+# of cards.
+cat(sprintf("P(X > threshold): %.1f %%\n",
+            100 * pnorm(threshold, mean = mu, sd = sigma, lower.tail = FALSE)))
+cat(sprintf("97.5%% quantile: %.2f\n", qnorm(0.975, mean = mu, sd = sigma)))
 
 #%% r id=plott
-# «Kjør alle» evaluerer setning for setning — plot() + abline() må derfor
-# stå samlet i én { }-blokk, ellers feiler abline() med «plot.new has not
-# been called yet» (samme fallgruve som rex_param_forms.txt sitt tips).
+# "Run all" evaluates statement by statement — plot() + abline() must
+# therefore be kept together in one { } block, otherwise abline() fails with
+# "plot.new has not been called yet" (the same pitfall as rex_param_forms.txt's tip).
 xs <- seq(mu - 4 * sigma, mu + 4 * sigma, length.out = 121)
 {
   plot(xs, dnorm(xs, mean = mu, sd = sigma), type = "l",
-       xlab = "", ylab = "", main = "Tetthet")
-  abline(v = terskel, col = "red")
+       xlab = "", ylab = "", main = "Density")
+  abline(v = threshold, col = "red")
 }

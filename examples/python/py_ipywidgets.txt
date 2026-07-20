@@ -1,84 +1,84 @@
-# label: ipywidgets — ekte Jupyter-widgets (pyodide)
+# label: ipywidgets — real Jupyter widgets (pyodide)
 #options.mode = python
-#options.title = "ipywidgets — ekte Jupyter-widgets"
-#options.description = "Ekte ipywidgets (samme protokoll som i Jupyter/Colab) via en lat, pinnet bro"
+#options.title = "ipywidgets — real Jupyter widgets"
+#options.description = "Real ipywidgets (same protocol as in Jupyter/Colab) via a lazy, pinned bridge"
 
 #%% md
-# ipywidgets — ekte Jupyter-widgets
+# ipywidgets — real Jupyter widgets
 
-`ui`-modulen (se eksempelet «Widgets — ui.slider/dropdown») er en enkel
-**pull**-modell som lever i nettleseren. Denne notatboken viser i stedet
-**broen** til ekte `ipywidgets` — samme bibliotek (og samme
-comm-protokoll) som i ordentlig Jupyter eller Google Colab. Kontrollene
-lever nå som ekte Python-objekter i kjernen (traitlets), og verdier
-synkroniseres BEGGE veier mellom nettleser og Python — ikke bare lest ut
-igjen ved neste kjøring.
+The `ui` module (see the example «Widgets — ui.slider/dropdown») is a
+simple **pull** model that lives in the browser. This notebook instead
+shows the **bridge** to real `ipywidgets` — the same library (and the
+same comm protocol) as in genuine Jupyter or Google Colab. The controls
+now live as real Python objects in the kernel (traitlets), and values
+sync in BOTH directions between browser and Python — not just read back
+on the next run.
 
-Første gang et dokument kjører `import ipywidgets`, installerer pyodide
-en pinnet pakkesett (ipywidgets + IPython m.fl., **~10 MB**) og laster en
-pinnet frontend-bunt — dette skjer kun én gang per sesjon (og kun for
-dokumenter som faktisk importerer `ipywidgets`; et vanlig script uten
-denne importen laster ingenting ekstra).
+The first time a document runs `import ipywidgets`, pyodide installs a
+pinned package set (ipywidgets + IPython and others, **~10 MB**) and
+loads a pinned frontend bundle — this happens only once per session (and
+only for documents that actually import `ipywidgets`; a plain script
+without that import loads nothing extra).
 
-**v1-omfang:** standardkontroller (slider, dropdown, ...), `observe` og
-verdisynk begge veier, visning i cellens output. **Ikke støttet ennå:**
-`interact()` og `Output`-widgeten (planlagt senere) — så `observe`-
-callbacker under kjører UTENFOR en fanget celle: `print(...)` inni en
-callback havner i nettleserens konsoll, ikke i cellens output.
+**v1 scope:** standard controls (slider, dropdown, ...), `observe` and
+two-way value sync, display in the cell's output. **Not supported yet:**
+`interact()` and the `Output` widget (planned later) — so `observe`
+callbacks below run OUTSIDE a captured cell: `print(...)` inside a
+callback ends up in the browser console, not in the cell's output.
 
 #%% python
 import ipywidgets as w
 
-n = w.IntSlider(value=5, min=0, max=20, description="Antall")
+n = w.IntSlider(value=5, min=0, max=20, description="Count")
 n
 
 #%% python
-andel = w.FloatSlider(value=2.5, min=0, max=10, step=0.1, description="Andel")
-andel
+share = w.FloatSlider(value=2.5, min=0, max=10, step=0.1, description="Share")
+share
 
 #%% python
-art = w.Dropdown(
+species = w.Dropdown(
     options=["setosa", "versicolor", "virginica"],
-    description="Art",
+    description="Species",
 )
-art
+species
 
 #%% md
-### `observe` — Python reagerer på endringer i sanntid
+### `observe` — Python reacts to changes in real time
 
-`observe` registrerer en callback som kjører i Python HVER gang
-kontrollen over (`n`) endrer verdi i nettleseren — ingen celle kjøres på
-nytt. Callbacken under oppdaterer en `Label`s tekst; siden `Label`-en
-allerede er vist (cellen har kjørt), oppdateres den synlige teksten
-LIVE når du drar i sliderene over.
+`observe` registers a callback that runs in Python EVERY time the
+control above (`n`) changes value in the browser — no cell is rerun.
+The callback below updates a `Label`'s text; since the `Label` is
+already displayed (the cell has run), the visible text updates LIVE as
+you drag the sliders above.
 
 #%% python
-status = w.Label(value=f"Antall er nå: {n.value}")
+status = w.Label(value=f"Count is now: {n.value}")
 
-def _vis_antall(change):
-    status.value = f"Antall er nå: {change['new']}"
-    print("observe-callback kjørte:", change["new"])  # havner i konsollen (v1)
+def _show_count(change):
+    status.value = f"Count is now: {change['new']}"
+    print("observe callback ran:", change["new"])  # ends up in the console (v1)
 
-n.observe(_vis_antall, names="value")
+n.observe(_show_count, names="value");
 status
 
 #%% md
-### Python leser kontrollens verdi (kernel-sync)
+### Python reads the control's value (kernel sync)
 
-Kontrollens verdi lever i Python-objektet `n` — å lese `n.value` gir
-akkurat den verdien slideren viser akkurat nå (dra i den over, kjør
-cellen under på nytt, og se den følge med).
+The control's value lives in the Python object `n` — reading `n.value`
+gives exactly the value the slider shows right now (drag it above,
+rerun the cell below, and watch it follow along).
 
 #%% python
 n.value
 
 #%% md
-### Ett steg: opprett, endre, vis
+### One step: create, change, display
 
-En vanlig idiom: opprett en kontroll, endre den med det samme, og vis
-den — alt i samme celle. Broen bufrer eventuelle endringer som kommer
-inn før frontend-registreringen er ferdig, slik at rekkefølgen alltid
-blir riktig: slideren under skal vise **2**, ikke startverdien 5.
+A common idiom: create a control, change it right away, and display it
+— all in the same cell. The bridge buffers any changes that arrive
+before the frontend registration finishes, so the order is always
+correct: the slider below should show **2**, not the initial value 5.
 
 #%% python
 s = w.IntSlider(5)

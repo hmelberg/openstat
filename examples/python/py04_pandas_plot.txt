@@ -4,22 +4,22 @@
 
 #micro
 require no.ssb.fdb:54 as fd
-create-dataset plottdata
-import fd/BEFOLKNING_KJOENN as kjonn
-import fd/INNTEKT_WLONN 2022-01-01 as inntekt
+create-dataset plot_data
+import fd/BEFOLKNING_KJOENN as gender
+import fd/INNTEKT_WLONN 2022-01-01 as income
 
 #python
 import matplotlib.pyplot as plt
 
-plottdata["inntekt_tusen"] = plottdata["inntekt"] / 1000
+plot_data["income_thousand"] = plot_data["income"] / 1000
 
-plottdata["inntekt_tusen"].plot.hist(bins=30, edgecolor="white")
-plt.xlabel("Inntekt (tusen kr)")
-plt.title("Fordeling av lønnsinntekt")
+plot_data["income_thousand"].plot.hist(bins=30, edgecolor="white")
+plt.xlabel("Income (thousand kr)")
+plt.title("Distribution of wage income")
 plt.show()
 
-plottdata.boxplot(column="inntekt_tusen", by="kjonn")
+plot_data.boxplot(column="income_thousand", by="gender")
 plt.suptitle("")
-plt.title("Lønnsinntekt etter kjønn")
-plt.ylabel("Inntekt (tusen kr)")
+plt.title("Wage income by gender")
+plt.ylabel("Income (thousand kr)")
 plt.show()

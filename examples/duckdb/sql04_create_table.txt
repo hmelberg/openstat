@@ -3,18 +3,18 @@
 -- but appears in the data overview and can be used from the other modes
 -- (microdata, Python, R, jamovi).
 
-CREATE OR REPLACE TABLE personer AS
+CREATE OR REPLACE TABLE people AS
 SELECT * FROM (VALUES
-  (1, 'Mann',   25, 450000),
-  (2, 'Kvinne', 34, 620000),
-  (3, 'Mann',   52, 810000),
-  (4, 'Kvinne', 41, 530000),
-  (5, 'Mann',   19, 210000),
-  (6, 'Kvinne', 67, 390000)
-) AS t(fnr, kjonn, alder, inntekt);
+  (1, 'Male',   25, 450000),
+  (2, 'Female', 34, 620000),
+  (3, 'Male',   52, 810000),
+  (4, 'Female', 41, 530000),
+  (5, 'Male',   19, 210000),
+  (6, 'Female', 67, 390000)
+) AS t(id, gender, age, income);
 
--- Create a new dataset 'hoytlonnede' with only those who earn a lot.
-CREATE OR REPLACE TABLE hoytlonnede AS
-SELECT fnr, kjonn, alder, inntekt
-FROM personer
-WHERE inntekt >= 600000;
+-- Create a new dataset 'high_earners' with only those who earn a lot.
+CREATE OR REPLACE TABLE high_earners AS
+SELECT id, gender, age, income
+FROM people
+WHERE income >= 600000;

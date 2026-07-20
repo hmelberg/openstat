@@ -1,27 +1,27 @@
-// label: Notatbok — #%%-celler med delte variabler
-// Example: notatbokdokument i JavaScript-modus — celler, markdown og økt-persistens
+// label: Notebook — #%% cells with shared variables
+// Example: notebook document in JavaScript mode — cells, markdown and session persistence
 # load https://raw.githubusercontent.com/hmelberg/openstat/main/data/iris.csv as iris
 #%% md
-# Iris-analyse i JavaScript
+# Iris analysis in JavaScript
 
-Variabler definert i én celle er tilgjengelige i de neste —
-kjør cellene enkeltvis (▶) eller alle med **Kjør**.
+Variables defined in one cell are available in the next ones —
+run the cells one at a time (▶) or all of them with **Run**.
 #%%
-const terskel = 5.0;
-const store = iris.filter(aq.escape(d => d.sepal_length > terskel));
-console.log(store.numRows() + " av " + iris.numRows() + " rader over terskelen");
+const threshold = 5.0;
+const filtered = iris.filter(aq.escape(d => d.sepal_length > threshold));
+console.log(filtered.numRows() + " of " + iris.numRows() + " rows above the threshold");
 #%%
-// Bygger videre på `store` fra forrige celle:
-store
+// Builds on `filtered` from the previous cell:
+filtered
   .groupby("species")
-  .rollup({ n: op.count(), snitt: op.mean("petal_length") })
+  .rollup({ n: op.count(), mean: op.mean("petal_length") })
 #%%
-// Siste celle: Plotly-figur av det filtrerte utvalget
+// Last cell: Plotly figure of the filtered subset
 ({ data: [{
-    x: Array.from(store.array("sepal_length")),
-    y: Array.from(store.array("petal_length")),
+    x: Array.from(filtered.array("sepal_length")),
+    y: Array.from(filtered.array("petal_length")),
     mode: "markers", type: "scatter",
-    text: Array.from(store.array("species")),
+    text: Array.from(filtered.array("species")),
   }],
-  layout: { title: "Iris (sepal_length > " + terskel + ")",
+  layout: { title: "Iris (sepal_length > " + threshold + ")",
             xaxis: { title: "sepal_length" }, yaxis: { title: "petal_length" } } })

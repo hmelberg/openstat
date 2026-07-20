@@ -7,7 +7,7 @@ import pandas_brython as pd
 import plotly_express_brython as pe
 
 # Both frames are ready:
-show("iris: " + str(len(iris)) + " rader, penguins: " + str(len(penguins)) + " rader")
+show("iris: " + str(len(iris)) + " rows, penguins: " + str(len(penguins)) + " rows")
 
 show(iris[["species", "sepal_length"]].groupby("species").mean())
 

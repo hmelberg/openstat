@@ -19,9 +19,9 @@ for r in records:
     if r["value"] is not None and r["country"]["value"] not in latest:
         latest[r["country"]["value"]] = round(r["value"], 1)
 
-life = pd.DataFrame({"land": list(latest.keys()),
-                     "forventet_levealder": list(latest.values())})
+life = pd.DataFrame({"country": list(latest.keys()),
+                     "life_expectancy": list(latest.values())})
 show(life)
 
-pe.bar(life, x="land", y="forventet_levealder",
-       title="Forventet levealder — siste år (Verdensbanken)")
+pe.bar(life, x="country", y="life_expectancy",
+       title="Life expectancy — latest year (World Bank)")

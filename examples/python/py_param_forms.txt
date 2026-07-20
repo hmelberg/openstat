@@ -1,54 +1,56 @@
-# label: #@param-skjemaer (Colab-kompatible)
+# label: #@param forms (Colab-compatible)
 #options.mode = python
-#options.title = "#@param-skjemaer (Colab-kompatible)"
-#options.description = "Colab-stil kommentar-skjemaer: #@param bygger en kontroll over cellen og skriver verdien rett inn i kildeteksten"
+#options.title = "#@param forms (Colab-compatible)"
+#options.description = "Colab-style comment forms: #@param builds a control above the cell and writes the value straight into the source text"
 # load https://raw.githubusercontent.com/hmelberg/openstat/main/data/iris.csv as iris
 
 #%% md
-# #@param-skjemaer
+# #@param forms
 
-Notatbøker fra Google Colab som bruker `#@param`-kommentaren, virker
-**direkte** her — ingen konvertering nødvendig. En linje som
+Notebooks from Google Colab that use the `#@param` comment work
+**directly** here — no conversion needed. A line like
 
 ```python
 n = 5  #@param {type:"slider", min:0, max:20}
 ```
 
-får en kontroll tegnet over cellen; endrer du kontrollen, skrives den nye
-verdien rett inn i **selve kildeteksten** (sjekk «Rå tekst» — det er
-alltid teksten, ikke en skjult tilstand, som er sannheten).
+gets a control drawn above the cell; change the control, and the new
+value is written straight into **the source text itself** (check
+«Raw text» — it's always the text, not hidden state, that is the
+source of truth).
 
-**`run:"auto"` vs. manuell:** legger du til `run:"auto"` i
-metadata-objektet, kjøres cellen på nytt automatisk hver gang kontrollen
-endres. Uten `run:"auto"` skrives kun teksten inn, og cellen får den
-vanlige "endret, ikke kjørt"-markeringen (stale-tint) inntil du trykker
-▶ selv.
+**`run:"auto"` vs. manual:** add `run:"auto"` to the metadata object,
+and the cell reruns automatically every time the control changes.
+Without `run:"auto"`, only the text is written, and the cell gets the
+usual "changed, not run" marker (stale tint) until you press ▶
+yourself.
 
-`#@title` og `#@markdown` (Colabs celle-tittel/tekst-kommentarer) er
-**ikke støttet ennå** — kommer i en senere runde.
+`#@title` and `#@markdown` (Colab's cell-title/text comments) are
+**not supported yet** — coming in a later round.
 
-Legg til `placement:"left"` (eller `"top"`/`"bottom"`) i metadata-objektet
-for å plassere akkurat den kontrollen i en annen stripe enn cellens standard.
+Add `placement:"left"` (or `"top"`/`"bottom"`) to the metadata object
+to place that particular control in a different strip than the cell's
+default.
 
-**R støttes også:** `x <- 3  #@param {type:"slider", min:0, max:10}` —
-parseren kjenner igjen både `=` og R sin `<-` som tildelingsoperator.
+**R is also supported:** `x <- 3  #@param {type:"slider", min:0, max:10}`
+— the parser recognizes both `=` and R's `<-` as assignment operators.
 
 #%% python
 n = 5  #@param {type:"slider", min:0, max:20, step:1, run:"auto"}
 iris.head(n)
 
 #%% python
-art = 'setosa'  #@param ["setosa", "versicolor", "virginica"]
-iris[iris["species"] == art]
+species = 'setosa'  #@param ["setosa", "versicolor", "virginica"]
+iris[iris["species"] == species]
 
 #%% python
-alle_kolonner = True  #@param {type:"boolean"}
-iris if alle_kolonner else iris[["sepal_length", "petal_length", "species"]]
+all_columns = True  #@param {type:"boolean"}
+iris if all_columns else iris[["sepal_length", "petal_length", "species"]]
 
 #%% python
-farge = 'blå'  #@param ["blå", "rød", "grønn"] {allow-input:true}
-f"Favorittfarge: {farge}"
+color = 'blue'  #@param ["blue", "red", "green"] {allow-input:true}
+f"Favorite color: {color}"
 
 #%% python
-dato = '2026-07-15'  #@param {type:"date"}
-f"Valgt dato: {dato}"
+date = '2026-07-15'  #@param {type:"date"}
+f"Selected date: {date}"

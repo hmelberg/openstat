@@ -2,14 +2,14 @@
 * Example: Stata – linear regression (OLS)
 * The first block imports variables via microdata.
 * The second block runs a simple OLS regression of income on sex.
-* Read the coefficient for kjonn: positive means higher income for the group.
+* Read the coefficient for gender: positive means higher income for the group.
 
 #micro
 require no.ssb.fdb:54 as fd
-create-dataset folk
-import fd/BEFOLKNING_KJOENN as kjonn
-import fd/INNTEKT_WLONN 2022-01-01 as inntekt
+create-dataset people
+import fd/BEFOLKNING_KJOENN as gender
+import fd/INNTEKT_WLONN 2022-01-01 as income
 
 #stata
-summarize inntekt
-regress inntekt kjonn
+summarize income
+regress income gender

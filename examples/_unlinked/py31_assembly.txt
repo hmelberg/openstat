@@ -4,18 +4,18 @@
 
 # connect https://raw.githubusercontent.com/mwaskom/seaborn-data/master/penguins.csv as pen
 
-# create-dataset studie, key(rowid)
+# create-dataset study, key(rowid)
 # The sources here have no common key, so the example below uses penguins
 # directly as a whole table:
-# load pen as pingviner
+# load pen as penguins
 
-pingviner.groupby("island")["body_mass_g"].mean()
+penguins.groupby("island")["body_mass_g"].mean()
 
 # ── Pattern with import + join (requires sources with a common key column) ──
-# connect https://x.example/personer.csv as p      # columns: pid, inntekt, region
-# connect https://x.example/salg.csv as s          # columns: pid, belop
+# connect https://x.example/personer.csv as p      # columns: pid, income, region
+# connect https://x.example/salg.csv as s          # columns: pid, amount
 # create-dataset panel, key(pid)
-# import p/inntekt, p/region into panel
-# load s as salg
-# join salg into panel on pid                       # left-join (default); inner/outer optional
-# panel.groupby("region")["inntekt"].mean()
+# import p/income, p/region into panel
+# load s as sales
+# join sales into panel on pid                       # left-join (default); inner/outer optional
+# panel.groupby("region")["income"].mean()

@@ -1,50 +1,50 @@
-# label: Dashboard — fordelingsutforsker
+# label: Dashboard — distribution explorer
 #options.mode = python
-#options.title = "Dashboard — fordelingsutforsker (pyodide)"
-#options.description = "scipy.stats i et interaktivt dashboard — normalfordeling med terskel (celle/ui-modellen)"
+#options.title = "Dashboard — distribution explorer (pyodide)"
+#options.description = "scipy.stats in an interactive dashboard — normal distribution with a threshold (cell/ui model)"
 
 #%% md
-# Dashboard — fordelingsutforsker
+# Dashboard — distribution explorer
 
-Normalfordelingen N(mu, sigma): flytt kontrollene under, så oppdaterer
-tetthetskurven, andelen over terskelen og 97,5 %-kvantilen seg sammen.
-`terskel` har en innebygd avspillingsknapp (`ui.play`) som stepper
-verdien automatisk. Kontrollcellen setter `on_change=["kpi", "plott"]`
-(en liste med to celle-id-er) OG `sync_to=` på hver kontroll: `sync_to`
-holder mu/sigma/terskel oppdatert i sesjonen med det samme, uten at selve
-kontrollcellen kjøres på nytt — det er kpi- og plott-cellene som skal
-kjøres, ikke kontrollcellen.
+The normal distribution N(mu, sigma): move the controls below, and the
+density curve, the share above the threshold, and the 97.5% quantile
+update together. `threshold` has a built-in play button (`ui.play`)
+that steps the value automatically. The controls cell sets
+`on_change=["kpi", "plot"]` (a list of two cell ids) AND `sync_to=` on
+each control: `sync_to` keeps mu/sigma/threshold updated in the session
+right away, without the controls cell itself rerunning — it's the kpi
+and plot cells that should run, not the controls cell.
 
-#%% python id=kontroller
+#%% python id=controls
 import ui
 
-mu = ui.slider(-5, 5, value=0, step=1, label="Forventning (mu)", name="mu",
-               on_change=["kpi", "plott"], sync_to="mu")
-sigma = ui.slider(1, 4, value=1, step=1, label="Standardavvik (sigma)", name="sigma",
-                   on_change=["kpi", "plott"], sync_to="sigma")
-terskel = ui.play(-5, 10, value=-5, step=1, label="Terskel (spill av)", name="terskel",
-                   on_change=["kpi", "plott"], sync_to="terskel")
+mu = ui.slider(-5, 5, value=0, step=1, label="Mean (mu)", name="mu",
+               on_change=["kpi", "plot"], sync_to="mu")
+sigma = ui.slider(1, 4, value=1, step=1, label="Standard deviation (sigma)", name="sigma",
+                   on_change=["kpi", "plot"], sync_to="sigma")
+threshold = ui.play(-5, 10, value=-5, step=1, label="Threshold (play)", name="threshold",
+                     on_change=["kpi", "plot"], sync_to="threshold")
 
 #%% python id=kpi cols=2
 import ui
 from scipy.stats import norm
 
-(ui.kpi(round(100 * float(norm.sf(terskel, loc=mu, scale=sigma)), 1),
-        unit="%", label="P(X > terskel)"),
+(ui.kpi(round(100 * float(norm.sf(threshold, loc=mu, scale=sigma)), 1),
+        unit="%", label="P(X > threshold)"),
  ui.kpi(round(float(norm.ppf(0.975, loc=mu, scale=sigma)), 2),
-        label="97,5 %-kvantilen"))
+        label="97.5% quantile"))
 
-#%% python id=plott
+#%% python id=plot
 import plotly.express as px
 from scipy.stats import norm
 
-def xakse(mu, sigma):
+def x_axis(mu, sigma):
     lo, hi = mu - 4 * sigma, mu + 4 * sigma
     n = 120
     return [lo + i * (hi - lo) / n for i in range(n + 1)]
 
-xs = xakse(mu, sigma)
+xs = x_axis(mu, sigma)
 ys = [float(norm.pdf(x, loc=mu, scale=sigma)) for x in xs]
-fig = px.line(x=xs, y=ys, title="Tetthet")
-fig.add_vline(x=terskel)
+fig = px.line(x=xs, y=ys, title="Density")
+fig.add_vline(x=threshold);
 fig

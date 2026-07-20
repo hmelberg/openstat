@@ -1,25 +1,25 @@
 # label: SQL — CTE + window function
 -- CTE (WITH) + window function: rank within a group without collapsing the rows.
 
-CREATE OR REPLACE TABLE personer AS
+CREATE OR REPLACE TABLE people AS
 SELECT * FROM (VALUES
-  (1, 'Mann',   25, 450000),
-  (2, 'Kvinne', 34, 620000),
-  (3, 'Mann',   52, 810000),
-  (4, 'Kvinne', 41, 530000),
-  (5, 'Mann',   19, 210000),
-  (6, 'Kvinne', 67, 390000),
-  (7, 'Mann',   45, 720000),
-  (8, 'Kvinne', 29, 480000)
-) AS t(fnr, kjonn, alder, inntekt);
+  (1, 'Male',   25, 450000),
+  (2, 'Female', 34, 620000),
+  (3, 'Male',   52, 810000),
+  (4, 'Female', 41, 530000),
+  (5, 'Male',   19, 210000),
+  (6, 'Female', 67, 390000),
+  (7, 'Male',   45, 720000),
+  (8, 'Female', 29, 480000)
+) AS t(id, gender, age, income);
 
 -- Top 2 incomes within each sex.
-WITH rangert AS (
-  SELECT fnr, kjonn, inntekt,
-         row_number() OVER (PARTITION BY kjonn ORDER BY inntekt DESC) AS rang
-  FROM personer
+WITH ranked AS (
+  SELECT id, gender, income,
+         row_number() OVER (PARTITION BY gender ORDER BY income DESC) AS rank
+  FROM people
 )
 SELECT *
-FROM rangert
-WHERE rang <= 2
-ORDER BY kjonn, rang;
+FROM ranked
+WHERE rank <= 2
+ORDER BY gender, rank;

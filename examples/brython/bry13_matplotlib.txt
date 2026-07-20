@@ -1,30 +1,30 @@
-# label: matplotlib — plt-API (Plotly-rendret)
-# Example: matplotlib i Brython-modus — plt-API-en rendret som Plotly
-# Vanlig matplotlib-undervisningskode virker; figurene blir interaktive.
+# label: matplotlib — plt API (rendered as Plotly)
+# Example: matplotlib in Brython mode — the plt API rendered as Plotly
+# Standard matplotlib teaching code works as-is; the figures become interactive.
 import matplotlib.pyplot as plt
 
-aar = [2020, 2021, 2022, 2023]
-nord = [120, 135, 150, 162]
-sor  = [210, 205, 230, 244]
+year = [2020, 2021, 2022, 2023]
+north = [120, 135, 150, 162]
+south = [210, 205, 230, 244]
 
 plt.figure(figsize=(7, 4))
-plt.plot(aar, nord, 'o-', label="Nord")
-plt.plot(aar, sor, 'r--', label="Sør")
-plt.title("Utvikling per region")
-plt.xlabel("År")
-plt.ylabel("Antall")
+plt.plot(year, north, 'o-', label="North")
+plt.plot(year, south, 'r--', label="South")
+plt.title("Trend per region")
+plt.xlabel("Year")
+plt.ylabel("Count")
 plt.legend()
 plt.grid(True)
 plt.show()
 
 # Histogram:
-inntekt = [420, 480, 510, 540, 560, 590, 610, 620, 680, 710, 820, 950]
-plt.hist(inntekt, bins=5, color="seagreen")
-plt.title("Inntektsfordeling (1000 kr)")
+income = [420, 480, 510, 540, 560, 590, 610, 620, 680, 710, 820, 950]
+plt.hist(income, bins=5, color="seagreen")
+plt.title("Income distribution (NOK 1,000s)")
 plt.show()
 
-# fig/ax-stilen fungerer også (1x1):
+# The fig/ax style also works (1x1):
 fig, ax = plt.subplots(figsize=(6, 3))
-ax.bar(["Nord", "Sør", "Øst"], [162, 244, 199])
-ax.set_title("Antall per region 2023")
+ax.bar(["North", "South", "East"], [162, 244, 199])
+ax.set_title("Count per region 2023")
 fig.show()

@@ -1,15 +1,15 @@
 # label: Stata — descriptives
 * Example: Stata – descriptive statistics
 * The first block imports variables via microdata.
-* The second block runs simple Stata commands on the 'folk' dataset.
+* The second block runs simple Stata commands on the 'people' dataset.
 
 #micro
 require no.ssb.fdb:54 as fd
-create-dataset folk
-import fd/BEFOLKNING_KJOENN as kjonn
-import fd/INNTEKT_WLONN 2022-01-01 as inntekt
+create-dataset people
+import fd/BEFOLKNING_KJOENN as gender
+import fd/INNTEKT_WLONN 2022-01-01 as income
 
 #stata
 describe
-summarize inntekt
-tabulate kjonn
+summarize income
+tabulate gender

@@ -23,4 +23,4 @@ show(df.groupby("g").sum())
 #           # connect <base> as <alias>  +  # load <alias>/<fil> as <name>
 #           from browser import ajax     (live APIs)
 
-pe.bar(df, x="g", y="v", title="Brython er raskest — Python-modus er størst")
+pe.bar(df, x="g", y="v", title="Brython is fastest — Python mode is most complete")

@@ -1,34 +1,34 @@
-# label: Notatbok — #tag-direktiver og innholds-sniffing
+# label: Notebook — #tag directives and content sniffing
 #options.mode = python
-#options.title = "Celle-direktiver med #tag"
-#options.description = "#tag.key = value i cellekroppen: metadata som overlever Colab/Jupytext-runde-turer, defaults i preambelen, og celler som selv røper typen sin"
+#options.title = "Cell directives with #tag"
+#options.description = "#tag.key = value in the cell body: metadata that survives Colab/Jupytext round-trips, defaults in the preamble, and cells that reveal their own type"
 #tag.type = python
 
 #%%
 """
-# `#tag`-direktiver
+# `#tag` directives
 
-Metadata kan ligge som kommentarlinjer ØVERST i cellekroppen i stedet for
-på `#%%`-linjen: `#tag.key = value`, én per linje. Colab og Jupytext eier
-`#%%`-linjene og skriver dem om — kommentarlinjer i kroppen overlever
-alltid. Denne cellen er dessuten *sniffet*: den er én trippel-sitert streng
-alene (tre doble anførselstegn), og rendres derfor som markdown uten noen
-`md`-markering.
+Metadata can live as comment lines at the TOP of the cell body instead
+of on the `#%%` line: `#tag.key = value`, one per line. Colab and
+Jupytext own the `#%%` lines and rewrite them — comment lines in the
+body always survive. This cell is also *sniffed*: it's a single
+triple-quoted string on its own (three double quotes), and is therefore
+rendered as markdown without any `md` marker.
 
-- `#tag.type = python` i preambelen over gir dokumentets standard-celletype.
-- `#tag.hide-code = true` under skjuler koden i cellen, som header-flagget.
-- Alt vises fortsatt som ren tekst i editoren — rå tekst ER editoren.
+- `#tag.type = python` in the preamble above sets the document's default cell type.
+- `#tag.hide-code = true` below hides the cell's code, just like the header flag.
+- Everything is still shown as plain text in the editor — raw text IS the editor.
 """
 
 #%%
 #tag.hide-code = true
-#tag.id = beregning
-summen = sum(range(10))
-summen
+#tag.id = calculation
+total = sum(range(10))
+total
 
 #%%
-<p>Denne cellen begynner med <code>&lt;</code> og sniffes som <b>html</b>.</p>
+<p>This cell starts with <code>&lt;</code> and is sniffed as <b>html</b>.</p>
 
 #%% duckdb
-#tag.id = tabell
-select 42 as svar
+#tag.id = table
+select 42 as answer

@@ -1,23 +1,23 @@
-// label: Regresjon og maskinlæring (ml.js)
-// Example: lineær regresjon (ss) og k-means-klynging (ML)
+// label: Regression and machine learning (ml.js)
+// Example: linear regression (ss) and k-means clustering (ML)
 # load https://raw.githubusercontent.com/hmelberg/openstat/main/data/iris.csv as iris
 
-// Enkel lineær regresjon: petal_length ~ sepal_length
-const par = iris.objects().map(d => [d.sepal_length, d.petal_length]);
-const modell = ss.linearRegression(par);
-const rl = ss.linearRegressionLine(modell);
-console.log("petal_length =", modell.b.toFixed(2), "+", modell.m.toFixed(2), "* sepal_length");
-console.log("r² =", ss.rSquared(par, rl).toFixed(3));
-console.log("prediksjon ved sepal_length=6:", rl(6).toFixed(2));
+// Simple linear regression: petal_length ~ sepal_length
+const pairs = iris.objects().map(d => [d.sepal_length, d.petal_length]);
+const model = ss.linearRegression(pairs);
+const rl = ss.linearRegressionLine(model);
+console.log("petal_length =", model.b.toFixed(2), "+", model.m.toFixed(2), "* sepal_length");
+console.log("r² =", ss.rSquared(pairs, rl).toFixed(3));
+console.log("prediction at sepal_length=6:", rl(6).toFixed(2));
 
-// k-means-klynging med ml.js (ML har også PCA, random forest, KNN m.m.):
+// k-means clustering with ml.js (ML also has PCA, random forest, KNN etc.):
 const X = iris.objects().map(d => [d.sepal_length, d.sepal_width, d.petal_length, d.petal_width]);
 const km = ML.KMeans(X, 3);
 
-// Hvor godt treffer klyngene artene? Kryss-tabell:
-const medKlynge = iris.derive({ rad: aq.op.row_number() })
-  .derive({ klynge: aq.escape(d => km.clusters[d.rad - 1]) });
-medKlynge
-  .groupby("species", "klynge")
+// How well do the clusters match the species? Cross-tabulation:
+const withCluster = iris.derive({ row: aq.op.row_number() })
+  .derive({ cluster: aq.escape(d => km.clusters[d.row - 1]) });
+withCluster
+  .groupby("species", "cluster")
   .count()
-  .orderby("species", "klynge")
+  .orderby("species", "cluster")
