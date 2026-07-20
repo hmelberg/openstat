@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenStat — Interactive elements</title>
+<style>
+  :root {
+    --bg: #ffffff; --panel: #f6f8fa; --text: #1f2328; --muted: #57606a;
+    --accent: #0b5fff; --border: #d0d7de; --code-bg: #f6f8fa; --kbd: #eaeef2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1b26; --panel: #24283b; --text: #c0caf5; --muted: #737aa2;
+      --accent: #7aa2f7; --border: #334155; --code-bg: #16161e; --kbd: #24283b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 880px; margin: 0 auto; padding: 2rem 1.25rem 5rem; }
+  h1 { font-size: 1.9rem; margin: 0 0 .3rem; }
+  h2 { font-size: 1.35rem; margin-top: 2.6rem; padding-top: 1.2rem; border-top: 1px solid var(--border); }
+  h3 { font-size: 1.05rem; margin-top: 1.8rem; }
+  p.lead { color: var(--muted); font-size: 1.08rem; margin-top: 0; }
+  code, pre {
+    font: 0.88em/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    background: var(--code-bg); border-radius: 6px;
+  }
+  code { padding: .1em .35em; }
+  pre { padding: .9rem 1rem; overflow-x: auto; border: 1px solid var(--border); }
+  pre code { padding: 0; background: none; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .93rem; }
+  th, td { border: 1px solid var(--border); padding: .45rem .65rem; text-align: left; vertical-align: top; }
+  th { background: var(--panel); }
+  .note {
+    background: var(--panel); border-left: 4px solid var(--accent);
+    padding: .7rem 1rem; border-radius: 0 8px 8px 0; margin: 1.2rem 0;
+  }
+  .pill {
+    display: inline-block; font-size: .78rem; font-weight: 600; padding: .1rem .55rem;
+    border-radius: 999px; border: 1px solid var(--border); color: var(--muted);
+    margin-left: .4rem; vertical-align: middle;
+  }
+  a { color: var(--accent); }
+  .toc { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 1rem 1.4rem; }
+  .toc ul { margin: .4rem 0 0; padding-left: 1.2rem; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Interactive elements in OpenStat</h1>
+<p class="lead">Three ways in, one engine underneath — pick the level of control you need.</p>
+
+<div class="toc">
+<strong>Contents</strong>
+<ul>
+  <li><a href="#display">How output display works</a></li>
+  <li><a href="#params">Level 1 — <code>#@param</code> forms (no UI code)</a></li>
+  <li><a href="#widgets">Level 2 — <code>ui.*</code> widgets (one-liners with live values)</a></li>
+  <li><a href="#elements">Level 3 — <code>ui.html</code> elements (full control)</a></li>
+  <li><a href="#events">Events and reruns</a></li>
+  <li><a href="#runtimes">Runtime support</a></li>
+</ul>
+</div>
+
+<p>OpenStat has three levels of abstraction for interactivity, aimed at three
+audiences. They are not competing systems: a <code>#@param</code> form, a
+<code>ui.slider</code>, and a hand-built <code>ui.html</code> element all
+render through the same engine, live in the same cells, and follow the same
+display rules.</p>
+
+<table>
+<tr><th>Level</th><th>You write</th><th>You get</th><th>Best for</th></tr>
+<tr><td><a href="#params">1 — <code>#@param</code></a></td>
+    <td>a comment on an assignment line</td>
+    <td>a form control that rewrites the value in your code and reruns</td>
+    <td>making any script tweakable without writing UI code</td></tr>
+<tr><td><a href="#widgets">2 — <code>ui.*</code></a></td>
+    <td>one line of Python</td>
+    <td>a live control whose current value is returned by the call</td>
+    <td>notebooks and dashboards driven by a few inputs</td></tr>
+<tr><td><a href="#elements">3 — <code>ui.html</code></a></td>
+    <td>element builders</td>
+    <td>real DOM nodes with events, styling, and component libraries</td>
+    <td>custom layouts, cards, buttons, anything the widgets don't cover</td></tr>
+</table>
+
+<h2 id="display">How output display works</h2>
+
+<p>One rule everywhere: <strong>a value alone on a line shows itself.</strong>
+Every bare expression in a cell (or script) is displayed — tables as tables,
+figures as figures, <code>ui.html</code> elements mounted into the output.</p>
+
+<pre><code>x = 5        # assignment — nothing shown
+x + 1        # shows 6
+"hello"      # shows hello
+df.head()    # shows the table</code></pre>
+
+<p>To <em>mute</em> a value you don't want shown:</p>
+
+<pre><code>_tmp         # names starting with _ are never displayed
+df.head();   # a trailing ; mutes any expression
+n = ui.slider(0, 100)   # assignments are silent as always</code></pre>
+
+<p>Two conveniences keep interactive code quiet: <code>None</code> is never
+displayed, and a bare <code>ui.&lt;control&gt;(...)</code> call renders its
+control <em>without</em> echoing the returned number under it.</p>
+
+<div class="note">Prefer last-expression-only display (Jupyter style)? Add
+<code>#options.display = last</code> at the top of the document.
+<code>#options.display = all</code> keeps the legacy echo mode.</div>
+
+<h2 id="params">Level 1 — <code>#@param</code> forms <span class="pill">all modes</span></h2>
+
+<p>Annotate an assignment with a <code>#@param</code> comment and OpenStat
+renders a form control for it. Changing the control <strong>writes the new
+value back into the code line</strong> — the form <em>is</em> the code — and
+reruns the cell (automatic by default).</p>
+
+<pre><code>n       = 50        #@param {type:"slider", min:10, max:150, step:10}
+species = "setosa"  #@param ["setosa", "versicolor", "virginica"]
+fruit   = "apple"   #@param ["apple", "banana"] {allow-input: true}
+level   = 3         #@param {type:"integer"}
+start   = "2026-01-01"  #@param {type:"date"}
+active  = True      #@param {type:"boolean"}
+expr    = "x + 1"   #@param {type:"raw"}</code></pre>
+
+<ul>
+<li><strong>Types:</strong> <code>slider</code>, <code>number</code>,
+    <code>integer</code>, <code>boolean</code>, <code>date</code>,
+    <code>raw</code>, plain text, and dropdowns from a list literal
+    (add <code>{allow-input: true}</code> for an editable dropdown).</li>
+<li><strong>Run behavior:</strong> <code>run:"auto"</code> is the default —
+    each change reruns the cell (sliders debounce). Use
+    <code>{run:"manual"}</code> to only write the value; a small
+    <em>Run ▶</em> chip appears in the form until you run the cell.</li>
+<li><strong>Placement:</strong> <code>{placement:"top"}</code> (default),
+    <code>"bottom"</code>, or <code>"left"</code>.</li>
+<li>In JavaScript mode the same syntax uses <code>//@param</code>.
+    Because the value is swapped into the line byte-exactly, don't end
+    param lines with a semicolon.</li>
+</ul>
+
+<h2 id="widgets">Level 2 — <code>ui.*</code> widgets <span class="pill">python · brython · micropython</span></h2>
+
+<p>One line per control. The call registers the control (drawn in the cell's
+widget strip) and <strong>returns its current value</strong> — when the user
+changes the control, the cell reruns and the call returns the new value.
+State lives outside your code, so a cell stays a pure function of its inputs
+(the <em>pull model</em>).</p>
+
+<pre><code>import ui
+
+n       = ui.slider(1, 20, value=5, label="Rows")
+species = ui.dropdown(["setosa", "versicolor"], label="Species")
+strict  = ui.checkbox("Strict", value=True)
+dark    = ui.switch("Dark mode")
+limit   = ui.number(10, min=0, max=100, label="Limit")
+name    = ui.text("iris", label="Dataset")
+
+iris[iris["species"] == species].head(n)</code></pre>
+
+<table>
+<tr><th>Control</th><th>Signature (all also take <code>label=</code>, <code>name=</code>, <code>rerun=</code>, <code>placement=</code>)</th></tr>
+<tr><td><code>ui.slider</code></td><td><code>slider(min=0, max=100, value=None, step=1, sync_to=None, on_change=None)</code></td></tr>
+<tr><td><code>ui.dropdown</code></td><td><code>dropdown(options, value=None, ...)</code></td></tr>
+<tr><td><code>ui.checkbox</code> / <code>ui.switch</code></td><td><code>checkbox(label, value=False, ...)</code></td></tr>
+<tr><td><code>ui.number</code></td><td><code>number(value=0, min=None, max=None, step=None, ...)</code></td></tr>
+<tr><td><code>ui.text</code></td><td><code>text(value='', ...)</code></td></tr>
+<tr><td><code>ui.button</code></td><td><code>button(label, rerun='self', on_click=None)</code> — reruns immediately on click</td></tr>
+<tr><td><code>ui.run_button</code></td><td><code>run_button(label="Run", target="all")</code> — one shared run button</td></tr>
+<tr><td><code>ui.play</code></td><td><code>play(min, max, step=1, interval=600, loop=False, ...)</code> — an animated slider</td></tr>
+</table>
+
+<h3>Targeting reruns</h3>
+<p><code>rerun=</code> decides what a change runs: <code>"self"</code>
+(default), a cell id (<code>#%% python id=plot</code> → <code>rerun="plot"</code>),
+a list of ids, or <code>"none"</code>. This is how one control cell drives a
+separate plot cell:</p>
+
+<pre><code>#%% python
+import ui
+n = ui.slider(1, 50, value=10, rerun="plot")
+
+#%% python id=plot
+iris.head(n)   # reruns whenever the slider changes</code></pre>
+
+<h3>Reading and steering controls from code</h3>
+<pre><code>ui.value("n")          # read a control's stored value without running anything
+h = ui.widget("n")     # handle: h.value, h.set(30), h.hide(), h.show(),
+                       #         h.on("input", fn), h.element(), h.input()</code></pre>
+
+<ul>
+<li><strong>Placement:</strong> per control (<code>placement="left"</code>)
+    or per cell (<code>#%% python widgets=left</code>).</li>
+<li><strong><code>sync_to="varname"</code></strong> pushes the value into a
+    live session variable as the user drags, without a rerun.</li>
+<li>Widgets need a notebook (<code>#%%</code> cells). In a plain script a
+    <code>ui.*</code> call quietly returns its default and draws nothing.</li>
+<li>Pasted Jupyter code using <em>ipywidgets</em> also works in python mode —
+    it is a separate compatibility bridge with its own live sync.</li>
+</ul>
+
+<h2 id="elements">Level 3 — <code>ui.html</code> elements <span class="pill">python · brython · micropython</span></h2>
+
+<p>Build real DOM elements from Python — around 110 standard tags via
+<code>ui.html.&lt;tag&gt;(*children, **kwargs)</code>. An element shown as a
+bare expression (or via <code>.show()</code>) mounts into the cell's output.</p>
+
+<pre><code>ui.html.div(
+    ui.html.h3("Result"),
+    ui.html.p("Everything ", ui.html.b("looks good"), "."),
+    cls="card", style={"padding": "1rem", "border_radius": "8px"},
+)</code></pre>
+
+<h3>The kwargs standard</h3>
+<ul>
+<li><code>cls=</code> or <code>class_=</code> → the <code>class</code> attribute.</li>
+<li><code>style=</code> — a CSS string, or a dict with snake_case keys
+    (<code>border_radius</code> → <code>borderRadius</code>).</li>
+<li><code>data_foo=</code> / <code>aria_label=</code> → <code>data-foo</code> /
+    <code>aria-label</code>.</li>
+<li><code>on_click=my_function</code> (any <code>on_&lt;event&gt;=</code>) —
+    binds a Python callable. Strings are <em>not</em> executed as code.</li>
+<li><code>attrs={...}</code> — escape hatch that sets attributes verbatim.</li>
+<li>Booleans set presence-attributes (<code>disabled=True</code>); problems
+    warn loudly in the console instead of failing silently.</li>
+</ul>
+
+<h3>Element methods</h3>
+<pre><code>el = ui.html.div(id="box")
+el.add("more text", ui.html.br())   # append children
+el.clear()                          # empty it
+el.on("click", handler)             # bind an event
+el.set_style(color="red")           # style after creation
+el.add_class("warn"); el.remove_class("warn")
+el.show()                           # mount into the running cell's output now
+el.show(target="box2")              # replace into another element by DOM id</code></pre>
+
+<h3>Ready-made building blocks</h3>
+<pre><code>ui.kpi(4.2, 0.3, unit="%", label="Growth", bra="opp")   # KPI card with delta arrow
+ui.markdown("**bold** and `code`")                       # rendered markdown
+ui.image(fig)                                            # matplotlib figure or URL → &lt;img&gt;</code></pre>
+
+<h3>Component libraries — <code>#tag.import</code></h3>
+<p>Pull in polished web components with one preamble line; each import gets a
+namespace of element builders:</p>
+
+<pre><code>#tag.import = shoelace        →  ui.sl.button("Click"), ui.sl.rating(), …
+#tag.import = pico            →  ui.pico.button("Click"), …
+#tag.import = https://example.com/lib.js as acme
+                              →  ui.acme.button() renders &lt;acme-button&gt;</code></pre>
+
+<h2 id="events">Events and reruns</h2>
+
+<p>Three ways to react to the user, from simplest to most explicit:</p>
+
+<table>
+<tr><th>Mechanism</th><th>What happens</th></tr>
+<tr><td><code>rerun="plot"</code> on a widget</td>
+    <td>value changes → the named cell reruns and pulls the new value</td></tr>
+<tr><td><code>on_change=my_fn</code> / <code>on_click=my_fn</code></td>
+    <td>the callable runs <em>instead of</em> a rerun; its return value (or
+        printed output) is rendered into the cell's output — or into
+        <code>target="dom-id"</code></td></tr>
+<tr><td><code>ui.on(selector, event, handler, target=None)</code><br>
+        <code>ui.run_cell(selector, event, cell_id)</code></td>
+    <td>bind any DOM event by CSS selector — e.g. make a hand-built
+        <code>ui.html</code> button run a named cell</td></tr>
+</table>
+
+<pre><code>#%% python
+import ui
+
+def compute(value):
+    return ui.kpi(value * 2, label="Doubled")
+
+n = ui.slider(0, 50, on_change=compute)   # no rerun — the KPI updates in place</code></pre>
+
+<h2 id="runtimes">Runtime support</h2>
+
+<table>
+<tr><th>Runtime</th><th><code>#@param</code></th><th><code>ui.*</code> widgets</th><th><code>ui.html</code></th><th>Display rule</th></tr>
+<tr><td>Python (pyodide)</td><td>✓</td><td>✓</td><td>✓ (+ ipywidgets bridge)</td><td>every bare expression</td></tr>
+<tr><td>Brython</td><td>✓</td><td>✓</td><td>✓</td><td>trailing expression only</td></tr>
+<tr><td>MicroPython</td><td>✓</td><td>✓</td><td>✓</td><td>trailing expression only</td></tr>
+<tr><td>JavaScript</td><td>✓ (<code>//@param</code>)</td><td>—</td><td>—</td><td>trailing expression</td></tr>
+<tr><td>R (webR)</td><td>✓</td><td>✓ (<code>ui_slider()</code>, … — frozen API)</td><td>—</td><td>R's own visibility rules</td></tr>
+</table>
+
+<p>The suppression rules (<code>_</code>-prefix, trailing <code>;</code>, no
+scalar echo from bare control calls) apply in all Python-family runtimes.</p>
+
+<div class="note"><strong>Try it:</strong> the examples menu has ready-to-run
+documents for every level — <em>Notebook widgets</em>, <em>widget events</em>,
+<em>#@param forms</em>, <em>ui.html</em>, and the dashboard series.</div>
+
+</main>
+</body>
+</html>
