@@ -3258,3 +3258,61 @@ test('uten into: retur og oppførsel BYTE-uendret', () => {
   assert.ok(strip, 'stripa opprettet som normalt');
   assert.strictEqual(strip.children.length, 1);
 });
+
+// ---- fase 4b review-fiks: into-mål som forsvinner under et UENDRET id -----
+// (review-funn, reprodusert: eksisterende-gjenbruk-grenene hadde ingen
+// else — en kontroll kunne strandes usynlig inni en foreldreløs gammel
+// host-node når SAMME into=-id sluttet å løse på en senere registrering.)
+
+test('into: eksisterende kontroll strandes ikke når et UENDRET into=-mål blir uoppløselig (vertens generasjon sveipet) — faller tilbake til stripa som en fersk ukjent-id-registrering', () => {
+  const { Ui, outEl, cellEl, setCtx } = freshEnv({ cellIdx: 0 });
+
+  // Host bygges i celle 0 sin egen kjørebrakett, ALDRI vist noe sted — samme
+  // oppskrift som Task 1-testen over Ui.elCreate (kryss-celle-vinduet er
+  // åpent til cellens EGEN neste rerun uten gjenkobling, se _elGens-
+  // docstringen ved Ui.elCreate).
+  Ui.beginCellRun(0);
+  const host = Ui.elCreate('div');
+  Ui.endCellRun(0);
+  assert.ok(Ui.elNode(host), 'host overlever egen skapende kjørings avslutning (kryss-celle-vindu)');
+
+  // Kontrollen registreres fra en ANNEN celle (1) — into=host er IDENTISK
+  // på tvers av begge registreringene under. Celle 0 sin senere sveip (se
+  // under) rører aldri celle 1 sin _controls-oppføring — mark-og-sopp i
+  // Ui.endCellRun er skopet til ctrl.cellIdx === cellIdx.
+  setCtx({ cellIdx: 1, cellEl: cellEl });
+  const spec = JSON.stringify({ type: 'slider', name: 'x', min: 0, max: 100, value: 40, into: host });
+  const res1 = Ui.registerControl(spec);
+  const key = Ui.widgetLookup('x');
+  const wrap = Ui.widgetNode(key, 'wrap');
+  assert.strictEqual(wrap.parentNode, Ui.elNode(host), 'monterte i host som forventet');
+  assert.deepStrictEqual(JSON.parse(res1), { __into: true, value: 40, key: key, name: 'x' });
+
+  // Reviewer-repro: celle 0 (vertens SKAPENDE celle) kjører på nytt UTEN å
+  // gjenskape elementet — generasjons-sveipet tar host-noden, helt uavhengig
+  // av kontrollens egen registrering (celle 1, urørt av celle 0 sin sveip).
+  Ui.beginCellRun(0);
+  Ui.endCellRun(0);
+  assert.strictEqual(Ui.elNode(host), null, 'host sopt — into-id-en er nå uoppløselig');
+
+  // Re-registrer MED SAMME spec (uendret into=host-id-streng) fra celle 1 —
+  // dette er den "existing"-gjenbruk-grenen reviewfunnet gjaldt: intoNode
+  // løser ikke lenger, men UTEN fiksen strander wrap-en usynlig inni den nå
+  // foreldreløse gamle host-noden (kun console.warn, PLAIN retur som om alt
+  // var normalt — "a control must never be lost" er brutt).
+  const warns = [];
+  const origWarn = console.warn;
+  console.warn = (m) => warns.push(m);
+  let res2;
+  try {
+    res2 = Ui.registerControl(spec);
+  } finally {
+    console.warn = origWarn;
+  }
+
+  assert.ok(warns.some((w) => /ukjent into-mål/.test(w)), 'warn fyrte for det nå-uoppløselige into-målet');
+  const strip = outEl.children.find((c) => c.classList.contains('ui-controls'));
+  assert.ok(strip, 'stripa opprettet som fallback');
+  assert.strictEqual(strip.children[0], wrap, 'SAMME wrap-node landet i stripa — ikke tapt inni den foreldreløse host-noden');
+  assert.strictEqual(JSON.parse(res2), 40, 'PLAIN verdi-retur ved fallback (ingen __into) — akkurat som en fersk ukjent-id-registrering');
+});

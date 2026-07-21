@@ -1110,7 +1110,15 @@
           // into-målet på HVER into-registrering — appendChild flytter
           // noden når den allerede har en annen forelder.
           existing.intoId = spec.into || null;
-          if (intoNode) intoNode.appendChild(existing.wrap);
+          if (intoNode) {
+            intoNode.appendChild(existing.wrap);
+          } else if (existing.intoId) {
+            // fase 4b review-fiks: into-målet forsvant under et UENDRET into=-id
+            // (generasjons-sveipet tok verts-elementet) — strand aldri kontrollen
+            // usynlig; samme stripe-fallback som en fersk ukjent-id-registrering får.
+            strip.insertBefore(existing.wrap, null);
+            existing.intoId = null;
+          }
         }
         // fase 4b: håndtak-kontrakt KUN når monteringen faktisk skjedde
         // (intoNode satt) — ukjent into-mål faller tilbake til den vanlige,
@@ -1124,7 +1132,15 @@
       if (existing) {
         value = _updateControlSpec(existing, spec);
         existing.intoId = spec.into || null;
-        if (intoNode) intoNode.appendChild(existing.wrap);
+        if (intoNode) {
+          intoNode.appendChild(existing.wrap);
+        } else if (existing.intoId) {
+          // fase 4b review-fiks: into-målet forsvant under et UENDRET into=-id
+          // (generasjons-sveipet tok verts-elementet) — strand aldri kontrollen
+          // usynlig; samme stripe-fallback som en fersk ukjent-id-registrering får.
+          strip.insertBefore(existing.wrap, null);
+          existing.intoId = null;
+        }
       } else {
         var stored = _values.hasOwnProperty(key) ? _values[key] : spec.value;
         var builder = _BUILDERS[spec.type];
