@@ -1821,6 +1821,23 @@ def test_row_extra_cls_appended_after_os_row(monkeypatch):
     assert create[2]["attrs"]["class"] == "os-row toolbar"
 
 
+def test_row_both_cls_and_class_warns(monkeypatch):
+    # Task 4-review micro-addition 2: _merge_container_style warns via
+    # the module's _warn_sink (same bridge widget()/_append_children
+    # already use) when BOTH cls= and class_= are given - mirroring
+    # _normalize_kwargs sin cls-vs-class_-advarsel, som ellers ALDRI ville
+    # trigget her (class_ er poppet FØR _tag_builder/_normalize_kwargs
+    # ser kwargs-dicten, se _merge_container_style).
+    mod, fake = _load_ui(monkeypatch)
+    warned = []
+    monkeypatch.setattr(mod, "_warn", warned.append)
+    mod.row(cls="toolbar", class_="ekstra")
+    assert len(warned) == 1
+    assert "cls=" in warned[0] and "class_=" in warned[0]
+    create = [c for c in fake.el_calls if c[0] == "elCreate"][0]
+    assert create[2]["attrs"]["class"] == "os-row toolbar"
+
+
 def test_grid_creates_container_and_one_child_per_unique_area(monkeypatch):
     mod, fake = _load_ui(monkeypatch)
     g = mod.grid("kpi kpi | plot table")
@@ -1943,6 +1960,20 @@ def test_add_align_sets_align_self_style_on_child(monkeypatch):
     child = mod.html.div("x")
     r.add(child, align="center")
     style_calls = [c for c in fake.el_calls if c[0] == "elSetProps" and c[1] == child._openstat_el_id]
+    assert style_calls[-1][2] == {"style": {"alignSelf": "center"}}
+
+
+def test_grid_add_area_and_align_together_sets_align_self_on_area_child(monkeypatch):
+    # Task 4-review micro-addition 3 (pinning test): area= and align=
+    # combined - align= must land on the AREA CHILD (the pre-created
+    # grid-area div), not the grid container itself or the raw child
+    # being added into it (Element.add's style_targets = [target] on the
+    # area= branch, see pyodide/ui.py).
+    mod, fake = _load_ui(monkeypatch)
+    g = mod.grid("kpi | plot")
+    plot = g._areas["plot"]
+    g.add(mod.html.span("chart"), area="plot", align="center")
+    style_calls = [c for c in fake.el_calls if c[0] == "elSetProps" and c[1] == plot._openstat_el_id]
     assert style_calls[-1][2] == {"style": {"alignSelf": "center"}}
 
 

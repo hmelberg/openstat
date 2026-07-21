@@ -847,7 +847,18 @@ class Element:
           Element-barn i DETTE kallet (span= -> style.gridColumn =
           "span N"; align= -> style.alignSelf) via Element.set_style -
           verdi-/tekst-barn har ingen egen DOM-node å style og hoppes
-          derfor stille over."""
+          derfor stille over.
+
+        Merk (Task 4-review): flere VERDI-barn (DataFrame/figur/skalar -
+        ikke Element/str) i ETT OG SAMME area=-kall viser bare den
+        SISTE - _render_area_children sender hvert verdi-barn via
+        Ui.elPayload, og elPayload er en tøm-så-rendre-operasjon (samme
+        node), så påfølgende elPayload-kall overskriver det forrige.
+        `.add(a, area="x")` + et separat `.add(b, area="x")`-kall er
+        den tiltenkte erstatt-idiomen (spec §Decisions 4); flere verdier
+        i ETT kall er ikke det - bruk et Element-barn (ui.row/column) som
+        omslutter dem hvis flere verdier skal vises samtidig i samme
+        område."""
         if area is not None:
             areas = getattr(self, "_areas", None)
             if not areas or area not in areas:

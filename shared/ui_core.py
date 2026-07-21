@@ -504,6 +504,13 @@ def _parse_grid_template(template):
     separerte tokens), en ujevn template er derfor alltid en
     programmeringsfeil, ikke noe å stille falle tilbake fra.
 
+    "." er CSS sin NULL-CELLE-token (grid-template-areas: en celle uten
+    noe område - "tomt rom" i mosaikken). Den teller med i bredde-
+    sjekken (ragged-valideringen over) og blir stående uendret i
+    `areas`-strengen (CSS må se den), men skal ALDRI bli et områdenavn -
+    hverken i `names` eller (dermed) som et forhåndsopprettet barn i
+    grid() sin `_areas`-dict (Task 3-review, micro-addition 1).
+
     Pur (ingen injeksjon, ingen sideeffekt) - testet direkte i CPython."""
     rows = [row.split() for row in str(template).split("|")]
     if not rows or any(not cols for cols in rows):
@@ -523,6 +530,8 @@ def _parse_grid_template(template):
     seen = set()
     for cols in rows:
         for name in cols:
+            if name == ".":
+                continue
             if name not in seen:
                 seen.add(name)
                 names.append(name)
@@ -557,6 +566,17 @@ def _merge_container_style(base_cls, style, kwargs):
         style = user_style
     cls = kwargs.pop("cls", None)
     class_ = kwargs.pop("class_", None)
+    if cls is not None and class_ is not None:
+        # Task 4-review micro-addition 2: warn via _warn_sink (mirroring
+        # _normalize_kwargs sin cls-vs-class_-advarsel, se der) - class_
+        # er allerede POPPET her (før _tag_builder/_normalize_kwargs ser
+        # kwargs), så DEN advarselen ville aldri trigge for containere
+        # uten dette. cls= vinner her (ikke "siste i kallrekkefølge" -
+        # begge er separate navngitte parametre, ingen kallrekkefølge å
+        # observere), til forskjell fra _normalize_kwargs sin regel.
+        _warn_sink(
+            "ui.row/column/grid: bade cls= og class_= angitt - cls= vinner (class_= ignorert)"
+        )
     user_cls = cls if cls is not None else class_
     kwargs["cls"] = base_cls if not user_cls else (base_cls + " " + str(user_cls))
     if style:

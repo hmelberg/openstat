@@ -60,3 +60,13 @@ def test_parse_grid_template_enkelt_celle():
     parsed = ui_core._parse_grid_template("kpi")
     assert parsed["areas"] == '"kpi"'
     assert parsed["names"] == ["kpi"]
+
+
+def test_parse_grid_template_punktum_er_null_celle_ikke_et_omraadenavn():
+    # Task 4-review micro-addition 1: "." er CSS sin null-celle-token
+    # (grid-template-areas) - må IKKE bli et områdenavn (og dermed IKKE
+    # et forhåndsopprettet barn i grid() sin _areas-dict), men areas-
+    # strengen selv beholder punktene uendret (CSS må se dem).
+    parsed = ui_core._parse_grid_template("a . | b .")
+    assert parsed["names"] == ["a", "b"]
+    assert parsed["areas"] == '"a ." "b ."'
