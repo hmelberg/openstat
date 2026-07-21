@@ -89,6 +89,16 @@ display rules.</p>
     <td>custom layouts, cards, buttons, anything the widgets don't cover</td></tr>
 </table>
 
+<div class="note"><strong>Choosing between <code>#@param</code> and
+<code>ui.*</code>:</strong> use <code>#@param</code> when the choice should
+<em>follow the document</em> — it writes the value back into the code line, so
+a saved or shared document reproduces exactly what you saw, and the exported
+code runs unchanged outside OpenStat. Use <code>ui.*</code> when the choice
+should <em>follow the data or needs events</em> — options computed at runtime
+(<code>ui.dropdown(sorted(set(df["species"])))</code>), callables instead of
+reruns, driving other cells with <code>rerun="plot"</code>, animation, or
+values you don't want written into the document.</div>
+
 <h2 id="display">How output display works</h2>
 
 <p>One rule everywhere: <strong>a value alone on a line shows itself.</strong>
