@@ -44,7 +44,8 @@ MIRRORED_FLOORS = {
 # Navn som skal komme fra ui_core og ALDRI re-defineres i en fasade.
 SHARED = ["HTML_TAGS", "_SL_ACCEPTS", "_snake_to_camel", "_json_safe",
           "_spec", "_into_el_id", "kpi", "markdown", "play", "run_button",
-          "run_cell", "widget", "_tag_builder", "_append_children", "_warn"]
+          "run_cell", "widget", "_tag_builder", "_append_children", "_warn",
+          "row", "column", "grid", "_flatten_children"]
 
 
 def _defs(path):

@@ -53,6 +53,14 @@ class FakeUiJs:
         # mottatte JSON-en uendret" (default) — testene som eksplisitt vil
         # se en KLAMPET/koersert retur setter denne selv.
         self.widget_set_result = None
+        # Task 3-mikrotillegg (fase 4b, jf. task-2-rapportens hjørnetilfelle
+        # #2): når False, later registerControl som om en ekte kjøre-
+        # kontekst finnes MEN selve into=-målet ikke løste seg (js/ui.js sin
+        # ukjent-el-id-fallback til stripa) - den "__into"-innpakkede
+        # dict-formen uteblir da, og en ekte kjørekontekst returnerer i
+        # stedet den RÅ skalarverdien direkte (ingen has_handler her heller
+        # - samme "ingen handler bundet"-fallback som stripa selv ville gitt).
+        self.into_resolves = True
 
     def widgetLookup(self, name):
         self.widget_calls.append(("widgetLookup", name))
@@ -94,7 +102,7 @@ class FakeUiJs:
         # "value":..., "key":..., "name":...}, Task 1) - mounting "lykkes"
         # alltid i denne stubben (ingen ekte _els-register å slå feil mot;
         # ukjent-el-id-fallback er JS-sidens ansvar, testet der).
-        if spec.get("into") and isinstance(self.next_result, str):
+        if spec.get("into") and isinstance(self.next_result, str) and self.into_resolves:
             return json.dumps({
                 "__into": True,
                 "value": json.loads(self.next_result),
@@ -1641,6 +1649,207 @@ def test_play_into_gir_widgethandle(monkeypatch):
     assert fake.calls[-1]["into"] == host._openstat_el_id
     assert isinstance(handle, mod.WidgetHandle)
     assert handle.value == 5
+
+
+def test_into_med_ukjent_mal_husker_faktisk_retur_ikke_frossen_default(monkeypatch):
+    # Task 3-mikrotillegg (jf. task-2-rapportens hjørnetilfelle #2): en ekte
+    # kjørekontekst finnes (next_result er en ekte JSON-verdi-streng) OG
+    # into= ble gitt, MEN selve inn-målet løser seg IKKE (js/ui.js sin
+    # ukjent-el-id-fallback til stripa, modellert her via
+    # fake.into_resolves = False) - registerControl returnerer da den RÅ
+    # skalarverdien (ingen "__into"-nøkkel, ingen "key"). _handle_from_into
+    # skal huske DENNE faktiske returnerte verdien (77), ikke den frosne
+    # spec-defaulten (value=42) - se shared/ui_core.py sin
+    # `default if res is None else res`-linje.
+    mod, fake = _load_ui(monkeypatch, next_result="77")
+    fake.into_resolves = False
+    host = mod.html.div()
+    handle = mod.slider(0, 100, value=42, into=host)
+    assert isinstance(handle, mod.WidgetHandle)
+    assert handle.value == 77
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Containere - ui.row/ui.column/ui.grid + Element.add(area=/span=/align=)
+# (fase 4b, Task 3, spec 2026-07-21-explicit-containers-design.md
+# §Decisions 3-4). Selve grid-template-parseren (_parse_grid_template) er
+# testet PURT (ingen fasade-lasting) i tests/test_ui_containers.py - denne
+# seksjonen dekker KUN fasade-integrasjonen (elCreate/elAppend/elClear/
+# elPayload-kallene via FakeUiJs sitt el_calls-opptak).
+# ══════════════════════════════════════════════════════════════════════════
+
+def test_row_creates_flex_container_with_os_row_class(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    r = mod.row(gap="1rem")
+    create = [c for c in fake.el_calls if c[0] == "elCreate"][0]
+    assert create[1] == "div"
+    assert create[2]["attrs"]["class"] == "os-row"
+    assert create[2]["style"] == {"gap": "1rem"}
+    assert isinstance(r, mod.Element)
+
+
+def test_column_creates_flex_container_with_os_col_class(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    c = mod.column()
+    create = [call for call in fake.el_calls if call[0] == "elCreate"][0]
+    assert create[2]["attrs"]["class"] == "os-col"
+    assert isinstance(c, mod.Element)
+
+
+def test_row_justify_and_align_and_wrap_bool_become_style(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    mod.row(justify="center", align="stretch", wrap=False)
+    create = [c for c in fake.el_calls if c[0] == "elCreate"][0]
+    assert create[2]["style"] == {
+        "justifyContent": "center", "alignItems": "stretch", "flexWrap": "nowrap",
+    }
+
+
+def test_row_extra_cls_appended_after_os_row(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    mod.row(cls="toolbar")
+    create = [c for c in fake.el_calls if c[0] == "elCreate"][0]
+    assert create[2]["attrs"]["class"] == "os-row toolbar"
+
+
+def test_grid_creates_container_and_one_child_per_unique_area(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    g = mod.grid("kpi kpi | plot table")
+    create_calls = [c for c in fake.el_calls if c[0] == "elCreate"]
+    assert len(create_calls) == 4   # container + 3 unike områder
+    container_props = create_calls[0][2]
+    assert container_props["attrs"]["class"] == "os-grid"
+    assert container_props["style"]["gridTemplateAreas"] == '"kpi kpi" "plot table"'
+    area_style = [c[2]["style"]["gridArea"] for c in create_calls[1:]]
+    assert area_style == ["kpi", "plot", "table"]
+    assert set(g._areas.keys()) == {"kpi", "plot", "table"}
+    assert all(isinstance(v, mod.Element) for v in g._areas.values())
+
+
+def test_grid_cols_sets_grid_template_columns(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    mod.grid("kpi kpi | plot table", cols="1fr 2fr")
+    container_props = [c for c in fake.el_calls if c[0] == "elCreate"][0][2]
+    assert container_props["style"]["gridTemplateColumns"] == "1fr 2fr"
+
+
+def test_grid_rows_and_gap_set_style(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    mod.grid("a", rows="100px 1fr", gap="4px")
+    container_props = [c for c in fake.el_calls if c[0] == "elCreate"][0][2]
+    assert container_props["style"]["gridTemplateRows"] == "100px 1fr"
+    assert container_props["style"]["gap"] == "4px"
+
+
+def test_grid_add_with_area_clears_then_appends_element_child(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    g = mod.grid("kpi kpi | plot table")
+    plot_id = g._areas["plot"]._openstat_el_id
+    child = mod.html.span("chart")
+    g.add(child, area="plot")
+    clears = [c for c in fake.el_calls if c[0] == "elClear" and c[1] == plot_id]
+    assert len(clears) == 1
+    appends = [c for c in fake.el_calls if c[0] == "elAppend" and c[1] == plot_id]
+    assert appends == [("elAppend", plot_id, {"el": child._openstat_el_id})]
+
+
+def test_grid_add_with_area_second_call_replaces(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    g = mod.grid("kpi | plot")
+    plot_id = g._areas["plot"]._openstat_el_id
+    g.add(mod.html.span("first"), area="plot")
+    g.add(mod.html.span("second"), area="plot")
+    clears = [c for c in fake.el_calls if c[0] == "elClear" and c[1] == plot_id]
+    assert len(clears) == 2   # tømt FØR hvert .add(..., area=) - erstatt, ikke append
+
+
+def test_grid_add_value_child_uses_elpayload_classification(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    g = mod.grid("kpi | plot")
+    plot_id = g._areas["plot"]._openstat_el_id
+    g.add(42, area="plot")
+    payloads = [c for c in fake.el_calls if c[0] == "elPayload" and c[1] == plot_id]
+    assert payloads == [("elPayload", plot_id, {"kind": "text", "text": "42"})]
+
+
+def test_grid_add_str_child_still_goes_through_elappend_as_text(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    g = mod.grid("kpi | plot")
+    plot_id = g._areas["plot"]._openstat_el_id
+    g.add("hello", area="plot")
+    appends = [c for c in fake.el_calls if c[0] == "elAppend" and c[1] == plot_id]
+    assert appends == [("elAppend", plot_id, {"text": "hello"})]
+
+
+def test_grid_add_unknown_area_raises_typeerror(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    g = mod.grid("kpi | plot")
+    with pytest.raises(TypeError):
+        g.add("x", area="nope")
+
+
+def test_row_add_area_raises_typeerror_not_a_grid(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    r = mod.row()
+    with pytest.raises(TypeError):
+        r.add("x", area="plot")
+
+
+def test_row_add_without_area_appends_no_clear(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    r = mod.row()
+    r.add("a")
+    r.add("b")
+    clears = [c for c in fake.el_calls if c[0] == "elClear" and c[1] == r._openstat_el_id]
+    assert clears == []
+    texts = [c[2]["text"] for c in fake.el_calls if c[0] == "elAppend" and c[1] == r._openstat_el_id]
+    assert texts == ["a", "b"]
+
+
+def test_row_add_list_adds_each(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    r = mod.row()
+    a = mod.html.span("A")
+    b = mod.html.span("B")
+    r.add([a, b])
+    appends = [c for c in fake.el_calls if c[0] == "elAppend" and c[1] == r._openstat_el_id]
+    assert appends == [
+        ("elAppend", r._openstat_el_id, {"el": a._openstat_el_id}),
+        ("elAppend", r._openstat_el_id, {"el": b._openstat_el_id}),
+    ]
+
+
+def test_add_span_sets_grid_column_style_on_child(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    r = mod.row()
+    child = mod.html.div("x")
+    r.add(child, span=2)
+    style_calls = [c for c in fake.el_calls if c[0] == "elSetProps" and c[1] == child._openstat_el_id]
+    assert style_calls[-1][2] == {"style": {"gridColumn": "span 2"}}
+
+
+def test_add_align_sets_align_self_style_on_child(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    r = mod.row()
+    child = mod.html.div("x")
+    r.add(child, align="center")
+    style_calls = [c for c in fake.el_calls if c[0] == "elSetProps" and c[1] == child._openstat_el_id]
+    assert style_calls[-1][2] == {"style": {"alignSelf": "center"}}
+
+
+def test_add_span_and_align_ignored_for_non_element_children(monkeypatch):
+    mod, fake = _load_ui(monkeypatch)
+    r = mod.row()
+    r.add("plain text", span=2, align="center")   # skal ikke kaste
+    style_calls = [c for c in fake.el_calls if c[0] == "elSetProps"]
+    assert style_calls == []
+
+
+def test_controls_compose_into_row_spec_into_equals_row_el_id(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result="40")
+    filters = mod.row()
+    mod.slider(0, 100, into=filters)
+    assert fake.calls[-1]["into"] == filters._openstat_el_id
 
 
 def test_image_ukjent_objekt_faller_tilbake_til_str(monkeypatch):

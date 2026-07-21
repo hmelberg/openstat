@@ -1385,6 +1385,16 @@
   border-left: 3px solid color-mix(in srgb, var(--danger) 60%, var(--border));
 }
 
+/* fase 4b (spec 2026-07-21): containere — os-row/os-col/os-grid
+   (ui.row/ui.column/ui.grid, shared/ui_core.py). Ren layout, ingen
+   fargevalg — arver tekst/bakgrunn fra omgivelsene som resten av
+   dokumentet; gap=/wrap=/justify=/align= (row/column) og
+   cols=/rows=/gap= (grid) overstyrer disse defaultene via inline style
+   satt fasade-side, se ui_core.py sin row()/column()/grid(). */
+.os-row { display: flex; flex-direction: row; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
+.os-col { display: flex; flex-direction: column; gap: 0.75rem; }
+.os-grid { display: grid; gap: 0.75rem; }
+
 /* ── #@param-skjemaer (spec 2 W4, Task 2; flyttet inn i .nb-output i widget-
    plassering-fasen): js/param-forms.js DOM-halvdel. .param-form settes inn
    av ParamForms.decorate INNI cellens .nb-output-wrapper, FØR en evt.

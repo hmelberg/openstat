@@ -823,6 +823,48 @@ def _normalize_kwargs(kwargs):
 # identisk; kjernens kopi refererer `_element_cls` i stedet for bare
 # `Element` - injisert under, se configure()-kallet).
 _append_children = _core._append_children
+# fase 4b (Task 3): _flatten_children flyttet til shared/ui_core.py
+# (pur, ingen fasade-avhengighet - samme ett-nivå-flating
+# _append_children selv bruker internt, se der) - brukt av
+# Element.add sin span=/align=-gren og _render_area_children under.
+_flatten_children = _core._flatten_children
+
+
+def _render_area_children(target_el_id, children):
+    """fase 4b (Element.add sin area=-gren, spec §Decisions 4): render
+    `children` INN i et allerede TØMT område-barn (Ui.elClear er kallerens
+    ansvar, FØR dette kalles). Element/str-barn går den vanlige
+    _append_children-stien (elAppend, med samme ett-nivå-flating og
+    nøstet-liste-advarsel som der). Alt annet - en VERDI (DataFrame/figur/
+    tall/bool/osv., hverken Element, str eller liste) - klassifiseres
+    PRESIS som en on_change-handler sin returverdi ville blitt
+    (_event_payload, samme funksjon W5.2 allerede bruker for
+    Ui.renderEventResult) og rendres via Ui.elPayload inn i noden - SAMME
+    rendrings-vokabular som ui.kpi/ui.markdown (_payload_element-familien)
+    bruker, ikke en rå str()-tekstnode slik _append_children sin
+    catch-all-gren ville gjort."""
+    element_or_text = []
+    u = None
+    for child in _flatten_children(children):
+        if child is None:
+            continue
+        if isinstance(child, (list, tuple)):
+            _warn_sink("ui.grid: nøstet liste (mer enn ett flatingsnivå) i area-barn - hoppet over")
+            continue
+        if isinstance(child, (Element, str)):
+            element_or_text.append(child)
+            continue
+        if u is None:
+            u = _ui()
+        if u is not None and target_el_id is not None:
+            payload = _event_payload(child, "")
+            if payload is not None:
+                try:
+                    u.elPayload(target_el_id, json.dumps(payload))
+                except Exception:
+                    pass
+    if element_or_text:
+        _append_children(target_el_id, element_or_text)
 
 
 class Element:
@@ -845,10 +887,55 @@ class Element:
         # elementets EGEN tag, KUN til _validate_accepts-whitelisten under.
         self._openstat_tag = tag
 
-    def add(self, *children):
+    def add(self, *children, area=None, span=None, align=None):
         """Legg til flere barn (samme regler som konstruktørens
-        *children - str/Element/liste-ett-nivå/None, spec §1)."""
-        _append_children(self._openstat_el_id, children)
+        *children - str/Element/liste-ett-nivå/None, spec §1) - UENDRET
+        når area=/span=/align= ikke er gitt (dagens *children-oppførsel,
+        inkludert `.add([a, b])`-listeformen, er 100% som før).
+
+        fase 4b (spec 2026-07-21 §Decisions 4, Task 3): tre nye,
+        valgfrie per-kalls-kwargs:
+
+        - area= (kun ui.grid-elementer, KREVER `_areas` satt av grid() -
+          en ANNEN Element uten et kjent område -> TypeError med en lesbar
+          feiltekst, ALDRI en stille no-op): tømmer området sitt
+          forhåndsopprettede barn-div (Ui.elClear) og RENDRER children INN
+          i det - erstatt-semantikk (W5 sin target-registry-idé, spec:
+          "into an OCCUPIED area REPLACES its content"), ikke append.
+          Element/str-barn går den vanlige _append_children-veien;
+          VERDI-barn (DataFrame/figur/skalar - hverken Element, str eller
+          liste) går via _render_area_children under, som klassifiserer
+          dem PRESIS som en on_change-handler sin returverdi ville blitt
+          (gjenbruker _event_payload) og rendrer via Ui.elPayload - SAMME
+          rendrings-vokabular som ui.kpi/ui.markdown/ui.on() allerede
+          bruker (_payload_element-familien).
+        - span=/align= (ethvert barn, ikke bare grid): satt på HVERT
+          Element-barn i DETTE kallet (span= -> style.gridColumn =
+          "span N"; align= -> style.alignSelf) via Element.set_style -
+          verdi-/tekst-barn har ingen egen DOM-node å style og hoppes
+          derfor stille over."""
+        if area is not None:
+            areas = getattr(self, "_areas", None)
+            if not areas or area not in areas:
+                raise TypeError(
+                    'ui.grid: "' + str(area) + '" er ikke et gyldig område på '
+                    'dette elementet - area= krever et ui.grid(...)-element '
+                    'med dette området i sin template')
+            target = areas[area]
+            target.clear()
+            _render_area_children(target._openstat_el_id, children)
+            style_targets = [target]
+        else:
+            _append_children(self._openstat_el_id, children)
+            style_targets = [c for c in _flatten_children(children) if isinstance(c, Element)]
+        if span is not None or align is not None:
+            styles = {}
+            if span is not None:
+                styles["grid_column"] = "span " + str(span)
+            if align is not None:
+                styles["align_self"] = align
+            for el in style_targets:
+                el.set_style(**styles)
         return self
 
     def clear(self):
@@ -1006,6 +1093,17 @@ _core.configure(
 )
 kpi = _core.kpi
 markdown = _core.markdown
+
+# fase 4b (Task 3, spec 2026-07-21): row/column/grid (containere) er rene
+# funksjoner i shared/ui_core.py - byte-identiske på tvers av fasadene
+# (samme injiserte element-motor-sti som _tag_builder, ingen egen
+# fasade-spesifikk kode). row/column/grid trenger IKKE selv en ny
+# configure()-injeksjon (de bruker bare _tag_builder, allerede rebundet
+# under sin egen kommentar lenger ned i fila - late binding via
+# ui_core.py sine egne modul-globals løser dette uansett rekkefølge).
+row = _core.row
+column = _core.column
+grid = _core.grid
 
 
 def _figure_spec(x):

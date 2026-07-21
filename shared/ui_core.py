@@ -84,12 +84,22 @@ def _handle_from_into(res, name, default):
     fra registerControl ({'__into':..., 'value':..., 'key':..., 'name':...})
     eller None (ingen kjørekontekst) eller en bar skalarverdi (into= ba om
     montering, men JS falt tilbake til stripa - ukjent el-id). default
-    huskes for no-context/no-key-.value-fallback (se WidgetHandle.value sin
-    nøkkel-fallback-gren, mirrored 3x i hver fasade)."""
+    huskes for no-context-.value-fallback (se WidgetHandle.value sin
+    nøkkel-fallback-gren, mirrored 3x i hver fasade).
+
+    fase 4b Task 3-mikrofiks (avdekket i task-2-rapportens hjørnetilfelle
+    #2): når `res` IKKE er None (en ekte kjørekontekst fantes, into= ble
+    forsøkt, men selve inn-målet løste seg ikke JS-side - "context exists
+    but into-target unresolved"), skal den HUSKEDE verdien være den
+    FAKTISK returnerte skalaren (`res`), ikke den frosne spec-defaulten -
+    JS-siden har allerede returnert den ekte, LAGREDE kontrollverdien i
+    dette tilfellet, og den skal ikke overskygges av value=/min= som ble
+    sendt INN. Kun det RENE no-context-tilfellet (res is None, ingen
+    kjørekontekst i det hele tatt) beholder den frosne defaulten."""
     if isinstance(res, dict) and res.get("__into"):
         return _widget_handle_cls(res.get("name"), res.get("key"))
     h = _widget_handle_cls(name, None)
-    h._fallback_value = default
+    h._fallback_value = default if res is None else res
     return h
 
 
@@ -147,6 +157,22 @@ def _snake_to_camel(name):
         return name
     head, *rest = name.split("_")
     return head + "".join(p[:1].upper() + p[1:] for p in rest if p)
+
+
+def _flatten_children(children):
+    """Ett flatingsnivå (spec §1, samme regel _append_children bruker
+    INNI seg selv - se lenger ned i denne filen) - PUR, ingen injeksjon.
+    Flyttet hit (fase 4b, Task 3) i stedet for duplisert 3x fasade-lokalt:
+    Element.add sin span=/align=-gren (mirrored 3x, pyodide/ui.py osv.) og
+    _render_area_children (samme fasader) bruker den til å finne de
+    FAKTISKE barna i et `.add([a, b], span=2)`-/`.add(x, area=...)`-kall."""
+    flat = []
+    for child in children:
+        if isinstance(child, (list, tuple)):
+            flat.extend(child)
+        else:
+            flat.append(child)
+    return flat
 
 
 def _json_safe(value):
@@ -446,3 +472,167 @@ def widget(name):
         _warn_sink('ui.widget: ukjent navn "' + str(name) + '"')
         return None
     return _widget_handle_cls(str(name), str(key))
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Containere - ui.row/ui.column/ui.grid (fase 4b, Task 3, spec
+# 2026-07-21-explicit-containers-design.md §Decisions 3-4). Rene funksjoner:
+# de bygger et props-dict akkurat som _tag_builder gjør (kwargs -> cls=/
+# style=), og kaller SAMME injiserte element-motor-sti (_tag_builder("div"),
+# selv definert lenger opp i DENNE filen - bruker _element_cls/_ui/
+# _normalize_kwargs/_warn_sink under panseret, allerede injisert av hver
+# fasades configure()-kall). Ingen egne nye configure()-placeholdere trengs
+# - containerne er 100% bygget av eksisterende injisert maskineri.
+#
+# `Element.add` sin area=/span=/align=-utvidelse (som LESER `_areas`-dicten
+# grid() setter under) er derimot FASADE-SIDE (Element er en fasade-lokal
+# klasse, ikke flyttet - se pyodide/ui.py osv.), mirrored 3x der.
+# ══════════════════════════════════════════════════════════════════════════
+
+def _parse_grid_template(template):
+    """"kpi kpi | plot table" -> {"areas": '"kpi kpi" "plot table"',
+    "names": ["kpi", "plot", "table"]} - CSS grid-template-areas-strengen
+    (én anførselstegn-kvotert rad per "|"-separert rad, mellomrom skiller
+    kolonner INNAD i en rad) + de unike områdenavnene i FØRSTE-SETT-
+    rekkefølge (rekkefølgen area-barna i grid() pre-opprettes i, og
+    dermed rekkefølgen `_areas`-dicten - og enhver test som lister den ut -
+    ser dem i).
+
+    Ragged rader (ulikt antall kolonner mellom rader) -> ValueError med en
+    lesbar feiltekst - CSS grid-template-areas KREVER en rektangulær
+    matrise (hver kvotert rad-streng må ha samme antall whitespace-
+    separerte tokens), en ujevn template er derfor alltid en
+    programmeringsfeil, ikke noe å stille falle tilbake fra.
+
+    Pur (ingen injeksjon, ingen sideeffekt) - testet direkte i CPython."""
+    rows = [row.split() for row in str(template).split("|")]
+    if not rows or any(not cols for cols in rows):
+        raise ValueError(
+            'ui.grid: tom rad i template "' + str(template) + '" - '
+            'hver "|"-separerte rad må ha minst én områdenavn-token')
+    width = len(rows[0])
+    for cols in rows:
+        if len(cols) != width:
+            raise ValueError(
+                'ui.grid: ujevne rader i template "' + str(template) + '" - '
+                'alle rader må ha samme antall kolonner (forventet ' +
+                str(width) + ', fikk ' + str(len(cols)) + ' i "' +
+                ' '.join(cols) + '")')
+    areas = ' '.join('"' + ' '.join(cols) + '"' for cols in rows)
+    names = []
+    seen = set()
+    for cols in rows:
+        for name in cols:
+            if name not in seen:
+                seen.add(name)
+                names.append(name)
+    return {"areas": areas, "names": names}
+
+
+def _merge_container_style(base_cls, style, kwargs):
+    """Delt hale for row()/column()/grid(): slå den BEREGNEDE style-dicten
+    (gap=/wrap=/justify=/align= for row/column, gridTemplate*=/gap= for
+    grid) sammen med et ev. brukergitt style=-kwarg (dict merges nøkkel for
+    nøkkel, brukerens SNAKE_CASE-nøkler camelCases som vanlig via
+    _snake_to_camel - samme regel _normalize_kwargs allerede bruker for
+    style=; en RAW cssText-streng derimot ERSTATTER den beregnede dicten
+    - de to formene lar seg ikke slå sammen, og en eksplisitt cssText-
+    streng er et bevisst "jeg styrer stilen selv"-signal fra brukeren).
+
+    cls=/class_= merges til `base_cls` (BASE_KLASSEN FØRST, brukerens
+    EKSTRA klasse(r) etter - samme "siste vinner ved kollisjon"-konvensjon
+    som _normalize_kwargs sin cls-vs-class_-håndtering, men her er det en
+    APPEND, ikke en erstatning - den kuraterte layout-klassen (os-row/
+    os-col/os-grid) skal ALLTID være med).
+
+    Muterer og returnerer `kwargs` (kalleren sender inn sin egen ferske
+    **kwargs-dict, aldri en delt en) - kwargs går videre INN i
+    _tag_builder("div")(**kwargs), som selv kjører _normalize_kwargs på
+    den."""
+    user_style = kwargs.pop("style", None)
+    if isinstance(user_style, dict):
+        style = dict(style)
+        style.update({_snake_to_camel(k): v for k, v in user_style.items()})
+    elif user_style is not None:
+        style = user_style
+    cls = kwargs.pop("cls", None)
+    class_ = kwargs.pop("class_", None)
+    user_cls = cls if cls is not None else class_
+    kwargs["cls"] = base_cls if not user_cls else (base_cls + " " + str(user_cls))
+    if style:
+        kwargs["style"] = style
+    return kwargs
+
+
+def _layout_props(base_cls, gap=None, wrap=None, justify=None, align=None, **kwargs):
+    """row()/column() sin felles kwargs-oppbygging: gap=/wrap=/justify=/
+    align= er tynne layout-kwargs som overstyrer app.css sine .os-row/
+    .os-col-defaults via inline style (facade-nøytralt - INGEN ny CSS
+    utover de tre klassene app.css allerede har, spec §Decisions 3).
+    wrap= aksepterer en ren bool (True -> "wrap", False -> "nowrap") ELLER
+    en rå CSS-verdi (f.eks. "wrap-reverse") gitt direkte som streng."""
+    style = {}
+    if gap is not None:
+        style["gap"] = gap
+    if wrap is not None:
+        if wrap is True:
+            style["flexWrap"] = "wrap"
+        elif wrap is False:
+            style["flexWrap"] = "nowrap"
+        else:
+            style["flexWrap"] = wrap
+    if justify is not None:
+        style["justifyContent"] = justify
+    if align is not None:
+        style["alignItems"] = align
+    return _merge_container_style(base_cls, style, kwargs)
+
+
+def row(*, gap=None, wrap=None, justify=None, align=None, **kwargs):
+    """ui.row(**kw) -> Element (fase 4b, container 1/3, spec §Decisions 3):
+    en flex-rad (.os-row, app.css) - kontroller/elementer monteres inn via
+    `.add()`/`into=`. gap=/wrap=/justify=/align= se _layout_props; alt
+    annet (cls=/style=/data_*/aria_*/attrs=/on_<event>=) går uendret videre
+    til den vanlige ui.html-kwargs-standarden (_normalize_kwargs, via
+    _tag_builder)."""
+    return _tag_builder("div")(**_layout_props(
+        "os-row", gap=gap, wrap=wrap, justify=justify, align=align, **kwargs))
+
+
+def column(*, gap=None, wrap=None, justify=None, align=None, **kwargs):
+    """ui.column(**kw) -> Element (fase 4b, container 2/3): en flex-kolonne
+    (.os-col). Samme layout-kwargs-sett som row() - flex er flex uansett
+    akse (flex-direction er den ENESTE forskjellen mellom .os-row/.os-col,
+    se app.css)."""
+    return _tag_builder("div")(**_layout_props(
+        "os-col", gap=gap, wrap=wrap, justify=justify, align=align, **kwargs))
+
+
+def grid(template, cols=None, rows=None, *, gap=None, **kwargs):
+    """ui.grid(template, cols=, rows=, **kw) -> Element (fase 4b, container
+    3/3, spec §Decisions 3): navngitte områder (_parse_grid_template) ->
+    CSS grid-template-areas, ETT barn-div PER UNIKT områdenavn (opprettet
+    HER, style.gridArea satt) - lagret som `{områdenavn: Element}` på
+    returverdien sitt `_areas`-attributt. `Element.add(x, area="navn")`
+    (fasade-side utvidelse, mirrored 3x - se pyodide/ui.py osv.) leser
+    NØYAKTIG denne dicten for å slå opp området å tømme+rendre inn i.
+
+    cols=/rows= er de vanlige CSS grid-template-columns/-rows-verdiene
+    (f.eks. "220px 1fr") - rene gjennomstrøms-strenger, ingen egen
+    parsing (til forskjell fra selve area-templaten)."""
+    parsed = _parse_grid_template(template)
+    style = {"gridTemplateAreas": parsed["areas"]}
+    if cols is not None:
+        style["gridTemplateColumns"] = cols
+    if rows is not None:
+        style["gridTemplateRows"] = rows
+    if gap is not None:
+        style["gap"] = gap
+    container = _tag_builder("div")(**_merge_container_style("os-grid", style, kwargs))
+    areas = {}
+    for name in parsed["names"]:
+        child = _tag_builder("div")(style={"gridArea": name})
+        container.add(child)
+        areas[name] = child
+    container._areas = areas
+    return container
