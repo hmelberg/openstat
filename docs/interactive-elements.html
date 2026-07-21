@@ -208,7 +208,14 @@ h = ui.widget("n")     # handle: h.value, h.set(30), h.hide(), h.show(),
 <li><strong>Placement:</strong> per control (<code>placement="left"</code>)
     or per cell (<code>#%% python widgets=left</code>).</li>
 <li><strong><code>sync_to="varname"</code></strong> pushes the value into a
-    live session variable as the user drags, without a rerun.</li>
+    live session variable — seeded already at registration, then updated as
+    the user drags, without a rerun. This makes it a full value channel of
+    its own: <code>ui.slider(0, 100, sync_to="n")</code> on its own line,
+    then use <code>n</code> anywhere below. One caveat: don't assign the
+    control to the SAME name you sync to (<code>n = ui.slider(sync_to="n")</code>)
+    — a rerun re-executes the assignment and the variable's type ends up
+    depending on interaction history. Use the bare-call form, or two
+    distinct names.</li>
 <li>Widgets need a notebook (<code>#%%</code> cells). In a plain script a
     <code>ui.*</code> call quietly returns its default and draws nothing.</li>
 <li>Pasted Jupyter code using <em>ipywidgets</em> also works in python mode —
