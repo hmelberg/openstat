@@ -36,6 +36,11 @@
     placement: 1,
     sync_to: 1,
     has_handler: 1,
+    // into (fase 4b: mount-mål — el-id fra _els-registeret, se
+    // _registerInto i DOM-halvdelen). Ren gjennomkopiering her (samme
+    // "valider ikke innholdet i den rene halvdelen" som has_handler over)
+    // — DOM-halvdelen slår opp selve elementet og advarer ved ukjent id.
+    into: 1,
     // play (dash-absorpsjon 5a Task 3): avspillingsintervall (ms, gulvet
     // til 200 av normalizeSpec under) + loop-flagg (wrap til min ved max,
     // fremfor å stoppe).
@@ -116,6 +121,13 @@
     // utover det (enhver "sannferdig" verdi normaliseres til ekte boolsk).
     if (raw.has_handler !== undefined) {
       spec.has_handler = !!raw.has_handler;
+    }
+
+    // into (fase 4b): el-id — streng, gjennomkopiert UVALIDERT (selve
+    // eksistensen av elementet sjekkes i DOM-halvdelen, _registerInto, som
+    // har _els-registeret; den rene halvdelen her vet ingenting om DOM).
+    if (raw.into !== undefined) {
+      spec.into = String(raw.into);
     }
 
     // sync_to (fase 3, spec §3): push av verdien inn i en navngitt sesjons-
@@ -979,7 +991,19 @@
       // hvilken av de (opptil tre) posisjons-stripene denne kontrollen skal
       // bygges/oppdateres i.
       var pos = _effectivePlacement(spec, cellEl);
-      var strip = _ensureStrip(cellEl, cellIdx, pos);
+
+      // fase 4b (spec 2026-07-21): into= — monter kontrollen i et element
+      // fra _els-registeret i stedet for stripa. Ukjent id → warn +
+      // stripe-fallback (en kontroll skal aldri forsvinne). into vinner
+      // over placement (gjensidig utelukkende, warn ved begge).
+      var intoNode = null;
+      if (spec.into) {
+        if (spec.placement) console.warn('Ui: into= og placement= er gjensidig utelukkende — into vinner');
+        var intoEntry = _els[spec.into];
+        intoNode = intoEntry ? intoEntry.node : null;
+        if (!intoNode) console.warn('Ui: ukjent into-mål ' + spec.into + ' — faller tilbake til stripa');
+      }
+      var strip = intoNode || _ensureStrip(cellEl, cellIdx, pos);
       var existing = _controls[key];
 
       // W2-carryover (d): en id-tagget celle kan ha flyttet RÅINDEKS siden
@@ -1015,7 +1039,13 @@
       // _values[key] HER (samme kontrolltype — verdien er fortsatt gyldig,
       // kun stedet den vises endret seg; "no value loss" per Task 3-kravet).
       var typeChanged = existing && existing.type !== spec.type;
-      var placementChanged = existing && !typeChanged && existing.placement !== pos;
+      // fase 4b: host-bytte (intoId endret — inn i et NYTT into-mål, eller inn/
+      // ut av into-verdenen) join'er samme regel som et rent stripe-bytte.
+      // existing.intoId er ALLTID satt (spec.into || null, se lagrings-
+      // punktene under) — aldri undefined — så sammenligningen er trygg også
+      // for kontroller som aldri har brukt into.
+      var placementChanged = existing && !typeChanged &&
+        (existing.placement !== pos || existing.intoId !== (spec.into || null));
       //
       // W1-carryover (a): FØR fjerning, fang nextSibling — den gamle nodens
       // posisjon i stripa. Den nye kontrollen settes inn PRESIS der (insertBefore
@@ -1050,13 +1080,21 @@
         }
         existing = undefined;
       } else if (placementChanged) {
-        if (existing.wrap && typeof existing.wrap.remove === 'function') existing.wrap.remove();
-        // Samme timer-hygiene som typeChanged over: den GAMLE noden (og
-        // dens ev. løpende timer) forlates for godt — en fersk kontroll
-        // bygges rett under, alltid i pause-tilstand.
-        _stopPlayTimer(key);
-        delete _controls[key];
-        existing = undefined;
+        // fase 4b: når DENNE registreringen faktisk løser til et into-mål
+        // (intoNode satt), er et host-bytte IKKE en grunn til å rive ned og
+        // bygge fersk — samme node gjenbrukes og re-parenteres i stedet
+        // (se appendChild-kallet i eksisterende-grenen under). Kun en
+        // stripe-internt bytte (eller en retrett UT av into-verdenen, hvor
+        // intoNode denne runden er null) river ned og bygger fersk, som før.
+        if (!intoNode) {
+          if (existing.wrap && typeof existing.wrap.remove === 'function') existing.wrap.remove();
+          // Samme timer-hygiene som typeChanged over: den GAMLE noden (og
+          // dens ev. løpende timer) forlates for godt — en fersk kontroll
+          // bygges rett under, alltid i pause-tilstand.
+          _stopPlayTimer(key);
+          delete _controls[key];
+          existing = undefined;
+        }
       }
 
       if (spec.type === 'button') {
@@ -1064,17 +1102,29 @@
           var builtBtn = _buildButton(key, cellIdx, spec);
           if (builtBtn.input && typeof builtBtn.input.setAttribute === 'function') builtBtn.input.setAttribute('data-ui-key', key);
           strip.insertBefore(builtBtn.wrap, reinsertBefore);
-          _controls[key] = { key: key, cellIdx: cellIdx, spec: spec, wrap: builtBtn.wrap, input: builtBtn.input, type: 'button', placement: pos };
+          _controls[key] = { key: key, cellIdx: cellIdx, spec: spec, wrap: builtBtn.wrap, input: builtBtn.input, type: 'button', placement: pos, intoId: spec.into || null };
         } else {
           existing.spec = spec;
           existing.wrap.textContent = spec.label || (typeof t === 'function' ? t('Kjør') : 'Kjør');
+          // fase 4b: hold intoId i sync + re-parenter INN i (evt. nye)
+          // into-målet på HVER into-registrering — appendChild flytter
+          // noden når den allerede har en annen forelder.
+          existing.intoId = spec.into || null;
+          if (intoNode) intoNode.appendChild(existing.wrap);
         }
+        // fase 4b: håndtak-kontrakt KUN når monteringen faktisk skjedde
+        // (intoNode satt) — ukjent into-mål faller tilbake til den vanlige,
+        // enkle returen (ingen __into-wrapper, se _registerInto sin
+        // fallback-dokumentasjon over).
+        if (intoNode) return { value: null, key: key, __into: true, name: spec.name || null };
         return { value: null, key: key };
       }
 
       var value;
       if (existing) {
         value = _updateControlSpec(existing, spec);
+        existing.intoId = spec.into || null;
+        if (intoNode) intoNode.appendChild(existing.wrap);
       } else {
         var stored = _values.hasOwnProperty(key) ? _values[key] : spec.value;
         var builder = _BUILDERS[spec.type];
@@ -1087,12 +1137,13 @@
         strip.insertBefore(built.wrap, reinsertBefore);
         _controls[key] = {
           key: key, cellIdx: cellIdx, spec: spec, wrap: built.wrap, input: built.input,
-          labelEl: built.labelEl, readout: built.readout, type: spec.type, placement: pos
+          labelEl: built.labelEl, readout: built.readout, type: spec.type, placement: pos, intoId: spec.into || null
         };
         value = stored;
       }
       _values[key] = value;
       _syncPush(spec, value);
+      if (intoNode) return { value: value, key: key, __into: true, name: spec.name || null };
       return { value: value, key: key };
     }
 
@@ -1108,6 +1159,15 @@
      * ALLE andre specs (has_handler fraværende/usann) beholder den gamle,
      * enkle verdi-returen UENDRET (bakoverkompatibelt med pyodide/brython/
      * mpy/R-fasadene slik de er i dag).
+     *
+     * fase 4b: når _registerInto sin retur har `__into` (spec.into faktisk
+     * monterte kontrollen et sted), UTVIDES returen i stedet til
+     * `{__into: true, value, key, name}` — dette VINNER over has_handler-
+     * grenen over (into og has_handler er ikke gjensidig utelukkende i
+     * specen, men into-håndtaket er det fasaden (Task 2) trenger når
+     * kontrollen ikke lever i stripa). Ukjent into-mål (fallback til stripa)
+     * har IKKE `__into` på reg — den grenen faller da videre til
+     * has_handler/bare-verdi som før.
      */
     Ui.registerControl = function (specJson) {
       var ctx = (typeof global.mdUiRunCtx === 'function') ? global.mdUiRunCtx() : null;
@@ -1132,6 +1192,9 @@
 
       var reg = _registerInto(ctx.doc === true ? null : ctx.cellIdx,
                               ctx.doc === true ? null : ctx.cellEl, spec);
+      if (reg.__into) {
+        return JSON.stringify({ __into: true, value: reg.value, key: reg.key, name: reg.name });
+      }
       if (spec.has_handler) {
         return JSON.stringify({ value: reg.value, key: reg.key });
       }
@@ -1341,6 +1404,16 @@
       _values[key] = written;
       _syncPush(ctrl.spec, written);
       return JSON.stringify(written);
+    };
+
+    /**
+     * Ui.widgetValue(key) → JSON-streng med kontrollens LAGREDE verdi,
+     * eller null for ukjent nøkkel — nøkkel-varianten av Ui.value(navn)
+     * (fase 4b: håndtak for NAVNLØSE into-kontroller trenger live .value).
+     */
+    Ui.widgetValue = function (key) {
+      if (!_values.hasOwnProperty(key)) return null;
+      try { return JSON.stringify(_values[key]); } catch (e) { return null; }
     };
 
     /**

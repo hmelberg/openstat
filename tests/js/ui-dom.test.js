@@ -74,8 +74,17 @@ class FakeEl {
   // testene leser den samme strengen rett tilbake).
   set innerHTML(v) { this._innerHTML = v; if (v === '') this.children = []; }
   get innerHTML() { return this._innerHTML !== undefined ? this._innerHTML : ''; }
-  appendChild(c) { this.children.push(c); c._parentNode = this; return c; }
+  // fase 4b: ekte DOM sin appendChild/insertBefore FJERNER automatisk noden
+  // fra en ev. tidligere forelder først ("moves" den, aldri en duplikat-
+  // referanse to steder) — _registerInto sin into-host-bytte (re-parenter
+  // SAMME wrap-node inn i et NYTT into-mål) lener seg på nettopp denne
+  // ekte DOM-oppførselen, så stubben må speile den her.
+  appendChild(c) {
+    if (c._parentNode && c._parentNode !== this) c._parentNode.removeChild(c);
+    this.children.push(c); c._parentNode = this; return c;
+  }
   insertBefore(node, ref) {
+    if (node._parentNode && node._parentNode !== this) node._parentNode.removeChild(node);
     if (ref == null) {
       this.children.push(node);
     } else {
@@ -3140,4 +3149,112 @@ test('fase 4a pin: sync_to pusher via mdUiSyncTo VED REGISTRERING (seed) og ved 
   } finally {
     delete global.mdUiSyncTo;
   }
+});
+
+// ---- fase 4b: into= — monter kontroller i elementer (_els-registeret) -----
+
+test('into: kontroll monteres i element, IKKE i stripa', () => {
+  const { Ui, outEl } = freshEnv();
+  const host = Ui.elCreate('div');
+  const res = Ui.registerControl(JSON.stringify({ type: 'slider', name: 'x', min: 0, max: 100, value: 40, into: host }));
+
+  const key = Ui.widgetLookup('x');
+  const wrap = Ui.widgetNode(key, 'wrap');
+  assert.strictEqual(wrap.parentNode, Ui.elNode(host), 'wrap er barn av into-elementet');
+  assert.ok(!outEl.children.some((c) => c.classList.contains('ui-controls')), 'stripa opprettes aldri — kontrollen lever kun i into-elementet');
+  assert.deepStrictEqual(JSON.parse(res), { __into: true, value: 40, key: key, name: 'x' });
+});
+
+test('into: re-registrering flytter SAMME node inn i NY container', () => {
+  const { Ui } = freshEnv();
+  const hostA = Ui.elCreate('div');
+  const hostB = Ui.elCreate('div');
+  Ui.registerControl(JSON.stringify({ type: 'slider', name: 'x', min: 0, max: 100, value: 40, into: hostA }));
+  const key = Ui.widgetLookup('x');
+  const wrap1 = Ui.widgetNode(key, 'wrap');
+  assert.strictEqual(wrap1.parentNode, Ui.elNode(hostA));
+
+  const res = Ui.registerControl(JSON.stringify({ type: 'slider', name: 'x', min: 0, max: 100, value: 40, into: hostB }));
+  const wrap2 = Ui.widgetNode(key, 'wrap');
+  assert.strictEqual(wrap2, wrap1, 'SAMME wrap-node gjenbrukt på tvers av host-byttet');
+  assert.strictEqual(wrap2.parentNode, Ui.elNode(hostB), 'flyttet inn i hostB');
+  assert.strictEqual(Ui.elNode(hostA).children.length, 0, 'fjernet fra hostA (appendChild flytter noden)');
+  assert.strictEqual(JSON.parse(res).value, 40, 'verdien overlever host-byttet');
+});
+
+test('into: verdilager overlever rerun-syklus', async () => {
+  const { Ui } = freshEnv({ cellIdx: 2 });
+  const host = Ui.elCreate('div');
+  Ui.registerControl(JSON.stringify({ type: 'slider', name: 'x', min: 0, max: 100, value: 40, into: host }));
+  Ui.endCellRun(2);
+
+  const key = Ui.widgetLookup('x');
+  const rangeInput = Ui.widgetNode(key, 'wrap').children[1];
+  rangeInput.value = '70';
+  rangeInput.dispatchEvent({ type: 'input' });
+  await wait(200);
+
+  const res = Ui.registerControl(JSON.stringify({ type: 'slider', name: 'x', min: 0, max: 100, value: 40, into: host }));
+  Ui.endCellRun(2);
+  assert.strictEqual(JSON.parse(res).value, 70, 'endret verdi overlever endCellRun/beginCellRun-syklusen');
+});
+
+test('into + placement: warn, into vinner', () => {
+  const { Ui } = freshEnv();
+  const host = Ui.elCreate('div');
+  const origWarn = console.warn;
+  let warned = 0;
+  console.warn = () => { warned++; };
+  let res;
+  try {
+    res = Ui.registerControl(JSON.stringify({ type: 'slider', name: 'x', min: 0, max: 100, value: 40, into: host, placement: 'left' }));
+  } finally {
+    console.warn = origWarn;
+  }
+  assert.ok(warned >= 1, 'console.warn kalt for into+placement-konflikten');
+  const key = Ui.widgetLookup('x');
+  const wrap = Ui.widgetNode(key, 'wrap');
+  assert.strictEqual(wrap.parentNode, Ui.elNode(host), 'into vant over placement — wrap havnet i into-elementet');
+  assert.deepStrictEqual(JSON.parse(res), { __into: true, value: 40, key: key, name: 'x' });
+});
+
+test('into: ukjent el-id → warn + fallback til stripa', () => {
+  const { Ui, outEl } = freshEnv();
+  const origWarn = console.warn;
+  let warned = 0;
+  console.warn = () => { warned++; };
+  let res;
+  try {
+    res = Ui.registerControl(JSON.stringify({ type: 'slider', name: 'x', min: 0, max: 100, value: 40, into: 'el9999' }));
+  } finally {
+    console.warn = origWarn;
+  }
+  assert.ok(warned >= 1, 'console.warn kalt for ukjent into-mål');
+  const strip = outEl.children.find((c) => c.classList.contains('ui-controls'));
+  assert.ok(strip, 'stripa opprettet som fallback');
+  assert.strictEqual(strip.children.length, 1, 'kontrollen endte i stripa, ikke tapt');
+  assert.strictEqual(JSON.parse(res), 40, 'PLAIN verdi-retur ved fallback — ingen __into-håndtak (kontrollen lever tross alt ikke der spec ba om)');
+});
+
+test('widgetValue: live verdi per nøkkel, null for ukjent', async () => {
+  const { Ui } = freshEnv({ cellIdx: 2 });
+  const host = Ui.elCreate('div');
+  Ui.registerControl(JSON.stringify({ type: 'slider', name: 'x', min: 0, max: 100, value: 40, into: host }));
+  const key = Ui.widgetLookup('x');
+  const rangeInput = Ui.widgetNode(key, 'wrap').children[1];
+  rangeInput.value = '70';
+  rangeInput.dispatchEvent({ type: 'input' });
+  await wait(200);
+
+  assert.strictEqual(Ui.widgetValue(key), '70', 'live lagret verdi for nøkkelen');
+  assert.strictEqual(Ui.widgetValue('finnes-ikke'), null, 'ukjent nøkkel → null');
+});
+
+test('uten into: retur og oppførsel BYTE-uendret', () => {
+  const { Ui, outEl } = freshEnv();
+  const res = Ui.registerControl(JSON.stringify({ type: 'slider', name: 'x', min: 0, max: 100, value: 40 }));
+  assert.strictEqual(JSON.parse(res), 40, 'bar verdi-retur, ingen objekt-wrapper — strip-oppførsel uendret uten into');
+  const strip = outEl.children.find((c) => c.classList.contains('ui-controls'));
+  assert.ok(strip, 'stripa opprettet som normalt');
+  assert.strictEqual(strip.children.length, 1);
 });
