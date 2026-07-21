@@ -2,7 +2,10 @@
 
 **Status:** APPROVED 2026-07-21 (design settled with Hans over an extended
 discussion 2026-07-20/21; every decision below was explicitly chosen, with
-alternatives assessed in-session — see §Rejected alternatives).
+alternatives assessed in-session — see §Rejected alternatives);
+Phase 4a+4b DELIVERED 2026-07-21 (plans 2026-07-21-sync-to-pin-docs.md,
+2026-07-21-containers.md — browser-verified pyodide+brython incl.
+area-replace, value-survival over rerun, strip/param regression).
 Continuation of the interactive-elements line
 (`2026-07-20-unified-interactive-elements-design.md`, phases 1–3 all
 DELIVERED 2026-07-20; user doc `docs/interactive-elements.html`).
