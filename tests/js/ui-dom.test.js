@@ -3120,3 +3120,24 @@ test('fase 2 pin: button — wrap ER knappen, klasse + type', () => {
   assert.strictEqual(btn.type, 'button');
   assert.strictEqual(btn.textContent, 'Trykk');
 });
+
+// ---- fase 4a (spec 2026-07-21): sync_to-push pinnes — VED REGISTRERING og ved endring ----
+
+test('fase 4a pin: sync_to pusher via mdUiSyncTo VED REGISTRERING (seed) og ved endring, FØR rerun', async () => {
+  const pushes = [];
+  global.mdUiSyncTo = (name, value) => { pushes.push([name, value]); };
+  try {
+    const { Ui, outEl } = freshEnv();
+    Ui.registerControl(JSON.stringify({ type: 'slider', name: 'x', min: 0, max: 100, value: 40, sync_to: 'n' }));
+    // Seed: registreringen alene har pushet gjeldende verdi til sesjonsvariabelen.
+    assert.deepStrictEqual(pushes, [['n', 40]]);
+    // Endring: input-event → umiddelbar push (før den debouncede reruen).
+    const strip = outEl.children[0];
+    const input = strip.children[0].children[1];
+    input.value = 70;
+    input.dispatchEvent({ type: 'input' });
+    assert.deepStrictEqual(pushes[pushes.length - 1], ['n', 70]);
+  } finally {
+    delete global.mdUiSyncTo;
+  }
+});
