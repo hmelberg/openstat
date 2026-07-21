@@ -1,0 +1,44 @@
+# label: Containers — explicit layout
+#options.mode = brython
+#options.title = "Containers — explicit layout"
+#options.description = "ui.row/ui.column/ui.grid + into=: controls composed into a dashboard layout, on_change redraws one area in place"
+# load https://raw.githubusercontent.com/hmelberg/openstat/main/data/iris.csv as iris
+
+#%% md
+# Containers — explicit layout
+
+`ui.grid(template, cols=)` lays out named areas (`|` separates rows,
+whitespace separates columns). `into=panel` mounts a control inside a
+container instead of the cell's widget strip — and changes what the call
+returns: without `into=` you get the value, with `into=` you get a
+**handle** (`.value`, `.set()`, `.on()`). The dropdown and slider below
+live in a `ui.column` placed in the `side` area; their shared `on_change`
+handler reads both handles' `.value` and redraws the `main` area —
+`.add(x, area="main")` on an already-occupied area **replaces** its
+content rather than appending. The `table` area is filled once, outside
+the handler, to show that `.add(..., area=)` also works as a one-shot
+placement.
+
+#%% brython
+import ui
+import pandas_brython as pd
+
+layout = ui.grid("side main | side table", cols="220px 1fr")
+
+def update(_):
+    sub = iris[iris["species"] == species.value]
+    layout.add(sub.sort_values("sepal_length", ascending=False).head(int(rows.value)),
+               area="main")
+
+panel = ui.column(gap="0.75rem")
+species = ui.dropdown(sorted(set(iris["species"])), value="setosa",
+                       label="Species", into=panel, on_change=update)
+rows = ui.slider(1, 20, value=5, step=1, label="Rows",
+                  into=panel, on_change=update)
+
+layout.add(panel, area="side")
+layout.add(iris[iris["species"] == "setosa"].sort_values("sepal_length", ascending=False).head(5),
+           area="main")
+layout.add(iris[["species", "sepal_length", "petal_length"]].groupby("species").mean(),
+           area="table")
+layout

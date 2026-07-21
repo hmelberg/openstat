@@ -129,6 +129,11 @@
       "file": "brython/bry25_widget_events.txt",
       "label": "Widget events — ui.on and ui.run_cell (Brython)",
       "group": null
+    },
+    {
+      "file": "brython/bry26_containers.txt",
+      "label": "Containers — explicit layout",
+      "group": null
     }
   ],
   "duckdb": [
@@ -768,6 +773,11 @@
     {
       "file": "python/py06_dashboard.txt",
       "label": "Dashboard — distribution explorer",
+      "group": null
+    },
+    {
+      "file": "python/py_containers.txt",
+      "label": "Containers — explicit layout",
       "group": null
     },
     {

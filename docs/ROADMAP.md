@@ -66,6 +66,12 @@ på tvers av moduser; output-rens ved inngang.
 er levert (display policy v2, delt konstruksjonskjerne, delt fasadekjerne).
 Brukeroversikt: docs/interactive-elements.html.*
 
+**Ferdig (fase 4a/4b, spec 2026-07-21-explicit-containers-design.md):**
+`sync_to`-seeding pinnet + dokumentert (4a); `into=`-håndtak-retur,
+`ui.row`/`ui.column`/`ui.grid` + `Element.add(area=/span=/align=)` med
+område-erstatt-semantikk, og Containers-seksjonen i
+docs/interactive-elements.html (4b) — alt levert og testet.
+
 **Colab-paritet for `#@param` (syntaksen er ellers Colab-kompatibel;
 run:auto-default og placement/R/JS-støtte er OpenStat-utvidelser Colab mangler):**
 - [ ] `#@title` — celletittel-linje med form-meta (`{run:"auto",

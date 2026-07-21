@@ -62,6 +62,7 @@
   <li><a href="#params">Level 1 — <code>#@param</code> forms (no UI code)</a></li>
   <li><a href="#widgets">Level 2 — <code>ui.*</code> widgets (one-liners with live values)</a></li>
   <li><a href="#elements">Level 3 — <code>ui.html</code> elements (full control)</a></li>
+  <li><a href="#containers">Containers — <code>ui.row</code> / <code>ui.column</code> / <code>ui.grid</code></a></li>
   <li><a href="#events">Events and reruns</a></li>
   <li><a href="#runtimes">Runtime support</a></li>
 </ul>
@@ -271,6 +272,94 @@ namespace of element builders:</p>
 #tag.import = pico            →  ui.pico.button("Click"), …
 #tag.import = https://example.com/lib.js as acme
                               →  ui.acme.button() renders &lt;acme-button&gt;</code></pre>
+
+<h2 id="containers">Containers <span class="pill">python · brython · micropython</span></h2>
+
+<p>Widgets (level 2) live in the cell's widget strip; <code>ui.html</code>
+(level 3) composes freely but is raw. Containers close the gap: controls
+placed explicitly inside a layout you build — a card, a toolbar, a
+dashboard grid — while keeping the widgets' value store, debounce, and
+<code>sync_to</code>/<code>rerun</code> wiring.</p>
+
+<p>Three container types, all ordinary <code>ui.html</code> elements
+underneath (nestable, stylable, <code>.show(target=)</code> works):</p>
+
+<ul>
+<li><code>ui.row(gap=, wrap=, justify=, align=)</code> / <code>ui.column(...)</code>
+    — flex layouts; same kwargs, only the axis differs.</li>
+<li><code>ui.grid(template, cols=None, rows=None, gap=None)</code> — named
+    areas, 1:1 with CSS <code>grid-template-areas</code>:
+    <code>|</code> separates rows, whitespace separates columns, and
+    <code>.</code> is the CSS null-cell (an empty spot in the layout).</li>
+</ul>
+
+<pre><code>layout = ui.grid("side main | side table", cols="220px 1fr")
+panel  = ui.column(gap="0.75rem")</code></pre>
+
+<h3><code>.add()</code> — append or replace-in-place</h3>
+<p>Every container (and any <code>ui.html</code> element) has
+<code>.add(child_or_list, area=, span=, align=)</code>:</p>
+<ul>
+<li><strong>Without <code>area=</code>:</strong> appends — same as passing
+    children to the element constructor, including the list form
+    (<code>.add([a, b])</code>).</li>
+<li><strong>With <code>area=</code>:</strong> only valid on a
+    <code>ui.grid(...)</code> — targets a named area. Adding into an
+    <em>occupied</em> area <strong>replaces</strong> its content rather than
+    appending (empties it first, then renders) — this is what makes an
+    <code>on_change</code> handler that redraws into an area work.
+    Values (a DataFrame, a figure, a number) render through the same
+    payload path <code>on_change</code> return values use. Adding several
+    plain values in <em>one</em> <code>.add(..., area=...)</code> call only
+    shows the last — the payload path is clear-then-render, not append;
+    wrap multiple values in a container child if they should coexist.</li>
+<li><code>span=</code>/<code>align=</code> set <code>grid-column: span N</code>
+    / <code>align-self</code> on each element child added in that call.</li>
+</ul>
+
+<h3>The return rule — <code>into=</code></h3>
+<p>Every <code>ui.*</code> control takes an optional <code>into=</code>
+kwarg naming the container it should mount in. It changes what the call
+returns:</p>
+
+<pre><code>n = ui.slider(0, 100)                 # no into= → the VALUE (pull model, as before)
+s = ui.slider(0, 100, into=panel)     # into=      → the HANDLE (.value, .set(), .on())</code></pre>
+
+<p>Memorable form: <strong>without <code>into=</code> you get the value;
+with <code>into=</code> you get the control.</strong> <code>rerun="self"</code>
+stays the default either way — a control with an <code>on_change</code>
+handler never reruns (event-driven), and one without redraws the layout
+with the new value (the beginner default). Three value channels are
+available side by side:</p>
+
+<table>
+<tr><th>Channel</th><th>Spelling</th><th>Suited for</th></tr>
+<tr><td>Pull (return = value)</td><td><code>n = ui.slider(0, 100)</code></td>
+    <td>notebooks, rerun-driven (unchanged)</td></tr>
+<tr><td>Session variable (seeded <code>sync_to</code>)</td>
+    <td><code>ui.slider(0, 100, sync_to="n")</code></td>
+    <td>live value without rerun, no assignment</td></tr>
+<tr><td>Handle (<code>.value</code>/<code>.set</code>/<code>.on</code>)</td>
+    <td><code>s = ui.slider(0, 100, into=c)</code></td>
+    <td>containers/apps, event-driven</td></tr>
+</table>
+
+<pre><code>#%% python
+import ui
+
+layout = ui.grid("side main | side table", cols="220px 1fr")
+
+def update(_):
+    sub = iris[iris["species"] == a.value]
+    layout.add(sub.head(s.value), area="main")   # replaces area content
+
+panel = ui.column(gap="0.75rem")
+s = ui.slider(0, 100, value=30, label="Threshold", into=panel, on_change=update)
+a = ui.dropdown(sorted(set(iris["species"])), into=panel, on_change=update)
+
+layout.add(panel, area="side")
+layout.add(iris.head(10), area="table")
+layout</code></pre>
 
 <h2 id="events">Events and reruns</h2>
 
