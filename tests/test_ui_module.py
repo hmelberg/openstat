@@ -26,7 +26,7 @@ class FakeUiJs:
     bindControlHandler-opptak, og el*/value-opptak (elCreate/elSetProps/
     elAppend/elClear/elOn/elShow/elNode/value)."""
 
-    def __init__(self, next_result=None, next_key="k1", value_store=None, imports=None, widget_keys=None):
+    def __init__(self, next_result=None, next_key="k1", value_store=None, imports=None, widget_keys=None, widget_value_store=None):
         self.calls = []
         self.next_result = next_result
         self.next_key = next_key
@@ -34,6 +34,10 @@ class FakeUiJs:
         self.value_store = value_store if value_store is not None else {}
         self.el_calls = []
         self._next_el_id = 1
+        # fase 4b: speiler js/ui.js sin Ui.widgetValue - {controlKey: rå
+        # python-verdi}, json.dumps'et ved lesing (samme retur-kontrakt som
+        # ekte Ui.widgetValue: en JSON-STRENG, eller None for ukjent nøkkel).
+        self.widget_value_store = widget_value_store if widget_value_store is not None else {}
         # ui-html-fasen (Task 4): speiler window.__uiImports (js/ui.js sin
         # Ui.hasImport) - {ns: True} for "importert", fraværende/False for
         # "ikke importert ennå".
@@ -71,9 +75,32 @@ class FakeUiJs:
         self.widget_calls.append(("widgetBind", key, event, handler))
         return True
 
+    def widgetValue(self, key):
+        # fase 4b: speiler js/ui.js sin Ui.widgetValue(key) - nøkkel-basert
+        # verdioppslag (til forskjell fra Ui.value(navn)) for navnløse
+        # into=-håndtak sin .value.
+        self.widget_calls.append(("widgetValue", key))
+        if key not in self.widget_value_store:
+            return None
+        return json.dumps(self.widget_value_store[key])
+
     def registerControl(self, spec_json):
         spec = json.loads(spec_json)
         self.calls.append(spec)
+        # fase 4b: into= — når spec inneholder "into" OG en ekte kjørekontekst
+        # finnes (next_result er en JSON-verdi-streng, samme "ekte kontekst"-
+        # signal som has_handler-grenen under bruker), speiler
+        # Ui.registerControl sin utvidede objekt-retur ({"__into": true,
+        # "value":..., "key":..., "name":...}, Task 1) - mounting "lykkes"
+        # alltid i denne stubben (ingen ekte _els-register å slå feil mot;
+        # ukjent-el-id-fallback er JS-sidens ansvar, testet der).
+        if spec.get("into") and isinstance(self.next_result, str):
+            return json.dumps({
+                "__into": True,
+                "value": json.loads(self.next_result),
+                "key": self.next_key,
+                "name": spec.get("name"),
+            })
         if spec.get("has_handler") and isinstance(self.next_result, str):
             return json.dumps({"value": json.loads(self.next_result), "key": self.next_key})
         return self.next_result
@@ -127,10 +154,11 @@ class FakeUiJs:
         return bool(self.imports.get(ns))
 
 
-def _load_ui(monkeypatch, next_result=None, ui_js=None, next_key="k1", value_store=None, imports=None, widget_keys=None):
+def _load_ui(monkeypatch, next_result=None, ui_js=None, next_key="k1", value_store=None, imports=None, widget_keys=None, widget_value_store=None):
     js = types.ModuleType("js")
     fake = ui_js if ui_js is not None else FakeUiJs(
-        next_result=next_result, next_key=next_key, value_store=value_store, imports=imports, widget_keys=widget_keys)
+        next_result=next_result, next_key=next_key, value_store=value_store, imports=imports, widget_keys=widget_keys,
+        widget_value_store=widget_value_store)
     js.window = types.SimpleNamespace(Ui=fake)
     monkeypatch.setitem(sys.modules, "js", js)
     path = pathlib.Path(__file__).resolve().parents[1] / "pyodide" / "ui.py"
@@ -1642,3 +1670,83 @@ def test_fase3_core_delt_kilde(monkeypatch):
     assert mod.HTML_TAGS is ui_core.HTML_TAGS
     assert mod._snake_to_camel is ui_core._snake_to_camel
     assert mod._spec is ui_core._spec
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# into= — kontroller kan monteres i et element/container-håndtak i stedet
+# for stripa (fase 4b, spec 2026-07-21, task-2-brief.md). Task 1 (js/ui.js)
+# sin utvidede registerControl-retur ({"__into": true, "value":..., "key":
+# ..., "name":...}) og Ui.widgetValue konsumeres via
+# _core._handle_from_into (shared/ui_core.py) - se WidgetHandle.value sin
+# nøkkel-fallback-gren.
+# ══════════════════════════════════════════════════════════════════════════
+
+def test_into_sender_el_id_i_spec_og_gir_widgethandle(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result="40", widget_value_store={"k1": 70})
+    host = mod.html.div()
+    handle = mod.slider(0, 100, into=host)
+    assert fake.calls[-1]["into"] == host._openstat_el_id
+    assert isinstance(handle, mod.WidgetHandle)
+    assert handle.value == 70
+    assert ("widgetValue", "k1") in fake.widget_calls
+
+
+def test_uten_into_retur_uendret_i_samme_kjoring(monkeypatch):
+    # (b) uten into= - samme skalar-retur som før into= i det hele tatt
+    # eksisterte (reuser fallback-formen fra test_slider_fallback_default_
+    # er_min over) - INGEN "into"-nøkkel havner i spec-en når parameteret
+    # ikke ble gitt (_spec dropper None-verdier som vanlig).
+    mod, fake = _load_ui(monkeypatch, next_result=None)
+    assert mod.slider(0, 100) == 0
+    mod2, fake2 = _load_ui(monkeypatch, next_result="55")
+    assert mod2.slider(0, 100, name="n") == 55
+    assert "into" not in fake2.calls[-1]
+
+
+def test_into_og_placement_begge_sendt_gjennom(monkeypatch):
+    # (c) into= + placement= samtidig - fasaden preempter IKKE JS-advarselen
+    # (den lever js-side, Task 1) - begge nøklene skal bare tres gjennom
+    # uendret i spec-en.
+    mod, fake = _load_ui(monkeypatch, next_result="10")
+    host = mod.html.div()
+    mod.slider(0, 100, into=host, placement="top")
+    spec = fake.calls[-1]
+    assert spec["into"] == host._openstat_el_id
+    assert spec["placement"] == "top"
+
+
+def test_into_uten_kjorekontekst_gir_handle_med_husket_default(monkeypatch):
+    # (d) plain-script-fallback (registerControl -> None, ingen kjøre-
+    # kontekst) MED into=: fortsatt et WidgetHandle (aldri en krasj) -
+    # key=None (ingen nøkkel finnes), .value faller da tilbake til den
+    # HUSKEDE spec-defaulten i stedet for et navneoppslag.
+    mod, fake = _load_ui(monkeypatch, next_result=None)
+    host = mod.html.div()
+    handle = mod.slider(0, 100, value=42, into=host)
+    assert isinstance(handle, mod.WidgetHandle)
+    assert handle.value == 42
+
+
+def test_into_med_ugyldig_objekt_gir_typeerror(monkeypatch):
+    mod, _ = _load_ui(monkeypatch, next_result="1")
+    with pytest.raises(TypeError):
+        mod.slider(0, 100, into=object())
+
+
+def test_into_pa_button_gir_widgethandle(monkeypatch):
+    # button() sin egen kontrakt (retur alltid None UTEN into=) endres til
+    # et WidgetHandle når into= er gitt (samme mønster som verdikontrollene).
+    mod, fake = _load_ui(monkeypatch, next_result="null", widget_value_store={"k1": None})
+    host = mod.html.div()
+    handle = mod.button("Kjør", into=host)
+    assert fake.calls[-1]["into"] == host._openstat_el_id
+    assert isinstance(handle, mod.WidgetHandle)
+
+
+def test_play_into_gir_widgethandle(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result="3", widget_value_store={"k1": 5})
+    host = mod.html.div()
+    handle = mod.play(0, 10, into=host)
+    assert fake.calls[-1]["into"] == host._openstat_el_id
+    assert isinstance(handle, mod.WidgetHandle)
+    assert handle.value == 5

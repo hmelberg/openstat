@@ -62,6 +62,37 @@ def configure(**kwargs):
         g['_' + k] = v
 
 
+def _into_el_id(into):
+    """fase 4b (spec 2026-07-21): into= aksepterer et Element/container-
+    håndtak (duck-typet på _openstat_el_id, samme kontrakt som
+    _append_children/index.html sin _show_one bruker for "dette er et
+    monterbart element") - hent ut elId-strengen, eller None hvis into=
+    ikke ble gitt i det hele tatt. Et objekt UTEN attributtet er en klar
+    programmeringsfeil (feil type sendt til into=) -> TypeError HØYT,
+    ikke en stille fallback (speiler _register sin egen "userialiserbar
+    verdi er en programmeringsfeil"-linje lenger ned i fila)."""
+    if into is None:
+        return None
+    try:
+        return into._openstat_el_id
+    except AttributeError:
+        raise TypeError("into= tar et ui.html-/container-element")
+
+
+def _handle_from_into(res, name, default):
+    """fase 4b: bygg WidgetHandle-retur for into=-kall. res er dict-formen
+    fra registerControl ({'__into':..., 'value':..., 'key':..., 'name':...})
+    eller None (ingen kjørekontekst) eller en bar skalarverdi (into= ba om
+    montering, men JS falt tilbake til stripa - ukjent el-id). default
+    huskes for no-context/no-key-.value-fallback (se WidgetHandle.value sin
+    nøkkel-fallback-gren, mirrored 3x i hver fasade)."""
+    if isinstance(res, dict) and res.get("__into"):
+        return _widget_handle_cls(res.get("name"), res.get("key"))
+    h = _widget_handle_cls(name, None)
+    h._fallback_value = default
+    return h
+
+
 def _spec(type_, **kwargs):
     """type + gitte kwargs, None-verdier droppes (matcher js/ui.js sin
     normalizeSpec, som selv fyller inn defaults for det som mangler).
@@ -341,7 +372,8 @@ def run_button(label="Kjør", *, target="all", name=None, placement=None):
 
 
 def play(min, max, *, value=None, step=1, interval=600, loop=False, label=None,
-         name=None, rerun='self', on_change=None, placement=None, sync_to=None):
+         name=None, rerun='self', on_change=None, placement=None, sync_to=None,
+         into=None):
     """Avspillings-glidebryter (dash-absorpsjon 5a Task 3, spec §3 - dash sin
     play()-widget, absorbert): som slider, men med en innebygd play/pause-
     knapp (js/ui.js sin _buildPlay) som stepper value+step per interval-ms,
@@ -357,12 +389,19 @@ def play(min, max, *, value=None, step=1, interval=600, loop=False, label=None,
     (js/ui.js sin _wireChange/_buildPlay: "hver tick går gjennom SAMME sti
     som en brukerendring").
     sync_to= pusher verdien inn i live-sesjonsvariabelen ved hver
-    endring/tick, uten rerun."""
+    endring/tick, uten rerun.
+    into= (fase 4b): monter kontrollen i et element/container-håndtak i
+    stedet for stripa (_into_el_id henter ut elId-en) - da returneres et
+    WidgetHandle (_handle_from_into) i stedet for verdien."""
     rerun = _alias_rerun(rerun, on_change)
+    into_id = _into_el_id(into)
     spec = _spec("play", min=min, max=max, value=value, step=step,
                  interval=interval, loop=bool(loop), label=label, name=name,
-                 rerun=rerun, placement=placement, sync_to=sync_to)
+                 rerun=rerun, placement=placement, sync_to=sync_to, into=into_id)
     result = _register_value(spec, on_change)
+    if into is not None:
+        default = _scalar(value) if value is not None else _scalar(min)
+        return _handle_from_into(result, name, default)
     if result is None:
         return _scalar(value) if value is not None else _scalar(min)
     return _num(result)

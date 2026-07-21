@@ -144,6 +144,7 @@ PICO_UTILITY_CLASSES = _core.PICO_UTILITY_CLASSES
 _snake_to_camel = _core._snake_to_camel
 _json_safe = _core._json_safe
 _spec = _core._spec
+_into_el_id = _core._into_el_id
 
 
 def _num(value):
@@ -290,12 +291,23 @@ def _register_value(spec, handler):
     returnerte nøkkelen via Ui.bindControlHandler FØR verdien pakkes ut -
     alle widget-byggerne under kan dermed fortsette å behandle
     _register_value(...) sin retur nøyaktig som den gamle
-    _register(...)-returen (skalar-eller-None)."""
+    _register(...)-returen (skalar-eller-None).
+
+    fase 4b (into=): registerControl sin objekt-form kan OGSÅ være
+    into=-treffet ({"__into": true, "value":..., "key":..., "name":...},
+    Task 1) - denne pakkes ALDRI ut her (trådd gjennom UKOERSERT til
+    kalleren, som kjenner into= sin egen kontrakt via
+    _core._handle_from_into) - kun den gamle has_handler-formen
+    ({"value":..., "key":...}, uten "__into") kollapses til .get("value")
+    som før. has_handler-bindingen skjer uansett (begge formene har en
+    "key")."""
     if callable(handler):
         spec["has_handler"] = True
     result = _register(spec)
     if isinstance(result, dict):
         _bind_handler_if_callable(handler, result.get("key"))
+        if result.get("__into"):
+            return result
         return result.get("value")
     return result
 
@@ -330,104 +342,136 @@ def _bind_handler_if_callable(handler, key):
         pass
 
 
-def slider(min=0, max=100, *, value=None, step=1, label=None, name=None, rerun='self', on_change=None, placement=None, sync_to=None):
+def slider(min=0, max=100, *, value=None, step=1, label=None, name=None, rerun='self', on_change=None, placement=None, sync_to=None, into=None):
     """Glidebryter. Fallback (ingen notatbok-støtte): value hvis gitt, ellers min.
     on_change= er kanonisk alias for rerun= (W5.1) - aliaset vinner.
     on_change= kan OGSÅ være en python-callable (ui-html-fasen, Task 3,
     spec §3): da bindes den som en handler (kontrollen rerunner ALDRI)
     i stedet for rerun-alias-stien.
-    sync_to= pusher verdien inn i live-sesjonsvariabelen ved endring, uten rerun."""
+    sync_to= pusher verdien inn i live-sesjonsvariabelen ved endring, uten rerun.
+    into= (fase 4b): monter kontrollen i et element/container-håndtak i
+    stedet for stripa - returnerer da et WidgetHandle i stedet for verdien."""
     rerun = _alias_rerun(rerun, on_change)
+    into_id = _into_el_id(into)
     spec = _spec("slider", min=min, max=max, value=value, step=step,
-                 label=label, name=name, rerun=rerun, placement=placement, sync_to=sync_to)
+                 label=label, name=name, rerun=rerun, placement=placement, sync_to=sync_to, into=into_id)
     result = _register_value(spec, on_change)
+    if into is not None:
+        default = _scalar(value) if value is not None else _scalar(min)
+        return _core._handle_from_into(result, name, default)
     if result is None:
         return _scalar(value) if value is not None else _scalar(min)
     return _num(result)
 
 
-def dropdown(options, *, value=None, label=None, name=None, rerun='self', on_change=None, placement=None, sync_to=None):
+def dropdown(options, *, value=None, label=None, name=None, rerun='self', on_change=None, placement=None, sync_to=None, into=None):
     """Nedtrekksmeny. Fallback: value hvis gitt, ellers første valg.
     on_change= er kanonisk alias for rerun= (W5.1) - aliaset vinner.
     on_change= kan OGSÅ være en python-callable (ui-html-fasen, Task 3,
     spec §3): da bindes den som en handler (kontrollen rerunner ALDRI)
     i stedet for rerun-alias-stien.
-    sync_to= pusher verdien inn i live-sesjonsvariabelen ved endring, uten rerun."""
+    sync_to= pusher verdien inn i live-sesjonsvariabelen ved endring, uten rerun.
+    into= (fase 4b): monter kontrollen i et element/container-håndtak i
+    stedet for stripa - returnerer da et WidgetHandle i stedet for verdien."""
     rerun = _alias_rerun(rerun, on_change)
+    into_id = _into_el_id(into)
     options = list(options)
     if not options:
         raise ValueError("ui.dropdown: options kan ikke være en tom liste.")
     spec = _spec("dropdown", options=[str(o) for o in options], value=value,
-                 label=label, name=name, rerun=rerun, placement=placement, sync_to=sync_to)
+                 label=label, name=name, rerun=rerun, placement=placement, sync_to=sync_to, into=into_id)
     result = _register_value(spec, on_change)
+    if into is not None:
+        default = str(value) if value is not None else str(options[0])
+        return _core._handle_from_into(result, name, default)
     if result is None:
         return str(value) if value is not None else str(options[0])
     return str(result)
 
 
-def checkbox(label=None, *, value=False, name=None, rerun='self', on_change=None, placement=None, sync_to=None):
+def checkbox(label=None, *, value=False, name=None, rerun='self', on_change=None, placement=None, sync_to=None, into=None):
     """Avkrysningsboks. Fallback: value.
     on_change= er kanonisk alias for rerun= (W5.1) - aliaset vinner.
     on_change= kan OGSÅ være en python-callable (ui-html-fasen, Task 3,
     spec §3): da bindes den som en handler (kontrollen rerunner ALDRI)
     i stedet for rerun-alias-stien.
-    sync_to= pusher verdien inn i live-sesjonsvariabelen ved endring, uten rerun."""
+    sync_to= pusher verdien inn i live-sesjonsvariabelen ved endring, uten rerun.
+    into= (fase 4b): monter kontrollen i et element/container-håndtak i
+    stedet for stripa - returnerer da et WidgetHandle i stedet for verdien."""
     rerun = _alias_rerun(rerun, on_change)
-    spec = _spec("checkbox", value=bool(value), label=label, name=name, rerun=rerun, placement=placement, sync_to=sync_to)
+    into_id = _into_el_id(into)
+    spec = _spec("checkbox", value=bool(value), label=label, name=name, rerun=rerun, placement=placement, sync_to=sync_to, into=into_id)
     result = _register_value(spec, on_change)
+    if into is not None:
+        return _core._handle_from_into(result, name, bool(value))
     if result is None:
         return bool(value)
     return bool(result)
 
 
-def switch(label=None, *, value=False, name=None, rerun='self', on_change=None, placement=None, sync_to=None):
+def switch(label=None, *, value=False, name=None, rerun='self', on_change=None, placement=None, sync_to=None, into=None):
     """Bryter (samme semantikk som checkbox, annen visning). Fallback: value.
     on_change= er kanonisk alias for rerun= (W5.1) - aliaset vinner.
     on_change= kan OGSÅ være en python-callable (ui-html-fasen, Task 3,
     spec §3): da bindes den som en handler (kontrollen rerunner ALDRI)
     i stedet for rerun-alias-stien.
-    sync_to= pusher verdien inn i live-sesjonsvariabelen ved endring, uten rerun."""
+    sync_to= pusher verdien inn i live-sesjonsvariabelen ved endring, uten rerun.
+    into= (fase 4b): monter kontrollen i et element/container-håndtak i
+    stedet for stripa - returnerer da et WidgetHandle i stedet for verdien."""
     rerun = _alias_rerun(rerun, on_change)
-    spec = _spec("switch", value=bool(value), label=label, name=name, rerun=rerun, placement=placement, sync_to=sync_to)
+    into_id = _into_el_id(into)
+    spec = _spec("switch", value=bool(value), label=label, name=name, rerun=rerun, placement=placement, sync_to=sync_to, into=into_id)
     result = _register_value(spec, on_change)
+    if into is not None:
+        return _core._handle_from_into(result, name, bool(value))
     if result is None:
         return bool(value)
     return bool(result)
 
 
-def number(value=0, *, min=None, max=None, step=None, label=None, name=None, rerun='self', on_change=None, placement=None, sync_to=None):
+def number(value=0, *, min=None, max=None, step=None, label=None, name=None, rerun='self', on_change=None, placement=None, sync_to=None, into=None):
     """Tallfelt. Fallback: value.
     on_change= er kanonisk alias for rerun= (W5.1) - aliaset vinner.
     on_change= kan OGSÅ være en python-callable (ui-html-fasen, Task 3,
     spec §3): da bindes den som en handler (kontrollen rerunner ALDRI)
     i stedet for rerun-alias-stien.
-    sync_to= pusher verdien inn i live-sesjonsvariabelen ved endring, uten rerun."""
+    sync_to= pusher verdien inn i live-sesjonsvariabelen ved endring, uten rerun.
+    into= (fase 4b): monter kontrollen i et element/container-håndtak i
+    stedet for stripa - returnerer da et WidgetHandle i stedet for verdien."""
     rerun = _alias_rerun(rerun, on_change)
+    into_id = _into_el_id(into)
     spec = _spec("number", value=value, min=min, max=max, step=step,
-                 label=label, name=name, rerun=rerun, placement=placement, sync_to=sync_to)
+                 label=label, name=name, rerun=rerun, placement=placement, sync_to=sync_to, into=into_id)
     result = _register_value(spec, on_change)
+    if into is not None:
+        return _core._handle_from_into(result, name, _scalar(value))
     if result is None:
         return _scalar(value)
     return _num(result)
 
 
-def text(value='', *, label=None, name=None, rerun='self', on_change=None, placement=None, sync_to=None):
+def text(value='', *, label=None, name=None, rerun='self', on_change=None, placement=None, sync_to=None, into=None):
     """Tekstfelt. Fallback: str(value) - returtypen er alltid str
     (speiler dash.py sin textfield(default=str(default))).
     on_change= er kanonisk alias for rerun= (W5.1) - aliaset vinner.
     on_change= kan OGSÅ være en python-callable (ui-html-fasen, Task 3,
     spec §3): da bindes den som en handler (kontrollen rerunner ALDRI)
     i stedet for rerun-alias-stien.
-    sync_to= pusher verdien inn i live-sesjonsvariabelen ved endring, uten rerun."""
+    sync_to= pusher verdien inn i live-sesjonsvariabelen ved endring, uten rerun.
+    into= (fase 4b): monter kontrollen i et element/container-håndtak i
+    stedet for stripa - returnerer da et WidgetHandle i stedet for verdien."""
     rerun = _alias_rerun(rerun, on_change)
-    spec = _spec("text", value=str(value), label=label, name=name, rerun=rerun, placement=placement, sync_to=sync_to)
+    into_id = _into_el_id(into)
+    spec = _spec("text", value=str(value), label=label, name=name, rerun=rerun, placement=placement, sync_to=sync_to, into=into_id)
     result = _register_value(spec, on_change)
+    if into is not None:
+        return _core._handle_from_into(result, name, str(value))
     if result is None:
         return str(value)
     return str(result)
 
 
-def button(label, *, rerun='self', on_click=None, name=None, placement=None):
+def button(label, *, rerun='self', on_click=None, name=None, placement=None, into=None):
     """Trykknapp. Returnerer alltid None - selve klikket trigger en rerun
     av målcellen (js/ui.js), ikke en verdi å lese ut.
     on_click= er kanonisk alias for rerun= (W5.1) - aliaset vinner.
@@ -435,10 +479,15 @@ def button(label, *, rerun='self', on_click=None, name=None, placement=None):
     spec §3): da bindes den som en handler (klikket rerunner ALDRI) i
     stedet for rerun-alias-stien; handleren mottar alltid None (knapper
     har ingen lagret verdi) - (derfor kan heller ikke ui.widget()
-    adressere knapper)."""
+    adressere knapper).
+    into= (fase 4b): monter knappen i et element/container-håndtak i
+    stedet for stripa - returnerer da et WidgetHandle i stedet for None."""
     rerun = _alias_rerun(rerun, on_click)
-    spec = _spec("button", label=label, name=name, rerun=rerun, placement=placement)
-    _register_value(spec, on_click)
+    into_id = _into_el_id(into)
+    spec = _spec("button", label=label, name=name, rerun=rerun, placement=placement, into=into_id)
+    result = _register_value(spec, on_click)
+    if into is not None:
+        return _core._handle_from_into(result, name, None)
     return None
 
 
@@ -553,8 +602,31 @@ class WidgetHandle:
         """Live oppslag - SAMME som ui.value(self._name) (navnet, ikke den
         FROSSEDE nøkkelen - .value skal alltid følge GJELDENDE kontroll
         under dette navnet, ikke en potensielt utdatert identitet). Kaller
-        _value (Brython-felle-aliaset over), ikke value(...) direkte."""
-        return _value(self._name)
+        _value (Brython-felle-aliaset over), ikke value(...) direkte.
+
+        fase 4b (into=): navnløse håndtak (self._name er None - bygget av
+        _core._handle_from_into for en into=-kontroll uten name=) har
+        INTET navn å slå opp via - faller da tilbake til nøkkelen i
+        stedet: ingen nøkkel heller (no-context-fallback, into= ba om
+        montering men det finnes ingen kjørekontekst) -> den HUSKEDE
+        default-verdien (_fallback_value, satt av _handle_from_into);
+        ellers Ui.widgetValue(key) (JSON-dekodet, samme falsy/JsNull-
+        disiplin som _register - "not raw" fanger både None og en ekte
+        JS `null`)."""
+        if self._name is not None:
+            return _value(self._name)
+        if self._key is None:
+            return getattr(self, '_fallback_value', None)
+        u = _ui()
+        if u is None:
+            return None
+        try:
+            raw = u.widgetValue(self._key)
+        except Exception:
+            return None
+        if not raw:
+            return None
+        return json.loads(raw)
 
     def set(self, v):
         """Skriv en ny verdi til kontrollen (verdilager + DOM + sync_to,
