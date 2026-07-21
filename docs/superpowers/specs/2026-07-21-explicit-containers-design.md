@@ -91,12 +91,16 @@ DSL. `cols=` stays for the simple case.
    `sync_to=` (where the value FLOWS — session variable name, live),
    `rerun=` (what RUNS on change — `"self"`/cell id/list/`"none"`).
 
-7. **`sync_to` seeding** (phase 4a, ships first, valuable alone):
-   the session variable is written at REGISTRATION (with the stored
-   or default value), not first at user change. This makes
-   `ui.slider(0, 100, sync_to="n")` + `df.head(n)` a complete third
-   value channel with no first-run `NameError`. Applies in all
-   python-family runtimes; R untouched (frozen).
+7. **`sync_to` seeding** — CORRECTED 2026-07-21: planning recon found
+   this ALREADY DELIVERED (the 2026-07-16 sync_to phase):
+   `_syncPush` fires at registration (js/ui.js:1095, comment "Fyrer
+   ved registrering OG ved hver endring") through the `mdUiSyncTo`
+   hook, synchronously into the session globals — browser-verified:
+   `ui.slider(0, 100, value=40, sync_to="n")` + bare `n + 1` in the
+   SAME cell shows 41 on first run. Phase 4a therefore shrinks to:
+   pin the registration-time push with a JS test (uncovered today)
+   and document the value channel + the self-shadow caveat in
+   `docs/interactive-elements.html`.
 
 8. **The self-shadow pattern** `n = ui.slider(sync_to="n")` is not
    forbidden (cannot be) but NEVER documented: a restart re-executes
@@ -214,10 +218,11 @@ in the store under its stable key — exactly like strip controls today.
 
 ## Phasing & testing
 
-- **4a — `sync_to` seeding** (small, independent, ships first):
-  registration-time seed in all python-family runtimes; TDD against
-  the facade suites (`FakeUiJs` records the seed push); the
-  self-shadow caveat documented in `docs/interactive-elements.html`.
+- **4a — `sync_to` pin + docs** (small, independent, ships first;
+  the seeding itself already exists — see decision 7): a ui-dom test
+  pinning the registration-time `_syncPush`, plus the sync_to value
+  channel and self-shadow caveat documented in
+  `docs/interactive-elements.html`.
 - **4b — mountable widgets + containers**: characterization first
   (existing widget suites must pass unchanged — strip behavior is
   frozen), then `_registerInto` mount-target, then the three
