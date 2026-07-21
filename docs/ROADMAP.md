@@ -82,6 +82,17 @@ run:auto-default og placement/R/JS-støtte er OpenStat-utvidelser Colab mangler)
 - [ ] `display-mode: "form"` per celle — skjul koden, vis bare skjemaet
       (i dag finnes kun globale «vis kode»-innstillinger)
 
+**Fra fase 4-sluttreviewet (småting, triagert backlog):**
+- [ ] Høflig R-feilmelding for `ui_row`/`ui_column`/`ui_grid` (spec-lovet; i dag
+      rå "could not find function" — legg til i UI_R_REGEX + stop()-stubber
+      etter ui.R:284-mønsteret)
+- [ ] `ui.grid(..., style="rå css-streng")` forkaster stille den beregnede
+      grid-templaten — append template-deklarasjonene eller varsle
+- [ ] `ui.button` med element-barn (spec beslutning 9, valgfri — droppet i
+      planleggingen, føres her for ordens skyld)
+- [ ] `.add([v1,v2], area=)` viser kun siste payload (dokumentert) —
+      auto-wrap i kolonne er mulig fremtidig forbedring
+
 **Fra fase-reviewene (småting, triagert backlog):**
 - [ ] Første-kjøring-tomt: Kjør før pyodide er ferdig bootet fullfører stille
       med tom output (pre-eksisterende, reprodusert 2026-07-20) — kø kjøringen

@@ -36,6 +36,7 @@ MIRRORED_FLOORS = {
     "_normalize_kwargs": 0.65,
     "Element": 0.80,
     "WidgetHandle": 0.90,
+    "_render_area_children": 0.95,
     "_payload_element": 0.90,
     "_lib_tag_builder": 0.85,
     "_validate_accepts": 0.70,
@@ -43,7 +44,8 @@ MIRRORED_FLOORS = {
 
 # Navn som skal komme fra ui_core og ALDRI re-defineres i en fasade.
 SHARED = ["HTML_TAGS", "_SL_ACCEPTS", "_snake_to_camel", "_json_safe",
-          "_spec", "_into_el_id", "kpi", "markdown", "play", "run_button",
+          "_spec", "_into_el_id", "_handle_from_into", "kpi", "markdown",
+          "play", "run_button",
           "run_cell", "widget", "_tag_builder", "_append_children", "_warn",
           "row", "column", "grid", "_flatten_children"]
 
