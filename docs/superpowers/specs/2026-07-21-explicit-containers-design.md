@@ -72,9 +72,15 @@ DSL. `cols=` stays for the simple case.
      untouched.
    - `s = ui.slider(0, 100, into=panel)` → returns the HANDLE
      (today's `WidgetHandle`: `.value` live read, `.set()`, `.on()`,
-     `.hide()/.show()`, `.element()`); mounted inside the container;
-     event-driven (`rerun` defaults to `"none"` in container mode —
-     container code is app code, explicit `rerun=` re-enables it).
+     `.hide()/.show()`, `.element()`); mounted inside the container.
+   `rerun="self"` stays the UNIVERSAL default in both modes (Hans
+   2026-07-21, revising an earlier `"none"`-in-container idea): the
+   existing rule "a control with an `on_change` callable never
+   reruns" already yields event-driven behavior exactly when the
+   builder wires a handler, and without one, rerun-rebuild is the
+   right beginner default — the layout re-renders with the new value,
+   controls keep their values via the stable keying. One rule
+   everywhere; no mode-dependent default to memorize.
    Memorable form: *without `into=` you get the value; with `into=`
    you get the control.* Two return types from one function is a
    DELIBERATE choice — see §Rejected alternatives for why the
