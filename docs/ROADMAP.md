@@ -60,6 +60,41 @@ toppmeny m/ bryter; ikoner + finpolish; «Jamovi light» (v1) som egen modus;
 websocket-stub for contTables; kopier-knapp på tabeller og figurer; datasett-synk
 på tvers av moduser; output-rens ved inngang.
 
+## Interaktive elementer — backlog (lagt til 2026-07-21)
+
+*Kontekst: fase 1–3 av spec 2026-07-20-unified-interactive-elements-design.md
+er levert (display policy v2, delt konstruksjonskjerne, delt fasadekjerne).
+Brukeroversikt: docs/interactive-elements.html.*
+
+**Colab-paritet for `#@param` (syntaksen er ellers Colab-kompatibel;
+run:auto-default og placement/R/JS-støtte er OpenStat-utvidelser Colab mangler):**
+- [ ] `#@title` — celletittel-linje med form-meta (`{run:"auto",
+      display-mode:...}`) slik Colab har; i dag bevisst utsatt
+      (js/param-forms.js:16)
+- [ ] `#@markdown` — prosa-linjer rendret i skjemastripen (delvis dekket av
+      `#%% md`-celler, men Colab-limt kode mister teksten i dag)
+- [ ] `display-mode: "form"` per celle — skjul koden, vis bare skjemaet
+      (i dag finnes kun globale «vis kode»-innstillinger)
+
+**Fra fase-reviewene (småting, triagert backlog):**
+- [ ] Første-kjøring-tomt: Kjør før pyodide er ferdig bootet fullfører stille
+      med tom output (pre-eksisterende, reprodusert 2026-07-20) — kø kjøringen
+      eller vis «venter på Python…»
+- [ ] brython/mpy string-heuristikk-hjørner: `ui.slider (0,100)` med mellomrom
+      dempes ikke; `_navn  # kommentar` som trailing dempes ikke; falske
+      positive for `ui.slider(...) + 1`-haler
+- [ ] To manglende test-pins i pyodide-suiten: demping × echo-modus og
+      regel 3–4 × only_last
+- [ ] Snubletrådens `_defs` ser ikke Assign-konstanter (HTML_TAGS/_SL_ACCEPTS-
+      oppføringene i SHARED er inerte; identitetstesten dekker delvis)
+- [ ] To døde configure-placeholders i shared/ui_core.py (`_register`,
+      `_bind_handler_if_callable`) — slett eller merk reservert
+- [ ] Runtime-divergens (hjørne): nakent `_`-prefikset ui.html-ELEMENT monteres
+      i brython/mpy (`_fmt`-sideeffekt) men ikke i pyodide — én linje per
+      runner + tvillingtester ved neste berøring
+- [ ] `M2PY_VERSION` må bumpes ved neste adferdsendring i pyodide/ui.py
+      (fase 3 var adferdsnøytral; shared/ui_core.py deler versjonsparam)
+
 ## AI-assistenten
 
 - [ ] **Auto-retting for python- og r-modus i v2-flyten** (i dag kun microdata).
