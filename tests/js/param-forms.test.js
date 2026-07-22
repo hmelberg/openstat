@@ -276,6 +276,163 @@ test('parse: mixed valid + malformed lines → only valid ones kept', () => {
   assert.deepStrictEqual(entries.map((e) => e.varName), ['a', 'c']);
 });
 
+// ===== parse: #@title / #@markdown (Colab parity, Task 1 — see
+// docs/superpowers/specs/2026-07-22-param-colab-parity-design.md) =====
+
+test('parse: param entries carry kind:"param"', () => {
+  const entries = PF.parse('x = 3  #@param', 'python');
+  assert.strictEqual(entries[0].kind, 'param');
+});
+
+test('parse: #@title with text only → kind:"title" entry, text captured, no meta', () => {
+  const entries = PF.parse('#@title My Form', 'python');
+  assert.strictEqual(entries.length, 1);
+  assert.strictEqual(entries[0].kind, 'title');
+  assert.strictEqual(entries[0].text, 'My Form');
+  assert.strictEqual(entries[0].lineIdx, 0);
+  assert.strictEqual(entries[0].meta.runAuto, true, 'no run: meta → default auto');
+});
+
+test('parse: #@title with {run:"manual"} meta → meta captured, cellRunDefault "manual"', () => {
+  const entries = PF.parse('#@title My Form {run:"manual"}', 'python');
+  assert.strictEqual(entries[0].kind, 'title');
+  assert.strictEqual(entries[0].text, 'My Form');
+  assert.strictEqual(entries[0].meta.runAuto, false);
+  assert.strictEqual(PF.cellRunDefault(entries), 'manual');
+});
+
+test('cellRunDefault: no title entry → "auto"', () => {
+  const entries = PF.parse('x = 1  #@param', 'python');
+  assert.strictEqual(PF.cellRunDefault(entries), 'auto');
+});
+
+test('cellRunDefault: title with explicit run:"auto" → "auto"', () => {
+  const entries = PF.parse('#@title Form {run:"auto"}', 'python');
+  assert.strictEqual(PF.cellRunDefault(entries), 'auto');
+});
+
+test('parse: #@title display-mode → parsed and ignored (not stored), console.warn pointing to roadmap', () => {
+  const spy = warnSpy();
+  const entries = PF.parse('#@title My Form {display-mode:"form"}', 'python');
+  spy.restore();
+  assert.strictEqual(entries.length, 1);
+  assert.strictEqual(entries[0].kind, 'title');
+  assert.strictEqual(entries[0].meta['display-mode'], undefined, 'ignored — deferred feature, not applied/stored');
+  assert.ok(spy.calls.some((c) => /display-mode/.test(c) && /ROADMAP/.test(c)));
+});
+
+test('parse: second #@title → warn + ignored, not in entries', () => {
+  const spy = warnSpy();
+  const src = ['#@title First', '#@title Second'].join('\n');
+  const entries = PF.parse(src, 'python');
+  spy.restore();
+  assert.strictEqual(entries.length, 1);
+  assert.strictEqual(entries[0].text, 'First');
+  assert.ok(spy.calls.some((c) => /title/.test(c)));
+});
+
+test('parse: #@markdown lines → kind:"markdown" entries in source order, text trimmed', () => {
+  const src = [
+    '#@markdown  Some explanatory text  ',
+    'x = 1  #@param',
+    '#@markdown More text'
+  ].join('\n');
+  const entries = PF.parse(src, 'python');
+  assert.strictEqual(entries.length, 3);
+  assert.strictEqual(entries[0].kind, 'markdown');
+  assert.strictEqual(entries[0].text, 'Some explanatory text');
+  assert.strictEqual(entries[1].kind, 'param');
+  assert.strictEqual(entries[2].kind, 'markdown');
+  assert.strictEqual(entries[2].text, 'More text');
+  assert.deepStrictEqual(entries.map((e) => e.lineIdx), [0, 1, 2]);
+});
+
+test('parse: consecutive #@markdown lines → separate entries (not merged)', () => {
+  const src = ['#@markdown First line', '#@markdown Second line'].join('\n');
+  const entries = PF.parse(src, 'python');
+  assert.strictEqual(entries.length, 2);
+  assert.deepStrictEqual(entries.map((e) => e.text), ['First line', 'Second line']);
+});
+
+test('parse: //@title and //@markdown recognized (javascript dialect, lang-independent like //@param)', () => {
+  const src = [
+    '//@title JS Form',
+    '//@markdown some prose',
+    'n = 5  //@param'
+  ].join('\n');
+  const entries = PF.parse(src, 'javascript');
+  assert.strictEqual(entries.length, 3);
+  assert.strictEqual(entries[0].kind, 'title');
+  assert.strictEqual(entries[0].text, 'JS Form');
+  assert.strictEqual(entries[1].kind, 'markdown');
+  assert.strictEqual(entries[1].text, 'some prose');
+  assert.strictEqual(entries[2].kind, 'param');
+});
+
+// Marker-toleranse: planens Global Constraints ber oss speile LINE_RE sin
+// EKSISTERENDE toleranse ("# @param" med mellomrom matcher) for
+// #@title/#@markdown også, for konsistens INNAD i OpenStat — dette er en
+// BEVISST AVVIK fra spec-teksten ("# @title stays a comment"/Colab-strict),
+// se code-kommentar ved TITLE_RE/MD_RE.
+test('parse: "# @title" (mellomrom etter #) matches — MIRRORS LINE_RE tolerance, deviates from spec text', () => {
+  const entries = PF.parse('# @title Spaced', 'python');
+  assert.strictEqual(entries.length, 1);
+  assert.strictEqual(entries[0].kind, 'title');
+  assert.strictEqual(entries[0].text, 'Spaced');
+});
+
+test('parse: "# @markdown" (mellomrom etter #) matches — same tolerance', () => {
+  const entries = PF.parse('# @markdown Spaced prose', 'python');
+  assert.strictEqual(entries.length, 1);
+  assert.strictEqual(entries[0].kind, 'markdown');
+  assert.strictEqual(entries[0].text, 'Spaced prose');
+});
+
+test('parse: #@title text ending in a non-meta "{...}" is kept as literal text (meta parse failure → no split)', () => {
+  const entries = PF.parse('#@title Use braces like {this}', 'python');
+  assert.strictEqual(entries[0].kind, 'title');
+  assert.strictEqual(entries[0].text, 'Use braces like {this}');
+  assert.strictEqual(entries[0].meta.runAuto, true);
+});
+
+test('parse: run-default inheritance — manual title → params without own run: inherit effective manual', () => {
+  const src = [
+    '#@title Form {run:"manual"}',
+    'x = 1  #@param',
+    'y = 2  #@param {type:"integer", run:"auto"}'
+  ].join('\n');
+  const entries = PF.parse(src, 'python');
+  const params = entries.filter((e) => e.kind === 'param');
+  assert.strictEqual(params[0].meta.runAuto, false, 'inherits manual default from title');
+  assert.strictEqual(params[1].meta.runAuto, true, 'explicit run:"auto" on the param line overrides the title default');
+});
+
+test('parse: no title → params keep their own auto/manual behavior unchanged (regression)', () => {
+  const src = [
+    'x = 1  #@param',
+    'y = 2  #@param {type:"integer", run:"manual"}'
+  ].join('\n');
+  const entries = PF.parse(src, 'python');
+  assert.strictEqual(entries[0].meta.runAuto, true);
+  assert.strictEqual(entries[1].meta.runAuto, false);
+});
+
+test('parse: title placed AFTER params still applies its run-default (order-independent)', () => {
+  const src = [
+    'x = 1  #@param',
+    '#@title Form {run:"manual"}'
+  ].join('\n');
+  const entries = PF.parse(src, 'python');
+  const param = entries.find((e) => e.kind === 'param');
+  assert.strictEqual(param.meta.runAuto, false);
+});
+
+test('parse: unknown key in @title-metadata → non-fatal warning attached, title kept', () => {
+  const entries = PF.parse('#@title Form {foo:1}', 'python');
+  assert.strictEqual(entries.length, 1);
+  assert.ok(entries[0].warnings.some((w) => /foo/.test(w)));
+});
+
 // ===== writeValue: byte-exact splicing =====
 
 test('writeValue: replaces only the value span, preserves indent/spacing/comment', () => {

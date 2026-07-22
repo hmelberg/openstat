@@ -41,6 +41,25 @@
   // uendret: (?:#|\/\/) er ikke-fangende.
   var LINE_RE = /^(\s*)([A-Za-z_]\w*)(\s*)(=|<-)(\s*)(.+?)(\s*)((?:#|\/\/)\s*@param\b(.*))?$/;
 
+  // #@title / #@markdown (Colab-paritet, plan 2026-07-22): standalone
+  // kommentarlinjer, IKKE en tildelingslinje — derfor et helt annet mønster
+  // enn LINE_RE (ingen varName/assignOp/valueRaw). Gruppe 1 er "resten av
+  // linja etter @title/@markdown" (tekst + evt. avsluttende {meta} for
+  // title — se findTrailingMeta).
+  //
+  // MARKER-TOLERANSE — BEVISST AVVIK FRA SPEC-TEKSTEN: spec §Design sier
+  // "# @title is NOT matched (Colab requires #@title)" (Colab-streng). Planens
+  // Global Constraints ber oss i stedet SPEILE LINE_RE sin EKSISTERENDE
+  // toleranse for #@param (som med viten og vilje tillater mellomrom:
+  // `(?:#|\/\/)\s*@param\b` matcher BÅDE "#@param" og "# @param") — for
+  // KONSISTENS INNAD i OpenStat, ikke for Colab-troskap. Denne
+  // implementasjonen følger PLANEN (ikke spec-ordlyden): `\s*` mellom
+  // #/// og @title/@markdown under, slik at "# @title"/"# @markdown" også
+  // matcher. Se Task 1-rapporten for hvorfor (kontrolløren bes forsone
+  // spec-teksten). Lang-uavhengig akkurat som (?:#|\/\/) i LINE_RE selv.
+  var TITLE_RE = /^\s*(?:#|\/\/)\s*@title\b(.*)$/;
+  var MD_RE = /^\s*(?:#|\/\/)\s*@markdown\b(.*)$/;
+
   var VALID_TYPES = { string: 1, boolean: 1, number: 1, integer: 1, slider: 1, date: 1, raw: 1 };
 
   // Gyldige placement-verdier (Task 3, per-kontroll plassering) — samme
@@ -73,6 +92,27 @@
       }
     }
     return -1;
+  }
+
+  // Finn en evt. AVSLUTTENDE balansert `{...}` i `text` (title-linjer:
+  // "#@title <text> [{...meta}]" — meta-objektet står til SLUTT på linja,
+  // ikke rett etter markøren som for #@param). Prøver hver "{" i tur (fra
+  // venstre) og godtar den FØRSTE hvis balancedSpan når HELT til slutten av
+  // teksten — dermed feiler dette trygt (returnerer null) for tekst som
+  // bare TILFELDIGVIS inneholder en "{"/"}" et sted midt i (f.eks. prosa som
+  // nevner krøllparenteser) uten at det er ment som metadata.
+  // Returnerer null hvis ingen slik avsluttende, balansert `{...}` finnes.
+  function findTrailingMeta(text) {
+    if (!text || text.charAt(text.length - 1) !== '}') return null;
+    for (var i = 0; i < text.length; i++) {
+      if (text.charAt(i) === '{') {
+        var close = balancedSpan(text, i, '{', '}');
+        if (close === text.length - 1) {
+          return { text: text.slice(0, i).trim(), metaText: text.slice(i, close + 1) };
+        }
+      }
+    }
+    return null;
   }
 
   // `{type:"slider"}` → `{"type":"slider"}` — kvoter ukvoterte nøkler
@@ -199,8 +239,15 @@
         else if (key === 'min' || key === 'max' || key === 'step') numKey(key, val);
         else if (key === 'allow-input') meta.allowInput = Boolean(val);
         else if (key === 'run') {
-          if (val === 'auto') meta.runAuto = true;              // eksplisitt = default
-          else if (val === 'manual') meta.runAuto = false;
+          // runExplicit (Colab-paritet, plan 2026-07-22): markerer at DENNE
+          // linja selv tok stilling til run — brukt av ParamForms.parse sin
+          // etterbehandling til å avgjøre om en celle-vid tittel-manual-
+          // default (ParamForms.cellRunDefault) skal SLÅ IGJENNOM på denne
+          // entryen eller ikke. Kun satt ved en GYLDIG verdi — en ugyldig
+          // run-verdi (else-grenen) beholder auto-defaulten OG regnes ikke
+          // som et eksplisitt valg (linja "sa egentlig ingenting" om run).
+          if (val === 'auto') { meta.runAuto = true; meta.runExplicit = true; } // eksplisitt = default
+          else if (val === 'manual') { meta.runAuto = false; meta.runExplicit = true; }
           else warnings.push('ugyldig run i @param-metadata: ' + val + ' (auto|manual; auto er default)');
         }
         else if (key === 'placement') {
@@ -228,16 +275,91 @@
     return { meta: meta, warnings: warnings };
   }
 
+  // Parse metadata-teksten i en #@title-linje sitt AVSLUTTENDE {...} (funnet
+  // av findTrailingMeta over) → {meta, warnings, parsed}. Et MYE mindre
+  // vokabular enn #@param sin parseMetaText (kun "run" og "display-mode"
+  // kjennes igjen her) — egen, liten funksjon i stedet for gjenbruk av
+  // parseMetaText, slik at feilmeldingene kan snakke om "@title-metadata"
+  // (ikke forvirrende "@param-metadata") og slik at display-mode kan
+  // varsles helt presist. looseJsonParse (den tolerante mini-parseren) er
+  // uendret gjenbrukt. parsed:false betyr "kunne ikke tolkes som et objekt
+  // i det hele tatt" — kalleren (ParamForms.parse) bruker det til å forkaste
+  // HELE meta-forsøket og beholde tittelens fulle remainder-tekst uendret
+  // (se findTrailingMeta sin kommentar: en avsluttende "{...}" som ikke er
+  // gyldig metadata er sannsynligvis bare prosa, ikke et feilslått skjema).
+  function parseTitleMeta(objText, lineNo) {
+    var warnings = [];
+    var meta = { runAuto: true };
+    var obj = looseJsonParse(objText);
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+      warnings.push('kunne ikke tolke @title-metadata-objekt: ' + objText);
+      return { meta: meta, warnings: warnings, parsed: false };
+    }
+    Object.keys(obj).forEach(function (key) {
+      var val = obj[key];
+      if (key === 'run') {
+        if (val === 'auto') meta.runAuto = true;
+        else if (val === 'manual') meta.runAuto = false;
+        else warnings.push('ugyldig run i @title-metadata: ' + val + ' (auto|manual; auto er default)');
+      } else if (key === 'display-mode') {
+        // display-mode:"form" (Colabs skjema-kolonne-layout) er UTSATT —
+        // spec §Out of scope, docs/ROADMAP.md sin "Colab-paritet for
+        // #@param"-seksjon ("display-mode: \"form\" per celle — skjul
+        // koden, vis bare skjemaet"). Parses (linja skal ikke feile pga.
+        // dette) men IGNORERES fullstendig — verdien lagres BEVISST ikke i
+        // meta, slik at ingen fremtidig konsument ved et uhell kan handle
+        // på den før funksjonen faktisk er bygget.
+        var msg = 'ParamForms.parse: linje ' + lineNo + ': display-mode i @title-metadata er en utsatt funksjon ' +
+          '(se docs/ROADMAP.md, "Colab-paritet for #@param") — parses men ignoreres';
+        console.warn(msg);
+        warnings.push(msg);
+      } else {
+        warnings.push('ukjent nøkkel i @title-metadata: ' + key);
+      }
+    });
+    return { meta: meta, warnings: warnings, parsed: true };
+  }
+
   /**
-   * ParamForms.parse(cellSource, lang) → [{lineIdx, varName, assignOp,
-   * valueRaw, meta, warnings}]
-   * Skanner hver linje i cellen for #@param-mønsteret. Linjer uten
-   * "#@param" gir ingen entry (helt inerte — spec §Global Constraints:
-   * null-effekt på dokumenter uten #@param). Ukjent/ubalansert metadata
-   * eller ukjent type → console.warn + linja hoppes over (INGEN entry) —
-   * dette er bevisst asymmetrisk med per-entry `warnings` (ukjente NØKLER
-   * i et ellers gyldig metadata-objekt er ikke-fatale og havner i den
-   * returnerte entryens warnings-liste i stedet).
+   * ParamForms.cellRunDefault(entries) → "auto" | "manual"
+   * Cellens run-DEFAULT avledet fra en EVENTUELL #@title-entry sin meta
+   * (Colab-semantikk: tittelens form-meta styrer hele skjemaet) — "manual"
+   * kun når #@title-linja selv sier {run:"manual"}; "auto" ellers, OG når
+   * det ikke finnes noen tittel i det hele tatt (uendret oppførsel for
+   * celler uten #@title — samme "auto er default" som før denne fasen).
+   * ParamForms.parse har ALLEREDE bakt denne defaulten inn i de returnerte
+   * param-entryenes meta.runAuto (se etterbehandlingen nederst i parse) —
+   * denne funksjonen eksponeres I TILLEGG (planens design) slik at
+   * DOM-halvdelen (Task 2) kan lese cellens EFFEKTIVE default direkte uten
+   * å måtte lete opp tittel-entryen selv.
+   */
+  function cellRunDefault(entries) {
+    var list = entries || [];
+    for (var i = 0; i < list.length; i++) {
+      var e = list[i];
+      if (e.kind === 'title' && e.meta && e.meta.runAuto === false) return 'manual';
+    }
+    return 'auto';
+  }
+  ParamForms.cellRunDefault = cellRunDefault;
+
+  /**
+   * ParamForms.parse(cellSource, lang) → [{kind, lineIdx, ...}]
+   * kind:"param" → {lineIdx, varName, assignOp, valueRaw, meta, warnings}
+   * (som før, pluss den nye kind-nøkkelen).
+   * kind:"title" → {lineIdx, text, meta, warnings} — #@title/(//@title,
+   * Colab-paritet plan 2026-07-22).
+   * kind:"markdown" → {lineIdx, text} — #@markdown/(//@markdown, samme plan).
+   * Skanner hver linje i cellen. Linjer uten "#@param"/"#@title"/
+   * "#@markdown" gir ingen entry (helt inerte — spec §Global Constraints:
+   * null-effekt på dokumenter uten disse markørene). For #@param: ukjent/
+   * ubalansert metadata eller ukjent type → console.warn + linja hoppes over
+   * (INGEN entry) — dette er bevisst asymmetrisk med per-entry `warnings`
+   * (ukjente NØKLER i et ellers gyldig metadata-objekt er ikke-fatale og
+   * havner i den returnerte entryens warnings-liste i stedet). En ANDRE
+   * #@title-linje i samme celle varsler + IGNORERES (kun den FØRSTE gjelder,
+   * Colab-semantikk); #@markdown har INGEN slik begrensning (hver linje er
+   * sin egen entry, i kildeorden — samme løkke-rekkefølge gir dette gratis).
    */
   // Stripp en eventuell avsluttende '\r' (CRLF-dokumenter, review-fiks 2) —
   // LINE_RE sin `$` ville ellers aldri matche (\r er ikke \s i regex-forstand
@@ -252,8 +374,52 @@
   ParamForms.parse = function (cellSource, lang) {
     var lines = String(cellSource == null ? '' : cellSource).split('\n');
     var entries = [];
+    var titleSeen = false; // kun FØRSTE #@title i cellen gjelder (Colab-semantikk)
     for (var i = 0; i < lines.length; i++) {
-      var m = LINE_RE.exec(stripCR(lines[i]));
+      var line = stripCR(lines[i]);
+
+      // ---- #@title (sjekkes FØR #@param — ingen overlapp i praksis, siden
+      // TITLE_RE/MD_RE aldri matcher en tildelingslinje, men rekkefølgen
+      // gjør prioriteten eksplisitt) ----
+      var mTitle = TITLE_RE.exec(line);
+      if (mTitle) {
+        if (titleSeen) {
+          console.warn('ParamForms.parse: linje ' + (i + 1) + ': flere #@title-linjer i samme celle — kun DEN FØRSTE gjelder, denne ignoreres');
+          continue;
+        }
+        titleSeen = true;
+        var titleRemainder = (mTitle[1] || '').trim();
+        var titleText = titleRemainder;
+        var titleMeta = { runAuto: true };
+        var titleWarnings = [];
+        var trailingMeta = findTrailingMeta(titleRemainder);
+        if (trailingMeta) {
+          var tm = parseTitleMeta(trailingMeta.metaText, i + 1);
+          if (tm.parsed) {
+            // Kun når meta FAKTISK tolkes som et objekt kutter vi teksten
+            // ved "{" — en avsluttende "{...}" som IKKE er gyldig metadata
+            // beholdes som en del av selve tittel-teksten (se
+            // findTrailingMeta/parseTitleMeta sine kommentarer).
+            titleText = trailingMeta.text;
+            titleMeta = tm.meta;
+            titleWarnings = tm.warnings;
+          }
+        }
+        entries.push({ kind: 'title', lineIdx: i, text: titleText, meta: titleMeta, warnings: titleWarnings });
+        continue;
+      }
+
+      // ---- #@markdown: hver linje er sin EGEN entry, i kildeorden (Colab
+      // gjengir skjema-elementer i rekkefølge; ingen sammenslåing av
+      // påfølgende linjer — se spec §Design punkt 2) ----
+      var mMd = MD_RE.exec(line);
+      if (mMd) {
+        entries.push({ kind: 'markdown', lineIdx: i, text: (mMd[1] || '').trim() });
+        continue;
+      }
+
+      // ---- #@param (uendret logikk, kun kind:"param" lagt til på entryen) ----
+      var m = LINE_RE.exec(line);
       if (!m || m[8] === undefined) continue; // ingen #@param på denne linja
 
       var varName = m[2];
@@ -281,6 +447,7 @@
       }
 
       entries.push({
+        kind: 'param',
         lineIdx: i,
         varName: varName,
         assignOp: assignOp,
@@ -289,6 +456,23 @@
         warnings: result.warnings
       });
     }
+
+    // Tittel-meta {run:"manual"} blir CELLE-VID default for #@param-linjer
+    // UTEN sin egen eksplisitte run:-nøkkel (Colab-semantikk: tittelens
+    // form-meta styrer hele skjemaet) — se ParamForms.cellRunDefault og
+    // meta.runExplicit (satt i parseMetaText). Etterbehandling i stedet for
+    // å veve inn i selve løkka over, FORDI #@title kan stå ETTER
+    // #@param-linjene i kildeteksten (ingen rekkefølge-krav — testet
+    // eksplisitt). Celler UTEN #@title: cellRunDefault returnerer "auto",
+    // løkka under blir da et no-op — INGEN endring av oppførsel for celler
+    // uten tittel (planens krav).
+    if (cellRunDefault(entries) === 'manual') {
+      for (var pIdx = 0; pIdx < entries.length; pIdx++) {
+        var pe = entries[pIdx];
+        if (pe.kind === 'param' && !pe.meta.runExplicit) pe.meta.runAuto = false;
+      }
+    }
+
     return entries;
   };
 
