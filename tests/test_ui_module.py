@@ -2011,6 +2011,99 @@ def test_grid_add_str_child_still_goes_through_elappend_as_text(monkeypatch):
     assert appends == [("elAppend", plot_id, {"text": "hello"})]
 
 
+def test_grid_add_single_value_call_sequence_unchanged(monkeypatch):
+    # Task 2-regresjonspin: ÉN verdi ALENE skal fortsatt gå elPayload
+    # DIREKTE inn i område-noden - INGEN os-col-wrapper, INGEN ekstra
+    # elCreate for en auto-stakk (dagens eksakte el_calls-rekkefølge).
+    mod, fake = _load_ui(monkeypatch)
+    g = mod.grid("kpi | plot")
+    plot_id = g._areas["plot"]._openstat_el_id
+    fake.el_calls.clear()
+    g.add(42, area="plot")
+    assert fake.el_calls == [
+        ("elClear", plot_id),
+        ("elPayload", plot_id, {"kind": "text", "text": "42"}),
+    ]
+
+
+def test_grid_add_element_only_multi_call_sequence_unchanged(monkeypatch):
+    # Task 2-regresjonspin: Element/str-barn ALENE (uansett antall) skal
+    # fortsatt gå RETT via _append_children inn i område-noden - INGEN
+    # os-col-wrapper (dagens eksakte el_calls-rekkefølge).
+    mod, fake = _load_ui(monkeypatch)
+    g = mod.grid("kpi | plot")
+    plot_id = g._areas["plot"]._openstat_el_id
+    a = mod.html.span("A")
+    b = mod.html.span("B")
+    fake.el_calls.clear()
+    g.add(a, b, area="plot")
+    assert fake.el_calls == [
+        ("elClear", plot_id),
+        ("elAppend", plot_id, {"el": a._openstat_el_id}),
+        ("elAppend", plot_id, {"el": b._openstat_el_id}),
+    ]
+
+
+def test_grid_add_two_values_auto_stack_in_call_order(monkeypatch):
+    # Task 2: FLERE verdi-barn i ETT area=-kall pakkes nå inn i en generert
+    # os-col-stakk - ETT sub-div PER barn, i kallrekkefølge (fikser "bare
+    # siste verdi vises").
+    mod, fake = _load_ui(monkeypatch)
+    g = mod.grid("kpi | plot")
+    plot_id = g._areas["plot"]._openstat_el_id
+    fake.el_calls.clear()
+    g.add(1, 2, area="plot")
+    creates = [c for c in fake.el_calls if c[0] == "elCreate"]
+    assert len(creates) == 3   # os-col-wrapper + ett sub-div per verdi
+    assert creates[0][2]["attrs"]["class"] == "os-col"
+    assert creates[1][2] == {}
+    assert creates[2][2] == {}
+    clears = [c for c in fake.el_calls if c[0] == "elClear"]
+    assert clears == [("elClear", plot_id)]   # tømt ÉN gang, ikke per verdi
+    wrapper_appends = [c for c in fake.el_calls if c[0] == "elAppend" and c[1] == plot_id]
+    assert len(wrapper_appends) == 1
+    wrapper_id = wrapper_appends[0][2]["el"]
+    subdiv_appends = [c for c in fake.el_calls if c[0] == "elAppend" and c[1] == wrapper_id]
+    assert len(subdiv_appends) == 2
+    sub_ids = [c[2]["el"] for c in subdiv_appends]
+    payloads = [c for c in fake.el_calls if c[0] == "elPayload"]
+    assert payloads == [
+        ("elPayload", sub_ids[0], {"kind": "text", "text": "1"}),
+        ("elPayload", sub_ids[1], {"kind": "text", "text": "2"}),
+    ]
+
+
+def test_grid_add_mixed_element_and_value_preserves_call_order(monkeypatch):
+    # Task 2: en MIKS av verdi- og Element-barn stakkes OGSÅ (og fikser
+    # rekkefølge-vransken - verdien skal IKKE alltid havne før elementet).
+    mod, fake = _load_ui(monkeypatch)
+    g = mod.grid("kpi | plot")
+    plot_id = g._areas["plot"]._openstat_el_id
+    a = mod.html.span("A")
+    fake.el_calls.clear()
+    g.add(a, 5, area="plot")
+    creates = [c for c in fake.el_calls if c[0] == "elCreate"]
+    assert len(creates) == 3   # os-col-wrapper + ett sub-div per barn
+    assert creates[0][2]["attrs"]["class"] == "os-col"
+    wrapper_appends = [c for c in fake.el_calls if c[0] == "elAppend" and c[1] == plot_id]
+    assert len(wrapper_appends) == 1
+    wrapper_id = wrapper_appends[0][2]["el"]
+    subdiv_appends = [c for c in fake.el_calls if c[0] == "elAppend" and c[1] == wrapper_id]
+    assert len(subdiv_appends) == 2
+    sub_a_id, sub_5_id = [c[2]["el"] for c in subdiv_appends]
+    # elementet (a) er appendet INN i sitt eget sub-div, FØR det sub-divet
+    # legges i wrapperen
+    a_appends = [c for c in fake.el_calls if c[0] == "elAppend" and c[1] == sub_a_id]
+    assert a_appends == [("elAppend", sub_a_id, {"el": a._openstat_el_id})]
+    payloads = [c for c in fake.el_calls if c[0] == "elPayload"]
+    assert payloads == [("elPayload", sub_5_id, {"kind": "text", "text": "5"})]
+    # rekkefølgen a-sub-divet ferdigstilles og festes til wrapperen FØR
+    # 5-sub-divet i det hele tatt rendres (kallrekkefølgen a, 5 bevart)
+    idx_a_into_wrapper = fake.el_calls.index(("elAppend", wrapper_id, {"el": sub_a_id}))
+    idx_5_payload = fake.el_calls.index(("elPayload", sub_5_id, {"kind": "text", "text": "5"}))
+    assert idx_a_into_wrapper < idx_5_payload
+
+
 def test_grid_add_unknown_area_raises_typeerror(monkeypatch):
     mod, fake = _load_ui(monkeypatch)
     g = mod.grid("kpi | plot")

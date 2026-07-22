@@ -878,15 +878,66 @@ def _render_area_children(target_el_id, children):
     Ui.renderEventResult) og rendres via Ui.elPayload inn i noden - SAMME
     rendrings-vokabular som ui.kpi/ui.markdown (_payload_element-familien)
     bruker, ikke en rå str()-tekstnode slik _append_children sin
-    catch-all-gren ville gjort."""
-    element_or_text = []
-    u = None
+    catch-all-gren ville gjort.
+
+    Task 2 (fase 4b, multi-payload auto-stakk): FLERE verdi-barn i ETT OG
+    SAMME kall, ELLER en MIKS av verdi- og Element/str-barn, går IKKE
+    lenger rett i `target_el_id` - de pakkes inn i en generert stakk (et
+    rent div, klassen "os-col") med ETT sub-div PER barn, I
+    KALLREKKEFØLGE: verdi-barn elPayload-rendres inn i sitt eget sub-div,
+    Element/str-barn appendes inn i sitt eget sub-div (_append_children) -
+    stakken appendes så INN i `target_el_id` (som allerede er tømt av
+    kalleren FØR denne funksjonen kalles, jf. docstringen over - IKKE
+    tømt igjen her). Dette fikser BÅDE "bare siste verdi vises" (elPayload
+    er en tøm-så-rendre-operasjon PÅ SAMME node; flere verdier fikk før
+    delt den ENE `target_el_id`-noden) OG rekkefølge-vransken der
+    verdi-barn FØR denne fiksen alltid endte opp FØR Element/str-barn i
+    DOM-en uansett kallrekkefølge (se `element_or_text`-samle-og-append-
+    TIL-SLUTT-mønsteret under). ÉN verdi ALENE, eller KUN Element/str-barn
+    (uansett antall) - begge DAGENS to grener - beholder sin eksakte
+    el_calls-rekkefølge UENDRET (ingen wrapper-div, se under)."""
+    flat = []
     for child in _flatten_children(children):
         if child is None:
             continue
         if isinstance(child, (list, tuple)):
             _warn_sink("ui.grid: nøstet liste (mer enn ett flatingsnivå) i area-barn - hoppet over")
             continue
+        flat.append(child)
+    values = [c for c in flat if not isinstance(c, (Element, str))]
+    if len(values) >= 2 or (values and len(flat) > len(values)):
+        u = _ui()
+        wrapper_id = None
+        if u is not None:
+            try:
+                wrapper_id = u.elCreate('div', json.dumps({"attrs": {"class": "os-col"}}))
+            except Exception:
+                wrapper_id = None
+        for child in flat:
+            sub_id = None
+            if u is not None:
+                try:
+                    sub_id = u.elCreate('div', json.dumps({}))
+                except Exception:
+                    sub_id = None
+            if isinstance(child, (Element, str)):
+                _append_children(sub_id, [child])
+            else:
+                if u is not None and sub_id is not None:
+                    payload = _event_payload(child, "")
+                    if payload is not None:
+                        try:
+                            u.elPayload(sub_id, json.dumps(payload))
+                        except Exception:
+                            pass
+            if wrapper_id is not None and sub_id is not None:
+                _append_children(wrapper_id, [Element(sub_id)])
+        if wrapper_id is not None:
+            _append_children(target_el_id, [Element(wrapper_id)])
+        return
+    element_or_text = []
+    u = None
+    for child in flat:
         if isinstance(child, (Element, str)):
             element_or_text.append(child)
             continue
@@ -951,16 +1002,22 @@ class Element:
           verdi-/tekst-barn har ingen egen DOM-node å style og hoppes
           derfor stille over.
 
-        Merk (Task 4-review): flere VERDI-barn (DataFrame/figur/skalar -
-        ikke Element/str) i ETT OG SAMME area=-kall viser bare den
-        SISTE - _render_area_children sender hvert verdi-barn via
-        Ui.elPayload, og elPayload er en tøm-så-rendre-operasjon (samme
-        node), så påfølgende elPayload-kall overskriver det forrige.
+        Merk (Task 2, fase 4b - multi-payload auto-stakk): FLERE verdi-barn
+        (DataFrame/figur/skalar - ikke Element/str) i ETT OG SAMME
+        area=-kall, ELLER en MIKS av verdi- og Element/str-barn, pakkes nå
+        automatisk inn i en generert stakk (_render_area_children, et rent
+        div med klassen "os-col") - ETT sub-div PER barn, I KALLREKKEFØLGE:
+        verdi-barn elPayload-rendres inn i sitt eget sub-div, Element/
+        str-barn appendes inn i sitt eget sub-div. Dette fikser BÅDE "bare
+        siste verdi vises" (den gamle oppførselen - flere elPayload-kall
+        delte FØR denne fiksen samme node) OG rekkefølge-vransken der
+        verdi-barn alltid endte FØR Element/str-barn uansett
+        kallrekkefølge. ÉN verdi ALENE, eller KUN Element/str-barn
+        (uansett antall), beholder DAGENS eksakte sti (ingen wrapper-div).
         `.add(a, area="x")` + et separat `.add(b, area="x")`-kall er
-        den tiltenkte erstatt-idiomen (spec §Decisions 4); flere verdier
-        i ETT kall er ikke det - bruk et Element-barn (ui.row/column) som
-        omslutter dem hvis flere verdier skal vises samtidig i samme
-        område."""
+        FORTSATT erstatt-idiomen (spec §Decisions 4) for å bytte innhold
+        OVER TID; auto-stakken over er for å vise FLERE ting SAMTIDIG i
+        ETT OG SAMME kall."""
         if area is not None:
             areas = getattr(self, "_areas", None)
             if not areas or area not in areas:
