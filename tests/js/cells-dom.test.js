@@ -11,6 +11,11 @@ const assert = require('node:assert');
 const path = require('path');
 
 const CELLS_PATH = path.join(__dirname, '..', '..', 'js', 'cells.js');
+// review-fiks (Major, 2026-07-22): kun brukt av freshIntegratedEnv() lenger
+// nede i fila — se kommentaren der for hvorfor param-forms.js trengs i
+// TILLEGG til cells.js for akkurat DEN regresjonen.
+const PARAM_FORMS_PATH = path.join(__dirname, '..', '..', 'js', 'param-forms.js');
+const UI_PATH = path.join(__dirname, '..', '..', 'js', 'ui.js');
 
 // Minimal querySelector-motor for FakeEl (final-review F6): produksjonskoden
 // bruker NØYAKTIG ett mønster mot elementer (ikke document) —
@@ -90,6 +95,14 @@ class FakeEl {
   addEventListener(ev, fn) { (this._listeners[ev] = this._listeners[ev] || []).push(fn); }
   dispatchEvent(ev) { (this._listeners[ev.type] || []).forEach((fn) => fn(ev)); }
   focus() { if (global.document) global.document.activeElement = this; }
+  // review-fiks (Major, 2026-07-22): js/param-forms.js sin _applyFormHideCode
+  // bruker nå setAttribute/getAttribute/removeAttribute for sin egen
+  // data-form-hide-code-provenance-markør (ikke .dataset — ingen andre
+  // eksisterende tester i denne fila trengte disse fra før, kun
+  // freshIntegratedEnv() lenger nede bruker dem, via ekte param-forms.js).
+  setAttribute(name, v) { this._attrs = this._attrs || {}; this._attrs[name] = v; }
+  getAttribute(name) { return this._attrs ? this._attrs[name] : undefined; }
+  removeAttribute(name) { if (this._attrs) delete this._attrs[name]; }
   // Speiler ekte DOM: å sette innerHTML='' (brukt av render()'s rebygging)
   // frakobler de gamle barna — final-review F6 sin "detached node midt i
   // kjøring"-scenario er utestbart kun hvis stubben faktisk frakobler dem.
@@ -616,6 +629,106 @@ test('docCellNode: hide-code (header-flagg og #tag.hide-code) gir nb-hide-code; 
   assert.ok(cells[0].classList.contains('nb-hide-code'), 'header-flagget hide-code');
   assert.ok(cells[1].classList.contains('nb-hide-code'), '#tag.hide-code = true');
   assert.ok(!cells[2].classList.contains('nb-hide-code'), 'ingen flagg → ingen klasse');
+});
+
+// review-fiks (Major, 2026-07-22): freshEnv() over laster ALDRI param-forms.js
+// og setter ALDRI global.ParamForms — docCellNode sitt guardede
+// `global.ParamForms && typeof global.ParamForms.decorate === 'function'`-kall
+// (js/cells.js ~linje 1370) er derfor et rent no-op i ALLE andre tester i
+// denne fila, inkludert hide-code-testen rett over. Det no-op-et var nettopp
+// hvorfor bugen (param-forms.js sin _applyFormHideCode gjorde en UBETINGET
+// classList.toggle('nb-hide-code', false) for enhver celle uten
+// display-mode:"form" — og rev dermed stille ned header-/tag-flagget sitt
+// nb-hide-code igjen, rett etter at docCellNode nettopp satte det) aldri ble
+// fanget her: uten en ekte ParamForms.decorate-kjøring var det ingenting som
+// kunne rive klassen ned igjen. freshIntegratedEnv() laster BEGGE de ekte
+// modulene mot samme DOM-stub (speiler ekte index.html sin lastrekkefølge —
+// cells.js og param-forms.js som globale <script>-tagger, begge parset før
+// noen brukerinteraksjon — og reviewerens to-filers repro) slik at akkurat
+// DEN interaksjonen mellom js/cells.js sitt docCellNode og js/param-forms.js
+// sin decorate/refresh faktisk dekkes.
+function freshIntegratedEnv() {
+  const env = freshEnv();
+  // param-forms.js sin _el (ALL DOM-konstruksjon, inkl. #@title-raden en
+  // display-mode:"form"-celle bygger) går via global.Ui.makeNode (fase 2,
+  // spec 2026-07-20) — ekte index.html laster js/ui.js MELLOM cells.js og
+  // param-forms.js (samme rekkefølge her), aldri en stub av den (samme
+  // mønster som tests/js/param-forms-dom.test.js).
+  delete require.cache[require.resolve(UI_PATH)];
+  require(UI_PATH);
+  delete require.cache[require.resolve(PARAM_FORMS_PATH)];
+  const PF = require(PARAM_FORMS_PATH);
+  global.ParamForms = PF;
+  return Object.assign({ PF: PF }, env);
+}
+
+// ---- Integrert regresjonstest: cells.js docCellNode + param-forms.js sin
+// _applyFormHideCode mot SAMME cellEl (review-fiks Major 2026-07-22) ----
+
+test('integrert: header-flagg hide-code UTEN #@title overlever ParamForms.decorate (regresjon for bugen)', () => {
+  const { C, scriptInputEl } = freshIntegratedEnv();
+  try {
+    scriptInputEl.value = '#%% python hide-code\nx = 1\n';
+    C.init('python');
+    const cellEl = C.cellElementAt(0);
+    assert.ok(cellEl.classList.contains('nb-hide-code'),
+      'header-flagget sitt bidrag skal IKKE nullstilles av ParamForms sin decorate for en celle uten #@title-skjema');
+  } finally {
+    delete global.ParamForms;
+    delete global.Ui;
+  }
+});
+
+test('integrert: #tag.hide-code = true UTEN #@title overlever ParamForms.decorate', () => {
+  const { C, scriptInputEl } = freshIntegratedEnv();
+  try {
+    scriptInputEl.value = '#%% python\n#tag.hide-code = true\nx = 1\n';
+    C.init('python');
+    const cellEl = C.cellElementAt(0);
+    assert.ok(cellEl.classList.contains('nb-hide-code'),
+      '#tag.hide-code = true sitt bidrag skal heller ikke nullstilles av ParamForms sin decorate');
+  } finally {
+    delete global.ParamForms;
+    delete global.Ui;
+  }
+});
+
+test('integrert: #@title {display-mode:"form"} UTEN header-flagg — decorate setter nb-hide-code, refresh fjerner den igjen når meta fjernes', () => {
+  const { C, scriptInputEl, PF } = freshIntegratedEnv();
+  try {
+    scriptInputEl.value = '#%% python\n#@title X {display-mode:"form"}\n';
+    C.init('python');
+    const cellEl = C.cellElementAt(0);
+    assert.ok(cellEl.classList.contains('nb-hide-code'),
+      'param-forms sitt EGET bidrag (display-mode:"form") skal fortsatt sette klassen');
+
+    // Samme tittel-TEKST ("X"), kun meta fjernet — tar refresh sin in-place-
+    // gren (ikke en full _build, se _sameStructure-kommentaren i
+    // param-forms.js), som MÅ kalle _applyFormHideCode ubetinget uansett.
+    PF.refresh(0, '#@title X\n');
+    assert.ok(!cellEl.classList.contains('nb-hide-code'),
+      'fjernet display-mode:"form" skal gjenopprette koden når INGEN annen kilde eier klassen');
+  } finally {
+    delete global.ParamForms;
+    delete global.Ui;
+  }
+});
+
+test('integrert: header-flagg OG #@title {display-mode:"form"} sammen — å fjerne meta beholder klassen (header eier den fortsatt)', () => {
+  const { C, scriptInputEl, PF } = freshIntegratedEnv();
+  try {
+    scriptInputEl.value = '#%% python hide-code\n#@title X {display-mode:"form"}\n';
+    C.init('python');
+    const cellEl = C.cellElementAt(0);
+    assert.ok(cellEl.classList.contains('nb-hide-code'), 'begge kildene vil ha klassen på — satt ved decorate');
+
+    PF.refresh(0, '#@title X\n'); // samme tittel-tekst, meta fjernet
+    assert.ok(cellEl.classList.contains('nb-hide-code'),
+      'param-forms skal KUN fjerne SITT EGET bidrag — header-flagget sitt bidrag er uberørt og eier fortsatt klassen');
+  } finally {
+    delete global.ParamForms;
+    delete global.Ui;
+  }
 });
 
 test('docCellNode: cols=3 legger til nb-cols-3 på wrapperen; ugyldig cols gir ingen nb-cols-*-klasse', () => {

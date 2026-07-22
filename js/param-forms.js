@@ -1146,18 +1146,39 @@
     // "no duplicate" er det også.
     // display-mode:"form"-vekkingen (2026-07-22, se _cellFormMode over): setter/
     // fjerner nb-hide-code på selve cellEl (samme klasse js/cells.js docCellNode
-    // styrer fra c.attrs['hide-code'] — de to kildene er uavhengige OR-bidrag,
-    // se docCellNode sin kommentar). Kalt fra BÅDE _build (dekker decorate OG
-    // refresh sin full-ombyggings-gren) og refresh sin in-place-gren under —
-    // MÅ kjøres ubetinget begge steder, ikke bare på strukturell ombygging:
-    // _sameStructure sammenlikner kun tittel-TEKSTEN, ikke meta, så en
-    // {display-mode:"form"} lagt til/fjernet UTEN å endre selve tittelteksten
-    // tar in-place-grenen (ingen _build-kall) — uten dette kallet DER ville en
-    // fjernet display-mode ALDRI gjenopprette koden (planens eksplisitte
-    // "removal matters"-krav).
+    // styrer fra c.attrs['hide-code'] — de to kildene er et OR til én delt
+    // klasse, se docCellNode sin kommentar). Kalt fra BÅDE _build (dekker
+    // decorate OG refresh sin full-ombyggings-gren) og refresh sin
+    // in-place-gren under — MÅ kjøres ubetinget begge steder, ikke bare på
+    // strukturell ombygging: _sameStructure sammenlikner kun tittel-TEKSTEN,
+    // ikke meta, så en {display-mode:"form"} lagt til/fjernet UTEN å endre
+    // selve tittelteksten tar in-place-grenen (ingen _build-kall) — uten
+    // dette kallet DER ville en fjernet display-mode ALDRI gjenopprette
+    // koden (planens eksplisitte "removal matters"-krav).
+    //
+    // Review-fiks (Major, 2026-07-22): "uavhengige OR-bidrag" var tidligere
+    // feilaktig implementert som en UBETINGET classList.toggle(...,
+    // _cellFormMode(entries)) — for ENHVER celle UTEN display-mode:"form"
+    // (dvs. de aller fleste), kjørte dette som toggle(false) hver eneste
+    // _build/refresh, og rev derved stille NED header-/tag-flagget sitt
+    // nb-hide-code igjen rett etter at docCellNode nettopp satte det (samme
+    // delte klasse — se cells.js:1346 og docCellNode-kommentaren). Et ekte
+    // OR-bidrag må bare noensinne røre SIN EGEN del av unionen: en
+    // data-form-hide-code-markør på cellEl husker om DENNE funksjonen selv
+    // var den som slo klassen PÅ — kun DA har den mandat til å slå den AV
+    // igjen. Slås klassen allerede på av header/tag (markøren fraværende) er
+    // det ikke vårt bidrag, og vi rører den aldri, verken av eller på.
     function _applyFormHideCode(cellEl, entries) {
       if (!cellEl || !cellEl.classList) return;
-      cellEl.classList.toggle('nb-hide-code', _cellFormMode(entries));
+      if (_cellFormMode(entries)) {
+        if (!cellEl.classList.contains('nb-hide-code')) {
+          cellEl.classList.add('nb-hide-code');
+          if (cellEl.setAttribute) cellEl.setAttribute('data-form-hide-code', '1');
+        }
+      } else if (cellEl.getAttribute && cellEl.getAttribute('data-form-hide-code')) {
+        cellEl.classList.remove('nb-hide-code');
+        if (cellEl.removeAttribute) cellEl.removeAttribute('data-form-hide-code');
+      }
     }
 
     function _build(cellIdx, cellEl, source, lang) {

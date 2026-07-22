@@ -83,7 +83,9 @@ run:auto-default og placement/R/JS-støtte er OpenStat-utvidelser Colab mangler)
       (js/cells.js KNOWN_FLAGS, `#%% python hide-code`/`#tag.hide-code = true`
       — nå vekket og satt/fjernet reaktivt av `#@title`s
       `{display-mode:"form"}`-meta, se js/param-forms.js). Rå tekst forblir
-      fluktveien til å se/redigere koden.
+      fluktveien til å se/redigere koden (ærlig forbehold: post-4a rendrer
+      INGEN doc-celle koden sin per-celle uansett, så klassen er per i dag
+      semantisk/fremtidsrettet, ikke synlig-endrende).
 
 **Småting-batch (levert 2026-07-22, plan 2026-07-22-smaating-batch.md,
 browser-verifisert):**

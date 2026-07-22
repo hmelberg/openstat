@@ -1341,8 +1341,13 @@
       // strukturell docRender bygger denne klassen på nytt fra c.attrs.
       // ParamForms.decorate (kalt rett under) kan I TILLEGG legge til/
       // fjerne SAMME klasse reaktivt ut fra #@title sin display-mode:"form"-
-      // meta (js/param-forms.js sin _build/refresh) — de to kildene er
-      // uavhengige OR-bidrag til én delt klasse.
+      // meta (js/param-forms.js sin _build/refresh) — de to kildene er et
+      // OR til én delt klasse, men IKKE uavhengige i betydningen "toggler
+      // klassen fritt": param-forms sin halvdel (_applyFormHideCode) fjerner
+      // ALDRI klassen med mindre den selv satte den (en data-form-hide-code-
+      // markør er beviset) — ellers ville den stille revet ned nettopp
+      // DETTE flagget sitt bidrag på hver eneste decorate/refresh for en
+      // celle uten display-mode:"form" (review-fiks, Major, 2026-07-22).
       if (c.attrs['hide-code']) wrap.classList.add('nb-hide-code');
       // cols (Task 4, spec §4): verdien er allerede validert (heltall 2-6,
       // ellers droppet av parseHeader/scanTagBlock over) — trygg å bruke

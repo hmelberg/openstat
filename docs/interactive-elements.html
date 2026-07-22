@@ -163,7 +163,10 @@ expr    = "x + 1"   #@param {type:"raw"}</code></pre>
 <li><strong><code>display-mode:"form"</code></strong> on the title
     (<code>#@title Iris explorer {display-mode:"form"}</code>) hides that
     cell's code, leaving only the form and its output — the code itself is
-    unchanged in the editor pane, just not shown in the notebook view.</li>
+    unchanged in the editor pane, just not shown in the notebook view. (Today
+    no doc-cell renders its own code inline anyway — the shared Rå tekst
+    editor is the only code surface — so this is semantic/forward-compatible
+    for now.)</li>
 <li>In JavaScript mode the same syntax uses <code>//@param</code>.
     Because the value is swapped into the line byte-exactly, don't end
     param lines with a semicolon.</li>
@@ -224,7 +227,8 @@ h = ui.widget("n")     # handle: h.value, h.set(30), h.hide(), h.show(),
 <li>The same code-hiding behind <code>display-mode:"form"</code> is also a
     plain cell flag, independent of any form: <code>#%% python hide-code</code>
     (or <code>#tag.hide-code = true</code>) hides a cell's code without
-    needing a <code>#@title</code> at all.</li>
+    needing a <code>#@title</code> at all. (Same forward-compatible caveat as
+    above — no doc-cell shows per-cell code today.)</li>
 <li><strong><code>sync_to="varname"</code></strong> pushes the value into a
     live session variable — seeded already at registration, then updated as
     the user drags, without a rerun. This makes it a full value channel of
