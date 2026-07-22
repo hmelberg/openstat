@@ -700,15 +700,23 @@
         // reflekterer forrige kjørings tilstand, ikke aliasene DENNE
         // kandidatscripten selv definerer i sin egen #micro-blokk, så en sjekk
         // mot den ville gitt falske "ukjent kolonne"-feil på gyldige script).
+        // unknownNames scans ONLY the #micro header segment of the candidate
+        // script (via extractLangSegment(script, 'microdata') — a plain reuse
+        // of the same parseHybridScript segmenter the syntax-checks below use,
+        // just asking for the 'microdata' kind instead of 'pyodide'/'r').
+        // import/require statements only legally occur there; scanning the
+        // whole markdown answer (as extractAllCode(mdText) did before) let
+        // ordinary analysis-code tokens like `total/N_OBS` divisions or
+        // `"data/GDP.csv"` path strings false-positive as "unknown variables".
         python: {
           extract: function (mdText) { return extractFirstCodeBlock(mdText, 'python'); },
           validate: validatePythonSyntax,
-          unknownNames: function (mdText) { return findUnknownVarNames(extractAllCode(mdText)); },
+          unknownNames: function (_mdText, script) { return findUnknownVarNames(extractLangSegment(script, 'microdata')); },
         },
         r: {
           extract: function (mdText) { return extractFirstCodeBlock(mdText, 'r'); },
           validate: validateRSyntax,
-          unknownNames: function (mdText) { return findUnknownVarNames(extractAllCode(mdText)); },
+          unknownNames: function (_mdText, script) { return findUnknownVarNames(extractLangSegment(script, 'microdata')); },
         },
       };
 
@@ -735,12 +743,19 @@
         attachResponseInsertBar(thinkingNode, accumulated);
 
         const dispatch = _v2Validators[mode];
-        if (dispatch) {
+        let currentMd = accumulated;
+        let script = dispatch ? dispatch.extract(currentMd) : '';
+        // python/r whose answer didn't follow the fenced-code svarformat at all
+        // (dispatch.extract found no ```python/py/r fence) has nothing to feed
+        // the repair loop — route it to the old passive-warning path below
+        // instead of silently skipping validation for that answer entirely.
+        // mode==='microdata' keeps its pre-refactor behavior: an empty extract
+        // there just means "nothing to validate yet" and stays silent.
+        const useRepairLoop = dispatch && (script || mode === 'microdata');
+        if (useRepairLoop) {
           // Validate; on failure, attempt ONE repair round, then badge.
           // (Generic over mode — see _v2Validators above. For mode==='microdata'
           // this is call-for-call identical to the pre-refactor code.)
-          let currentMd = accumulated;
-          let script = dispatch.extract(currentMd);
           let repaired = false;
           let finalBubble = bubble;
           while (script) {
@@ -791,9 +806,14 @@
             script = dispatch.extract(currentMd);
           }
         } else {
-          // Andre moduser uten nivå 1-validator ennå (javascript, duckdb, …):
-          // behold den opprinnelige, ikke-reparerende oppførselen uendret — kun
-          // en advarsel om ukjente katalogvariabler i #micro-blokken.
+          // Andre moduser uten nivå 1-validator ennå (javascript, duckdb, …) —
+          // OG python/r-svar som ikke fulgte svarformatet (dispatch.extract fant
+          // ingen ```python/py/r-fence i det hele tatt, f.eks. en ren prosetekst-
+          // avvisning): behold den opprinnelige, ikke-reparerende oppførselen
+          // uendret — kun en advarsel om ukjente katalogvariabler i svaret.
+          // (mode==='microdata' uten treff i extract er UENDRET fra før: den
+          // faller IKKE hit — dette er kun nivå 1-reparasjonsløkkas eget stille
+          // "ingenting å validere ennå"-tilfelle, samme som pre-refactor.)
           const unknown = findUnknownVarNames(extractAllCode(accumulated));
           if (unknown.length) {
             const warn = renderValidationWarnings({
@@ -1388,7 +1408,9 @@
       // parseHybridScript is unavailable (e.g. the node test harness) or no
       // segment of the wanted kind was found — better to syntax-check a little
       // too much (the #micro lines would then fail compile()/parse(), which
-      // just degrades to "skipped" below) than to silently skip validation.
+      // just degrades to a reported {passed:false} error, not "skipped" —
+      // compile()/parse() DOES run, it just fails) than to silently skip
+      // validation.
       const LANG_SEGMENT_KIND = { python: 'pyodide', r: 'r' };
       function extractLangSegment(script, lang) {
         if (!script) return '';
@@ -1411,6 +1433,10 @@
       // AI-svar. Vi hekter oss KUN på en økt andre deler av appen allerede har
       // startet (varmlasting ved modusbytte til python, eller en tidligere
       // Kjør) — hvis ingen finnes, hopper vi over (skipped:true), aldri boot.
+      // Merk: når en økt ER i ferd med å starte (booting, ikke ferdig), AWAITER
+      // vi den (linjen under) i stedet for å hoppe over — badgen kan derfor
+      // dukke opp et lite øyeblikk etter selve svarteksten, uten at vi noen
+      // gang selv trigget boot-en.
       async function validatePythonSyntax(script) {
         if (typeof __pyodidePromise === 'undefined' || !__pyodidePromise) return { skipped: true };
         let py;
@@ -1434,7 +1460,22 @@
           '_out\n';
         let raw;
         try { raw = await py.runPythonAsync(checkCode); } catch (_) { return { skipped: true }; }
-        try { return JSON.parse(raw); } catch (_) { return { skipped: true }; }
+        let parsed;
+        try { parsed = JSON.parse(raw); } catch (_) { return { skipped: true }; }
+        // _ex.lineno (line_no over) was captured but never surfaced: buildRepairErrors
+        // only reads e.message/e.kind, so a bare line_no field silently vanished before
+        // ever reaching the repair-round prompt. Fold it into the message itself — R's
+        // parse() error text already embeds "<text>:LINJE:KOLONNE:" on its own, so this
+        // brings python's repair-error string to parity with R's.
+        if (parsed && Array.isArray(parsed.errors)) {
+          parsed.errors = parsed.errors.map(function (e) {
+            if (e && e.line_no != null && e.message) {
+              return Object.assign({}, e, { message: 'linje ' + e.line_no + ': ' + e.message });
+            }
+            return e;
+          });
+        }
+        return parsed;
       }
 
       // Nivå 1 R-syntaks-sjekk: parse(text=...) via en ALLEREDE lastet/

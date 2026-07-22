@@ -118,3 +118,83 @@ test('_v2Validators.python.validate: skipped:true selv med en pending pyodide-ø
   assert.deepEqual(res, { skipped: true });
   delete global.__pyodidePromise;
 });
+
+// ---- validatePythonSyntax: linjenummer foldes inn i feilmeldingen ----------
+// _ex.lineno (Python-sidens "line_no" i det rå JSON-svaret) ble tidligere
+// beregnet men aldri lest av buildRepairErrors (som kun ser på e.message/
+// e.kind) — reparasjonsrunden fikk dermed ALDRI vite hvilken linje feilen var
+// på, selv om Pyodide-siden faktisk hadde regnet den ut. R sin parse()-
+// feiltekst inneholder linjenummeret naturlig ("<text>:LINJE:KOLONNE:"), så
+// dette bringer python opp på samme nivå.
+
+test('validatePythonSyntax: fletter line_no inn i message når det finnes', async () => {
+  global.__pyodidePromise = Promise.resolve({
+    runPythonAsync: async function () {
+      return JSON.stringify({
+        passed: false,
+        errors: [{ kind: 'parse', message: 'invalid syntax', line_no: 3 }],
+      });
+    },
+  });
+  const res = await aiChat.validatePythonSyntax('#micro\nimport fd/X as y\n\n#python\nx = (');
+  assert.equal(res.passed, false);
+  assert.equal(res.errors[0].message, 'linje 3: invalid syntax');
+  delete global.__pyodidePromise;
+});
+
+test('validatePythonSyntax: lar message stå uendret når line_no mangler', async () => {
+  global.__pyodidePromise = Promise.resolve({
+    runPythonAsync: async function () {
+      return JSON.stringify({
+        passed: false,
+        errors: [{ kind: 'parse', message: 'NameError: x is not defined' }],
+      });
+    },
+  });
+  const res = await aiChat.validatePythonSyntax('#micro\nimport fd/X as y\n\n#python\nprint(x)');
+  assert.equal(res.errors[0].message, 'NameError: x is not defined');
+  delete global.__pyodidePromise;
+});
+
+// ---- _v2Validators.python/r.unknownNames: grunnet i microdata-segmentet ----
+// Før: extractAllCode(mdText) skannet ALLE kodeblokker i hele svaret, så
+// analysekode-tokens som "total/N_OBS" (divisjon) eller "data/GDP.csv"
+// (filstier) kunne se ut som "alias/VARIABELNAVN"-mønsteret og false-positive
+// som ukjente katalogvariabler. Nå: unknownNames skanner KUN #micro-segmentet
+// av selve kandidatscriptet (samme parseHybridScript-segmenterer som
+// extractLangSegment/syntaks-sjekkene bruker) — import/require skjer
+// uansett bare der.
+
+test('_v2Validators.python.unknownNames: grunnet i microdata-segmentet, ikke i analysekoden', () => {
+  global.parseHybridScript = function (text) {
+    const idx = text.indexOf('#python');
+    if (idx < 0) return [{ kind: 'microdata', text: text }];
+    return [
+      { kind: 'microdata', text: text.slice(0, idx) },
+      { kind: 'pyodide', text: text.slice(idx + '#python'.length) },
+    ];
+  };
+  global.microdataVariableNames = ['BEFOLKNING_KJOENN'];
+  const script = '#micro\nimport fd/OPPDIKTET_VARIABEL as x\n\n#python\ntotal = folk / N_OBS\n';
+  const unknown = aiChat._v2Validators.python.unknownNames('irrelevant-mdtext', script);
+  assert.deepEqual(unknown, ['OPPDIKTET_VARIABEL']);
+  delete global.parseHybridScript;
+  delete global.microdataVariableNames;
+});
+
+test('_v2Validators.r.unknownNames: grunnet i microdata-segmentet, ikke i analysekoden', () => {
+  global.parseHybridScript = function (text) {
+    const idx = text.indexOf('#r');
+    if (idx < 0) return [{ kind: 'microdata', text: text }];
+    return [
+      { kind: 'microdata', text: text.slice(0, idx) },
+      { kind: 'r', text: text.slice(idx + '#r'.length) },
+    ];
+  };
+  global.microdataVariableNames = ['BEFOLKNING_KJOENN'];
+  const script = '#micro\nimport fd/OPPDIKTET_VARIABEL as y\n\n#r\nread.csv("data/GDP.csv")\n';
+  const unknown = aiChat._v2Validators.r.unknownNames('irrelevant-mdtext', script);
+  assert.deepEqual(unknown, ['OPPDIKTET_VARIABEL']);
+  delete global.parseHybridScript;
+  delete global.microdataVariableNames;
+});

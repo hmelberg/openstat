@@ -170,7 +170,7 @@ export default async (request: Request): Promise<Response> => {
     ``,
     focusedBlock ? `${focusedBlock}\n` : ``,
     scriptContext ? `**Gjeldende skript i editor (kontekst):**\n\`\`\`${mode === "microdata" ? "microdata" : mode}\n${scriptContext}\n\`\`\`\n` : ``,
-    priorScript ? `**Forrige skript som feilet — fiks feilene under, ikke gjenta dem:**\n\`\`\`microdata\n${priorScript}\n\`\`\`\n` : ``,
+    priorScript ? `**Forrige skript som feilet — fiks feilene under, ikke gjenta dem:**\n\`\`\`${mode === "microdata" ? "microdata" : mode}\n${priorScript}\n\`\`\`\n` : ``,
     errors ? `**Valideringsfeil å rette:**\n${errors}\n` : ``,
     SVARFORMAT_TILLEGG,
     `**Spørsmål:** ${question}`,
