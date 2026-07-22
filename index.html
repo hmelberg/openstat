@@ -3923,6 +3923,16 @@
     let pyodide = null;
     let pyInterruptBuf = null;
     let scriptRunInProgress = false;
+    // Første-kjøring-fiksen (rotårsak funnet 2026-07-22, se btnRun-
+    // handleren): auto-kjøringen av starteksempelet (runtimeReadyBootstrap)
+    // gjorde Kjør-knappen om til «Avbryt» — et bruker-klikk i det vinduet
+    // avbrøt auto-kjøringen STILLE i stedet for å kjøre brukerens dokument
+    // (observert som «første kjøring gir tom output» 2026-07-20..22).
+    // autoStartupRunPending settes rett før auto-klikket; handleren gjør
+    // krav på det og merker KJØRINGEN som auto (currentRunIsAuto) — et
+    // klikk under en auto-kjøring avbryter den og re-klikker automatisk.
+    let autoStartupRunPending = false;
+    let currentRunIsAuto = false;
     // ── ui-widgets (spec 2, W1): kjørekontekst per celle ────────────────────
     // Settes/nullstilles ved de FIRE kjøre-brakettene (Kjør alle-segmentløkka,
     // mdRunNotebookCell sin enkelt-celle-sti, microdata-replay-løkka som
@@ -9749,6 +9759,7 @@ options(width = 200)
         // 5b-sluttreviewens backlog): klikket kunne treffe et nylastet dokument.
         if (!_nbFrag && !window.mdUserLoadedDoc
             && STARTUP_EXAMPLES[activeEditorMode] && scriptInput.value.trim() === STARTUP_EXAMPLES[activeEditorMode].trim()) {
+          autoStartupRunPending = true;   // se erklæringen ved scriptRunInProgress
           document.getElementById('btnRun').click();
         }
       }
@@ -10783,10 +10794,28 @@ async def _m2py_run_segment(_seg_json):
     };
 
     btnRun.addEventListener('click', async () => {
+      const _claimedAuto = autoStartupRunPending;
+      autoStartupRunPending = false;
       if (scriptRunInProgress) {
+        if (currentRunIsAuto) {
+          // Første-kjøring-fiksen: klikket avbryter auto-kjøringen av
+          // starteksempelet, men brukeren MENER «kjør dokumentet mitt» —
+          // vent til avbruddet har landet og re-klikk automatisk.
+          console.debug('[kjør] klikk under auto-kjøring → avbryter starteksempelet og kjører brukerens dokument');
+          performRunInterrupt();
+          let _ventet = 0;
+          while (scriptRunInProgress && _ventet < 8000) {
+            await new Promise(r => setTimeout(r, 100));
+            _ventet += 100;
+          }
+          if (!scriptRunInProgress) btnRun.click();
+          else console.warn('[kjør] auto-kjøringen svarte ikke på avbrudd innen 8s — klikk Kjør igjen');
+          return;
+        }
         performRunInterrupt();
         return;
       }
+      currentRunIsAuto = _claimedAuto;
       // Fase C (spec 2026-07-16, valg A): motor-notatbøker (brython/
       // micropython) kjøres celle for celle via Cells.runCell — HELT UTENOM
       // executableSource/segmentmaskineriet under (som ville blanket alle
@@ -10887,7 +10916,20 @@ async def _m2py_run_segment(_seg_json):
         // Moduser med lett runtime (webr, senere brython) skal ikke betale
         // Pyodide-lastingen (10-30 s kaldt) — de py-avhengige blokkene i
         // runHybridR henter sin egen ved behov (plan 2026-07-09 fase 1).
+        // Første-kjøring-UX (roadmap): når Kjør trykkes FØR motoren er klar,
+        // si det eksplisitt i stedet for et stumt "Starting..." i opptil
+        // ett minutt. console.debug-brødsmulene ([kjør]-prefiks, skjult
+        // uten verbose-konsoll) er PERMANENT diagnostikk for det
+        // udiagnostiserte første-kjøring-tomt-racet (roadmap; tre
+        // observerte tilfeller 2026-07-20..22, ikke reproduserbart på
+        // kommando) — neste naturlige forekomst skal vise nøyaktig
+        // hvilken grense outputen forsvinner ved.
+        console.debug('[kjør] klikk: mode=' + activeEditorMode + ' nbActive=' + !!(window.Cells && window.Cells.active()) + ' scriptLen=' + effectiveScript.length);
+        if (runtimeForMode(activeEditorMode) === 'pyodide' && !pyodide) {
+          setStatus(rightStatus, t('Venter på Python-motoren (første gang kan ta opptil ett minutt)…'));
+        }
         py = (runtimeForMode(activeEditorMode) !== 'pyodide') ? null : await loadPyodideAndM2py();
+        console.debug('[kjør] runtime klar: py=' + !!py);
         let stdout = '';
         let stderr = '';
         // Egen funksjon: kalles både ved normal boot her og ved SEN Pyodide-
@@ -11062,6 +11104,11 @@ async def _m2py_run_segment(_seg_json):
           if (_uiIdx !== null && _uiIdx !== undefined && window.Ui && window.Ui.beginCellRun) window.Ui.beginCellRun(_uiIdx);
           py.globals.set('_m2py_seg_json', JSON.stringify(segments[i]));
           const rc = await py.runPythonAsync('await _m2py_run_segment(_m2py_seg_json)');
+          // [kjør]-brødsmule (permanent diagnostikk, se klikk-brødsmulen):
+          // fanget stdout-lengde per segment — et første-kjøring-tomt-tilfelle
+          // vil vise om outputen aldri ble PRODUSERT (0 her) eller ble
+          // produsert men mistet i rendringen (>0 her, tom celle likevel).
+          console.debug('[kjør] segment ' + i + ' (' + segments[i].kind + '): rc=' + rc + ' fanget=' + (stdout.length - renderedLen) + ' tegn, sink=' + !!_sink);
           nbUiRunCtx = _docUiRun ? { cellIdx: null, cellEl: null, doc: true } : null;
           // ui-widgets (Task 3): stale-sopp for denne cellens kontrollstripe
           // — kun når planen faktisk ga en celleindeks for segmentet (se
@@ -11075,6 +11122,7 @@ async def _m2py_run_segment(_seg_json):
         if (py && typeof py.setStdout === 'function') py.setStdout();
         if (py && typeof py.setStderr === 'function') py.setStderr();
         lastOutput = (stdout || '').trim();
+        console.debug('[kjør] ferdig: segmenter=' + segments.length + ' total stdout=' + stdout.length + ' tegn');
         await refreshDatasetSidebarFromPy(py);
         if (stderr) console.warn('[stderr]', stderr.trim());
         lastOutputMode = 'run';
@@ -11104,6 +11152,7 @@ async def _m2py_run_segment(_seg_json):
         if (py && typeof py.setStderr === 'function') py.setStderr();
         explainRunActive = false;
         scriptRunInProgress = false;
+        currentRunIsAuto = false;
         // ui-widgets kjørekontekst (Task 2): sikkerhetsnett — løkka over
         // nullstiller allerede etter hvert segment, dette dekker en feil
         // kastet FØR løkka når til å nullstille selv (f.eks. under segment-

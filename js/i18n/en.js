@@ -4,6 +4,7 @@
 // data-i18n-html may contain HTML (authored here, in-repo).
 window.M2PY_I18N = window.M2PY_I18N || {};
 window.M2PY_I18N.en = {
+  "Venter på Python-motoren (første gang kan ta opptil ett minutt)…": "Waiting for the Python engine (the first time can take up to a minute)…",
   "Meny": "Menu",
   "Fil": "File",
   "Presentasjon": "Presentation",
