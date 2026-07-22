@@ -197,6 +197,35 @@ test('normalizeSpec: button without label', () => {
   assert.strictEqual(res.spec.label, undefined);
 });
 
+// ---- normalizeSpec: label_els (fase 4-beslutning 9-opsjonen, Task 1) ------
+// Ren gjennomkopiering for button (samme "valider bare formen, DOM-halvdelen
+// løser el-id-ene mot _els" som into= allerede gjør) — se js/ui.js sin
+// _buildButton/_registerInto for selve el-id-oppløsningen.
+
+test('normalizeSpec: button label_els kopieres gjennom uendret (array av {text}/{el})', () => {
+  const items = [{ text: 'Kjør ' }, { el: 'el3' }];
+  const res = Ui.normalizeSpec({ type: 'button', label: 'Kjør', label_els: items });
+  assert.deepStrictEqual(res.spec.label_els, items);
+  assert.strictEqual(res.warnings.length, 0);
+});
+
+test('normalizeSpec: label_els på ikke-button-type varsler og droppes', () => {
+  const res = Ui.normalizeSpec({ type: 'slider', label_els: [{ text: 'x' }] });
+  assert.strictEqual(res.spec.label_els, undefined);
+  assert.ok(res.warnings.some((w) => /label_els/.test(w)));
+});
+
+test('normalizeSpec: button label_els som ikke er et array varsler og droppes', () => {
+  const res = Ui.normalizeSpec({ type: 'button', label_els: 'ikke-array' });
+  assert.strictEqual(res.spec.label_els, undefined);
+  assert.ok(res.warnings.some((w) => /label_els/.test(w)));
+});
+
+test('normalizeSpec: label_els er ikke en ukjent-nøkkel-advarsel (VALID_KEYS)', () => {
+  const res = Ui.normalizeSpec({ type: 'button', label_els: [{ text: 'x' }] });
+  assert.ok(!res.warnings.some((w) => /ukjent nøkkel: label_els/.test(w)));
+});
+
 // ===== normalizeSpec: play (dash-absorpsjon 5a Task 3) — som slider
 // (min/max/step/value NaN-vakter/klamping/min>max-bytte), pluss interval
 // (gulvet til 200ms) og loop (boolsk). =====

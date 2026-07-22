@@ -471,20 +471,56 @@ def text(value='', *, label=None, name=None, rerun='self', on_change=None, place
     return str(result)
 
 
-def button(label, *, rerun='self', on_click=None, name=None, placement=None, into=None):
+def button(*children, rerun='self', on_click=None, name=None, placement=None, into=None):
     """Trykknapp. Returnerer alltid None - selve klikket trigger en rerun
     av målcellen (js/ui.js), ikke en verdi å lese ut.
+    *children (ui-html-fasen, Task 1 av 2026-07-22-ui-features-batch,
+    fase 4-beslutning 9-opsjonen): bakoverkompatibelt med den gamle
+    enkelt-streng-signaturen (button("Kjør")) - positional-argumentene kan
+    nå OGSÅ blande inn ui.html-elementer, f.eks.
+    button(ui.html.b("Kjør"), " nå", on_click=fn). Strengbarnas
+    SAMMENSLÅTTE tekst blir spec.label (fallback for JS-sidens
+    tekst-stier/tilgjengelighet); et element-barn (duck-typet på
+    _openstat_el_id, samme kontrakt som _into_el_id bruker) sin el-id
+    havner i spec.label_els SAMMEN med tekstbarna, i nøyaktig samme
+    rekkefølge de ble gitt i (samme barn-vokabular som Ui.elAppend -
+    {"el": ...}/{"text": ...}) - label_els er KUN med i specen når minst
+    ett barn faktisk er et element (byte-lik spec, ingen "label_els"-nøkkel
+    i det hele tatt, for det gamle rene-streng-tilfellet - inkludert flere
+    strengbarn i samme kall). None-barn hoppes stille over (samme
+    konvensjon som _append_children). Verken tekst eller element-barn
+    igjen etter det -> TypeError (speiler den gamle signaturens påkrevde
+    `label`-posisjonsargument - "button() uten NOE å vise" er fortsatt en
+    programmeringsfeil, ikke en stille tom knapp).
     on_click= er kanonisk alias for rerun= (W5.1) - aliaset vinner.
-    on_click= kan OGSÅ være en python-callable (ui-html-fasen, Task 3,
+    on_click= kan OGSÅ være en python-callable (ui-html-fasen, Task 2,
     spec §3): da bindes den som en handler (klikket rerunner ALDRI) i
     stedet for rerun-alias-stien; handleren mottar alltid None (knapper
     har ingen lagret verdi) - (derfor kan heller ikke ui.widget()
     adressere knapper).
     into= (fase 4b): monter knappen i et element/container-håndtak i
     stedet for stripa - returnerer da et WidgetHandle i stedet for None."""
+    label_parts = []
+    label_els = []
+    has_els = False
+    for child in children:
+        if child is None:
+            continue
+        el_id = getattr(child, "_openstat_el_id", None)
+        if el_id is not None:
+            has_els = True
+            label_els.append({"el": el_id})
+        else:
+            text = str(child)
+            label_parts.append(text)
+            label_els.append({"text": text})
+    label = "".join(label_parts)
+    if not label and not has_els:
+        raise TypeError("ui.button: krever minst ett tekst- eller element-barn å vise")
     rerun = _alias_rerun(rerun, on_click)
     into_id = _into_el_id(into)
-    spec = _spec("button", label=label, name=name, rerun=rerun, placement=placement, into=into_id)
+    spec = _spec("button", label=label, name=name, rerun=rerun, placement=placement, into=into_id,
+                 label_els=label_els if has_els else None)
     result = _register_value(spec, on_click)
     if into is not None:
         return _core._handle_from_into(result, name, None)

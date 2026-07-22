@@ -218,6 +218,93 @@ def test_button_fallback_returnerer_none(monkeypatch):
     assert mod.button("Kjør") is None
 
 
+# ---- button element-barn (label_els, fase 4-beslutning 9-opsjonen, Task 1
+# av 2026-07-22-ui-features-batch): *children er bakoverkompatibel med den
+# gamle enkelt-streng-signaturen (spec.label alene, INGEN label_els-nøkkel
+# i det hele tatt — byte-lik uten de nye element-barna), og aksepterer nå
+# OGSÅ ui.html-elementer blandet inn — spec.label_els bygges KUN når minst
+# ett barn faktisk er et element. ----
+
+def test_button_enkelt_streng_er_byte_lik_uten_label_els(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=None)
+    assert mod.button("Kjør") is None
+    spec = fake.calls[-1]
+    assert spec["label"] == "Kjør"
+    assert "label_els" not in spec
+
+
+def test_button_flere_tekstbarn_slas_sammen_uten_label_els(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=None)
+    mod.button("Kjør ", "nå")
+    spec = fake.calls[-1]
+    assert spec["label"] == "Kjør nå"
+    assert "label_els" not in spec, "rene tekstbarn trenger ingen label_els — label alene holder"
+
+
+def test_button_element_barn_setter_label_els_ordnet(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=None)
+    el = mod.html.b()
+    mod.button(el, " nå")
+    spec = fake.calls[-1]
+    assert spec["label"] == " nå", "kun strengbarnas tekst inngår i label — element-barnet er IKKE med"
+    assert spec["label_els"] == [{"el": el._openstat_el_id}, {"text": " nå"}]
+
+
+def test_button_miks_tekst_element_tekst_bevarer_rekkefolge(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=None)
+    el = mod.html.b()
+    mod.button("Kjør ", el, " nå")
+    spec = fake.calls[-1]
+    assert spec["label"] == "Kjør  nå"
+    assert spec["label_els"] == [{"text": "Kjør "}, {"el": el._openstat_el_id}, {"text": " nå"}]
+
+
+def test_button_element_alene_er_gyldig_uten_tekst(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=None)
+    el = mod.html.b()
+    assert mod.button(el) is None
+    spec = fake.calls[-1]
+    assert spec.get("label") == ""
+    assert spec["label_els"] == [{"el": el._openstat_el_id}]
+
+
+def test_button_ingen_barn_gir_typeerror(monkeypatch):
+    mod, _ = _load_ui(monkeypatch, next_result=None)
+    with pytest.raises(TypeError):
+        mod.button()
+
+
+def test_button_tom_streng_gir_typeerror(monkeypatch):
+    mod, _ = _load_ui(monkeypatch, next_result=None)
+    with pytest.raises(TypeError):
+        mod.button("")
+
+
+def test_button_none_barn_hoppes_over_og_teller_som_tomt(monkeypatch):
+    mod, _ = _load_ui(monkeypatch, next_result=None)
+    with pytest.raises(TypeError):
+        mod.button(None)
+
+
+def test_button_none_blant_andre_barn_hoppes_over_stille(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result=None)
+    mod.button(None, "Kjør")
+    spec = fake.calls[-1]
+    assert spec["label"] == "Kjør"
+    assert "label_els" not in spec
+
+
+def test_button_into_med_label_els(monkeypatch):
+    mod, fake = _load_ui(monkeypatch, next_result="null", widget_value_store={"k1": None})
+    host = mod.html.div()
+    el = mod.html.b()
+    handle = mod.button(el, " nå", into=host)
+    spec = fake.calls[-1]
+    assert spec["into"] == host._openstat_el_id
+    assert spec["label_els"] == [{"el": el._openstat_el_id}, {"text": " nå"}]
+    assert isinstance(handle, mod.WidgetHandle)
+
+
 # ---- (b) spec JSON for slider inneholder type/min/max/step + rerun ----
 
 def test_slider_spec_inneholder_forventede_nokler(monkeypatch):

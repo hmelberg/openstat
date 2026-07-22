@@ -3316,3 +3316,129 @@ test('into: eksisterende kontroll strandes ikke når et UENDRET into=-mål blir 
   assert.strictEqual(strip.children[0], wrap, 'SAMME wrap-node landet i stripa — ikke tapt inni den foreldreløse host-noden');
   assert.strictEqual(JSON.parse(res2), 40, 'PLAIN verdi-retur ved fallback (ingen __into) — akkurat som en fersk ukjent-id-registrering');
 });
+
+// ══════════════════════════════════════════════════════════════════════════
+// button element-barn (fase 4-beslutning 9-opsjonen, Task 1 av
+// 2026-07-22-ui-features-batch): spec.label_els — en ORDNET liste av
+// {"text": s}/{"el": elId}-poster (samme barn-vokabular som Ui.elAppend,
+// se der) — _buildButton (fersk knapp) og _registerInto sin button-
+// oppdateringsgren (eksisterende knapp) bygger BEGGE knappens innhold ved
+// å tømme og deretter append'e per post, i stedet for en enkel
+// textContent-tildeling. spec.label alene (label_els fraværende/tom) er
+// UENDRET — se de eksisterende button-testene lenger opp i fila for at
+// PLAIN-label-stien fortsatt er byte-lik.
+// ══════════════════════════════════════════════════════════════════════════
+
+// Merk: Ui.widgetLookup(navn) slår opp via _values (dash-absorpsjon 5a
+// Task 2) — en KNAPP har ALDRI en lagret verdi og finnes derfor aldri via
+// navn den veien (se den eksisterende "en KNAPP har ingen lagret verdi og
+// finnes derfor aldri via navn"-testen lenger opp i fila). Disse testene
+// henter derfor knapp-noden via stripa direkte (samme oppskrift som
+// "button: klikk → UMIDDELBAR rerun"-testen lenger opp), eller via
+// `key`-feltet i selve JSON-returen for into=-tilfellet (samme felt
+// into-testene lenger opp i fila allerede bruker).
+
+test('button: label_els bygger knappen TOM + append i rekkefølge (tekst/element/tekst)', () => {
+  const { Ui, outEl } = freshEnv();
+  const boldId = Ui.elCreate('b');
+  const spec = JSON.stringify({
+    type: 'button', name: 'go',
+    label: 'Kjør nå',
+    label_els: [{ text: 'Kjør ' }, { el: boldId }, { text: ' nå' }],
+  });
+  Ui.registerControl(spec);
+  const btn = outEl.children[0].children[0];
+
+  assert.strictEqual(btn.children.length, 3, 'tre barn i kilde-rekkefølge — ikke en enkelt textContent-node');
+  assert.strictEqual(btn.children[0].textContent, 'Kjør ');
+  assert.strictEqual(btn.children[1], Ui.elNode(boldId), 'element-barnet er SELVE _els-noden, ikke en kopi');
+  assert.strictEqual(btn.children[2].textContent, ' nå');
+});
+
+test('button: label_els med ukjent el-id → warn + hopper over (resten av rekkefølgen bygges likevel)', () => {
+  const { Ui, outEl } = freshEnv();
+  const spec = JSON.stringify({
+    type: 'button', name: 'go',
+    label_els: [{ text: 'A' }, { el: 'el9999' }, { text: 'B' }],
+  });
+  const warns = [];
+  const origWarn = console.warn;
+  console.warn = (m) => warns.push(m);
+  try {
+    Ui.registerControl(spec);
+  } finally {
+    console.warn = origWarn;
+  }
+  const btn = outEl.children[0].children[0];
+
+  assert.strictEqual(btn.children.length, 2, 'ukjent el-id hoppet over — knappen mister ALDRI resten av innholdet for én ukjent referanse');
+  assert.strictEqual(btn.children[0].textContent, 'A');
+  assert.strictEqual(btn.children[1].textContent, 'B');
+  assert.ok(warns.some((w) => /ukjent el-id/.test(w)), 'warn nevner den ukjente el-id-en');
+});
+
+test('button: re-registrering med label_els re-appender i SAMME knapp-node (barn re-opprettet i DENNE kjøringen)', () => {
+  const { Ui, outEl } = freshEnv();
+  const el1 = Ui.elCreate('b');
+  Ui.registerControl(JSON.stringify({ type: 'button', name: 'go', label_els: [{ text: 'Kjør ' }, { el: el1 }] }));
+  const strip = outEl.children[0];
+  const wrap1 = strip.children[0];
+  assert.strictEqual(wrap1.children.length, 2);
+
+  // Simulerer en rerun: fasaden bygger barnet på nytt (FERSK el-id via
+  // elCreate, se _elGens-docstringen ved Ui.elCreate) og kaller button()
+  // på nytt under SAMME navn — key-en er derfor uendret, men label_els
+  // sin el-id peker nå på en HELT ANNEN _els-node enn forrige kjøring.
+  const el2 = Ui.elCreate('b');
+  Ui.registerControl(JSON.stringify({ type: 'button', name: 'go', label_els: [{ text: 'Kjør igjen ' }, { el: el2 }] }));
+  assert.strictEqual(strip.children.length, 1, 'ingen duplikat-knapp opprettet');
+  const wrap2 = strip.children[0];
+
+  assert.strictEqual(wrap2, wrap1, 'SAMME knapp-node beholdt på tvers av re-registreringen (ingen re-mount)');
+  assert.strictEqual(wrap2.children.length, 2, 'tømt og bygget helt på nytt — ikke akkumulert oppå forrige kjørings barn');
+  assert.strictEqual(wrap2.children[0].textContent, 'Kjør igjen ');
+  assert.strictEqual(wrap2.children[1], Ui.elNode(el2), 'DENNE kjøringens (re-opprettede) el-barn appendet — ikke forrige kjørings node');
+});
+
+test('button: label_els → deretter re-registrering UTEN label_els faller tilbake til ren tekst (ingen gjenværende element-barn)', () => {
+  const { Ui, outEl } = freshEnv();
+  const el1 = Ui.elCreate('b');
+  Ui.registerControl(JSON.stringify({ type: 'button', name: 'go', label_els: [{ el: el1 }] }));
+  const strip = outEl.children[0];
+  const wrap = strip.children[0];
+  assert.strictEqual(wrap.children.length, 1);
+
+  Ui.registerControl(JSON.stringify({ type: 'button', name: 'go', label: 'Kjør' }));
+  assert.strictEqual(strip.children[0], wrap, 'samme node beholdt');
+  assert.strictEqual(wrap.textContent, 'Kjør', 'ren tekst-fallback — byte-lik plain-label-oppdateringen');
+  assert.strictEqual(wrap.children.length, 0, 'ingen gjenværende element-barn fra forrige label_els-registrering');
+});
+
+test('button: klikk fyrer rerun uendret når label_els brukes (element-barn er kun visuelt innhold)', async () => {
+  const { Ui, outEl, runCellCalls } = freshEnv({ cellIdx: 3 });
+  const el1 = Ui.elCreate('b');
+  Ui.registerControl(JSON.stringify({ type: 'button', name: 'go', label_els: [{ el: el1 }] }));
+  const btn = outEl.children[0].children[0];
+  btn.dispatchEvent({ type: 'click' });
+  await Promise.resolve();
+  assert.deepStrictEqual(runCellCalls, [3], 'rerun fyrer akkurat som en plain-label-knapp');
+});
+
+test('into: button med label_els bygger element-barn INNI into-målet', () => {
+  const { Ui, outEl } = freshEnv();
+  const host = Ui.elCreate('div');
+  const boldId = Ui.elCreate('b');
+  const spec = JSON.stringify({
+    type: 'button', name: 'go', into: host,
+    label_els: [{ text: 'Kjør ' }, { el: boldId }],
+  });
+  const res = JSON.parse(Ui.registerControl(spec));
+  const btn = Ui.widgetNode(res.key, 'wrap');
+
+  assert.strictEqual(btn.parentNode, Ui.elNode(host), 'knappen monteres i into-målet, ikke stripa');
+  assert.ok(!outEl.children.some((c) => c.classList.contains('ui-controls')), 'stripa opprettes aldri for et into-mål som løser');
+  assert.strictEqual(btn.children.length, 2);
+  assert.strictEqual(btn.children[0].textContent, 'Kjør ');
+  assert.strictEqual(btn.children[1], Ui.elNode(boldId));
+  assert.deepStrictEqual(res, { value: null, key: res.key, __into: true, name: 'go' });
+});

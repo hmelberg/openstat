@@ -45,7 +45,13 @@
     // til 200 av normalizeSpec under) + loop-flagg (wrap til min ved max,
     // fremfor å stoppe).
     interval: 1,
-    loop: 1
+    loop: 1,
+    // label_els (ui.button element-barn, fase 4-beslutning 9-opsjonen):
+    // ordnet liste av {"text": s}/{"el": elId}-poster — samme barn-
+    // vokabular Ui.elAppend bruker, se der. Ren gjennomkopiering her
+    // (samme "valider bare formen i den rene halvdelen, DOM-halvdelen
+    // løser el-id-ene mot _els" som into= allerede gjør).
+    label_els: 1
   };
 
   // Gyldige placement-verdier (per-kontroll plassering, Task 3) — samme
@@ -128,6 +134,22 @@
     // har _els-registeret; den rene halvdelen her vet ingenting om DOM).
     if (raw.into !== undefined) {
       spec.into = String(raw.into);
+    }
+
+    // label_els (ui.button element-barn, fase 4-beslutning 9-opsjonen): kun
+    // meningsfull for button (andre kontroller har ingen frittstående
+    // innhold å bygge av tekst/element-barn) — DOM-halvdelen
+    // (_buildButton/_registerInto) løser hvert element sin el-id mot
+    // _els-registeret; denne rene halvdelen validerer bare FORMEN (array),
+    // ikke innholdet.
+    if (raw.label_els !== undefined) {
+      if (type !== 'button') {
+        warnings.push('label_els støttes ikke på ' + type);
+      } else if (!Array.isArray(raw.label_els)) {
+        warnings.push('ugyldig label_els (forventet array)');
+      } else {
+        spec.label_els = raw.label_els;
+      }
     }
 
     // sync_to (fase 3, spec §3): push av verdien inn i en navngitt sesjons-
@@ -722,9 +744,47 @@
       return { wrap: wrap, input: input, labelEl: labelEl, readout: readout };
     }
 
+    // ui.button element-barn (fase 4-beslutning 9-opsjonen): spec.label_els
+    // er en ORDNET liste av {"text": s}/{"el": elId}-poster — SAMME
+    // barn-vokabular Ui.elAppend bruker (se der), delt mellom en fersk
+    // knapp (_buildButton) og en eksisterende knapp som re-registreres
+    // (_registerInto sin button-oppdateringsgren, under). Kalleren tømmer
+    // knappen FØR dette kalles (en fersk <button> har ingen barn ennå; en
+    // eksisterende tømmes eksplisitt) — denne funksjonen bygger BARE opp,
+    // aldri ned. Ukjent el-id → warn + hopp over posten (knappen mister
+    // ALDRI resten av innholdet for én ukjent referanse — samme
+    // "aldri fatalt, alltid varsle og fortsette"-filosofi som
+    // Ui.elAppend selv).
+    function _appendButtonLabelEls(btn, labelEls) {
+      for (var i = 0; i < labelEls.length; i++) {
+        var item = labelEls[i];
+        if (!item || typeof item !== 'object') continue;
+        if (item.text !== undefined) {
+          btn.appendChild(document.createTextNode(String(item.text)));
+        } else if (item.el !== undefined) {
+          var entry = _els[item.el];
+          var childNode = entry ? entry.node : null;
+          if (!childNode) { console.warn('Ui: ukjent el-id i button label_els: ' + item.el); continue; }
+          btn.appendChild(childNode);
+        } else {
+          console.warn('Ui: button label_els-post mangler "el" eller "text"');
+        }
+      }
+    }
+
     function _buildButton(key, cellIdx, spec) {
-      var label = spec.label || (typeof t === 'function' ? t('Kjør') : 'Kjør');
-      var btn = Ui.makeNode('button', { props: { className: 'ui-widget ui-widget--button', textContent: label, type: 'button' } });
+      var btn;
+      if (spec.label_els && spec.label_els.length) {
+        // Element-barn (fase 4-beslutning 9-opsjonen): bygg knappen TOM
+        // (ingen textContent-prop) og append hver post i kilde-rekkefølge
+        // — mikset tekst/element bevarer da rekkefølgen presist slik
+        // fasaden bygde den.
+        btn = Ui.makeNode('button', { props: { className: 'ui-widget ui-widget--button', type: 'button' } });
+        _appendButtonLabelEls(btn, spec.label_els);
+      } else {
+        var label = spec.label || (typeof t === 'function' ? t('Kjør') : 'Kjør');
+        btn = Ui.makeNode('button', { props: { className: 'ui-widget ui-widget--button', textContent: label, type: 'button' } });
+      }
       // Ingen debounce: et knappeklikk skal rerunne UMIDDELBART — MED
       // MINDRE en handler er bundet (widget-callable-kanalen, Task 1): da
       // fyres handleren i stedet (knapper har ingen lagret verdi, se
@@ -1105,7 +1165,23 @@
           _controls[key] = { key: key, cellIdx: cellIdx, spec: spec, wrap: builtBtn.wrap, input: builtBtn.input, type: 'button', placement: pos, intoId: spec.into || null };
         } else {
           existing.spec = spec;
-          existing.wrap.textContent = spec.label || (typeof t === 'function' ? t('Kjør') : 'Kjør');
+          // fase 4-beslutning 9-opsjonen: label_els (element-barn) tømmer
+          // og re-appender SAMME knapp-node fremfor en enkel textContent-
+          // tildeling — nødvendig fordi et re-registrert kall (denne
+          // funksjonen kjøres på nytt HVER kjøring under samme controlKey)
+          // typisk bærer FERSKE el-id-er (fasaden bygde barn-elementene på
+          // nytt denne kjøringen, se Ui.elCreate sin monotont voksende
+          // id-generator) — de gamle DOM-nodene _appendButtonLabelEls en
+          // gang appendet er derfor ALDRI riktige å beholde. textContent-
+          // tildelingen (else-grenen) tømmer implisitt via samme setter og
+          // forblir byte-lik når label_els er fraværende (plain-label-
+          // stien, uendret siden før dette tasket).
+          if (spec.label_els && spec.label_els.length) {
+            while (existing.wrap.firstChild) existing.wrap.removeChild(existing.wrap.firstChild);
+            _appendButtonLabelEls(existing.wrap, spec.label_els);
+          } else {
+            existing.wrap.textContent = spec.label || (typeof t === 'function' ? t('Kjør') : 'Kjør');
+          }
           // fase 4b: hold intoId i sync + re-parenter INN i (evt. nye)
           // into-målet på HVER into-registrering — appendChild flytter
           // noden når den allerede har en annen forelder.
