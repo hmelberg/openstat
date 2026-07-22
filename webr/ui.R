@@ -296,6 +296,27 @@ ui_pico <- function(...) {
   stop("ui.html støttes ikke i R ennå — bruk python-modusene (pyodide/brython/micropython)", call. = FALSE)
 }
 
+#' Rad-container. Task 1 (småting-batch): Ikke støttet i R-modus ennå -
+#' bruk python-modusene. Høflig melding, ikke krasj (spec-lovet,
+#' 2026-07-21-explicit-containers-design.md §Out of scope).
+ui_row <- function(...) {
+  stop("ui.row støttes ikke i R ennå — bruk python-modusene (pyodide/brython/micropython)", call. = FALSE)
+}
+
+#' Kolonne-container. Task 1 (småting-batch): Ikke støttet i R-modus ennå -
+#' bruk python-modusene. Høflig melding, ikke krasj (spec-lovet,
+#' 2026-07-21-explicit-containers-design.md §Out of scope).
+ui_column <- function(...) {
+  stop("ui.column støttes ikke i R ennå — bruk python-modusene (pyodide/brython/micropython)", call. = FALSE)
+}
+
+#' Grid-container. Task 1 (småting-batch): Ikke støttet i R-modus ennå -
+#' bruk python-modusene. Høflig melding, ikke krasj (spec-lovet,
+#' 2026-07-21-explicit-containers-design.md §Out of scope).
+ui_grid <- function(...) {
+  stop("ui.grid støttes ikke i R ennå — bruk python-modusene (pyodide/brython/micropython)", call. = FALSE)
+}
+
 #' ui.widget("navn")-håndtak. IKKE støttet i R (dash-absorpsjon 5a Task 2,
 #' spec §1): webR kjører R-koden i en egen worker (declare-og-injiser-
 #' modellen, se filhodet) - et LEVENDE håndtak (.set()/.on()/.hide()/

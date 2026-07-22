@@ -538,6 +538,21 @@ def _parse_grid_template(template):
     return {"areas": areas, "names": names}
 
 
+def _style_dict_to_css_text(style):
+    """{"gridTemplateAreas": '"a" "b"', ...} -> 'grid-template-areas: "a" "b";
+    ...' - camelCase-nøkler til kebab-case CSS-egenskapsnavn (motsatt
+    retning av _snake_to_camel), semikolon-separert. Brukt AV
+    _merge_container_style sin grid-raw-style-fiks (Task 1, fase-4
+    sluttreview L-3) til å uttrykke den beregnede grid-template-dicten som
+    cssText-tekst, slik at den kan APPENDES til en brukergitt rå
+    style=-streng i stedet for å bli erstattet av den."""
+    parts = []
+    for key, value in style.items():
+        kebab = "".join("-" + c.lower() if c.isupper() else c for c in key)
+        parts.append(kebab + ": " + str(value) + ";")
+    return " ".join(parts)
+
+
 def _merge_container_style(base_cls, style, kwargs):
     """Delt hale for row()/column()/grid(): slå den BEREGNEDE style-dicten
     (gap=/wrap=/justify=/align= for row/column, gridTemplate*=/gap= for
@@ -545,8 +560,13 @@ def _merge_container_style(base_cls, style, kwargs):
     nøkkel, brukerens SNAKE_CASE-nøkler camelCases som vanlig via
     _snake_to_camel - samme regel _normalize_kwargs allerede bruker for
     style=; en RAW cssText-streng derimot ERSTATTER den beregnede dicten
-    - de to formene lar seg ikke slå sammen, og en eksplisitt cssText-
-    streng er et bevisst "jeg styrer stilen selv"-signal fra brukeren).
+    her (de to formene lar seg ikke slå sammen på DENNE generelle
+    funksjonen). For row()/column() er det greit (der finnes ingen
+    positional template å miste). grid() unngår tapet ved å APPENDE de
+    beregnede grid-template-deklarasjonene til en rå style=-streng FØR den
+    når hit (se grid() sin egen docstring/kode) - kwargs["style"] er da
+    allerede den ferdig-supplerte strengen når _merge_container_style ser
+    den, så erstatningen under er fortsatt trygg.
 
     cls=/class_= merges til `base_cls` (BASE_KLASSEN FØRST, brukerens
     EKSTRA klasse(r) etter - samme "siste vinner ved kollisjon"-konvensjon
@@ -639,7 +659,16 @@ def grid(template, cols=None, rows=None, *, gap=None, **kwargs):
 
     cols=/rows= er de vanlige CSS grid-template-columns/-rows-verdiene
     (f.eks. "220px 1fr") - rene gjennomstrøms-strenger, ingen egen
-    parsing (til forskjell fra selve area-templaten)."""
+    parsing (til forskjell fra selve area-templaten).
+
+    style= som en RAW cssText-streng ville ellers (via
+    _merge_container_style, se der) ERSTATTE denne beregnede style-dicten
+    i sin helhet - og dermed stille slette gridTemplateAreas/-Columns/
+    -Rows/gap fra templaten/cols=/rows=/gap= (fase-4 sluttreview L-3).
+    Append i stedet: brukerens egne deklarasjoner FØRST, så de beregnede
+    grid-template-deklarasjonene (cssText, _style_dict_to_css_text) -
+    templaten overlever alltid en rå style=-streng. Dict-style=-merging
+    (den vanlige, ikke-raw veien) er uendret - se _merge_container_style."""
     parsed = _parse_grid_template(template)
     style = {"gridTemplateAreas": parsed["areas"]}
     if cols is not None:
@@ -648,6 +677,12 @@ def grid(template, cols=None, rows=None, *, gap=None, **kwargs):
         style["gridTemplateRows"] = rows
     if gap is not None:
         style["gap"] = gap
+    user_style = kwargs.get("style")
+    if isinstance(user_style, str):
+        prefix = user_style.strip()
+        if prefix and not prefix.endswith(";"):
+            prefix += ";"
+        kwargs["style"] = (prefix + " " + _style_dict_to_css_text(style)).strip()
     container = _tag_builder("div")(**_merge_container_style("os-grid", style, kwargs))
     areas = {}
     for name in parsed["names"]:

@@ -1867,6 +1867,23 @@ def test_grid_rows_and_gap_set_style(monkeypatch):
     assert container_props["style"]["gap"] == "4px"
 
 
+def test_grid_raw_string_style_appends_to_computed_grid_template(monkeypatch):
+    # fase-4 sluttreview L-3: en RAW cssText-style=-streng ERSTATTET (før
+    # denne fiksen) den beregnede style-dicten i sin helhet - dermed
+    # forsvant gridTemplateAreas/-Columns/-Rows stille. Nå SUPPLERES
+    # brukerens cssText-streng med de beregnede grid-template-
+    # deklarasjonene i stedet for å erstattes av dem.
+    mod, fake = _load_ui(monkeypatch)
+    mod.grid("kpi kpi | plot table", cols="1fr 1fr", style="background: papayawhip")
+    container_props = [c for c in fake.el_calls if c[0] == "elCreate"][0][2]
+    style = container_props["style"]
+    assert isinstance(style, str)
+    assert "background: papayawhip" in style
+    assert "grid-template-areas" in style
+    assert '"kpi kpi" "plot table"' in style
+    assert "grid-template-columns: 1fr 1fr" in style
+
+
 def test_grid_add_with_area_clears_then_appends_element_child(monkeypatch):
     mod, fake = _load_ui(monkeypatch)
     g = mod.grid("kpi kpi | plot table")
