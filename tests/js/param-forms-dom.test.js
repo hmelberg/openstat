@@ -147,31 +147,38 @@ test('decorate: celle UTEN #@param → ingen .param-form-stripe opprettes', () =
   assert.ok(!outEl.children.some((c) => c.classList.contains('param-form')));
 });
 
-// ---- review-funn (fase 5 Task 1): DOM-halvdelen er IKKE gatet mot de nye
-// kind:"title"/"markdown"-entryene ParamForms.parse nå kan returnere — en
-// #@markdown-linje (ingen .meta i det hele tatt) krasjer _entryPlacement sin
-// entry.meta.placement-lesing, og en #@title-linje bygger en søppel
-// "undefined"-rad via _buildText. Midlertidig fiks: DOM-halvdelen filtrerer
-// til kind:"param" rett etter sine egne interne ParamForms.parse-kall, til
-// Task 2 lærer DOM-halvdelen de nye kindene.
-test('decorate: celle med KUN #@markdown → verken krasj eller noen kontroll-stripe bygges', () => {
+// ---- Task 2 (Colab-paritet 2026-07-22): DOM-halvdelen render nå ekte
+// kind:"title"/"markdown"-rader (se lenger ned, "#@title/#@markdown-
+// rendring"-seksjonen) — den midlertidige kind:"param"-only-gatingen fra
+// fase 5 Task 1 er fjernet. De to pin-testene under er OPPDATERT til den nye
+// virkeligheten (var: "ingen krasj, ingen stripe" / "ingen rad for
+// tittelen" — nå: "stripa bygges, egen .param-form-md/.param-form-title-rad,
+// fortsatt null kontroll-INPUTS for disse to entry-kindene").
+test('decorate: celle med KUN #@markdown → ingen krasj, .param-form-md rendres i stripa, ingen kontroll-input', () => {
   const { ParamForms, cellEl, outEl } = freshEnv();
   assert.doesNotThrow(() => {
     ParamForms.decorate(0, cellEl, '#@markdown Some prose', 'python');
   });
   assert.strictEqual(cellEl.children.length, 2, 'kun de to opprinnelige barna (.nb-input/.nb-output)');
-  assert.strictEqual(outEl.children.length, 1, 'kun .nb-output-body, ingen stripe');
-  assert.ok(!outEl.children.some((c) => c.classList.contains('param-form')));
+  const strip = outEl.children[0];
+  assert.ok(strip.classList.contains('param-form'), 'markdown alene holder til at stripa bygges nå');
+  assert.strictEqual(strip.children.length, 1, 'kun md-raden, ingen kontroll-rad');
+  assert.ok(strip.children[0].classList.contains('param-form-md'));
+  assert.ok(!strip.children.some((c) => c.classList.contains('param-form-row')),
+    'ingen kontroll-rad betyr ingen input i det hele tatt');
 });
 
-test('decorate: celle med #@title + ÉN #@param → nøyaktig ÉN kontroll bygges (ingen "undefined"-rad for tittelen)', () => {
+test('decorate: celle med #@title + ÉN #@param → tittel-rad FØRST, deretter nøyaktig ÉN kontroll', () => {
   const { ParamForms, cellEl, outEl } = freshEnv();
   const src = '#@title X\nx = 3  #@param {type:"slider", min:0, max:10}';
   ParamForms.decorate(0, cellEl, src, 'python');
   const strip = outEl.children[0];
   assert.ok(strip.classList.contains('param-form'));
-  assert.strictEqual(strip.children.length, 1, 'kun x sin kontroll — ingen rad for #@title');
-  const row = strip.children[0];
+  assert.strictEqual(strip.children.length, 2, 'tittel-rad + x sin kontroll');
+  const titleRow = strip.children[0];
+  assert.ok(titleRow.classList.contains('param-form-title'));
+  assert.strictEqual(titleRow.textContent, 'X');
+  const row = strip.children[1];
   assert.strictEqual(row.children[0].textContent, 'x', 'label = varName, aldri "undefined"');
 });
 
@@ -952,6 +959,154 @@ test('_commit: bruker Cells.updateCellSource sin returnerte FERSKE kilde til å 
     [3, '# reconciled\nn = 9  #@param\nm = 42  #@param'],
     'den andre commiten splicer mot den RETURNERTE ferske kilden (med den forsonede linja intakt)'
   );
+});
+
+// ---------- Task 2 (Colab-paritet 2026-07-22): #@title/#@markdown-rendring ----
+// Spec §Design 1-2 + plan Task 2: tittel FØRST som `.param-form-title`
+// (heading-stil div, textContent), markdown-rader `.param-form-md`
+// interleaved etter lineIdx blant param-radene — ALLE i cellens
+// DEFAULT-plasserte stripe (per-linje placement forblir params-only).
+// Markdown-innhold via `global.Ui && Ui.renderPayload({kind:'markdown', ...})`
+// med ren textContent-fallback når Ui/rendereren mangler. Ingen write-back,
+// ingen inputs, run-chip-logikken ignorerer de nye kindene.
+
+test('decorate: tittel først, markdown interleaved med param-rader i kildeorden (lineIdx), alt i default-stripa', () => {
+  const { ParamForms, cellEl, outEl } = freshEnv();
+  const src = [
+    '#@title Skjema',
+    '#@markdown Første avsnitt',
+    'x = 3  #@param {type:"number"}',
+    '#@markdown Andre avsnitt',
+    'y = 5  #@param {type:"number"}',
+  ].join('\n');
+  ParamForms.decorate(0, cellEl, src, 'python');
+  const strip = outEl.children[0];
+  assert.strictEqual(strip.children.length, 5, 'tittel + 2 markdown + 2 kontroller');
+  assert.ok(strip.children[0].classList.contains('param-form-title'));
+  assert.strictEqual(strip.children[0].textContent, 'Skjema');
+  assert.ok(strip.children[1].classList.contains('param-form-md'));
+  assert.ok(strip.children[2].classList.contains('param-form-row'));
+  assert.strictEqual(strip.children[2].children[0].textContent, 'x');
+  assert.ok(strip.children[3].classList.contains('param-form-md'));
+  assert.ok(strip.children[4].classList.contains('param-form-row'));
+  assert.strictEqual(strip.children[4].children[0].textContent, 'y');
+});
+
+test('decorate: #@title senere i kilden enn #@param rendres likevel FØRST i stripa (Colab-semantikk)', () => {
+  const { ParamForms, cellEl, outEl } = freshEnv();
+  const src = 'x = 3  #@param {type:"number"}\n#@title Skjema';
+  ParamForms.decorate(0, cellEl, src, 'python');
+  const strip = outEl.children[0];
+  assert.strictEqual(strip.children.length, 2);
+  assert.ok(strip.children[0].classList.contains('param-form-title'), 'tittelen flyttes til toppen uansett kilde-rekkefølge');
+  assert.strictEqual(strip.children[0].textContent, 'Skjema');
+  assert.ok(strip.children[1].classList.contains('param-form-row'));
+});
+
+test('markdown: kaller global.Ui.renderPayload({kind:"markdown", text}, host) når Ui finnes', () => {
+  const { ParamForms, cellEl, outEl } = freshEnv();
+  const calls = [];
+  const realRenderPayload = global.Ui.renderPayload;
+  global.Ui.renderPayload = (payload, host) => { calls.push([payload, host]); };
+  try {
+    ParamForms.decorate(0, cellEl, '#@markdown Hello world', 'python');
+  } finally {
+    global.Ui.renderPayload = realRenderPayload;
+  }
+  assert.strictEqual(calls.length, 1);
+  assert.deepStrictEqual(calls[0][0], { kind: 'markdown', text: 'Hello world' });
+  const strip = outEl.children[0];
+  assert.strictEqual(calls[0][1], strip.children[0], 'host er selve .param-form-md-noden');
+});
+
+test('markdown: Ui.renderPayload fraværende (funksjonen mangler, resten av Ui — makeNode — finnes fortsatt) → ren textContent-fallback', () => {
+  const { ParamForms, cellEl, outEl } = freshEnv();
+  // Kun renderPayload fjernes — Ui.makeNode må fortsatt finnes, siden HELE
+  // DOM-halvdelen (ikke bare markdown-raden) bygger elementer via den (_el),
+  // se _build over. "Ui fraværende" i praksis betyr her "denne ene
+  // funksjonen mangler", ikke "hele Ui-modulen er borte".
+  const savedRenderPayload = global.Ui.renderPayload;
+  delete global.Ui.renderPayload;
+  try {
+    ParamForms.decorate(0, cellEl, '#@markdown Plain fallback', 'python');
+  } finally {
+    global.Ui.renderPayload = savedRenderPayload;
+  }
+  const strip = outEl.children[0];
+  const mdRow = strip.children[0];
+  assert.ok(mdRow.classList.contains('param-form-md'));
+  assert.strictEqual(mdRow.textContent, 'Plain fallback');
+});
+
+test('refresh: endret TEKST i en #@markdown-linje er strukturell → stripa bygges på nytt', () => {
+  const { ParamForms, cellEl, outEl } = freshEnv();
+  const calls = [];
+  const realRenderPayload = global.Ui.renderPayload;
+  global.Ui.renderPayload = (payload) => { calls.push(payload.text); };
+  try {
+    const src = '#@markdown Original tekst\nx = 3  #@param {type:"number"}';
+    ParamForms.decorate(0, cellEl, src, 'python');
+    const oldStrip = outEl.children[0];
+
+    const newSrc = '#@markdown Endret tekst\nx = 3  #@param {type:"number"}';
+    ParamForms.refresh(0, newSrc);
+
+    const newStrip = outEl.children[0];
+    assert.notStrictEqual(newStrip, oldStrip, 'stripa er bygd på nytt (ny node) — markdown-tekst er strukturell');
+    assert.deepStrictEqual(calls, ['Original tekst', 'Endret tekst']);
+  } finally {
+    global.Ui.renderPayload = realRenderPayload;
+  }
+});
+
+test('refresh: markdown-tekst UENDRET + kun param-verdi endret → IKKE ombygd (samme stripe-node, in-place)', () => {
+  const { ParamForms, cellEl, outEl } = freshEnv();
+  const src = '#@markdown Uendret\nx = 3  #@param {type:"number"}';
+  ParamForms.decorate(0, cellEl, src, 'python');
+  const strip = outEl.children[0];
+
+  ParamForms.refresh(0, '#@markdown Uendret\nx = 9  #@param {type:"number"}');
+  assert.strictEqual(outEl.children[0], strip, 'ingen ombygging — kun param-verdien endret, markdown uendret');
+  assert.strictEqual(Number(strip.children[1].children[1].value), 9, 'param-kontrollen fikk likevel den nye verdien in-place');
+});
+
+test('manual-by-title: #@param uten egen run: i en {run:"manual"}-tittel-celle → endring viser Kjør-chip, ingen auto-kjøring', async () => {
+  const { ParamForms, cellEl, outEl, runCellCalls } = freshEnv();
+  const src = '#@title Skjema {run:"manual"}\nx = 3  #@param {type:"number"}';
+  ParamForms.decorate(0, cellEl, src, 'python');
+  const strip = outEl.children[0];
+  assert.strictEqual(strip.children.length, 2, 'tittel + kontroll, ingen chip ennå');
+
+  const numInput = strip.children[1].children[1];
+  numInput.value = '9';
+  numInput.dispatchEvent({ type: 'change' });
+  await wait(50);
+
+  assert.strictEqual(strip.children.length, 3, 'chip lagt til (siste barn)');
+  const chip = strip.children[2];
+  assert.ok(chip.classList.contains('param-form-runchip'));
+  assert.deepStrictEqual(runCellCalls, [], 'ingen auto-kjøring — tittelens manual-default (ParamForms.cellRunDefault) gjaldt');
+});
+
+test('placement: param med egen placement:"bottom" havner i EGEN stripe, mens tittel/markdown blir i default (top)-stripa', () => {
+  const { ParamForms, cellEl, outEl } = freshEnv();
+  const src = [
+    '#@title Skjema',
+    '#@markdown Forklaring',
+    'a = 1  #@param {type:"number"}',
+    'b = 2  #@param {type:"number", placement:"bottom"}',
+  ].join('\n');
+  ParamForms.decorate(0, cellEl, src, 'python');
+
+  const topStrip = outEl.children.find((c) => c.classList.contains('param-form') && c.getAttribute('data-pos') === 'top');
+  const bottomStrip = outEl.children.find((c) => c.classList.contains('param-form') && c.getAttribute('data-pos') === 'bottom');
+  assert.ok(topStrip && bottomStrip, 'to separate stripe-containere');
+  assert.strictEqual(topStrip.children.length, 3, 'tittel + markdown + a sin kontroll');
+  assert.ok(topStrip.children[0].classList.contains('param-form-title'));
+  assert.ok(topStrip.children[1].classList.contains('param-form-md'));
+  assert.strictEqual(topStrip.children[2].children[0].textContent, 'a');
+  assert.strictEqual(bottomStrip.children.length, 1, 'kun b — tittel/markdown flytter seg ALDRI til en ikke-default stripe');
+  assert.strictEqual(bottomStrip.children[0].children[0].textContent, 'b');
 });
 
 // ---------- fase 2 (spec 2026-07-20): pin-tester FØR Ui.makeNode-svitsjen ----

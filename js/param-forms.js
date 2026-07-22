@@ -965,6 +965,31 @@
       }
     }
 
+    // #@title-rad (Task 2, Colab-paritet 2026-07-22): en enkel heading-stil
+    // div — INGEN input, INGEN _commit-lytter (title-entries har ingen
+    // write-back, spec §Design punkt 4: write-back gjelder KUN param-entries).
+    function _buildTitleRow(entry) {
+      return _el('div', 'param-form-title', entry.text);
+    }
+
+    // #@markdown-rad (Task 2): rendres via den DELTE Ui.renderPayload-stien
+    // (samme vokabular som ui.markdown()/on_change-resultater, spec §Design
+    // punkt 2/5 — "same trust level as #%% md cells and ui.markdown, no new
+    // HTML surface") — Ui selv degraderer allerede grasiøst til ren
+    // <pre>-tekst når markdown-it ikke er lastet (js/ui.js sin mdToHtml).
+    // Fallbacken her dekker et STRENGERE tilfelle: Ui/renderPayload finnes
+    // ikke i det hele tatt (f.eks. node-tester uten js/ui.js lastet) — da
+    // settes ren textContent i stedet, ingen HTML-rendering forsøkt.
+    function _buildMarkdownRow(entry) {
+      var host = _el('div', 'param-form-md');
+      if (global.Ui && typeof global.Ui.renderPayload === 'function') {
+        global.Ui.renderPayload({ kind: 'markdown', text: entry.text }, host);
+      } else {
+        host.textContent = entry.text;
+      }
+      return host;
+    }
+
     function _buildEntryControl(cellIdx, entry, value, lang) {
       var builder = _BUILDERS[entry.meta.type] || _buildText;
       var built = builder(cellIdx, entry, value, lang);
@@ -1101,17 +1126,12 @@
           if (_stripIsLive(s, outEl)) s.remove();
         });
       }
-      // Midlertidig kind-gating (review-funn, fase 5 Task 1): ParamForms.parse
-      // returnerer nå OGSÅ kind:"title"/"markdown"-entries, men DOM-halvdelen
-      // her under (_entryPlacement, _buildEntryControl, _sameStructure, …) er
-      // fortsatt skrevet KUN for kind:"param" (title/markdown har verken
-      // varName eller (for markdown) noe meta i det hele tatt) — uten dette
-      // filteret krasjer _entryPlacement på entry.meta.placement for en
-      // markdown-entry, og en title-entry bygger en søppel "undefined"-rad
-      // via _buildText. Fjernes når Task 2 gir DOM-halvdelen egen rendering
-      // for title/markdown; det PUBLIKE ParamForms.parse-resultatet forblir
-      // uendret/ufiltrert (Task 2 + eksisterende parse-tester konsumerer det).
-      var entries = ParamForms.parse(source, lang).filter(function (e) { return e.kind === 'param'; });
+      // ParamForms.parse returnerer nå tre entry-kinds ("param", "title",
+      // "markdown", Task 2/Colab-paritet 2026-07-22) — DOM-halvdelen her
+      // under bygger egne rader for alle tre (se _buildTitleRow/
+      // _buildMarkdownRow), ingen filtrering lenger (fase 5 Task 1 sin
+      // midlertidige kind:"param"-only-gating er fjernet).
+      var entries = ParamForms.parse(source, lang);
       if (!entries.length) {
         _forms[cellIdx] = { cellEl: cellEl, lang: lang, source: source,
                             entries: [], builtEntries: [], strips: { top: null, bottom: null, left: null }, controls: [],
@@ -1120,16 +1140,51 @@
       }
       var cellDefault = _cellDefaultPlacement(cellEl);
       var stripNodes = {};
-      var controls = [];
+      // `controls` er PARALLELL med `entries` (samme lengde/indeks, IKKE bare
+      // param-entryene komprimert) — title/markdown-indekser er `null` (ingen
+      // kontroll å oppdatere in-place for dem, se refresh sin
+      // _updateControlValue-løkke, som hopper over null). Dette holder
+      // "controls[i] hører til entries[i]"-parallelliteten planens Global
+      // Constraints krever, uten en egen parallell-liste-datastruktur.
+      var controls = new Array(entries.length);
+      for (var ci = 0; ci < entries.length; ci++) controls[ci] = null;
+
+      // Tittelen (maks én, garantert av parse — kun FØRSTE #@title gjelder)
+      // rendres ALLTID FØRST i cellens default-plasserte stripe, UANSETT
+      // hvilken lineIdx den faktisk sto på i kildeteksten (Colab-semantikk:
+      // se spec §Design punkt 1) — plukkes derfor ut og bygges FØR
+      // hovedløkka under, som så hopper over akkurat denne indeksen.
+      var titleIdx = -1;
+      for (var ti = 0; ti < entries.length; ti++) {
+        if (entries[ti].kind === 'title') { titleIdx = ti; break; }
+      }
+      if (titleIdx !== -1) {
+        if (!stripNodes[cellDefault]) stripNodes[cellDefault] = _el('div', 'param-form');
+        stripNodes[cellDefault].appendChild(_buildTitleRow(entries[titleIdx]));
+      }
+
       for (var i = 0; i < entries.length; i++) {
+        if (i === titleIdx) continue;
         var entry = entries[i];
+        if (entry.kind === 'markdown') {
+          // Markdown følger ALLTID cellens default-plassering, i kildeorden
+          // blant param-radene som også er default-plassert (entries er
+          // allerede sortert på lineIdx av parse) — ALDRI per-linje placement
+          // (spec §Design punkt 2: "Per-line placement is NOT supported for
+          // title/markdown").
+          if (!stripNodes[cellDefault]) stripNodes[cellDefault] = _el('div', 'param-form');
+          stripNodes[cellDefault].appendChild(_buildMarkdownRow(entry));
+          continue;
+        }
+        // kind === 'param' (uendret oppførsel: egen per-linje placement,
+        // ellers cellens default — se _entryPlacement)
         var pos = _entryPlacement(entry, cellDefault);
         if (!stripNodes[pos]) stripNodes[pos] = _el('div', 'param-form');
         var value = ParamForms.currentValue(entry, lang);
         var ctrl = _buildEntryControl(cellIdx, entry, value, lang);
         stripNodes[pos].appendChild(ctrl.row);
         ctrl.placement = pos;
-        controls.push(ctrl);
+        controls[i] = ctrl;
       }
       ['top', 'bottom', 'left'].forEach(function (pos) {
         if (stripNodes[pos]) _insertStrip(cellEl, stripNodes[pos], pos);
@@ -1169,7 +1224,23 @@
       if (oldEntries.length !== newEntries.length) return false;
       for (var i = 0; i < oldEntries.length; i++) {
         var a = oldEntries[i], b = newEntries[i];
-        if (a.lineIdx !== b.lineIdx || a.varName !== b.varName || a.meta.type !== b.meta.type) return false;
+        // kind+lineIdx sjekkes FØRST og UAVHENGIG av .meta (Task 2:
+        // kind:"markdown"-entries har INGEN .meta-felt i det hele tatt — se
+        // ParamForms.parse — så enhver videre .meta-lesing under må skje
+        // ETTER at vi vet BEGGE er kind:"param"; ellers ville en markdown-
+        // entry krasje her akkurat slik den tidligere krasjet DOM-halvdelens
+        // øvrige param-only-kode, se den fjernede kind-gatingen i _build).
+        if (a.lineIdx !== b.lineIdx || a.kind !== b.kind) return false;
+        if (a.kind === 'title' || a.kind === 'markdown') {
+          // Planens Global Constraints: kind+text deltar i struktur-
+          // sammenlikningen — en endret markdown-TEKST (eller tittel-tekst)
+          // er en strukturell endring (full ombygging), ikke en in-place-
+          // oppdatering (disse radene har uansett ingen kontroll å oppdatere
+          // in-place — se controls[i] === null for disse indeksene i _build).
+          if (a.text !== b.text) return false;
+          continue;
+        }
+        if (a.varName !== b.varName || a.meta.type !== b.meta.type) return false;
         // Task 3: en placement-endring (meta.placement) er STRUKTURELL —
         // kontrollen må havne i en ANNEN fysisk stripe (evt. den delte
         // .nb-strips-left-kolonnen), noe kun en full _build (som bygger
@@ -1248,11 +1319,10 @@
     ParamForms.refresh = function (cellIdx, source) {
       var st = _forms[cellIdx];
       if (!st) return;
-      // Midlertidig kind-gating (samme review-funn/begrunnelse som i _build
-      // over) — newEntries må være kind:"param"-only FØR _sameStructure
-      // sammenlikner dem mot st.builtEntries (som _build over allerede
-      // filtrerer), ellers krasjer/forsøpler samme DOM-hazard her også.
-      var newEntries = ParamForms.parse(source, st.lang).filter(function (e) { return e.kind === 'param'; });
+      // Task 2: ingen kind-filtrering lenger — newEntries er ParamForms.parse
+      // sitt FULLE, ufiltrerte resultat (param+title+markdown), samme liste
+      // _build nå bygger fra.
+      var newEntries = ParamForms.parse(source, st.lang);
       // Struktur-sammenlikningen går mot builtEntries — det kontrollene
       // faktisk ble BYGGET fra — ikke mot st.entries, som syncSource kan ha
       // oppdatert per tastetrykk siden (review-fiks 1): controls[i] er
@@ -1263,7 +1333,12 @@
         return;
       }
       for (var i = 0; i < newEntries.length; i++) {
-        _updateControlValue(st.controls[i], newEntries[i], st.lang);
+        // title/markdown-indekser har controls[i] === null (ingen kontroll
+        // bygget for dem, se _build) — og _sameStructure over garanterer
+        // uansett at teksten deres er UENDRET når vi når hit, så det er
+        // ingenting å oppdatere. Hopp over dem i stedet for å kalle
+        // _updateControlValue med en null-kontroll.
+        if (st.controls[i]) _updateControlValue(st.controls[i], newEntries[i], st.lang);
       }
       st.entries = newEntries;
       st.builtEntries = newEntries;
