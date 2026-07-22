@@ -147,6 +147,34 @@ test('decorate: celle UTEN #@param → ingen .param-form-stripe opprettes', () =
   assert.ok(!outEl.children.some((c) => c.classList.contains('param-form')));
 });
 
+// ---- review-funn (fase 5 Task 1): DOM-halvdelen er IKKE gatet mot de nye
+// kind:"title"/"markdown"-entryene ParamForms.parse nå kan returnere — en
+// #@markdown-linje (ingen .meta i det hele tatt) krasjer _entryPlacement sin
+// entry.meta.placement-lesing, og en #@title-linje bygger en søppel
+// "undefined"-rad via _buildText. Midlertidig fiks: DOM-halvdelen filtrerer
+// til kind:"param" rett etter sine egne interne ParamForms.parse-kall, til
+// Task 2 lærer DOM-halvdelen de nye kindene.
+test('decorate: celle med KUN #@markdown → verken krasj eller noen kontroll-stripe bygges', () => {
+  const { ParamForms, cellEl, outEl } = freshEnv();
+  assert.doesNotThrow(() => {
+    ParamForms.decorate(0, cellEl, '#@markdown Some prose', 'python');
+  });
+  assert.strictEqual(cellEl.children.length, 2, 'kun de to opprinnelige barna (.nb-input/.nb-output)');
+  assert.strictEqual(outEl.children.length, 1, 'kun .nb-output-body, ingen stripe');
+  assert.ok(!outEl.children.some((c) => c.classList.contains('param-form')));
+});
+
+test('decorate: celle med #@title + ÉN #@param → nøyaktig ÉN kontroll bygges (ingen "undefined"-rad for tittelen)', () => {
+  const { ParamForms, cellEl, outEl } = freshEnv();
+  const src = '#@title X\nx = 3  #@param {type:"slider", min:0, max:10}';
+  ParamForms.decorate(0, cellEl, src, 'python');
+  const strip = outEl.children[0];
+  assert.ok(strip.classList.contains('param-form'));
+  assert.strictEqual(strip.children.length, 1, 'kun x sin kontroll — ingen rad for #@title');
+  const row = strip.children[0];
+  assert.strictEqual(row.children[0].textContent, 'x', 'label = varName, aldri "undefined"');
+});
+
 test('decorate: bygger .param-form som FØRSTE barn i .nb-output (FØR .nb-output-body), ett kontrollelement per entry, seedet fra currentValue', () => {
   const { ParamForms, cellEl, inputEl, outEl, bodyEl } = freshEnv();
   const src = 'x = 3  #@param {type:"slider", min:0, max:10}\nname = \'a\'  #@param ["a", "b", "c"]';

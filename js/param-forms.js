@@ -1101,7 +1101,17 @@
           if (_stripIsLive(s, outEl)) s.remove();
         });
       }
-      var entries = ParamForms.parse(source, lang);
+      // Midlertidig kind-gating (review-funn, fase 5 Task 1): ParamForms.parse
+      // returnerer nå OGSÅ kind:"title"/"markdown"-entries, men DOM-halvdelen
+      // her under (_entryPlacement, _buildEntryControl, _sameStructure, …) er
+      // fortsatt skrevet KUN for kind:"param" (title/markdown har verken
+      // varName eller (for markdown) noe meta i det hele tatt) — uten dette
+      // filteret krasjer _entryPlacement på entry.meta.placement for en
+      // markdown-entry, og en title-entry bygger en søppel "undefined"-rad
+      // via _buildText. Fjernes når Task 2 gir DOM-halvdelen egen rendering
+      // for title/markdown; det PUBLIKE ParamForms.parse-resultatet forblir
+      // uendret/ufiltrert (Task 2 + eksisterende parse-tester konsumerer det).
+      var entries = ParamForms.parse(source, lang).filter(function (e) { return e.kind === 'param'; });
       if (!entries.length) {
         _forms[cellIdx] = { cellEl: cellEl, lang: lang, source: source,
                             entries: [], builtEntries: [], strips: { top: null, bottom: null, left: null }, controls: [],
@@ -1238,7 +1248,11 @@
     ParamForms.refresh = function (cellIdx, source) {
       var st = _forms[cellIdx];
       if (!st) return;
-      var newEntries = ParamForms.parse(source, st.lang);
+      // Midlertidig kind-gating (samme review-funn/begrunnelse som i _build
+      // over) — newEntries må være kind:"param"-only FØR _sameStructure
+      // sammenlikner dem mot st.builtEntries (som _build over allerede
+      // filtrerer), ellers krasjer/forsøpler samme DOM-hazard her også.
+      var newEntries = ParamForms.parse(source, st.lang).filter(function (e) { return e.kind === 'param'; });
       // Struktur-sammenlikningen går mot builtEntries — det kontrollene
       // faktisk ble BYGGET fra — ikke mot st.entries, som syncSource kan ha
       // oppdatert per tastetrykk siden (review-fiks 1): controls[i] er
