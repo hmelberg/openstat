@@ -52,7 +52,7 @@ _widget_handle_cls = None
 
 
 def configure(**kwargs):
-    """Fasaden kaller configure(register=..., register_value=..., ...) ved
+    """Fasaden kaller configure(register_value=..., scalar=..., ...) ved
     import. Idempotent: hvert kall overskriver forrige (riktig under
     pytest der tre fasader deler prosessen og re-importeres per test)."""
     g = globals()

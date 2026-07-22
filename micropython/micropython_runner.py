@@ -97,7 +97,11 @@ def _tail_suppressed(tail):
        kommentar tillatt etterpå) — `ui.slider(0,100) + 1` og
        `ui.slider(0,100).value` er dermed IKKE lenger falske positiver
        (prefiks-match alene godtok dem før). Valgfritt whitespace mellom
-       kontrollnavnet og '(' godtas også (`ui.slider (0,100)`)."""
+       kontrollnavnet og '(' godtas også (`ui.slider (0,100)`).
+       Kjent begrensning: parenteser inni streng-argumenter
+       (`ui.dropdown(["a)b"])`) forvirrer telleren, så slike nakne kall
+       VISES i stedet for å dempes — trygg retning (støy, aldri
+       feilaktig demping)."""
     _bare_check = tail
     if '#' in tail:
         _pre = tail.split('#', 1)[0].strip()
