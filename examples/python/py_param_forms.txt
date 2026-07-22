@@ -25,8 +25,10 @@ Without `run:"auto"`, only the text is written, and the cell gets the
 usual "changed, not run" marker (stale tint) until you press ▶
 yourself.
 
-`#@title` and `#@markdown` (Colab's cell-title/text comments) are
-**not supported yet** — coming in a later round.
+`#@title` and `#@markdown` (Colab's cell-title/text comments) also work:
+a `#@title` line renders as a heading above the form, and its
+`{run:"manual"}` meta (if any) becomes the cell's run default; each
+`#@markdown` line renders as prose in the form strip, in source order.
 
 Add `placement:"left"` (or `"top"`/`"bottom"`) to the metadata object
 to place that particular control in a different strip than the cell's
@@ -36,6 +38,8 @@ default.
 — the parser recognizes both `=` and R's `<-` as assignment operators.
 
 #%% python
+#@title Row count
+#@markdown Choose how many rows of the iris dataset to preview.
 n = 5  #@param {type:"slider", min:0, max:20, step:1, run:"auto"}
 iris.head(n)
 

@@ -132,7 +132,9 @@ renders a form control for it. Changing the control <strong>writes the new
 value back into the code line</strong> — the form <em>is</em> the code — and
 reruns the cell (automatic by default).</p>
 
-<pre><code>n       = 50        #@param {type:"slider", min:10, max:150, step:10}
+<pre><code>#@title Iris explorer {run:"manual"}
+#@markdown Pick a species and a row count, then tweak the slider below.
+n       = 50        #@param {type:"slider", min:10, max:150, step:10}
 species = "setosa"  #@param ["setosa", "versicolor", "virginica"]
 fruit   = "apple"   #@param ["apple", "banana"] {allow-input: true}
 level   = 3         #@param {type:"integer"}
@@ -141,6 +143,13 @@ active  = True      #@param {type:"boolean"}
 expr    = "x + 1"   #@param {type:"raw"}</code></pre>
 
 <ul>
+<li><strong><code>#@title</code> / <code>#@markdown</code>:</strong> a
+    <code>#@title</code> line renders as a heading above the form strip
+    and, when the cell has one, its <code>{run:"manual"}</code> meta becomes
+    the cell's run <em>default</em> (only the first <code>#@title</code> in
+    a cell counts); <code>#@markdown</code> lines render as prose, in the
+    order they appear, alongside the controls. Both are Colab syntax, so
+    pasted Colab cells render as-is.</li>
 <li><strong>Types:</strong> <code>slider</code>, <code>number</code>,
     <code>integer</code>, <code>boolean</code>, <code>date</code>,
     <code>raw</code>, plain text, and dropdowns from a list literal

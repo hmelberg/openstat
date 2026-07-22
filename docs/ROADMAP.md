@@ -74,11 +74,11 @@ docs/interactive-elements.html (4b) — alt levert og testet.
 
 **Colab-paritet for `#@param` (syntaksen er ellers Colab-kompatibel;
 run:auto-default og placement/R/JS-støtte er OpenStat-utvidelser Colab mangler):**
-- [ ] `#@title` — celletittel-linje med form-meta (`{run:"auto",
-      display-mode:...}`) slik Colab har; i dag bevisst utsatt
-      (js/param-forms.js:16)
-- [ ] `#@markdown` — prosa-linjer rendret i skjemastripen (delvis dekket av
-      `#%% md`-celler, men Colab-limt kode mister teksten i dag)
+- [x] `#@title` — celletittel-linje med form-meta (`{run:"manual"}` som
+      celle-run-default); levert 2026-07-22 (display-mode fortsatt utsatt,
+      se punktet under)
+- [x] `#@markdown` — prosa-linjer rendret i skjemastripen, kildeorden;
+      levert 2026-07-22
 - [ ] `display-mode: "form"` per celle — skjul koden, vis bare skjemaet
       (i dag finnes kun globale «vis kode»-innstillinger)
 

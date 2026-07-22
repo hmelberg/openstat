@@ -8,6 +8,8 @@ An assignment with a `//@param` comment gets a form field in the cell.
 The cell reruns automatically when the value changes (turn off with `run:"manual"`).
 NB: no semicolon on param lines — the value is swapped in byte-exact.
 #%%
+//@title Species filter
+//@markdown Set a sepal-length threshold and optionally restrict to one species.
 threshold = 5  //@param {type:"slider", min:4, max:8, step:0.5}
 selected_species = 'setosa'  //@param {type:"string"}
 include_all = false  //@param {type:"boolean", run:"manual"}  // requires clicking the Run chip
