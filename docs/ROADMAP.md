@@ -122,13 +122,19 @@ i småting-batchen.*
 
 ## AI-assistenten
 
-- [ ] **Auto-retting for python- og r-modus i v2-flyten** (i dag kun microdata).
-      Backend er klar (`kode-svar-v2` tar `prior_script`+`errors` uansett modus);
-      det som mangler er klientvalidator. To nivåer:
-      - Nivå 1 (liten jobb, start her — python først): syntakssjekk via
-        `compile()` i Pyodide / `parse()` i webR + kolonnenavn-sjekk mot aktivt
-        datasett (`lastDatasetInfo`). Flytt `if (mode === 'microdata')`-grenen i
-        `runFastQueryV2` til en modus-dispatch.
+- [x] **Auto-retting nivå 1 for python- og r-modus i v2-flyten** — levert
+      2026-07-22 (commits b3daf09+766f558): modus-dispatch i `runFastQueryV2`
+      (microdata byte-frosset, reviewer-verifisert), syntakssjekk via
+      ALLEREDE LASTET Pyodide `compile()` / webR `parse()` (booter aldri for
+      validering — {skipped} ellers), linjenummer i feilene, ukjent-variabel-
+      sjekken grunnet i microdata-segmentene (unngår falske positive fra
+      divisjoner/stier), passiv-varsel-fallback uten kodefence, og backendens
+      `prior_script`-fence gjort modus-riktig (var hardkodet microdata —
+      review-funn). BEVISST kuttet: kolonnenavn-sjekk mot `lastDatasetInfo`
+      (post-kjøring-tilstand er feil orakel for et ferskt svars egne
+      #micro-aliaser — ville gitt falske reparasjonsrunder). Ikke røyktestet
+      mot LASTET runtime i browser ennå (trenger AI-nøkkel-flyt) — ta en
+      manuell sjekk ved neste anledning.
       - Nivå 2 (senere, hvis nivå 1 ikke fanger nok): sandkasse-prøvekjøring mot
         kopi av aktivt datasett med timeout; send runtime-feilen til
         reparasjonsrunden. Utfordringer: bivirkninger, nettkall, kjøretid.
