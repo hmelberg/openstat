@@ -21,9 +21,12 @@ All parsing/rendering lives in `js/param-forms.js` (runtime-agnostic:
 text-level, like `#@param` itself), so every mode with `#`-comments gets
 it, and JS mode via `//@`.
 
-1. **`#@title <text> [{...meta}]`** — a standalone comment line:
-   `# @title` is NOT matched (Colab requires `#@title`); text runs to
-   the optional trailing balanced `{...}` meta object.
+1. **`#@title <text> [{...meta}]`** — a standalone comment line; text
+   runs to the optional trailing balanced `{...}` meta object.
+   (Implementation note 2026-07-22: `# @title` with whitespace IS
+   matched, mirroring the existing `LINE_RE` tolerance for
+   `# @param` — internal consistency won over Colab's strictness;
+   plan-delegated decision.)
    - Renders as a heading row (`.param-form-title`) at the TOP of the
      cell's default-placement strip.
    - Meta on the title line sets the CELL-WIDE default for params that
