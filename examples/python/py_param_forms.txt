@@ -19,11 +19,11 @@ value is written straight into **the source text itself** (check
 «Raw text» — it's always the text, not hidden state, that is the
 source of truth).
 
-**`run:"auto"` vs. manual:** add `run:"auto"` to the metadata object,
-and the cell reruns automatically every time the control changes.
-Without `run:"auto"`, only the text is written, and the cell gets the
-usual "changed, not run" marker (stale tint) until you press ▶
-yourself.
+**`run:"auto"` vs. manual:** auto is the default — the cell reruns
+automatically every time a control changes. Add `{run:"manual"}` (on a
+param line, or on a `#@title` line to set the whole cell's default) to
+only write the value; the form then shows a Run chip until you run the
+cell yourself.
 
 `#@title` and `#@markdown` (Colab's cell-title/text comments) also work:
 a `#@title` line renders as a heading above the form, and its
@@ -40,7 +40,7 @@ default.
 #%% python
 #@title Row count
 #@markdown Choose how many rows of the iris dataset to preview.
-n = 5  #@param {type:"slider", min:0, max:20, step:1, run:"auto"}
+n = 5  #@param {type:"slider", min:0, max:20, step:1}
 iris.head(n)
 
 #%% python

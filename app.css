@@ -1394,6 +1394,9 @@
 .os-row { display: flex; flex-direction: row; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
 .os-col { display: flex; flex-direction: column; gap: 0.75rem; }
 .os-grid { display: grid; gap: 0.75rem; }
+/* fase 5 (spec 2026-07-22): #@title-raden i skjemastripen — spec-lovet
+   overskriftsstil (sluttreview-funn: regelen manglet helt). */
+.param-form-title { font-weight: 600; }
 
 /* ── #@param-skjemaer (spec 2 W4, Task 2; flyttet inn i .nb-output i widget-
    plassering-fasen): js/param-forms.js DOM-halvdel. .param-form settes inn
