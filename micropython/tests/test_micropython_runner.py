@@ -226,12 +226,30 @@ def test_fmt_element_raising_show_does_not_crash():
 def test_execute_code_element_last_expression_mounts_no_blank_line(capsys):
     # Kallstedet (~134-136): shown == '' skal ikke printes (ingen blank
     # linje) - end-to-end via _execute_code, ikke bare _fmt direkte.
-    mr._shared_vars['_el_rt'] = _FakeEl()
-    ret = mr._execute_code('print("før")\n_el_rt')
+    # Ikke-understreket variabelnavn (el_rt) MED VILJE: en _-prefikset
+    # elementvariabel er nå suppressed og skal IKKE montere (se twin-testen
+    # rett under — pyodide-paritet, fase-3-era ledger Minor 2). Denne testen
+    # pinner den rene monterer-uten-blank-linje-stien (ikke-understreket).
+    mr._shared_vars['el_rt'] = _FakeEl()
+    ret = mr._execute_code('print("før")\nel_rt')
     assert ret == ''
     out = capsys.readouterr().out
     assert out == 'før' + chr(10)
-    assert mr._shared_vars['_el_rt'].shown == 1
+    assert mr._shared_vars['el_rt'].shown == 1
+
+
+def test_execute_code_underscore_element_last_expression_does_not_mount(capsys):
+    # Pyodide-paritet (fase-3-era ledger Minor 2): en bar _-prefikset
+    # ui.html-ELEMENT skal IKKE montere som trailing-uttrykk — display-
+    # policy v2s underscore-demping vinner over element-monteringskroken,
+    # så _fmt hoppes helt over (og show() kalles dermed aldri) når halen er
+    # suppressed. Port av Brython-tvillingens test.
+    mr._shared_vars['_el_us'] = _FakeEl()
+    ret = mr._execute_code('print("før")\n_el_us')
+    assert ret == ''
+    out = capsys.readouterr().out
+    assert out == 'før' + chr(10)
+    assert mr._shared_vars['_el_us'].shown == 0
 
 
 def test_show_element_mounts_no_blank_line(capsys):
@@ -296,3 +314,71 @@ def test_non_control_ui_call_still_displayed(capsys):
         'ui = FakeUi2()')
     out = run(capsys, 'ui.value("n")')
     assert '99' in out
+
+
+# ---- demping-hjørner (fase-1 sluttreview + fase-3-era ledger) -------------
+
+def test_underscore_name_with_trailing_comment_not_displayed(capsys):
+    # Korner 1: `_navn  # kommentar` skal fortsatt dempes — kommentaren må
+    # strippes (bare-navn-pluss-kommentar-formen) før understreksjekken.
+    run(capsys, '_med_kmt = 456')
+    out = run(capsys, '_med_kmt  # en kommentar')
+    assert '456' not in out
+    assert mr._get_last_error() == ''
+
+
+def test_ui_control_call_with_trailing_arithmetic_not_muted(capsys):
+    # Korner 2: `ui.slider(0,100) + 1` er IKKE et nakent kontroll-kall —
+    # halen fortsetter etter kallets lukke-parentes, så den skal VISES.
+    run(capsys,
+        'class FakeUiA:\n'
+        '    def slider(self, *a, **k):\n'
+        '        return 42\n'
+        'ui = FakeUiA()')
+    out = run(capsys, 'ui.slider(0, 100) + 1')
+    assert '43' in out
+    assert mr._get_last_error() == ''
+
+
+def test_ui_control_call_dot_attr_tail_not_muted(capsys):
+    # Korner 2 (variant): `ui.slider(0,100).value` fortsetter etter
+    # kallets lukke-parentes — skal VISES, ikke dempes av prefiks-match.
+    run(capsys,
+        'class FakeUiB:\n'
+        '    def slider(self, *a, **k):\n'
+        '        return type("X", (), {"value": 42})()\n'
+        'ui = FakeUiB()')
+    out = run(capsys, 'ui.slider(0, 100).value')
+    assert '42' in out
+    assert mr._get_last_error() == ''
+
+
+def test_ui_control_call_with_space_before_paren_muted(capsys):
+    # Korner 3: `ui.slider (0,100)` (mellomrom før parentes) skal nå OGSÅ
+    # dempes — evalueringen skjer uansett (calls-lista fylles).
+    run(capsys,
+        'class FakeUiC:\n'
+        '    def __init__(self):\n'
+        '        self.calls = []\n'
+        '    def slider(self, *a, **k):\n'
+        '        self.calls.append(a)\n'
+        '        return 7\n'
+        'ui = FakeUiC()')
+    out = run(capsys, 'ui.slider (0, 100)')
+    assert '7' not in out
+    assert mr._get_last_error() == ''
+    out2 = run(capsys, 'len(ui.calls)')
+    assert '1' in out2
+
+
+def test_ui_control_call_with_trailing_comment_muted(capsys):
+    # Kontroll-kall-halen skal tåle en etterfølgende kommentar (samme
+    # "bare whitespace/kommentar etter lukke-parentes"-regel som korner 2).
+    run(capsys,
+        'class FakeUiD:\n'
+        '    def slider(self, *a, **k):\n'
+        '        return 9\n'
+        'ui = FakeUiD()')
+    out = run(capsys, 'ui.slider(0, 100)  # juster')
+    assert '9' not in out
+    assert mr._get_last_error() == ''

@@ -64,6 +64,17 @@ _UI_CONTROLS = ('slider', 'dropdown', 'checkbox', 'switch', 'number', 'text',
                 'button', 'run_button', 'play')
 
 
+def _is_bare_underscore_name(s):
+    """True hvis `s` er nøyaktig ett bart navn som starter med '_' (ingen
+    andre tegn enn '_'/bokstav/siffer). Brukt av _-demping-grenen under, og
+    gjenbrukt for "bare-navn-pluss-kommentar"-formen (korner 1)."""
+    if not s or not s.startswith('_'):
+        return False
+    for _ch in s:
+        if not (_ch == '_' or _ch.isalpha() or _ch.isdigit()):
+            return False
+    return True
+
 def _tail_suppressed(tail):
     """Display policy v2 (spec 2026-07-20 §Phase 1) på trailing-uttrykket:
     demp visningen når det er (a) et nakent navn med _-prefiks eller (b) et
@@ -72,19 +83,56 @@ def _tail_suppressed(tail):
     (sideeffekter bevart). ';'-demping trenger ingen kode her: en hale med
     ';' kompilerer ikke i eval-modus, så kandidaten forkastes og hele koden
     plain-exec'es uten visning. Ingen `ast` — string-sjekker (samme grunn
-    som kandidat-skanningen i _execute_code)."""
-    if tail.startswith('_'):
-        _ok = True
-        for _ch in tail:
-            if not (_ch == '_' or _ch.isalpha() or _ch.isdigit()):
-                _ok = False
-                break
-        if _ok:
-            return True
+    som kandidat-skanningen i _execute_code).
+
+    Hjørnefikser (fase-1 sluttreview + fase-3-era ledger):
+    1. `_navn  # kommentar` skal fortsatt dempes — strip en trailing
+       kommentar FØR understreksjekken, men bare for "bare-navn-pluss-
+       kommentar"-formen: splitt på FØRSTE '#' og krev at delen FØR den
+       (.strip()'et) i seg selv består IdentifierListen (samme sjekk som
+       under) — regex-fritt, og kan ikke feiltolke '#' inni en streng-hale
+       fordi den halen uansett ikke er et bart navn.
+    2/3. Et ui.<kontroll>(...)-kall dempes bare når halen SLUTTER ved
+       kallets egen matchende lukke-parentes (kun whitespace/en strippet
+       kommentar tillatt etterpå) — `ui.slider(0,100) + 1` og
+       `ui.slider(0,100).value` er dermed IKKE lenger falske positiver
+       (prefiks-match alene godtok dem før). Valgfritt whitespace mellom
+       kontrollnavnet og '(' godtas også (`ui.slider (0,100)`)."""
+    _bare_check = tail
+    if '#' in tail:
+        _pre = tail.split('#', 1)[0].strip()
+        if _is_bare_underscore_name(_pre):
+            _bare_check = _pre
+    if _is_bare_underscore_name(_bare_check):
+        return True
     if tail.startswith('ui.'):
         _rest = tail[3:]
         for _name in _UI_CONTROLS:
-            if _rest.startswith(_name + '('):
+            if not _rest.startswith(_name):
+                continue
+            _after = _rest[len(_name):]
+            _i = 0
+            while _i < len(_after) and _after[_i] in (' ', chr(9)):
+                _i += 1
+            if _i >= len(_after) or _after[_i] != '(':
+                continue
+            _depth = 0
+            _j = _i
+            _matched = -1
+            while _j < len(_after):
+                _c = _after[_j]
+                if _c == '(':
+                    _depth += 1
+                elif _c == ')':
+                    _depth -= 1
+                    if _depth == 0:
+                        _matched = _j
+                        break
+                _j += 1
+            if _matched == -1:
+                continue
+            _remainder = _after[_matched + 1:].strip()
+            if _remainder == '' or _remainder.startswith('#'):
                 return True
     return False
 
@@ -186,9 +234,12 @@ def _execute_code(code):
                 break
         if not displayed:
             exec(compile(code, '<micropython>', 'exec'), _shared_vars)
-        shown = _fmt(result) if displayed else ''
-        if suppressed:
-            shown = ''
+        # Korner 4 (fase-3-era ledger Minor 2, pyodide-paritet): når halen er
+        # suppressed, ikke kall _fmt() i det hele tatt — en _-prefikset
+        # ui.html-ELEMENT skal ikke montere (_fmt sin _openstat_el_id-gren
+        # kaller obj.show() som sideeffekt; det må ikke skje for en dempet
+        # verdi, akkurat som pyodide-siden aldri kaller _show_one for den).
+        shown = _fmt(result) if (displayed and not suppressed) else ''
         if shown:
             print(shown)
         return ''
