@@ -191,7 +191,7 @@ iris[iris["species"] == species].head(n)</code></pre>
 <tr><td><code>ui.checkbox</code> / <code>ui.switch</code></td><td><code>checkbox(label, value=False, ...)</code></td></tr>
 <tr><td><code>ui.number</code></td><td><code>number(value=0, min=None, max=None, step=None, ...)</code></td></tr>
 <tr><td><code>ui.text</code></td><td><code>text(value='', ...)</code></td></tr>
-<tr><td><code>ui.button</code></td><td><code>button(label, rerun='self', on_click=None)</code> — reruns immediately on click</td></tr>
+<tr><td><code>ui.button</code></td><td><code>button(*children, rerun='self', on_click=None)</code> — reruns immediately on click; children may mix strings and elements (<code>ui.button(ui.html.b("Run"), " now")</code>)</td></tr>
 <tr><td><code>ui.run_button</code></td><td><code>run_button(label="Run", target="all")</code> — one shared run button</td></tr>
 <tr><td><code>ui.play</code></td><td><code>play(min, max, step=1, interval=600, loop=False, ...)</code> — an animated slider</td></tr>
 </table>
@@ -319,9 +319,9 @@ panel  = ui.column(gap="0.75rem")</code></pre>
     <code>on_change</code> handler that redraws into an area work.
     Values (a DataFrame, a figure, a number) render through the same
     payload path <code>on_change</code> return values use. Adding several
-    plain values in <em>one</em> <code>.add(..., area=...)</code> call only
-    shows the last — the payload path is clear-then-render, not append;
-    wrap multiple values in a container child if they should coexist.</li>
+    values (or a mix of values and elements) in <em>one</em>
+    <code>.add(..., area=...)</code> call stacks them vertically in call
+    order — each child gets its own row inside the area.</li>
 <li><code>span=</code>/<code>align=</code> set <code>grid-column: span N</code>
     / <code>align-self</code> on each element child added in that call
     (with <code>area=</code>, they land on the area's cell).</li>

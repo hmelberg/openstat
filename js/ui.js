@@ -781,6 +781,9 @@
         // fasaden bygde den.
         btn = Ui.makeNode('button', { props: { className: 'ui-widget ui-widget--button', type: 'button' } });
         _appendButtonLabelEls(btn, spec.label_els);
+        // Review-fiks (features-batch): ALLE el-id-ene stale (sveipet) →
+        // aldri en helt tom knapp; fall tilbake til tekst-labelen.
+        if (!btn.firstChild) btn.textContent = spec.label || (typeof t === 'function' ? t('Kjør') : 'Kjør');
       } else {
         var label = spec.label || (typeof t === 'function' ? t('Kjør') : 'Kjør');
         btn = Ui.makeNode('button', { props: { className: 'ui-widget ui-widget--button', textContent: label, type: 'button' } });
@@ -1179,6 +1182,9 @@
           if (spec.label_els && spec.label_els.length) {
             while (existing.wrap.firstChild) existing.wrap.removeChild(existing.wrap.firstChild);
             _appendButtonLabelEls(existing.wrap, spec.label_els);
+            // Review-fiks (features-batch): samme alle-stale-fallback som
+            // ved fersk bygging — aldri en helt tom knapp.
+            if (!existing.wrap.firstChild) existing.wrap.textContent = spec.label || (typeof t === 'function' ? t('Kjør') : 'Kjør');
           } else {
             existing.wrap.textContent = spec.label || (typeof t === 'function' ? t('Kjør') : 'Kjør');
           }

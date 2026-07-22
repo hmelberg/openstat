@@ -104,10 +104,10 @@ i småting-batchen.*
 - [ ] Første-kjøring-tomt: Kjør før pyodide er ferdig bootet fullfører stille
       med tom output (pre-eksisterende, reprodusert 2026-07-20) — kø kjøringen
       eller vis «venter på Python…» (egen liten designjobb)
-- [ ] `ui.button` med element-barn (spec 2026-07-21 beslutning 9, valgfri —
-      droppet i planleggingen)
-- [ ] `.add([v1,v2], area=)` viser kun siste payload (dokumentert) —
-      auto-wrap i kolonne er mulig fremtidig forbedring
+- [x] `ui.button` med element-barn — levert 2026-07-22
+      (ui-features-batch; label_els i spec, miks av tekst/element)
+- [x] `.add([v1,v2], area=)` auto-stakker nå alle payloads i kildeorden —
+      levert 2026-07-22 (ui-features-batch)
 
 ## AI-assistenten
 
