@@ -47,16 +47,46 @@ SHARED = ["HTML_TAGS", "_SL_ACCEPTS", "_snake_to_camel", "_json_safe",
           "_spec", "_into_el_id", "_handle_from_into", "kpi", "markdown",
           "play", "run_button",
           "run_cell", "widget", "_tag_builder", "_append_children", "_warn",
-          "row", "column", "grid", "_flatten_children"]
+          "row", "column", "grid", "_flatten_children",
+          "_HTML_TAG_SET", "PICO_COMPONENT_CLASSES", "PICO_HTML_ELEMENTS",
+          "PICO_UTILITY_CLASSES"]
 
 
 def _defs(path):
     src = path.read_text(encoding="utf-8")
     out = {}
     lines = src.split("\n")
-    for n in ast.parse(src).body:
+    body = ast.parse(src).body
+    for n in body:
         if isinstance(n, (ast.FunctionDef, ast.ClassDef)):
             out[n.name] = "\n".join(lines[n.lineno - 1:n.end_lineno])
+    # Fase 3 sluttreview Minor 2 (snubletråd Assign-blindhet): fang også
+    # opp module-level `ast.Assign` som re-definerer et SHARED-navn LOKALT
+    # med en egen verdi. Den legitime fasade-idiomen `X = _core.X` (en
+    # ren alias-rebinding av kjernens EGEN attributt) er eksplisitt
+    # unntatt — det er IKKE en lokal redefinisjon, det ER delingen.
+    # Kollisjon med FunctionDef/ClassDef-oppføringene over kan ikke skje:
+    # vi hopper over ethvert navn som allerede finnes i `out` (`not in
+    # out`), så en Assign kan aldri overskrive eller skygge en def/class-
+    # oppføring (og motsatt, def/class-loopen kjørte allerede over Assigns
+    # er ikke synlige for den). Andre modul-nivå Assigns i fasadene (f.eks.
+    # `_value = value`, `html = _HtmlNamespace()`, mpy sin `sl =
+    # _LibNamespace(...)`) samles inn under sitt eget (ikke-SHARED) navn
+    # uten å bety noe — testen under sjekker kun navn som FINNES i SHARED.
+    for n in body:
+        if not isinstance(n, ast.Assign):
+            continue
+        rhs = n.value
+        _is_core_alias = (
+            isinstance(rhs, ast.Attribute)
+            and isinstance(rhs.value, ast.Name)
+            and rhs.value.id == "_core"
+        )
+        if _is_core_alias:
+            continue
+        for t in n.targets:
+            if isinstance(t, ast.Name) and t.id not in out:
+                out[t.id] = "\n".join(lines[n.lineno - 1:n.end_lineno])
     return out
 
 

@@ -112,3 +112,26 @@ def test_assigned_ui_control_value_displays_via_name():
 def test_non_control_ui_call_still_shown():
     ui = FakeUi()
     assert run_block("ui.value('n')", g={"ui": ui}) == [99]
+
+def test_bare_ui_control_call_echoed_but_not_shown_in_command_mode(capsys):
+    # fase-1 sluttreview Minor 2 (a): demping x ekko-modus — echo skjer
+    # UANSETT (den kommer før _expr_suppressed-sjekken), men skalarverdien
+    # skal fortsatt IKKE vises.
+    ui = FakeUi()
+    assert run_block("ui.slider(0, 100)", show_commands=True, g={"ui": ui}) == []
+    assert ">>> ui.slider(0, 100)" in capsys.readouterr().out
+
+def test_semicolon_suppresses_trailing_expression_in_only_last_mode():
+    # fase-1 sluttreview Minor 2 (b), regel 3 x only_last: den siste
+    # setningen er den eneste kandidaten under only_last=True — hvis DEN
+    # er ';'-dempet skal ingenting vises (ikke falle tilbake på en
+    # tidligere setning).
+    assert run_block("1 + 1\n5 + 5;", only_last=True) == []
+
+def test_bare_ui_control_call_suppressed_in_only_last_mode():
+    # fase-1 sluttreview Minor 2 (b), regel 4 x only_last: kontrollen
+    # registreres (sideeffekten skjer fortsatt), men skalar-ekkoet dempes
+    # selv om den er den siste (og dermed eneste "kandidat"-) setningen.
+    ui = FakeUi()
+    assert run_block("1 + 1\nui.slider(0, 100)", only_last=True, g={"ui": ui}) == []
+    assert ui.calls == [(0, 100)]

@@ -9,9 +9,7 @@ egen (re)import."""
 import json
 
 # ---- injiserte dialekt-symboler (settes av configure) -------------------
-_register = None
 _register_value = None
-_bind_handler_if_callable = None
 _ui = None
 # `_warn_sink` (pre-scaffaldet i Task 1, koblet til FØRST nå i Task 3): EN
 # fasade-lokal BRO-funksjon (`def _warn_sink(msg): _warn(msg)`), ALDRI
