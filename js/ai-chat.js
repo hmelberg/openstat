@@ -625,6 +625,28 @@
         return out.join('\n');
       }
 
+      // Generalizes extractFirstMicrodataBlock's fence-scanning for a single,
+      // explicitly-tagged language (used by the python/r nivå 1-validatorer,
+      // see docs/ROADMAP.md §AI-assistenten). Unlike extractFirstMicrodataBlock
+      // (which sniffs untagged fences for microdata-looking syntax),
+      // kode-svar-v2's python/r svarformat ALWAYS tags its one code fence with
+      // the language (see netlify/edge-functions/kode-svar.ts OUTPUT_PY/OUTPUT_R)
+      // — so a plain tag match is enough, no sniffing needed.
+      const CODE_FENCE_LANGS = { python: ['python', 'py'], r: ['r'] };
+      function extractFirstCodeBlock(textMd, lang) {
+        if (!textMd) return '';
+        const wanted = CODE_FENCE_LANGS[lang] || [lang];
+        const re = /```(\w*)\s*\n([\s\S]*?)```/g;
+        let m;
+        while ((m = re.exec(textMd)) !== null) {
+          const l = (m[1] || '').toLowerCase();
+          if (wanted.indexOf(l) < 0) continue;
+          const body = (m[2] || '').trim();
+          if (body) return body;
+        }
+        return '';
+      }
+
       // Collect db/NAME (or alias/NAME) tokens whose NAME is not in the loaded
       // catalog — the cheapest, most damaging failure (invented variable names).
       function findUnknownVarNames(script) {
@@ -655,6 +677,41 @@
         return parts.join('\n');
       }
 
+      // Nivå 1 auto-retting (docs/ROADMAP.md §AI-assistenten): modus-dispatch
+      // for kode-svar-v2-reparasjonssløyfen i runFastQueryV2. Hver oppføring
+      // gir (a) extract(mdText) → kandidatscript eller '' (ingen kodeblokk
+      // funnet — sløyfen kjører da ikke), (b) validate(script) → Promise som
+      // løser til {passed,errors[]} eller {skipped:true}, (c)
+      // unknownNames(mdText, script) → liste over ukjente katalog-variabelnavn.
+      // microdata-oppføringen kaller EKSAKT de samme funksjonene, i samme
+      // rekkefølge, som før refaktoreringen (validateMicrodataLocal/
+      // extractFirstMicrodataBlock/findUnknownVarNames er uendret) — dette
+      // holder microdata-veien byte-frosset selv om løkka rundt er blitt generisk.
+      const _v2Validators = {
+        microdata: {
+          extract: extractFirstMicrodataBlock,
+          validate: validateMicrodataLocal,
+          unknownNames: function (_mdText, script) { return findUnknownVarNames(script); },
+        },
+        // Syntaks-sjekk kjører KUN mot en allerede lastet/lastende Pyodide-økt
+        // (validatePythonSyntax under) — den booter aldri en ny 30s-runtime
+        // bare for å validere ett AI-svar. Kolonnenavn-sjekk (df["kol"]) er
+        // BEVISST utelatt her — se rapporten for begrunnelsen (lastDatasetInfo
+        // reflekterer forrige kjørings tilstand, ikke aliasene DENNE
+        // kandidatscripten selv definerer i sin egen #micro-blokk, så en sjekk
+        // mot den ville gitt falske "ukjent kolonne"-feil på gyldige script).
+        python: {
+          extract: function (mdText) { return extractFirstCodeBlock(mdText, 'python'); },
+          validate: validatePythonSyntax,
+          unknownNames: function (mdText) { return findUnknownVarNames(extractAllCode(mdText)); },
+        },
+        r: {
+          extract: function (mdText) { return extractFirstCodeBlock(mdText, 'r'); },
+          validate: validateRSyntax,
+          unknownNames: function (mdText) { return findUnknownVarNames(extractAllCode(mdText)); },
+        },
+      };
+
       async function runFastQueryV2(text, lang, scriptContext, thinkingNode, signal) {
         const t0 = Date.now();
         thinkingNode.innerHTML = '';
@@ -677,15 +734,19 @@
         appendMeta(thinkingNode, meta);
         attachResponseInsertBar(thinkingNode, accumulated);
 
-        if (mode === 'microdata') {
+        const dispatch = _v2Validators[mode];
+        if (dispatch) {
           // Validate; on failure, attempt ONE repair round, then badge.
-          let script = extractFirstMicrodataBlock(accumulated);
+          // (Generic over mode — see _v2Validators above. For mode==='microdata'
+          // this is call-for-call identical to the pre-refactor code.)
+          let currentMd = accumulated;
+          let script = dispatch.extract(currentMd);
           let repaired = false;
           let finalBubble = bubble;
           while (script) {
             let vr;
-            try { vr = await validateMicrodataLocal(script); } catch (_) { vr = { skipped: true }; }
-            const unknown = findUnknownVarNames(script);
+            try { vr = await dispatch.validate(script); } catch (_) { vr = { skipped: true }; }
+            const unknown = dispatch.unknownNames(currentMd, script);
             const hasErrors = (!vr.skipped && !vr.passed) || unknown.length > 0;
             if (!hasErrors || repaired) {
               if (hasErrors) {
@@ -726,10 +787,13 @@
             finalBubble = repairBubble;
             meta.tokens.input += r2.tokens.input; meta.tokens.output += r2.tokens.output;
             meta.tokens.cacheRead += r2.tokens.cacheRead; meta.tokens.cacheCreate += r2.tokens.cacheCreate;
-            script = extractFirstMicrodataBlock(r2.accumulated);
+            currentMd = r2.accumulated;
+            script = dispatch.extract(currentMd);
           }
         } else {
-          // Python/R: no m2py repair. Ground variable names in the #micro block only.
+          // Andre moduser uten nivå 1-validator ennå (javascript, duckdb, …):
+          // behold den opprinnelige, ikke-reparerende oppførselen uendret — kun
+          // en advarsel om ukjente katalogvariabler i #micro-blokken.
           const unknown = findUnknownVarNames(extractAllCode(accumulated));
           if (unknown.length) {
             const warn = renderValidationWarnings({
@@ -1313,6 +1377,99 @@
         try { return JSON.parse(raw); } catch (_) { return { skipped: true }; }
       }
 
+      // Isolate the #python/#r code segment out of a python/r kode-svar-v2
+      // candidate script (which is ALWAYS a single hybrid blob: a `#micro`
+      // directive header followed by a `#r`/`#python` marker + the actual
+      // analysis code — see kode-svar.ts MICRO_IMPORT_BRIDGE). Reuses
+      // index.html's own parseHybridScript segmenter (bare global — same
+      // cross-file convention as activeEditorMode/microdataCatalog elsewhere
+      // in this file) so the split matches EXACTLY how the app itself would
+      // interpret the hybrid script. Falls back to the whole script when
+      // parseHybridScript is unavailable (e.g. the node test harness) or no
+      // segment of the wanted kind was found — better to syntax-check a little
+      // too much (the #micro lines would then fail compile()/parse(), which
+      // just degrades to "skipped" below) than to silently skip validation.
+      const LANG_SEGMENT_KIND = { python: 'pyodide', r: 'r' };
+      function extractLangSegment(script, lang) {
+        if (!script) return '';
+        const wantKind = LANG_SEGMENT_KIND[lang] || lang;
+        if (typeof parseHybridScript !== 'function') return script;
+        let segments;
+        try { segments = parseHybridScript(script, wantKind); } catch (_) { return script; }
+        const parts = (segments || [])
+          .filter(function (s) { return s.kind === wantKind; })
+          .map(function (s) { return s.text; });
+        return parts.length ? parts.join('\n\n') : script;
+      }
+
+      // Nivå 1 python-syntaks-sjekk (docs/ROADMAP.md §AI-assistenten):
+      // compile(...,'exec') via en ALLEREDE lastet/lastende Pyodide-økt.
+      // __pyodidePromise (index.html sin loadPyodideAndM2py-memoisering) er
+      // en bare global, samme mønster som activeEditorMode/microdataCatalog
+      // ellers i denne fila. VIKTIG: vi kaller ALDRI loadPyodideAndM2py() selv
+      // — det ville boot-et en ny ~30s-runtime bare for å validere ett
+      // AI-svar. Vi hekter oss KUN på en økt andre deler av appen allerede har
+      // startet (varmlasting ved modusbytte til python, eller en tidligere
+      // Kjør) — hvis ingen finnes, hopper vi over (skipped:true), aldri boot.
+      async function validatePythonSyntax(script) {
+        if (typeof __pyodidePromise === 'undefined' || !__pyodidePromise) return { skipped: true };
+        let py;
+        try { py = await __pyodidePromise; } catch (_) { return { skipped: true }; }
+        if (!py) return { skipped: true };
+        const pyCode = extractLangSegment(script, 'python');
+        if (!pyCode) return { skipped: true };
+        // Linjenumre er relative til DEN UTTRUKNE python-delen (#micro-linjene
+        // foran er kuttet bort) — det holder fint for reparasjonsrundens
+        // feilmelding, som uansett sender hele kandidatscriptet tilbake til AI-en.
+        const checkCode =
+          'import json\n' +
+          '_src = ' + JSON.stringify(pyCode) + '\n' +
+          'try:\n' +
+          '    compile(_src, "<ai-script>", "exec")\n' +
+          '    _out = json.dumps({"passed": True, "errors": []})\n' +
+          'except SyntaxError as _ex:\n' +
+          '    _out = json.dumps({"passed": False, "errors": [{"kind": "parse", "message": str(_ex.msg) if _ex.msg else str(_ex), "line_no": _ex.lineno}]})\n' +
+          'except Exception as _ex2:\n' +
+          '    _out = json.dumps({"passed": False, "errors": [{"kind": "parse", "message": f"{type(_ex2).__name__}: {_ex2}"}]})\n' +
+          '_out\n';
+        let raw;
+        try { raw = await py.runPythonAsync(checkCode); } catch (_) { return { skipped: true }; }
+        try { return JSON.parse(raw); } catch (_) { return { skipped: true }; }
+      }
+
+      // Nivå 1 R-syntaks-sjekk: parse(text=...) via en ALLEREDE lastet/
+      // lastende webR-økt (webRPromise — samme bare-global-mønster og samme
+      // "aldri boot"-regel som validatePythonSyntax over). Bruker KUN base R
+      // (ingen jsonlite — jsonlite krever en defensiv webr::install() først,
+      // se andre webR-kallsteder i index.html, og det ville også være en
+      // uønsket bivirkning bare for å validere). Feilteksten fra parse()
+      // inneholder selv linje/kolonne på formen "<text>:LINJE:KOLONNE:" —
+      // trekkes ut med et enkelt regex i stedet.
+      async function validateRSyntax(script) {
+        if (typeof webRPromise === 'undefined' || !webRPromise) return { skipped: true };
+        try { await webRPromise; } catch (_) { return { skipped: true }; }
+        if (typeof webRReady === 'undefined' || !webRReady || typeof webR === 'undefined' || !webR) return { skipped: true };
+        const rCode = extractLangSegment(script, 'r');
+        if (!rCode) return { skipped: true };
+        const checkExpr =
+          'tryCatch({ parse(text = ' + JSON.stringify(rCode) + '); "OK" }, ' +
+          'error = function(e) paste0("ERR:", conditionMessage(e)))';
+        let robj;
+        try { robj = await webR.evalR(checkExpr); } catch (_) { return { skipped: true }; }
+        try {
+          const js = await robj.toJs();
+          const result = (js.values || [])[0];
+          if (result === 'OK') return { passed: true, errors: [] };
+          const msg = String(result || '').replace(/^ERR:/, '');
+          const lm = /<text>:(\d+):\d+:/.exec(msg);
+          return { passed: false, errors: [{ kind: 'parse', message: msg, line_no: lm ? parseInt(lm[1], 10) : null }] };
+        } catch (_) {
+          return { skipped: true };
+        } finally {
+          try { await webR.destroy(robj); } catch (_) {}
+        }
+      }
+
       function autoresize() {
         const ta = dom.aiInput;
         ta.style.height = 'auto';
@@ -1471,5 +1628,24 @@
         document.addEventListener('DOMContentLoaded', init);
       } else {
         init();
+      }
+
+      // Node-testbar seam (samme mønster som js/ui.js, js/cells.js, js/names.js
+      // m.fl.): eksporter et lite, stabilt sett av rene funksjoner + nivå
+      // 1-dispatch-tabellen for tests/js/*.test.js. Resten av modulen (init(),
+      // sendMessage() m.fl.) krever en ekte nettleser-DOM og eksporteres ikke —
+      // se tests/js/ui-dom.test.js for mønsteret dersom det trengs senere.
+      if (typeof module !== 'undefined' && module.exports) {
+        module.exports = {
+          extractFirstCodeBlock: extractFirstCodeBlock,
+          extractFirstMicrodataBlock: extractFirstMicrodataBlock,
+          extractLangSegment: extractLangSegment,
+          extractAllCode: extractAllCode,
+          findUnknownVarNames: findUnknownVarNames,
+          buildRepairErrors: buildRepairErrors,
+          validatePythonSyntax: validatePythonSyntax,
+          validateRSyntax: validateRSyntax,
+          _v2Validators: _v2Validators,
+        };
       }
     })();
