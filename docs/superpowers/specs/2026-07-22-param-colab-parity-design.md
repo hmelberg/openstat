@@ -4,6 +4,9 @@
 the phase-4 discussion: separate small phase, lives entirely in
 param-forms.js; `display-mode:"form"` explicitly deferred to the
 `#options.view` family). Roadmap: "Colab-paritet for `#@param`".
+DELIVERED 2026-07-22 (plan 2026-07-22-param-colab-parity.md —
+browser-verified: Colab-shaped form in python mode incl. rendered
+markdown + manual-by-title run-chip + write-back, and `//@` in JS mode).
 
 ## Motivation
 
