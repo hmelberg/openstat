@@ -82,35 +82,32 @@ run:auto-default og placement/R/JS-støtte er OpenStat-utvidelser Colab mangler)
 - [ ] `display-mode: "form"` per celle — skjul koden, vis bare skjemaet
       (i dag finnes kun globale «vis kode»-innstillinger)
 
-**Fra fase 4-sluttreviewet (småting, triagert backlog):**
-- [ ] Høflig R-feilmelding for `ui_row`/`ui_column`/`ui_grid` (spec-lovet; i dag
-      rå "could not find function" — legg til i UI_R_REGEX + stop()-stubber
-      etter ui.R:284-mønsteret)
-- [ ] `ui.grid(..., style="rå css-streng")` forkaster stille den beregnede
-      grid-templaten — append template-deklarasjonene eller varsle
-- [ ] `ui.button` med element-barn (spec beslutning 9, valgfri — droppet i
-      planleggingen, føres her for ordens skyld)
-- [ ] `.add([v1,v2], area=)` viser kun siste payload (dokumentert) —
-      auto-wrap i kolonne er mulig fremtidig forbedring
+**Småting-batch (levert 2026-07-22, plan 2026-07-22-smaating-batch.md,
+browser-verifisert):**
+- [x] Høflig R-feilmelding for `ui_row`/`ui_column`/`ui_grid`
+- [x] `ui.grid(..., style="rå css-streng")` bevarer nå templaten
+- [x] brython/mpy demping-hjørner: mellomrom-før-paren dempes,
+      `_navn  # kommentar` dempes, `ui.slider(...) + 1`-haler dempes IKKE
+      lenger feilaktig (paren-slutt-krav; kjent grense: parenteser i
+      streng-argumenter — dokumentert i runnerne)
+- [x] To manglende test-pins (demping × echo, regel 3–4 × only_last)
+- [x] Snubletråden ser nå konstant-redefinisjoner (Assign-innsamling)
+- [x] Døde configure-placeholders fjernet
+- [x] `_`-prefikset element monteres ikke lenger i brython/mpy
+      (pyodide-paritet, tvillingtester)
 
-**Fra fase-reviewene (småting, triagert backlog):**
+*M2PY_VERSION-disiplin: bump ved enhver adferdsendring i pyodide/ui.py
+eller shared/ui_core.py (deler versjonsparam) — håndhevet i fase 4b/5 og
+i småting-batchen.*
+
+**Bevisste features-i-backlog (ikke hygiene):**
 - [ ] Første-kjøring-tomt: Kjør før pyodide er ferdig bootet fullfører stille
       med tom output (pre-eksisterende, reprodusert 2026-07-20) — kø kjøringen
-      eller vis «venter på Python…»
-- [ ] brython/mpy string-heuristikk-hjørner: `ui.slider (0,100)` med mellomrom
-      dempes ikke; `_navn  # kommentar` som trailing dempes ikke; falske
-      positive for `ui.slider(...) + 1`-haler
-- [ ] To manglende test-pins i pyodide-suiten: demping × echo-modus og
-      regel 3–4 × only_last
-- [ ] Snubletrådens `_defs` ser ikke Assign-konstanter (HTML_TAGS/_SL_ACCEPTS-
-      oppføringene i SHARED er inerte; identitetstesten dekker delvis)
-- [ ] To døde configure-placeholders i shared/ui_core.py (`_register`,
-      `_bind_handler_if_callable`) — slett eller merk reservert
-- [ ] Runtime-divergens (hjørne): nakent `_`-prefikset ui.html-ELEMENT monteres
-      i brython/mpy (`_fmt`-sideeffekt) men ikke i pyodide — én linje per
-      runner + tvillingtester ved neste berøring
-- [ ] `M2PY_VERSION` må bumpes ved neste adferdsendring i pyodide/ui.py
-      (fase 3 var adferdsnøytral; shared/ui_core.py deler versjonsparam)
+      eller vis «venter på Python…» (egen liten designjobb)
+- [ ] `ui.button` med element-barn (spec 2026-07-21 beslutning 9, valgfri —
+      droppet i planleggingen)
+- [ ] `.add([v1,v2], area=)` viser kun siste payload (dokumentert) —
+      auto-wrap i kolonne er mulig fremtidig forbedring
 
 ## AI-assistenten
 
