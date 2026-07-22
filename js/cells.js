@@ -1327,6 +1327,23 @@
       wrap.dataset.idx = String(idx);
       if (c.attrs.style && /^(note|warn|card)$/.test(c.attrs.style)) wrap.classList.add('nb-style-' + c.attrs.style);
       if (c.attrs['hide-output']) wrap.classList.add('nb-hide-output');
+      // hide-code (dormant siden 4a-konvergensen, spec 2026-07-22-param-
+      // colab-parity-design.md sitt utsatte display-mode-punkt vekket via
+      // DENNE flagget i stedet — se docs/ROADMAP.md): samme "flagg → klasse
+      // på wrap"-mønster som hide-output rett over. app.css sin
+      // .nb-hide-code-regel skjuler cellens kode-halvdel, ikke param-/
+      // widget-stripene eller output — se app.css-kommentaren der for
+      // hvorfor selve regelen pr. i dag ikke treffer noe synlig element i
+      // DENNE (output-only) doc-cellen: Rå tekst/#scriptInput er uendret
+      // synlig ved siden av, se docs/interactive-elements.html. Samme
+      // aksepterte in-place-etterslep som hide-output/style/widgets/cols
+      // (docReconcile-kommentaren lenger ned) gjelder også her — kun en
+      // strukturell docRender bygger denne klassen på nytt fra c.attrs.
+      // ParamForms.decorate (kalt rett under) kan I TILLEGG legge til/
+      // fjerne SAMME klasse reaktivt ut fra #@title sin display-mode:"form"-
+      // meta (js/param-forms.js sin _build/refresh) — de to kildene er
+      // uavhengige OR-bidrag til én delt klasse.
+      if (c.attrs['hide-code']) wrap.classList.add('nb-hide-code');
       // cols (Task 4, spec §4): verdien er allerede validert (heltall 2-6,
       // ellers droppet av parseHeader/scanTagBlock over) — trygg å bruke
       // direkte i klassenavnet uten en ny range-sjekk her.

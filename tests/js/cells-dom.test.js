@@ -603,6 +603,21 @@ test('skip-celler utelates; hide-output skjuler wrapper; style-klasser følger m
   assert.ok(cells[1].classList.contains('nb-hide-output'));
 });
 
+// hide-code (vekket 2026-07-22, se app.css/.nb-hide-code og
+// docCellNode-kommentaren): header-flagget og #tag.hide-code=true gir begge
+// nb-hide-code på wrapperen — samme klasse-på-wrap-mønster som hide-output
+// rett over — mens en celle uten flagget ikke får klassen.
+test('docCellNode: hide-code (header-flagg og #tag.hide-code) gir nb-hide-code; fraværende flagg gir ingen klasse', () => {
+  const { C, scriptInputEl, outputAreaEl } = freshEnv();
+  scriptInputEl.value = '#%% python hide-code\nx = 1\n#%% python\n#tag.hide-code = true\ny = 2\n#%% python\nz = 3\n';
+  C.init('python');
+  const cells = collectNodes(outputAreaEl, []).filter((n) => n.classList && n.classList.contains('doc-cell'));
+  assert.strictEqual(cells.length, 3);
+  assert.ok(cells[0].classList.contains('nb-hide-code'), 'header-flagget hide-code');
+  assert.ok(cells[1].classList.contains('nb-hide-code'), '#tag.hide-code = true');
+  assert.ok(!cells[2].classList.contains('nb-hide-code'), 'ingen flagg → ingen klasse');
+});
+
 test('docCellNode: cols=3 legger til nb-cols-3 på wrapperen; ugyldig cols gir ingen nb-cols-*-klasse', () => {
   const { C, scriptInputEl, outputAreaEl } = freshEnv();
   scriptInputEl.value = '#%% python cols=3\nx = 1\n#%% python cols=9\ny = 2\n#%% python\nz = 3\n';
@@ -1283,21 +1298,22 @@ test('runCell: payload.text er tag-blanket (linjetall bevart)', async () => {
   assert.strictEqual(captured.cellIdx, 0);
 });
 
-// 4a (spec §1): "Code cells: hide-code is meaningless in the document
-// (there is no code there) and is ignored by the renderer (the attr
-// remains valid for skrittvis/echo policy)" — docCellNode viser ALDRI kode
-// i det hele tatt, så hide-code-attributtet produserer bevisst INGEN
-// DOM-klasse lenger (motsatt av den gamle cellNode-oppførselen denne testen
-// tidligere dekket). Regresjonsvakt: attrs-mergen (#tag → attrs.hide-code)
-// skal fortsatt parses uten å krasje docRender, selv om DOM-en ignorerer den.
-test('hide-code via #tag: attrs-mergen krasjer ikke docRender, men gir INGEN DOM-effekt (kode vises aldri i dokumentet)', () => {
+// 4a (spec §1) sa opprinnelig "Code cells: hide-code is meaningless in the
+// document (there is no code there) and is ignored by the renderer" — VEKKET
+// 2026-07-22 (docs/ROADMAP.md, spec 2026-07-22-param-colab-parity-design.md
+// sitt display-mode:"form"-punkt): docCellNode viser fortsatt aldri kode i
+// SEG SELV (uendret — se app.css sin .nb-hide-code-kommentar for hvorfor),
+// men attributten er ikke lenger meningsløst ignorert — den gir nå
+// nb-hide-code på wrapperen, samme klasse-på-wrap-mønster som hide-output
+// (docCellNode-kommentaren), forward-compatible og delt med ParamForms sin
+// display-mode-reaktive add/remove (se param-forms-dom.test.js).
+test('hide-code via #tag: attrs-mergen gir nb-hide-code på wrapperen (vekket 2026-07-22)', () => {
   const { C, scriptInputEl } = freshEnv();
   scriptInputEl.value = '#%% python\n#tag.hide-code = true\nx = 1\n';
   assert.doesNotThrow(() => C.init('python'));
   const cell0 = C.cellElementAt(0);
   assert.ok(cell0, 'cellen rendres uansett');
-  assert.ok(!cell0.classList.contains('nb-hide-code'),
-    'hide-code er meningsløst i dokumentet (spec §1) — ingen klasse settes');
+  assert.ok(cell0.classList.contains('nb-hide-code'), '#tag.hide-code = true gir nb-hide-code');
 });
 
 // ---- presentasjon (spec 2026-07-16-presentation-design.md, Task 2) ----

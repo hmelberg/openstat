@@ -160,6 +160,10 @@ expr    = "x + 1"   #@param {type:"raw"}</code></pre>
     <em>Run ▶</em> chip appears in the form until you run the cell.</li>
 <li><strong>Placement:</strong> <code>{placement:"top"}</code> (default),
     <code>"bottom"</code>, or <code>"left"</code>.</li>
+<li><strong><code>display-mode:"form"</code></strong> on the title
+    (<code>#@title Iris explorer {display-mode:"form"}</code>) hides that
+    cell's code, leaving only the form and its output — the code itself is
+    unchanged in the editor pane, just not shown in the notebook view.</li>
 <li>In JavaScript mode the same syntax uses <code>//@param</code>.
     Because the value is swapped into the line byte-exactly, don't end
     param lines with a semicolon.</li>
@@ -217,6 +221,10 @@ h = ui.widget("n")     # handle: h.value, h.set(30), h.hide(), h.show(),
 <ul>
 <li><strong>Placement:</strong> per control (<code>placement="left"</code>)
     or per cell (<code>#%% python widgets=left</code>).</li>
+<li>The same code-hiding behind <code>display-mode:"form"</code> is also a
+    plain cell flag, independent of any form: <code>#%% python hide-code</code>
+    (or <code>#tag.hide-code = true</code>) hides a cell's code without
+    needing a <code>#@title</code> at all.</li>
 <li><strong><code>sync_to="varname"</code></strong> pushes the value into a
     live session variable — seeded already at registration, then updated as
     the user drags, without a rerun. This makes it a full value channel of

@@ -37,6 +37,14 @@ class FakeEl {
     return {
       contains: (c) => self._className.split(/\s+/).filter(Boolean).includes(c),
       add: (...c) => { const set = new Set(self._className.split(/\s+/).filter(Boolean)); c.forEach((x) => set.add(x)); self._className = Array.from(set).join(' '); },
+      remove: (...c) => { const set = new Set(self._className.split(/\s+/).filter(Boolean)); c.forEach((x) => set.delete(x)); self._className = Array.from(set).join(' '); },
+      toggle: (c, force) => {
+        const set = new Set(self._className.split(/\s+/).filter(Boolean));
+        const on = force === undefined ? !set.has(c) : !!force;
+        if (on) set.add(c); else set.delete(c);
+        self._className = Array.from(set).join(' ');
+        return on;
+      },
     };
   }
   set textContent(v) { this._text = v; this.children = []; }
@@ -1001,6 +1009,45 @@ test('decorate: #@title senere i kilden enn #@param rendres likevel FØRST i str
   assert.ok(strip.children[0].classList.contains('param-form-title'), 'tittelen flyttes til toppen uansett kilde-rekkefølge');
   assert.strictEqual(strip.children[0].textContent, 'Skjema');
   assert.ok(strip.children[1].classList.contains('param-form-row'));
+});
+
+// ---------- display-mode:"form" → nb-hide-code (vekket 2026-07-22, se
+// js/param-forms.js sin _applyFormHideCode og js/cells.js sin docCellNode-
+// kommentar). Samme klasse app.css/.nb-hide-code (og cells-dom.test.js sin
+// hide-code-attr-test) dekker, men satt/fjernet reaktivt fra #@title sin
+// meta i stedet for cellens header-/tag-flagg. ----------
+
+test('decorate: #@title {display-mode:"form"} → cellEl får nb-hide-code', () => {
+  const { ParamForms, cellEl } = freshEnv();
+  ParamForms.decorate(0, cellEl, '#@title X {display-mode:"form"}\nx = 3  #@param', 'python');
+  assert.ok(cellEl.classList.contains('nb-hide-code'));
+});
+
+test('decorate: #@title uten display-mode (eller ugyldig verdi) → ingen nb-hide-code', () => {
+  const { ParamForms, cellEl } = freshEnv();
+  ParamForms.decorate(0, cellEl, '#@title X\nx = 3  #@param', 'python');
+  assert.ok(!cellEl.classList.contains('nb-hide-code'));
+});
+
+test('refresh: {display-mode:"form"} fjernet fra tittelen (samme tittel-TEKST, in-place-grenen) → nb-hide-code fjernes igjen', () => {
+  const { ParamForms, cellEl } = freshEnv();
+  const withForm = '#@title X {display-mode:"form"}\nx = 3  #@param {type:"number"}';
+  const withoutForm = '#@title X\nx = 3  #@param {type:"number"}';
+  ParamForms.decorate(0, cellEl, withForm, 'python');
+  assert.ok(cellEl.classList.contains('nb-hide-code'), 'satt ved decorate');
+  ParamForms.refresh(0, withoutForm);
+  assert.ok(!cellEl.classList.contains('nb-hide-code'),
+    'fjernet meta gjenoppretter koden selv om tittelteksten ("X") er uendret (in-place-grenen, ikke full ombygging)');
+});
+
+test('refresh: {display-mode:"form"} lagt TIL i in-place-grenen (samme tittel-tekst) → nb-hide-code settes', () => {
+  const { ParamForms, cellEl } = freshEnv();
+  const withoutForm = '#@title X\nx = 3  #@param {type:"number"}';
+  const withForm = '#@title X {display-mode:"form"}\nx = 3  #@param {type:"number"}';
+  ParamForms.decorate(0, cellEl, withoutForm, 'python');
+  assert.ok(!cellEl.classList.contains('nb-hide-code'));
+  ParamForms.refresh(0, withForm);
+  assert.ok(cellEl.classList.contains('nb-hide-code'));
 });
 
 test('markdown: kaller global.Ui.renderPayload({kind:"markdown", text}, host) når Ui finnes', () => {

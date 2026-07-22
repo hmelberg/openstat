@@ -75,12 +75,15 @@ docs/interactive-elements.html (4b) — alt levert og testet.
 **Colab-paritet for `#@param` (syntaksen er ellers Colab-kompatibel;
 run:auto-default og placement/R/JS-støtte er OpenStat-utvidelser Colab mangler):**
 - [x] `#@title` — celletittel-linje med form-meta (`{run:"manual"}` som
-      celle-run-default); levert 2026-07-22 (display-mode fortsatt utsatt,
-      se punktet under)
+      celle-run-default); levert 2026-07-22
 - [x] `#@markdown` — prosa-linjer rendret i skjemastripen, kildeorden;
       levert 2026-07-22
-- [ ] `display-mode: "form"` per celle — skjul koden, vis bare skjemaet
-      (i dag finnes kun globale «vis kode»-innstillinger)
+- [x] `display-mode: "form"` per celle — skjul koden, vis bare skjemaet;
+      levert 2026-07-22 via det tidligere sovende `hide-code`-celleflagget
+      (js/cells.js KNOWN_FLAGS, `#%% python hide-code`/`#tag.hide-code = true`
+      — nå vekket og satt/fjernet reaktivt av `#@title`s
+      `{display-mode:"form"}`-meta, se js/param-forms.js). Rå tekst forblir
+      fluktveien til å se/redigere koden.
 
 **Småting-batch (levert 2026-07-22, plan 2026-07-22-smaating-batch.md,
 browser-verifisert):**

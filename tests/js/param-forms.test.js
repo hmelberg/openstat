@@ -311,14 +311,26 @@ test('cellRunDefault: title with explicit run:"auto" → "auto"', () => {
   assert.strictEqual(PF.cellRunDefault(entries), 'auto');
 });
 
-test('parse: #@title display-mode → parsed and ignored (not stored), console.warn pointing to roadmap', () => {
+test('parse: #@title display-mode:"form" → honored — meta.displayMode stored, no warning', () => {
   const spy = warnSpy();
   const entries = PF.parse('#@title My Form {display-mode:"form"}', 'python');
   spy.restore();
   assert.strictEqual(entries.length, 1);
   assert.strictEqual(entries[0].kind, 'title');
-  assert.strictEqual(entries[0].meta['display-mode'], undefined, 'ignored — deferred feature, not applied/stored');
-  assert.ok(spy.calls.some((c) => /display-mode/.test(c) && /ROADMAP/.test(c)));
+  assert.strictEqual(entries[0].meta.displayMode, 'form', 'vekket 2026-07-22 — parses OG lagres nå');
+  assert.strictEqual(entries[0].meta['display-mode'], undefined, 'lagres under camelCase displayMode, ikke rå nøkkelen');
+  assert.strictEqual(spy.calls.length, 0, 'gyldig verdi skal ikke varsle');
+});
+
+test('parse: #@title display-mode med ugyldig verdi → fortsatt varsel+drop, meldingen navngir "form"', () => {
+  const spy = warnSpy();
+  const entries = PF.parse('#@title My Form {display-mode:"column"}', 'python');
+  spy.restore();
+  assert.strictEqual(entries.length, 1);
+  assert.strictEqual(entries[0].kind, 'title');
+  assert.strictEqual(entries[0].meta.displayMode, undefined, 'ugyldig verdi lagres ikke');
+  assert.ok(spy.calls.some((c) => /display-mode/.test(c) && /"form"/.test(c)),
+    'meldingen navngir den gyldige verdien i stedet for å kalle hele nøkkelen utsatt');
 });
 
 test('parse: second #@title → warn + ignored, not in entries', () => {

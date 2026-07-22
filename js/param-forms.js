@@ -302,17 +302,26 @@
         else if (val === 'manual') meta.runAuto = false;
         else warnings.push('ugyldig run i @title-metadata: ' + val + ' (auto|manual; auto er default)');
       } else if (key === 'display-mode') {
-        // display-mode:"form" (Colabs skjema-kolonne-layout) er UTSATT —
-        // spec §Out of scope, docs/ROADMAP.md sin "Colab-paritet for
-        // #@param"-seksjon ("display-mode: \"form\" per celle — skjul
-        // koden, vis bare skjemaet"). Parses (linja skal ikke feile pga.
-        // dette) men IGNORERES fullstendig — verdien lagres BEVISST ikke i
-        // meta, slik at ingen fremtidig konsument ved et uhell kan handle
-        // på den før funksjonen faktisk er bygget.
-        var msg = 'ParamForms.parse: linje ' + lineNo + ': display-mode i @title-metadata er en utsatt funksjon ' +
-          '(se docs/ROADMAP.md, "Colab-paritet for #@param") — parses men ignoreres';
-        console.warn(msg);
-        warnings.push(msg);
+        // display-mode:"form" (Colabs skjema-visning) — VEKKET 2026-07-22
+        // (docs/ROADMAP.md sin "Colab-paritet for #@param"-seksjon, spec
+        // 2026-07-22-param-colab-parity-design.md sitt tidligere utsatte
+        // punkt) via det sovende hide-code-celleflagget (js/cells.js
+        // KNOWN_FLAGS): en gyldig "form"-verdi lagres i meta.displayMode —
+        // DOM-halvdelen (_build/refresh under) leser den og legger til/
+        // fjerner nb-hide-code på cellEl, samme klasse hide-code-flagget
+        // selv styrer (js/cells.js docCellNode). Enhver annen verdi er
+        // fortsatt ukjent/ugyldig — parses (linja skal ikke feile) men
+        // IGNORERES, samme "varsle og dropp"-mønster som før, meldingen
+        // navngir nå den ene gyldige verdien i stedet for å kalle hele
+        // nøkkelen utsatt.
+        if (val === 'form') {
+          meta.displayMode = 'form';
+        } else {
+          var msg = 'ParamForms.parse: linje ' + lineNo + ': ugyldig display-mode i @title-metadata: ' + val +
+            ' (kun "form" støttes) — parses men ignoreres';
+          console.warn(msg);
+          warnings.push(msg);
+        }
       } else {
         warnings.push('ukjent nøkkel i @title-metadata: ' + key);
       }
@@ -342,6 +351,24 @@
     return 'auto';
   }
   ParamForms.cellRunDefault = cellRunDefault;
+
+  /**
+   * _cellFormMode(entries) → true når cellens (eneste, første) #@title har
+   * {display-mode:"form"} i sin meta — samme "les tittel-entryen"-mønster
+   * som cellRunDefault rett over, men for hide-code-vekkingen (2026-07-22)
+   * i stedet for run-defaulten. Kun DOM-halvdelen (se _applyFormHideCode
+   * under) trenger dette — ikke eksponert på ParamForms (ingen kjent
+   * konsument utenfor denne fila ennå, i motsetning til cellRunDefault som
+   * js/cells.js selv leser).
+   */
+  function _cellFormMode(entries) {
+    var list = entries || [];
+    for (var i = 0; i < list.length; i++) {
+      var e = list[i];
+      if (e.kind === 'title' && e.meta && e.meta.displayMode === 'form') return true;
+    }
+    return false;
+  }
 
   /**
    * ParamForms.parse(cellSource, lang) → [{kind, lineIdx, ...}]
@@ -1117,6 +1144,22 @@
     // leses friskt fra kildeteksten uansett, så "no value loss" er
     // automatisk, og de gamle stripe-nodene fjernes eksplisitt her, så
     // "no duplicate" er det også.
+    // display-mode:"form"-vekkingen (2026-07-22, se _cellFormMode over): setter/
+    // fjerner nb-hide-code på selve cellEl (samme klasse js/cells.js docCellNode
+    // styrer fra c.attrs['hide-code'] — de to kildene er uavhengige OR-bidrag,
+    // se docCellNode sin kommentar). Kalt fra BÅDE _build (dekker decorate OG
+    // refresh sin full-ombyggings-gren) og refresh sin in-place-gren under —
+    // MÅ kjøres ubetinget begge steder, ikke bare på strukturell ombygging:
+    // _sameStructure sammenlikner kun tittel-TEKSTEN, ikke meta, så en
+    // {display-mode:"form"} lagt til/fjernet UTEN å endre selve tittelteksten
+    // tar in-place-grenen (ingen _build-kall) — uten dette kallet DER ville en
+    // fjernet display-mode ALDRI gjenopprette koden (planens eksplisitte
+    // "removal matters"-krav).
+    function _applyFormHideCode(cellEl, entries) {
+      if (!cellEl || !cellEl.classList) return;
+      cellEl.classList.toggle('nb-hide-code', _cellFormMode(entries));
+    }
+
     function _build(cellIdx, cellEl, source, lang) {
       var outEl = _findChild(cellEl, 'nb-output');
       var prev = _forms[cellIdx];
@@ -1132,6 +1175,7 @@
       // _buildMarkdownRow), ingen filtrering lenger (fase 5 Task 1 sin
       // midlertidige kind:"param"-only-gating er fjernet).
       var entries = ParamForms.parse(source, lang);
+      _applyFormHideCode(cellEl, entries);
       if (!entries.length) {
         _forms[cellIdx] = { cellEl: cellEl, lang: lang, source: source,
                             entries: [], builtEntries: [], strips: { top: null, bottom: null, left: null }, controls: [],
@@ -1332,6 +1376,12 @@
         _build(cellIdx, st.cellEl, source, st.lang);
         return;
       }
+      // display-mode:"form" er IKKE del av _sameStructure sin tittel-
+      // sammenlikning (kun .text, se der) — en meta-only-endring (lagt til
+      // eller fjernet, tittelteksten selv uendret) tar altså DENNE grenen,
+      // ikke _build over. Må derfor synkes ubetinget her også (se
+      // _applyFormHideCode sin kommentar for "removal matters"-kravet).
+      _applyFormHideCode(st.cellEl, newEntries);
       for (var i = 0; i < newEntries.length; i++) {
         // title/markdown-indekser har controls[i] === null (ingen kontroll
         // bygget for dem, se _build) — og _sameStructure over garanterer

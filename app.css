@@ -1142,6 +1142,21 @@
 .nb-cell.nb-cell-hint { border-color: var(--accent);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent); }
 .nb-hide-output .nb-output { display: none; }
+/* hide-code (vekket 2026-07-22, spec 2026-07-22-param-colab-parity-design.md
+   sitt utsatte display-mode:"form"-punkt, docs/ROADMAP.md) — modellert 1:1
+   på .nb-hide-output-regelen rett over, samme klasse-på-wrap-mønster
+   (js/cells.js docCellNode, js/param-forms.js _build/refresh sin
+   displayMode-reaktive add/remove). .nb-input FINNES IKKE i denne
+   (output-only) doc-cellens DOM per i dag (4a-konvergensen fjernet den
+   gamle per-celle kode-editoren, se js/cells.js sine egne kommentarer og
+   .superpowers/sdd/fix-hidecode-report.md) — regelen er derfor en bevisst
+   FORWARD-COMPATIBLE hook (samme selektor-mønster som søsken-regelen,
+   ingenting den treffer skal noen gang være param-form/ui-controls/
+   nb-output-body, kun en fremtidig kode-visning). Param-/widget-stripene og
+   selve outputen ligger UTENFOR .nb-input og forblir dermed alltid synlige;
+   koden er uendret tilgjengelig i den delte #scriptInput-editoren (panel-
+   left) ved siden av, uavhengig av denne klassen. */
+.nb-hide-code .nb-input { display: none; }
 /* Rendrede md/html-celler: nesten rammeløst (Jupyter/Colab-konvensjon) —
    kun et hint på hover/fokus om at det er en celle. */
 .nb-cell.nb-rendered-only { border-color: transparent; background: transparent; box-shadow: none; }
