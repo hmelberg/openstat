@@ -101,9 +101,15 @@ eller shared/ui_core.py (deler versjonsparam) — håndhevet i fase 4b/5 og
 i småting-batchen.*
 
 **Bevisste features-i-backlog (ikke hygiene):**
-- [ ] Første-kjøring-tomt: Kjør før pyodide er ferdig bootet fullfører stille
-      med tom output (pre-eksisterende, reprodusert 2026-07-20) — kø kjøringen
-      eller vis «venter på Python…» (egen liten designjobb)
+- [x] Første-kjøring-tomt — LØST 2026-07-22 (commit 2477e76): rotårsaken var
+      IKKE boot-venting, men auto-kjøringen av starteksempelet som gjorde
+      Kjør-knappen til «Avbryt» — brukerens første klikk i det vinduet ble
+      en stille abort. Nå avbrytes auto-kjøringen og brukerens dokument
+      kjøres automatisk; «Venter på Python-motoren…»-status ved kjøring før
+      boot; permanente [kjør]-brødsmuler (console.debug) ved kjøregrensene.
+      Kjent rest (lite vindu): engine-notatbøkenes auto-kjøring
+      (brython/mpy/js) har samme teoretiske svelg via engineNbRunActive —
+      ta ved neste berøring av den porten
 - [x] `ui.button` med element-barn — levert 2026-07-22
       (ui-features-batch; label_els i spec, miks av tekst/element)
 - [x] `.add([v1,v2], area=)` auto-stakker nå alle payloads i kildeorden —
