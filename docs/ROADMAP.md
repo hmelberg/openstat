@@ -1,8 +1,49 @@
 # Roadmap — safestat/openstat
 
-*Levende dokument. Oppdatert 2026-07-09 (kveld). Punktene er ikke forpliktelser, men
+*Levende dokument. Oppdatert 2026-07-23. Punktene er ikke forpliktelser, men
 prioritert idéliste. Kilder: designdok/reviews fra jamovi 2.0 fase 1–3
 (docs/PLAN_jamovi_*.md, docs/jamovi-validation.md) + løpende samtaler og Hans' testing.*
+
+## Prioritering av det gjenstående (vurdert 2026-07-23)
+
+**Viktigst — anbefalt neste økt:**
+- [ ] **Numerisk validering av jamovi-modus mot ekte jamovi** — eksistensiell
+      for tillit i et statistikkverktøy: stille gale tall er den verste
+      feilklassen produktet kan ha, og skaden skjer utenfor appen. UX er
+      testet (Hans 9/7); sjekklisten med 9 rader står klar i
+      docs/jamovi-validation.md. Krever Hans (manuell side-om-side), én
+      konsentrert økt.
+
+**Ferdig 2026-07-23 — cache-skew ved deploy (var vurdert nest viktigst):**
+- [x] SW/py-cache-strategien: (a) begge motorenes `fetchText` bærer nå
+      `?v=M2PY_VERSION` (samme konvensjon som __ensureUi); (b) sw.js sin
+      enumererte SWR-liste (som DRIFTET — manglet ui_brython/ui_mpy/
+      shared/ui_core, de tre filene som faktisk krasjet 20.–22.7) erstattet
+      med én suffiks-regel for alle lokale .py; (c) SWR-nøkkelen inkluderer
+      søkestrengen, så en versjonsbump gir cache-MISS → ferskt svar på
+      FØRSTE last etter deploy (før: serve-stale-først); (d) CACHE bumpet
+      v33. Deploy-simulert i browser: ny ?v= → egen nøkkel + ferskt innhold.
+      M2PY_VERSION-disiplinen dekker dermed nå OGSÅ brython/micropython-
+      filene — bump ved enhver .py-adferdsendring.
+
+**Mindre viktig (beskrevet for fremtidige økter):**
+- [ ] Engine-notatbøkenes auto-kjøringsrest: brython/mpy/js-auto-kjøringen
+      har et lite klikk-svelg-vindu via `engineNbRunActive`-porten (samme
+      klasse som første-kjøring-fiksen 2477e76 løste for pyodide-veien, men
+      mye mindre vindu — motor-boot er 1–3 s). Ta ved neste berøring av
+      den porten.
+- [ ] Manuell AI-røyktest av auto-retting nivå 1 mot LASTET runtime
+      (trenger nøkkel-flyt): provoser en syntaksfeil i et python-svar og se
+      at reparasjonsrunden fyrer med linjenummer; samme for R.
+- [ ] `display-mode:"form"`/hide-code er semantisk levert men visuelt
+      sovende til per-celle-kodevisning eventuelt gjeninnføres (post-4a
+      finnes ingen — Rå tekst er kodeflaten). Ingen handling nødvendig; kun
+      relevant hvis cellevisningen endres.
+- [ ] AI auto-retting nivå 2 (sandkasse-prøvekjøring) — kun hvis nivå 1
+      viser seg å fange for lite i praksis.
+- [ ] jamovi RM-ANOVA + CFA, scatr-wasm (venter på Hans), `# requires:`-
+      direktivet, minnebruk på svake maskiner — funksjonalitet/komfort,
+      ikke risiko; se seksjonene under.
 
 ## jamovi-modus — gjenstående arbeid
 

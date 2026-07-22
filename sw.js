@@ -3,7 +3,7 @@
 // duplicated across this file (PYODIDE_VERSION below), index.html and
 // export_data*.html — update all together when upgrading Pyodide.
 const PYODIDE_VERSION = 'v314.0.2';
-const CACHE = 'm2py-v32';
+const CACHE = 'm2py-v33';
 const CDN_HOSTS = new Set([
   'cdn.jsdelivr.net',
   'cdn.plot.ly',
@@ -13,21 +13,14 @@ const CDN_HOSTS = new Set([
   'repo.r-wasm.org',    // wasm-R-pakker: jmv, scatr m.fl. (~170 MB, cache-first)
   'cdnjs.cloudflare.com' // require.min.js (ipywidgets-broen, js/ipywidgets-bridge.js — pinned)
 ]);
-const LOCAL_SWR_SUFFIXES = [
-  '/m2py.py',
-  '/functions.py',
-  '/variable_metadata.json',
-  '/mockdata_core.py',
-  '/mockdata_realism.py',
-  '/brython/pandas_brython.py',
-  '/brython/plotly_express_brython.py',
-  '/brython/brython_runner.py',
-  '/micropython/micropython_runner.py',
-  '/micropython/pandas_mpy.py',
-  '/micropython/plotly_express_mpy.py',
-  '/micropython/dash.py',
-  '/micropython/duckdb_mpy.py'
-];
+// Cache-skew-fiksen (2026-07-23): den gamle ENUMERERTE listen driftet —
+// den manglet bl.a. ui_brython.py, ui_mpy.py og shared/ui_core.py, som
+// dermed falt til ren HTTP-cache med heuristisk TTL (observert stale-krasj
+// etter deploy tre ganger 2026-07-20..22). Nå dekkes ALLE lokale .py-filer
+// av én suffiks-regel, så nye filer aldri kan glemmes.
+function isLocalPySwr(pathname) {
+  return pathname.endsWith('.py') || pathname.endsWith('/variable_metadata.json');
+}
 
 const PRECACHE_URLS = [
   'https://cdn.jsdelivr.net/pyodide/' + PYODIDE_VERSION + '/full/pyodide.js',
@@ -76,8 +69,7 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  if (url.origin === self.location.origin &&
-      LOCAL_SWR_SUFFIXES.some(s => url.pathname.endsWith(s))) {
+  if (url.origin === self.location.origin && isLocalPySwr(url.pathname)) {
     e.respondWith(staleWhileRevalidate(e.request));
     return;
   }
@@ -115,8 +107,13 @@ async function cacheFirst(req) {
 
 async function staleWhileRevalidate(req) {
   const cache = await caches.open(CACHE);
-  const keyUrl = new URL(req.url);
-  const key = new Request(keyUrl.origin + keyUrl.pathname);
+  // Cache-skew-fiksen (2026-07-23): nøkkelen inkluderer nå SØKESTRENGEN.
+  // Alle lokale .py-fetcher bærer ?v=M2PY_VERSION (index.html __ensureUi +
+  // begge motorenes fetchText) — med search i nøkkelen gir en versjonsbump
+  // cache-MISS → ferskt nettverkssvar på FØRSTE last etter deploy, i stedet
+  // for SWR-ens serve-stale-først. Gamle versjonsnøkler ryddes ved
+  // CACHE-navnebump (activate-sveipet).
+  const key = new Request(req.url);
   const hit = await cache.match(key);
   // 'no-cache': revalider mot server (304 ved uendret). Default cache-modus
   // kunne hente stale svar fra HTTP-diskcachen (kun Last-Modified-header →

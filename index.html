@@ -2613,8 +2613,8 @@
     (function fetchAutocompleteData() {
       const base = window.location.href.replace(/[^/]+$/, '');
       Promise.all([
-        fetch(base + 'variable_metadata.json').then(r => r.ok ? r.json() : {}).catch(() => ({})),
-        fetch(base + 'functions.py').then(r => r.ok ? r.text() : '').catch(() => '')
+        fetch(base + 'variable_metadata.json?v=' + (window.M2PY_VERSION || '1')).then(r => r.ok ? r.json() : {}).catch(() => ({})),
+        fetch(base + 'functions.py?v=' + (window.M2PY_VERSION || '1')).then(r => r.ok ? r.text() : '').catch(() => '')
       ]).then(([meta, funcCode]) => {
         if (meta && meta.variables) {
           microdataVariableNames = Object.keys(meta.variables);

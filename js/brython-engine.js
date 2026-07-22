@@ -223,7 +223,15 @@
   }
 
   function fetchText(path) {
-    return fetch(path).then(function (r) {
+    // Cache-skew-fiksen (2026-07-23, roadmap): versjons-param på ALLE
+    // runtime-hentede .py-filer — samme konvensjon som __ensureUi
+    // (index.html) bruker for pyodide-familien. Uten denne kunne
+    // browserens heuristiske HTTP-cache (og SW-en) servere en STALE
+    // motorfil etter deploy (observert: ny js/ui.js + gammel
+    // ui-fasade → TypeError ved kjøring).
+    var ver = (typeof window !== 'undefined' && window.M2PY_VERSION) || '1';
+    var url = path + (path.indexOf('?') >= 0 ? '&' : '?') + 'v=' + ver;
+    return fetch(url).then(function (r) {
       if (!r.ok) throw new Error('Kunne ikke hente ' + path + ' (' + r.status + ')');
       return r.text();
     });
