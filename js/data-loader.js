@@ -34,14 +34,48 @@
     return {};
   }
 
-  async function fetchLoadTarget(item, fetchImpl, authToken, anthropicKey) {
+  // Brukernøkler (spec 2026-07-23): en kilde med auth.user i registeret krever
+  // registrert nøkkel (js/keys.js). Nøkkelen sendes KUN som X-Source-Key til
+  // /api/hent (som injiserer etter plasseringsregelen, vertsbundet) — den
+  // legges aldri inn i selve kilde-URL-en klient-side, og havner dermed aldri
+  // i script, delingslenker eller cache-nøkler.
+  function userAuthSourceFor(url, registry) {
+    var target = url;
+    if (url.indexOf('/api/hent?') === 0) {
+      var m = /[?&]url=([^&]+)/.exec(url);
+      if (!m) return null;
+      try { target = decodeURIComponent(m[1]); } catch (e) { return null; }
+    }
+    var host;
+    try { host = new URL(target).host; } catch (e) { return null; }
+    var reg = registry || [];
+    for (var i = 0; i < reg.length; i++) {
+      var s = reg[i];
+      if (!s.auth || !s.auth.user) continue;
+      try { if (new URL(s.base_url).host === host) return s; } catch (e2) {}
+    }
+    return null;
+  }
+
+  function sourceKeyHeader(url, registry, keysApi) {
+    var src = userAuthSourceFor(url, registry);
+    if (!src) return {};
+    var K = keysApi || global.Keys;
+    var val = K && K.get(src.id);
+    if (!val) throw new Error('«' + src.id + '» krever API-nøkkel — registrer den i AI-innstillingene.');
+    return { 'X-Source-Key': val };
+  }
+
+  async function fetchLoadTarget(item, fetchImpl, authToken, anthropicKey, registry, keysApi) {
+    var srcKey = sourceKeyHeader(item.url, registry, keysApi);   // kaster ved manglende nøkkel
+    function hdrs() { return Object.assign({}, proxyHeaders(authToken, anthropicKey), srcKey); }
     async function viaProxy() {
-      var pr = await fetchImpl('/api/hent?url=' + encodeURIComponent(item.url), { headers: proxyHeaders(authToken, anthropicKey) });
+      var pr = await fetchImpl('/api/hent?url=' + encodeURIComponent(item.url), { headers: hdrs() });
       if (!pr.ok) throw new Error('proxy ' + pr.status + ' for ' + item.alias);
       return pr;
     }
     if (item.url.indexOf('/api/hent?') === 0) {
-      var r0 = await fetchImpl(item.url, { headers: proxyHeaders(authToken, anthropicKey) });
+      var r0 = await fetchImpl(item.url, { headers: hdrs() });
       if (!r0.ok) throw new Error('proxy ' + r0.status + ' for ' + item.alias);
       return r0;
     }
@@ -105,7 +139,7 @@
       localItems.push(item);
     }
 
-    var loads = await fetchResolvedItems(localItems, deps);
+    var loads = await fetchResolvedItems(localItems, Object.assign({}, deps, { registry: registry }));
     return { loads: loads, remote: remote };
   }
 
@@ -121,6 +155,7 @@
   async function fetchResolvedItems(localItems, deps) {
     deps = deps || {};
     var fetchImpl = deps.fetchImpl || (typeof fetch !== 'undefined' ? fetch.bind(global) : null);
+    var registry = deps.registry || (fetchImpl ? await loadRegistry(fetchImpl) : []);
     // V3 (spec browser-strict): strict-kilder får ALDRI nøkkel via
     // /source_access — HVER strict-kjøring (kryptert eller ei) autoriseres og
     // logges via /local_run_authorize (deps.authorizeStrict), som utleverer
@@ -139,7 +174,7 @@
     function fetchBytes(item) {
       var k = item.url;
       if (!_bufCache[k]) {
-        _bufCache[k] = fetchLoadTarget(item, fetchImpl, deps.authToken || null, deps.anthropicKey || null)
+        _bufCache[k] = fetchLoadTarget(item, fetchImpl, deps.authToken || null, deps.anthropicKey || null, registry, deps.keysApi || null)
           .then(function (resp) {
             return resp.arrayBuffer().then(function (ab) { return { resp: resp, buf: new Uint8Array(ab) }; });
           });

@@ -147,3 +147,56 @@ Deno.test("resolveAndAssemble: fetches spec sources + returns spec", async () =>
   const p = out.sources.find((x: {alias: string}) => x.alias === "p");
   assertEquals(new TextDecoder().decode(p.bytes), "pid,income\n1,10\n2,20");
 });
+
+const KAGGLE_REG = [{
+  id: "kaggle", navn: "Kaggle", utgiver: "Kaggle", tillit: "etablert", tilgang: "rest",
+  base_url: "https://www.kaggle.com/api/v1/", cors: false,
+  auth: { type: "api_key", user: true, plassering: "basic" },
+}];
+
+Deno.test("data-loader: X-Source-Key settes på proxy-kall for user-auth-kilde", async () => {
+  const calls: { url: string; headers: Record<string, string> }[] = [];
+  const fetchImpl = ((input: string | URL | Request, init?: RequestInit) => {
+    calls.push({ url: String(input), headers: (init?.headers as Record<string, string>) ?? {} });
+    return Promise.resolve(new Response("a,b\n1,2", { status: 200, headers: { "content-type": "text/csv" } }));
+  }) as typeof fetch;
+  const inner = encodeURIComponent("https://www.kaggle.com/api/v1/datasets/download/own/slug/fil-a.csv");
+  const script = "# load /api/hent?url=" + inner + " as kag";
+  const keysApi = { get: (t: string) => (t === "kaggle" ? "bruker:K9" : "") };
+  const out = await DL.resolveAndFetchLoads(script, { fetchImpl, registry: KAGGLE_REG, keysApi });
+  assertEquals(out.loads[0].alias, "kag");
+  const proxy = calls.find((c) => c.url.includes("/api/hent?url="));
+  assertEquals(proxy?.headers["X-Source-Key"], "bruker:K9");
+});
+
+Deno.test("data-loader: manglende brukernøkkel → norsk feil før fetch", async () => {
+  const calls: string[] = [];
+  const fetchImpl = ((input: string | URL | Request) => {
+    calls.push(String(input));
+    return Promise.resolve(new Response("x", { status: 200, headers: { "content-type": "text/csv" } }));
+  }) as typeof fetch;
+  const inner = encodeURIComponent("https://www.kaggle.com/api/v1/datasets/download/own/slug/fil-b.csv");
+  const script = "# load /api/hent?url=" + inner + " as kag2";
+  await assertRejects(
+    () => DL.resolveAndFetchLoads(script, { fetchImpl, registry: KAGGLE_REG, keysApi: { get: () => "" } }),
+    Error, "krever API-nøkkel",
+  );
+  assertEquals(calls.filter((c) => c.includes("kaggle")).length, 0);
+});
+
+Deno.test("data-loader: connect-basert user-auth-kilde rutes via proxy med nøkkel", async () => {
+  const calls: { url: string; headers: Record<string, string> }[] = [];
+  const fetchImpl = ((input: string | URL | Request, init?: RequestInit) => {
+    calls.push({ url: String(input), headers: (init?.headers as Record<string, string>) ?? {} });
+    return Promise.resolve(new Response("a,b\n1,2", { status: 200, headers: { "content-type": "text/csv" } }));
+  }) as typeof fetch;
+  const script = [
+    "# connect kaggle",
+    "# load kaggle/datasets/download/own/slug/fil-c.csv as kag3",
+  ].join("\n");
+  const keysApi = { get: (t: string) => (t === "kaggle" ? "bruker:K10" : "") };
+  await DL.resolveAndFetchLoads(script, { fetchImpl, registry: KAGGLE_REG, keysApi });
+  const proxy = calls.find((c) => c.url.includes("/api/hent?url="));
+  if (!proxy) throw new Error("ingen proxy-kall: " + calls.map((c) => c.url).join(" | "));
+  assertEquals(proxy.headers["X-Source-Key"], "bruker:K10");
+});
