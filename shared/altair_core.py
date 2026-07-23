@@ -255,3 +255,216 @@ class Row(Channel):
 def value(v):
     """alt.value: literal kanalverdi (encode(color=alt.value('red')))."""
     return {'value': v}
+
+
+_CHANNEL_NAMES = ('x', 'y', 'color', 'size', 'opacity', 'tooltip',
+                  'column', 'row', 'text')
+
+_param_counter = [0]
+
+
+class _Defaults:
+    """Modulvide størrelsesdefaults (speiler pe.defaults). None = ikke satt
+    — da bestemmer spec/vega-lite selv (render-siden i index.html legger på
+    en visningsdefault for ikke-fasetterte spec-er)."""
+    def __init__(self):
+        self.height = None
+        self.width = None
+
+
+defaults = _Defaults()
+
+
+def _one_channel(val, records):
+    if hasattr(val, '_channel_dict'):
+        return val._channel_dict(records)
+    if isinstance(val, str):
+        return _parse_shorthand(val, records)
+    if isinstance(val, dict):
+        return dict(val)
+    raise ValueError('encode(): ugyldig kanalverdi: ' + repr(val))
+
+
+class _TopLevel:
+    """Delte toppnivå-metoder for Chart og LayerChart."""
+
+    def properties(self, width=None, height=None, title=None):
+        if width is not None:
+            self._props['width'] = width
+        if height is not None:
+            self._props['height'] = height
+        if title is not None:
+            self._props['title'] = title
+        return self
+
+    def interactive(self):
+        # altair bruker hashede param-navn; teller er deterministisk nok
+        # (diff-testene normaliserer navnet uansett)
+        _param_counter[0] = _param_counter[0] + 1
+        self._params.append({'name': 'param_' + str(_param_counter[0]),
+                             'select': {'type': 'interval',
+                                        'encodings': ['x', 'y']},
+                             'bind': 'scales'})
+        return self
+
+    def to_dict(self):
+        return self._to_dict(True)
+
+    def to_json(self, indent=None):
+        # indent-guard: MicroPython-json støtter ikke alltid indent-kwarg
+        if indent is None:
+            return json.dumps(self.to_dict())
+        return json.dumps(self.to_dict(), indent=indent)
+
+    def to_vegalite_json_str(self):
+        """Runner-protokollen (_fmt): hele spec-en som JSON-streng."""
+        return json.dumps(self.to_dict())
+
+    def show(self):
+        return str(self)
+
+    def __str__(self):
+        return '<AltairChart: use show() or leave as last expression>'
+
+    def __repr__(self):
+        return str(self)
+
+    def _repr_html_(self):
+        return str(self)
+
+    def _apply_top(self, spec):
+        """Props + params + modul-defaults inn i en toppnivå-spec."""
+        for k in self._props:
+            spec[k] = self._props[k]
+        if 'width' not in spec and defaults.width is not None:
+            spec['width'] = defaults.width
+        if 'height' not in spec and defaults.height is not None:
+            spec['height'] = defaults.height
+        if self._params:
+            spec['params'] = [dict(p) for p in self._params]
+        return spec
+
+    # ---- utenfor v1-omfanget (spec §Out of scope) ----------------------
+    def __or__(self, other):
+        raise NotImplementedError('hconcat (|) er utenfor v1 — spec '
+                                  '2026-07-23-altair-shim-design.md')
+
+    def __and__(self, other):
+        raise NotImplementedError('vconcat (&) er utenfor v1')
+
+    def facet(self, *a, **kw):
+        raise NotImplementedError('facet() er utenfor v1 — bruk column=/'
+                                  'row=-kanalene i encode()')
+
+    def transform_filter(self, *a, **kw):
+        raise NotImplementedError('transform_filter er utenfor v1')
+
+    def transform_calculate(self, *a, **kw):
+        raise NotImplementedError('transform_calculate er utenfor v1')
+
+
+class Chart(_TopLevel):
+    def __init__(self, data=None):
+        self._records = _records_from_data(data)
+        self._mark = None
+        self._encoding = {}
+        self._props = {}
+        self._params = []
+
+    def __add__(self, other):
+        return LayerChart([self, other])
+
+    def _set_mark(self, mtype, kw):
+        m = {'type': mtype}
+        for k in kw:
+            if kw[k] is not None:
+                m[k] = kw[k]
+        self._mark = m
+        return self
+
+    def mark_point(self, **kw):
+        return self._set_mark('point', kw)
+
+    def mark_line(self, **kw):
+        return self._set_mark('line', kw)
+
+    def mark_bar(self, **kw):
+        return self._set_mark('bar', kw)
+
+    def mark_area(self, **kw):
+        return self._set_mark('area', kw)
+
+    def mark_circle(self, **kw):
+        return self._set_mark('circle', kw)
+
+    def mark_tick(self, **kw):
+        return self._set_mark('tick', kw)
+
+    def mark_rect(self, **kw):
+        return self._set_mark('rect', kw)
+
+    def mark_rule(self, **kw):
+        return self._set_mark('rule', kw)
+
+    def mark_text(self, **kw):
+        return self._set_mark('text', kw)
+
+    def mark_boxplot(self, **kw):
+        return self._set_mark('boxplot', kw)
+
+    def encode(self, **channels):
+        for name in channels:
+            if name not in _CHANNEL_NAMES:
+                raise NotImplementedError(
+                    'encode(' + name + '=...) er utenfor v1-omfanget '
+                    '(kanaler: ' + ', '.join(_CHANNEL_NAMES) + ')')
+        for name in channels:
+            self._encoding[name] = channels[name]
+        return self
+
+    def _to_dict(self, top):
+        spec = {}
+        if top:
+            spec['$schema'] = VEGALITE_SCHEMA
+        spec['data'] = {'values': _json_safe(self._records)}
+        if self._mark is not None:
+            spec['mark'] = dict(self._mark)
+        if self._encoding:
+            enc = {}
+            for name in self._encoding:
+                val = self._encoding[name]
+                if isinstance(val, (list, tuple)):
+                    enc[name] = [_one_channel(v, self._records) for v in val]
+                else:
+                    enc[name] = _one_channel(val, self._records)
+            spec['encoding'] = enc
+        if top:
+            return self._apply_top(spec)
+        # lag-kontekst (LayerChart): props/params på under-charten følger
+        # med, men modul-defaults gjør det IKKE (gjelder kun toppnivå)
+        for k in self._props:
+            spec[k] = self._props[k]
+        if self._params:
+            spec['params'] = [dict(p) for p in self._params]
+        return spec
+
+
+def hconcat(*charts):
+    raise NotImplementedError('hconcat er utenfor v1')
+
+
+def vconcat(*charts):
+    raise NotImplementedError('vconcat er utenfor v1')
+
+
+def selection_point(*a, **kw):
+    raise NotImplementedError('selection_point er utenfor v1 — '
+                              '.interactive() dekker zoom/pan')
+
+
+def selection_interval(*a, **kw):
+    raise NotImplementedError('selection_interval er utenfor v1')
+
+
+def condition(*a, **kw):
+    raise NotImplementedError('alt.condition er utenfor v1')

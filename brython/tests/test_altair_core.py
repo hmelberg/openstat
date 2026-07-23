@@ -91,8 +91,109 @@ def test_value_helper():
     assert alt.value("red") == {"value": "red"}
 
 
+def test_chart_minimal_spec():
+    spec = alt.Chart({"a": [1, 2]}).mark_point().encode(x="a:Q").to_dict()
+    assert spec["$schema"] == alt.VEGALITE_SCHEMA
+    assert spec["mark"] == {"type": "point"}
+    assert spec["data"] == {"values": [{"a": 1}, {"a": 2}]}
+    assert spec["encoding"] == {"x": {"field": "a", "type": "quantitative"}}
+
+
+def test_all_marks():
+    c = alt.Chart({"a": [1]})
+    for m in ("point", "line", "bar", "area", "circle", "tick",
+              "rect", "rule", "text", "boxplot"):
+        spec = getattr(c, "mark_" + m)().to_dict()
+        assert spec["mark"] == {"type": m}, m
+
+
+def test_mark_kwargs():
+    spec = alt.Chart({"a": [1]}).mark_line(point=True, strokeDash=[4, 2]).to_dict()
+    assert spec["mark"] == {"type": "line", "point": True, "strokeDash": [4, 2]}
+
+
+def test_encode_channel_objects_and_lists():
+    spec = (alt.Chart({"g": ["a"], "v": [1]}).mark_bar()
+            .encode(x=alt.X("g:N", sort="-y"),
+                    y="mean(v):Q",
+                    tooltip=["g:N", alt.Tooltip("v:Q", format=".1f")]).to_dict())
+    assert spec["encoding"]["x"] == {"field": "g", "type": "nominal", "sort": "-y"}
+    assert spec["encoding"]["y"] == {"aggregate": "mean", "field": "v",
+                                     "type": "quantitative"}
+    assert spec["encoding"]["tooltip"] == [
+        {"field": "g", "type": "nominal"},
+        {"field": "v", "type": "quantitative", "format": ".1f"}]
+
+
+def test_encode_unknown_channel_raises():
+    try:
+        alt.Chart({"a": [1]}).mark_point().encode(theta="a:Q")
+        assert False, "skulle kastet"
+    except NotImplementedError as e:
+        assert "theta" in str(e)
+
+
+def test_properties_and_defaults():
+    spec = (alt.Chart({"a": [1]}).mark_point()
+            .properties(width=400, height=250, title="Tittel").to_dict())
+    assert spec["width"] == 400 and spec["height"] == 250 and spec["title"] == "Tittel"
+    alt.defaults.height = 300
+    try:
+        spec2 = alt.Chart({"a": [1]}).mark_point().to_dict()
+        assert spec2["height"] == 300 and "width" not in spec2
+    finally:
+        alt.defaults.height = None
+
+
+def test_interactive_param():
+    spec = alt.Chart({"a": [1]}).mark_point().encode(x="a:Q").interactive().to_dict()
+    assert len(spec["params"]) == 1
+    p = spec["params"][0]
+    assert p["name"].startswith("param_")
+    assert p["select"] == {"type": "interval", "encodings": ["x", "y"]}
+    assert p["bind"] == "scales"
+
+
+def test_facet_channels():
+    spec = (alt.Chart({"a": [1], "g": ["x"]}).mark_point()
+            .encode(x="a:Q", column="g:N", row="g:N").to_dict())
+    assert spec["encoding"]["column"] == {"field": "g", "type": "nominal"}
+    assert spec["encoding"]["row"] == {"field": "g", "type": "nominal"}
+
+
+def test_nan_becomes_null_in_values():
+    import pandas_brython as bpd
+    df = bpd.DataFrame({"x": [1, 2], "y": [1.0, bpd.nan]})
+    spec = alt.Chart(df).mark_point().encode(x="x:Q", y="y:Q").to_dict()
+    assert spec["data"]["values"][1]["y"] is None
+    json.dumps(spec)   # må ikke kaste
+
+
+def test_runner_protocol_and_repr():
+    c = alt.Chart({"a": [1]}).mark_point()
+    s = c.to_vegalite_json_str()
+    assert json.loads(s)["mark"] == {"type": "point"}
+    assert "AltairChart" in repr(c)
+    assert c.to_json(indent=2).startswith("{")
+
+
+def test_out_of_scope_raises():
+    c = alt.Chart({"a": [1]}).mark_point()
+    for attempt in (lambda: c | c, lambda: c & c, lambda: c.facet("a"),
+                    lambda: c.transform_filter("x"),
+                    lambda: c.transform_calculate(y="x"),
+                    lambda: alt.hconcat(c, c), lambda: alt.vconcat(c, c),
+                    lambda: alt.selection_point(), lambda: alt.selection_interval(),
+                    lambda: alt.condition(None, None, None)):
+        try:
+            attempt()
+            assert False, "skulle kastet NotImplementedError"
+        except NotImplementedError:
+            pass
+
+
 if __name__ == '__main__':
     for name, fn in sorted(globals().items()):
         if name.startswith('test_'):
             fn(); print('PASS', name)
-    print('ALLE ALTAIR-CORE-TESTER (task 1) GRØNNE')
+    print('ALLE ALTAIR-CORE-TESTER GRØNNE')
