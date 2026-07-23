@@ -2630,27 +2630,29 @@
     let microdataFunctions = [];
     let microdataVariableNames = [];
 
-    (function fetchAutocompleteData() {
-      const base = window.location.href.replace(/[^/]+$/, '');
-      Promise.all([
-        fetch(base + 'variable_metadata.json?v=' + (window.M2PY_VERSION || '1')).then(r => r.ok ? r.json() : {}).catch(() => ({})),
-        fetch(base + 'functions.py?v=' + (window.M2PY_VERSION || '1')).then(r => r.ok ? r.text() : '').catch(() => '')
-      ]).then(([meta, funcCode]) => {
-        if (meta && meta.variables) {
-          microdataVariableNames = Object.keys(meta.variables);
-          microdataCatalog = meta;
-        }
-        if (funcCode) {
-          const names = [];
-          const re = /def\s+(\w+)\s*\(/g;
-          let m;
-          const skip = new Set(['_elementwise', '_safe', '_days_to_dt', 'get_microdata_functions', 'wrapped']);
-          while ((m = re.exec(funcCode)) !== null)
-            if (!skip.has(m[1])) names.push(m[1]);
-          microdataFunctions = [...new Set(names)];
-        }
-      });
-    })();
+    // Lazy katalog (plan 2026-07-23-lazy-microdata-assets): variable_metadata.json
+    // (640 KB) hentes først når microdata-språket faktisk er i spill (statx-/
+    // microdata-modus aktiveres, eller en kjøring har microdata-segmenter) —
+    // aldri ved sideoppstart. microdataFunctions (autocomplete) fylles av
+    // _loadPyodideAndM2pyImpl, som uansett henter functions.py.
+    // Memo nullstilles ved feil så neste kall prøver på nytt.
+    let __microdataCatalogPromise = null;
+    function ensureMicrodataCatalog() {
+      if (!__microdataCatalogPromise) {
+        const base = window.location.href.replace(/[^/]+$/, '');
+        __microdataCatalogPromise = fetch(base + 'variable_metadata.json?v=' + (window.M2PY_VERSION || '1'))
+          .then(r => r.ok ? r.json() : null)
+          .then(meta => {
+            if (meta && meta.variables) {
+              microdataCatalog = meta;
+              microdataVariableNames = Object.keys(meta.variables);
+            }
+            return microdataCatalog;
+          })
+          .catch(() => { __microdataCatalogPromise = null; return null; });
+      }
+      return __microdataCatalogPromise;
+    }
 
     // ── Innstillinger ─────────────────────────────────────────────────────────
     const IMPORT_LIMIT_KEY = 'microdata_import_limit';
@@ -3263,7 +3265,10 @@
     const modeRegistry = {
       // (translate-feltene + Oversett-knappen er fjernet 2026-07-10:
       // oversettelse mellom språkene er microdata-repoens funksjon.)
-      microdata: { id: 'microdata', label: 'Microdata', handleTab: microdataHandleTab },
+      microdata: { id: 'microdata', label: 'Microdata', handleTab: microdataHandleTab,
+        // Modusen er ute av menyen i openstat, men nåbar via #options.mode-
+        // direktiv/eksempellasting — prefetch katalogen ved aktivering.
+        onActivate: function () { ensureMicrodataCatalog(); } },
       python:    { id: 'python',    label: 'Python', hlConfig: PY_HL_CFG, handleTab: handlePythonTab,
         runDefault: 'pyodide',
         preRun: async function (script, ctx) {
@@ -3337,7 +3342,10 @@
       statx: { id: 'statx', label: 'Statx',
         hlConfig: STATA_HL_CFG,
         handleTab: microdataHandleTab,
-        onActivate: function () { if (!pdexplorerReady && !pdexplorerLoading) loadPyodideAndM2py().then(loadPdexplorer); },
+        onActivate: function () {
+          ensureMicrodataCatalog();
+          if (!pdexplorerReady && !pdexplorerLoading) loadPyodideAndM2py().then(loadPdexplorer);
+        },
         runSelf: async function (script, ctx) { await runStatxScript(script, ctx); } },
       duckdb: { id: 'duckdb', label: 'SQL - DuckDB', hlConfig: SQL_HL_CFG, handleTab: microdataHandleTab,
         // Fase 1 (2026-07-11): SQL-modus varmer duckdb-wasm, ikke Pyodide —
