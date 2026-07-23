@@ -59,3 +59,36 @@ Deno.test("renderRegistryBlock is compact and byte-stable", () => {
   if (!block.includes("ssb") || !block.includes("søkbar")) throw new Error("mangler innhold:\n" + block);
   if (block.includes("FRED_API_KEY")) throw new Error("auth-detaljer skal ikke i prompt");
 });
+
+Deno.test("parseRegistry validates auth: env xor user, plassering incl. basic", () => {
+  const base = { id: "k", navn: "K", utgiver: "K", tillit: "etablert", tilgang: "rest",
+    base_url: "https://api.k.example/", cors: false };
+  // valid: user-key with basic placement
+  const ok = parseRegistry([{ ...base, auth: { type: "api_key", user: true, plassering: "basic" } }]);
+  assertEquals(ok[0].auth?.user, true);
+  // invalid: both env and user
+  assertThrows(() => parseRegistry([{ ...base, auth: { type: "api_key", env: "X", user: true, plassering: "basic" } }]));
+  // invalid: neither env nor user
+  assertThrows(() => parseRegistry([{ ...base, auth: { type: "api_key", plassering: "basic" } }]));
+  // invalid: bad plassering
+  assertThrows(() => parseRegistry([{ ...base, auth: { type: "api_key", user: true, plassering: "query:" } }]));
+});
+
+Deno.test("renderRegistryBlock marks user-key sources by registration state", () => {
+  const reg = parseRegistry([{
+    id: "kaggle", navn: "Kaggle", utgiver: "Kaggle", tillit: "etablert", tilgang: "rest",
+    base_url: "https://www.kaggle.com/api/v1/", cors: false,
+    auth: { type: "api_key", user: true, plassering: "basic" },
+  }]);
+  const uten = renderRegistryBlock(reg);
+  if (!uten.includes("IKKE registrert")) throw new Error("mangler ikke-registrert-markering:\n" + uten);
+  const med = renderRegistryBlock(reg, ["kaggle"]);
+  if (!med.includes("brukernøkkel (registrert)")) throw new Error("mangler registrert-markering:\n" + med);
+  if (med.includes("IKKE registrert")) throw new Error("registrert kilde feilmarkert:\n" + med);
+});
+
+Deno.test("shipped data/data-sources.json parses against the schema", async () => {
+  const raw = JSON.parse(await Deno.readTextFile(new URL("../../../data/data-sources.json", import.meta.url)));
+  const reg = parseRegistry(raw);
+  if (reg.length < 11) throw new Error("uventet få kilder: " + reg.length);
+});

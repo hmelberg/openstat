@@ -4,8 +4,9 @@
 
 export interface SourceAuth {
   type: "api_key";
-  env: string;        // Netlify env var name holding the key
-  plassering: string; // "query:<param>" | "header:<name>"
+  env?: string;       // Netlify env var (site-nøkkel) — gjensidig utelukkende med user
+  user?: boolean;     // true = brukernøkkel via X-Source-Key (js/keys.js), injiseres av /api/hent
+  plassering: string; // "query:<param>" | "header:<name>" | "basic"
 }
 
 export interface DataSource {
@@ -21,6 +22,7 @@ export interface DataSource {
   oppskrift?: Record<string, string>;
   sporrings_url_mal?: string;
   auth?: SourceAuth;
+  nokkel_hint?: string;
   quirks?: string;
 }
 
@@ -40,6 +42,18 @@ export function parseRegistry(json: unknown): DataSource[] {
     if (!TILGANG.has(e.tilgang as string)) throw new Error(`kilde ${e.id}: ukjent tilgang '${e.tilgang}'`);
     if (typeof e.cors !== "boolean") throw new Error(`kilde ${e.id}: 'cors' må være boolsk`);
     new URL(e.base_url as string); // throws on invalid
+    if (e.auth !== undefined) {
+      const a = e.auth as Record<string, unknown>;
+      if (a.type !== "api_key") throw new Error(`kilde ${e.id}: ukjent auth.type '${a.type}'`);
+      const plass = a.plassering;
+      const okPlass = typeof plass === "string" &&
+        (/^(query|header):.+$/.test(plass) || plass === "basic");
+      if (!okPlass) throw new Error(`kilde ${e.id}: ugyldig auth.plassering '${plass}'`);
+      const hasEnv = typeof a.env === "string" && !!(a.env as string).trim();
+      if (hasEnv === (a.user === true)) {
+        throw new Error(`kilde ${e.id}: auth må ha nøyaktig én av env eller user:true`);
+      }
+    }
     return e as unknown as DataSource;
   });
 }
@@ -71,12 +85,20 @@ export function sourceForUrl(reg: DataSource[], url: string): DataSource | null 
   }) ?? null;
 }
 
-/** Compact registry rendering for the cached system prefix. No auth details. */
-export function renderRegistryBlock(reg: DataSource[]): string {
+/** Compact registry rendering for the cached system prefix. No auth secrets.
+ *  userKeys = registrerte brukernøkkel-kilde-ider (fra available_keys) — bare
+ *  ider, aldri verdier; styrer om en user-auth-kilde framstår som brukbar. */
+export function renderRegistryBlock(reg: DataSource[], userKeys: string[] = []): string {
   const lines = reg.map((s) => {
     const bits = [`${s.tilgang}, base ${s.base_url}`];
     if (s.sok_endepunkt) bits.push("søkbar via search_catalog");
-    if (s.auth) bits.push("krever nøkkel → hentes alltid via /api/hent");
+    if (s.auth?.user) {
+      bits.push(userKeys.includes(s.id)
+        ? "krever brukernøkkel (registrert) → hentes alltid via /api/hent"
+        : "krever brukernøkkel — IKKE registrert: ikke bygg svaret på denne kilden; nevn i så fall at nøkkel kan registreres i AI-innstillingene");
+    } else if (s.auth) {
+      bits.push("krever nøkkel → hentes alltid via /api/hent");
+    }
     if (!s.cors) bits.push("ikke CORS → /api/hent");
     if (s.join_nokler?.length) bits.push(`join: ${s.join_nokler.join(", ")}`);
     const quirks = s.quirks ? ` — ${s.quirks}` : "";
