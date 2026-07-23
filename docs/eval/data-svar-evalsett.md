@@ -28,6 +28,8 @@ Kriterier (alle må holde):
 | 13 | python | Hvordan har arbeidsledigheten i Sverige utviklet seg siste 10 år? | scb (search_catalog) |
 | 14 | r | Sammenlign befolkningsveksten i Finland og Norge siden 2000. | statfin + ssb (flerkilde-join på år) |
 | 15 | python | Hvordan har folketallet i Danmark utviklet seg per kvartal siden 2020? | dst |
+| 16 | python | (nivå 2-leverandør, manuell m/ OpenAI-nøkkel) Hvordan har arbeidsledigheten i Sverige utviklet seg siste 10 år? — uten websøk skal svaret bygge på search_catalog/probe; foreslåtte modellkunnskaps-URL-er skal være probet eller ærlig avvist | scb (registerverktøy, MEMORY_URLS-regelen) |
+| 17 | python | (uten registrert Kaggle-nøkkel) Finn et Kaggle-datasett om Titanic og vis overlevelsesrate etter kjønn. | kaggle (valgfri nøkkel — anonym henting skal fungere for åpne datasett) |
 
 Resultatlogg (dato, #, PASS/FAIL, notat) føres nederst; feilmønstre omsettes
 til promptregler i _lib/data-svar-prompt.ts eller quirks i data-sources.json.
