@@ -8,8 +8,12 @@ import { tableMetadata } from "./_lib/tools/table-metadata.ts";
 import { probeUrl } from "./_lib/tools/probe.ts";
 import { injectBeforeDone } from "./_lib/sse-util.ts";
 import {
-  buildDataSvarSystem, coerceDataMode, progressLabel, questionTurn, repairTurn, TOOL_DEFS,
+  buildDataSvarSystem, CLIENT_TOOL_DEFS, coerceDataMode, progressLabel, questionTurn, repairTurn, TOOL_DEFS,
 } from "./_lib/data-svar-prompt.ts";
+import { parseProviderConfig } from "./_lib/providers/config.ts";
+import { runProviderAgenticStream } from "./_lib/providers/agentic.ts";
+import { makeOpenAiCompatTurn } from "./_lib/providers/openai-compat.ts";
+import { makeOpenAiResponsesTurn } from "./_lib/providers/openai-responses.ts";
 
 interface RepairBody { script: string; error: string; round: number; }
 interface ResumeBody { state?: AgenticResumeState; probed?: unknown; }
@@ -18,6 +22,7 @@ interface RequestBody {
   mode?: string;
   script?: string;
   available_keys?: unknown;
+  provider?: unknown;
   repair?: RepairBody;
   resume?: ResumeBody;
 }
@@ -33,6 +38,8 @@ function validResumeState(s: AgenticResumeState | undefined): s is AgenticResume
   return !!s && Array.isArray(s.messages) && s.messages.length >= 1 && s.messages.length <= 400 &&
     Number.isInteger(s.turn) && s.turn >= 1 && s.turn <= 64 &&
     Number.isInteger(s.clientCalls) && s.clientCalls >= 0 && s.clientCalls <= 200 &&
+    (s.prevResponseId === undefined ||
+      (typeof s.prevResponseId === "string" && s.prevResponseId.length <= 200)) &&
     typeof s.usage === "object" && s.usage !== null;
 }
 
@@ -67,9 +74,14 @@ export default async (request: Request): Promise<Response> => {
     };
   }
 
+  const provider = parseProviderConfig(body.provider, request);
+  if (provider && "error" in provider) return provider.error;
+
   const byokKey = extractByokKey(request);
-  const apiKey = byokKey ?? Deno.env.get("ANTHROPIC_API_KEY");
-  const model = Deno.env.get("DATA_SVAR_MODEL") ?? Deno.env.get("ANTHROPIC_MODEL") ?? "claude-sonnet-4-6";
+  const apiKey = provider ? provider.key : (byokKey ?? Deno.env.get("ANTHROPIC_API_KEY"));
+  const model = provider
+    ? provider.model
+    : (Deno.env.get("DATA_SVAR_MODEL") ?? Deno.env.get("ANTHROPIC_MODEL") ?? "claude-sonnet-4-6");
   if (!apiKey) {
     console.error("ANTHROPIC_API_KEY is not set");
     return new Response("Server configuration error", { status: 500 });
@@ -91,7 +103,8 @@ export default async (request: Request): Promise<Response> => {
       .filter((k): k is string => typeof k === "string" && /^[a-z0-9_-]{1,32}$/.test(k))
       .slice(0, 20)
     : [];
-  const system = buildDataSvarSystem(mode, renderRegistryBlock(registry, availableKeys));
+  const memoryUrls = provider ? provider.webSearch === "none" : false;
+  const system = buildDataSvarSystem(mode, renderRegistryBlock(registry, availableKeys), { memoryUrls });
 
   // Deterministic source manifest: collected from probe calls, not model text.
   // On resume, re-seeded from the previous invocations' manifest so the final
@@ -125,17 +138,28 @@ export default async (request: Request): Promise<Response> => {
     ? repairTurn(question, repair.script, repair.error, repair.round)
     : questionTurn(question, body.script);
 
-  const inner = runAgenticStream({
-    apiKey, model, system, userContent,
-    tools: TOOL_DEFS,
-    executeTool,
-    progressLabel,
-    cacheTtl: "1h",
+  const commonOpts = {
+    system, userContent,
+    executeTool, progressLabel,
     maxTokens: 8192,
     maxClientToolCalls: 12,
     resume: resumeState,
     continueExtra: () => ({ probed }),
-  });
+  };
+  let inner: ReadableStream<Uint8Array>;
+  if (provider && provider.type === "openai-compat") {
+    inner = runProviderAgenticStream({ ...commonOpts, runTurn: makeOpenAiCompatTurn(provider), tools: CLIENT_TOOL_DEFS });
+  } else if (provider && provider.type === "openai-responses") {
+    inner = runProviderAgenticStream({ ...commonOpts, runTurn: makeOpenAiResponsesTurn(provider), tools: CLIENT_TOOL_DEFS });
+  } else {
+    inner = runAgenticStream({
+      ...commonOpts,
+      apiKey, model,
+      tools: TOOL_DEFS,
+      cacheTtl: "1h",
+      apiBase: provider?.type === "anthropic-compat" ? provider.baseUrl : undefined,
+    });
+  }
 
   const stream = injectBeforeDone(inner, () =>
     probed.length ? { type: "sources", sources: probed } : null);
