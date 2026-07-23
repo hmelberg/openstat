@@ -898,7 +898,7 @@
       if (mdLive) { body.style.fontFamily = ''; body.style.whiteSpace = ''; }
 
       try {
-        const anthropicKey = localStorage.getItem('md_anthropic_key') || '';
+        const anthropicKey = (window.Keys && window.Keys.get('anthropic')) || '';
         if (!anthropicKey) {
           status.textContent = t('Du må ha lagt inn egen Anthropic-nøkkel (AI-innstillinger) for å bruke dataminimering.');
           cancelBtn.disabled = true;
@@ -1990,7 +1990,7 @@
 
       window.mdHasStoredSecret = function () {
         try {
-          if (localStorage.getItem('md_anthropic_key')) return true;
+          if (window.Keys && window.Keys.get('anthropic')) return true;
           if (localStorage.getItem('m2py_github_pat')) return true;
           var p = localStorage.getItem('m2py_github_profiles');
           if (p && /"pat"\s*:\s*"[^"]/.test(p)) return true;
@@ -2270,7 +2270,7 @@
         alert(t('Editor er tom. Skriv et script først.'));
         return;
       }
-      if (!localStorage.getItem('md_anthropic_key')) {
+      if (!(window.Keys && window.Keys.get('anthropic'))) {
         alert(t('Du må ha lagt inn egen Anthropic-nøkkel (AI-innstillinger) for å bruke dataminimering.'));
         return;
       }
@@ -2665,10 +2665,10 @@
       return 10000;
     }
 
-    // BYOK-nøkkel (samme localStorage-nøkkel som ai-chat.js) — brukes av
+    // BYOK-nøkkel (via Keys-API fra js/keys.js) — brukes av
     // data-loaderen mot /api/hent når brukeren ikke har en lagret nøkkel.
     function getAnthropicKey() {
-      return localStorage.getItem('md_anthropic_key') || null;
+      return (window.Keys && window.Keys.get('anthropic')) || null;
     }
 
     // key(ask): modal passordfelt; nøkkelen caches KUN i minnet for økten.
