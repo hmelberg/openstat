@@ -1,3 +1,19 @@
+/** Wrap a completed (non-streamed) answer as the standard SSE event pair, so
+ *  provider paths that buffer the whole reply reuse the client's stream path. */
+export function singleTextStream(
+  text: string,
+  usage: Record<string, number>,
+): ReadableStream<Uint8Array> {
+  const enc = new TextEncoder();
+  return new ReadableStream({
+    start(c) {
+      c.enqueue(enc.encode(`data: ${JSON.stringify({ type: "text", text })}\n\n`));
+      c.enqueue(enc.encode(`data: ${JSON.stringify({ type: "done", ...usage })}\n\n`));
+      c.close();
+    },
+  });
+}
+
 // SSE pass-through that injects one synthetic event immediately before the
 // `done` event (used for the deterministic source manifest in data-svar).
 export function injectBeforeDone(

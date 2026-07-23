@@ -1,12 +1,17 @@
 import { detectLanguage } from "./_lib/parse-script-context.ts";
 import { streamAnthropic } from "./_lib/anthropic.ts";
 import { extractByokKey, gate, upstreamErrorResponse } from "./_lib/auth.ts";
+import { parseProviderConfig } from "./_lib/providers/config.ts";
+import { messageOpenAiCompat } from "./_lib/providers/openai-compat.ts";
+import { messageOpenAiResponses } from "./_lib/providers/openai-responses.ts";
+import { singleTextStream } from "./_lib/sse-util.ts";
 
 interface RequestBody {
   script?: string;
   output: string;
   språk?: "auto" | "microdata" | "python" | "r";
   ui_lang?: "no" | "en";   // svarspråk (UI-språket); default norsk
+  provider?: unknown;
 }
 
 // Inlined from ./prompts/tolk-resultat.md (Deno Deploy bundler tar ikke .md i runtime;
@@ -87,10 +92,13 @@ export default async (request: Request): Promise<Response> => {
     return new Response("Missing output", { status: 400 });
   }
 
+  const provider = parseProviderConfig(body.provider, request);
+  if (provider && "error" in provider) return provider.error;
+
   const byokKey = extractByokKey(request);
   const apiKey = byokKey ?? Deno.env.get("ANTHROPIC_API_KEY");
   const model = Deno.env.get("ANTHROPIC_MODEL") ?? "claude-sonnet-4-6";
-  if (!apiKey) {
+  if (!provider && !apiKey) {
     console.error("ANTHROPIC_API_KEY is not set");
     return new Response("Server configuration error", { status: 500 });
   }
@@ -115,14 +123,24 @@ section headings as: «Hva analysen gjorde» → «What the analysis did»,
     .replaceAll("{{OUTPUT}}", () => output);
 
   try {
-    const stream = await streamAnthropic({
-      apiKey,
-      model,
-      prompt,
-      maxTokens: 1800,
-      system: TOLK_SYSTEM,
-      cacheTtl: "1h",
-    });
+    let stream: ReadableStream<Uint8Array>;
+    if (provider && provider.type === "openai-compat") {
+      const r = await messageOpenAiCompat(provider, { system: TOLK_SYSTEM, prompt, maxTokens: 1800 });
+      stream = singleTextStream(r.text, r.usage);
+    } else if (provider && provider.type === "openai-responses") {
+      const r = await messageOpenAiResponses(provider, { system: TOLK_SYSTEM, prompt, maxTokens: 1800 });
+      stream = singleTextStream(r.text, r.usage);
+    } else {
+      stream = await streamAnthropic({
+        apiKey: provider ? provider.key : apiKey!,
+        model: provider ? provider.model : model,
+        prompt,
+        maxTokens: 1800,
+        system: TOLK_SYSTEM,
+        cacheTtl: "1h",
+        apiBase: provider?.type === "anthropic-compat" ? provider.baseUrl : undefined,
+      });
+    }
     return new Response(stream, {
       headers: {
         "Content-Type": "text/event-stream",

@@ -1,5 +1,5 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { injectBeforeDone } from "./sse-util.ts";
+import { injectBeforeDone, singleTextStream } from "./sse-util.ts";
 
 function sse(events: Record<string, unknown>[]): ReadableStream<Uint8Array> {
   const enc = new TextEncoder();
@@ -29,4 +29,13 @@ Deno.test("injectBeforeDone: null event and no done-event pass through", async (
   assertEquals(a.map((e) => e.type), ["done"]);
   const b = await collect(injectBeforeDone(sse([{ type: "error", message: "x" }]), () => ({ type: "sources" })));
   assertEquals(b.map((e) => e.type), ["error"]);
+});
+
+Deno.test("singleTextStream: ett text-event + done med usage", async () => {
+  const events = (await new Response(singleTextStream("Hei.", { inputTokens: 3, outputTokens: 1 })).text())
+    .split("\n\n").filter(Boolean).map((l) => JSON.parse(l.replace(/^data: /, "")));
+  assertEquals(events, [
+    { type: "text", text: "Hei." },
+    { type: "done", inputTokens: 3, outputTokens: 1 },
+  ]);
 });
