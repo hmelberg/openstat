@@ -6,7 +6,9 @@ landed. Decisions: level 2 includes data-svar WITHOUT web search
 (registry tools + memory-URLs-must-probe); tool-calling is REQUIRED for
 level-2 data-svar (no two-shot fallback for non-tool models); ONE global
 provider config (no per-function selection, no multi-profiles); optional
-source keys (anonymous Kaggle) folded in as Part B.)
+source keys (anonymous Kaggle) folded in as Part B. AMENDED same day on
+Hans' call: OpenAI Responses API with native `web_search` included as a
+third provider type (A6) rather than deferred to roadmap.)
 
 ## Motivation
 
@@ -39,7 +41,8 @@ that without weakening keyed sources.
 The AI settings dialog gains an «AI-leverandør» section:
 
 - **Type:** `anthropic` (default — exactly today's behavior) |
-  `anthropic-compat` (tier 1) | `openai-compat` (tier 2).
+  `anthropic-compat` (tier 1) | `openai-compat` (tier 2) |
+  `openai-responses` (tier 2 with native web search — A6).
 - **Base-URL** and **modellnavn** fields (shown for the two custom types).
 - **Nøkkel** stored in `md_keys` under type `llm` (via `js/keys.js`);
   the non-secret config `{type, base_url, model}` in a new localStorage
@@ -119,11 +122,13 @@ idle timeouts).
   rule generalized to memory URLs). The SEARCH_HINTS meta-catalogs
   (awesome-public-datasets etc.) become probe-targets the model can try
   from memory rather than web_search starting points.
-- Provider config carries a capability field: `webSearch: "none"` is the
-  only value implemented now. The field exists so a future
-  `webSearch: "native"` + per-provider search adapter (OpenAI
-  web_search, Gemini grounding) can slot into the tool-list assembly
-  without redesign. Reserved, not built (YAGNI on the adapters).
+- Provider config carries a capability field derived from the type:
+  `webSearch: "none"` (openai-compat) or `"native"` (anthropic paths and
+  openai-responses). The tool-list assembly keys off this field, so a
+  future Gemini-grounding adapter slots in without redesign. The tier-2
+  memory-URL prompt block is included exactly when `webSearch` is
+  `"none"` — an openai-responses provider gets the standard web-search
+  workflow instead.
 - Tool-calling is REQUIRED: if a tier-2 provider response to the first
   turn contains no tool-call capability signal (e.g. the API rejects the
   `tools` param), data-svar fails with a clear message
@@ -133,7 +138,8 @@ idle timeouts).
 ### A5. Function coverage
 
 - **Tier 1 (anthropic-compat):** all AI functions, unchanged behavior.
-- **Tier 2 (openai-compat):** `data-svar` (Web mode) and `tolk-resultat`.
+- **Tier 2 (openai-compat and openai-responses):** `data-svar` (Web
+  mode) and `tolk-resultat`.
 - **Anthropic-only for now:** `kode-svar`/`kode-svar-v2` and `dm-vurder`
   (deeply tied to the streamed v2 flow; the value of provider choice is
   in Web mode). The UI must say this: with a tier-2 provider active, the
@@ -141,6 +147,37 @@ idle timeouts).
   failing opaquely — they keep using an Anthropic key if one is
   registered (`md_keys.anthropic`), i.e. provider config does NOT
   disable Anthropic-backed features when both are configured.
+
+### A6. OpenAI Responses API with native web search
+
+A third provider type, `openai-responses`, gives OpenAI users near-full
+data-svar parity (added to scope 2026-07-23 after Hans confirmed the
+Responses API ships both streaming and a hosted `web_search` tool; the
+generic chat-completions tier cannot assume either, which is why both
+tiers exist).
+
+- **Endpoint:** non-streaming `POST {base_url}/responses` (default
+  base_url `https://api.openai.com/v1`). Non-streaming is deliberate for
+  v1 even though the API can stream — it reuses tier 2's hop model and
+  the edge-generated SSE progress unchanged; provider-side streaming is
+  a later optimization, not a capability gap.
+- **Tools:** the three client tools in Responses function-tool format
+  (flat `{type:"function", name, parameters}`) PLUS the hosted
+  `{type: "web_search"}`. There is no `web_fetch` equivalent: the prompt
+  for this type says search-result snippets/citations may be transcribed
+  per the existing INLINE ladder (level 2, marked «transkribert»), and
+  the probe-before-use rule stands unchanged for every URL regardless of
+  how it was found.
+- **Continuation state:** the Responses API is stateful; each hop's
+  `previous_response_id` is carried in the existing resume state (a
+  string — far smaller than tier 2's message-array state), and each new
+  request sends only the pending `function_call_output` items. Requires
+  the provider to support `store` (OpenAI's default); if a gateway
+  rejects stored state, the run fails with a clear message rather than
+  silently degrading («leverandøren støtter ikke lagret samtaletilstand
+  (store) — bruk typen openai-kompatibel i stedet»).
+- **Cost note surfaced in UI help text:** hosted web search bills extra
+  on the user's OpenAI account, same as their own usage elsewhere.
 
 ## Part B — Optional source keys (anonymous Kaggle)
 
@@ -182,6 +219,10 @@ idle timeouts).
 - `_lib/providers/openai-compat.test.ts`: tool-def and message
   translation both directions, tool-call extraction, non-streaming turn
   against a fake fetch, key never in thrown/returned errors.
+- `_lib/providers/openai-responses.test.ts`: function-tool format,
+  web_search tool included, `previous_response_id` round-trip through
+  resume state, function_call_output-only follow-up requests, clear
+  error when the API rejects `store`/`tools`.
 - `auth.ts` gate tests: custom-provider config accepted as BYOK; SSRF
   rejection of internal base_urls; oversized key/model rejected.
 - `data-svar-prompt` tests: tier-2 block present only for tier 2;
@@ -197,8 +238,11 @@ idle timeouts).
 
 ## Out of scope / roadmap
 
-- Native search adapters (OpenAI web_search tool, Gemini grounding) —
-  the `webSearch` capability field reserves the slot.
+- Gemini grounding (and other providers' native search) — the
+  `webSearch` capability field + the openai-responses adapter establish
+  the pattern; each further provider is its own small adapter.
+- Provider-side streaming for openai-responses (v1 is non-streaming per
+  hop by design — see A6).
 - Tier 2 for `kode-svar`/`kode-svar-v2`/`dm-vurder`.
 - Two-shot no-tool-calling fallback (rejected 2026-07-23 — shrinking
   category of models, whole separate flow).
