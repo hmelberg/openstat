@@ -80,7 +80,9 @@
   // markøren skal ALDRI ende opp bokstavelig i emittert kode; urlExpr()
   // er eneste sted som leser den, og alle emisjonsfunksjoner går via den.
   function urlExpr(url, item, mode) {
-    if (typeof url === 'string' && url.indexOf('__URLVAR__') === 0) return '_url_' + item.alias;
+    if (typeof url === 'string' && url.indexOf('__URLVAR__') === 0) {
+      return mode === 'python' ? '_url_' + item.alias : 'url_' + item.alias + '_';
+    }
     return mode === 'python' ? pyStr(url) : rStr(url);
   }
 
@@ -172,7 +174,7 @@
           if (mode === 'python') {
             out.lines.push('_url_' + item.alias + ' = ' + pyStr(url) + ' + "' + (url.indexOf('?') >= 0 ? '&' : '?') + param + '=" + ' + cname);
           } else {
-            out.lines.push('_url_' + item.alias + ' <- paste0(' + rStr(url) + ', "' + (url.indexOf('?') >= 0 ? '&' : '?') + param + '=", ' + cname + ')');
+            out.lines.push('url_' + item.alias + '_ <- paste0(' + rStr(url) + ', "' + (url.indexOf('?') >= 0 ? '&' : '?') + param + '=", ' + cname + ')');
           }
           url = '__URLVAR__' + item.alias;   // marker: emisjonen bruker variabelen (urlExpr)
         } else {
@@ -191,11 +193,11 @@
   function emitR(item, url, body, fmt, out) {
     if (body !== null) {
       out.lines.push('# krever httr (+ jsonlite for JSON-svar):');
-      out.lines.push('_resp <- httr::POST(' + urlExpr(url, item, 'r') + ', body = ' + rStr(body) + ', encode = "raw", httr::content_type_json())');
+      out.lines.push('resp_ <- httr::POST(' + urlExpr(url, item, 'r') + ', body = ' + rStr(body) + ', encode = "raw", httr::content_type_json())');
       if (fmt === 'json') {
-        out.lines.push(item.alias + ' <- httr::content(_resp, as = "parsed")');
+        out.lines.push(item.alias + ' <- httr::content(resp_, as = "parsed")');
       } else {
-        out.lines.push(item.alias + ' <- read.csv(text = httr::content(_resp, as = "text"))  # NB: sjekk skilletegn (sep=";")');
+        out.lines.push(item.alias + ' <- read.csv(text = httr::content(resp_, as = "text"))  # NB: sjekk skilletegn (sep=";")');
       }
       return;
     }
@@ -218,10 +220,12 @@
     var parsed = DD.parse(script);
     if (parsed.errors.length) throw new Error('Direktivfeil: ' + parsed.errors.join('; '));
     if (!parsed.loads.length) {
-      // Ingen direktiver i det hele tatt → byte-identisk passthrough (planens
-      // garanti). Connect-linjer ER direktiver og kan bære key(<literal>) —
-      // de linje-skopes gjennom samme scrub selv uten loads.
-      if (!parsed.connects.length) return { code: script, warnings: [] };
+      // Ingen (parsebare) loads → ingen emisjon å gjøre, men linjer som SER UT
+      // som direktiver (også malformerte, f.eks. «# load … key(secret)» uten
+      // «as») kan likevel bære nøkkelliteraler. Kjør derfor alltid den
+      // linje-skopede scrubben — output blir byte-identisk når ingen linje
+      // matcher direktivformen (DIRECTIVE_LINE_RE), så passthrough-testen
+      // holder uendret.
       var st0 = { masked: false };
       var passthrough = String(script).split('\n').map(function (l) {
         return scrubDirectiveLine(l, DD, st0);

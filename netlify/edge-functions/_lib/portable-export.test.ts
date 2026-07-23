@@ -210,3 +210,29 @@ Deno.test("anvil-kilde og exec(remote) → ikke-portabel kommentarblokk, resten 
   if (!out.code.includes("print('etterpå')")) throw new Error("resten av scriptet mangler");
   if (!out.warnings.length) throw new Error("mangler warning");
 });
+
+Deno.test("R: POST- og nøkkel-temporaries er gyldige R-navn (starter aldri med underscore)", () => {
+  const REG = [{ id: "fred", navn: "F", utgiver: "F", tillit: "etablert", tilgang: "rest",
+    base_url: "https://api.stlouisfed.org/fred/", cors: false,
+    auth: { type: "api_key", env: "FRED_API_KEY", plassering: "query:api_key" } }];
+  const inner = "https://x.example/t.px";
+  const body = JSON.stringify({ q: 1 });
+  const s = "# connect fred\n# load fred/series?x=1 as u, kind(json)\n# load /api/hent?url=" + encodeURIComponent(inner) + "&body=" + encodeURIComponent(body) + " as p\n";
+  const out = PE.transpile(s, "r", REG);
+  const targets = out.code.split("\n")
+    .map((l: string) => (/^\s*([A-Za-z_.][\w.]*)\s*<-/.exec(l) || [])[1])
+    .filter(Boolean);
+  for (const t of targets) {
+    if (/^_/.test(t)) throw new Error("ugyldig R-navn emittert: " + t + "\n" + out.code);
+  }
+  if (!out.code.includes("FRED_API_KEY <- ")) throw new Error("mangler R-plassholder");
+  if (!out.code.includes("url_u_")) throw new Error("nøkkel-URL-variabel mangler/feil navn:\n" + out.code);
+});
+
+Deno.test("fast-path: malformet direktiv m/ key-literal scrubbes også uten parsebare loads", () => {
+  const s = "# load https://x.example/secret.csv key(supersecret123)\nprint('hei')\n";
+  const out = PE.transpile(s, "python", []);
+  if (out.code.includes("supersecret123")) throw new Error("nøkkelliteral lekket via fast-path");
+  if (!out.code.includes("key(***)")) throw new Error("maskering mangler");
+  if (!out.code.includes("print('hei')")) throw new Error("resten mangler");
+});
