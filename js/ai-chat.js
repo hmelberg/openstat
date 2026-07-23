@@ -24,7 +24,7 @@
       // microdata). Surfaced only via its own send button
       // (syncWebBtnVisibility() shows/hides #aiSendWebBtn).
       function webModeEligible() {
-        const hasByok = !!state.anthropicKey;
+        const hasByok = !!state.anthropicKey || customProviderReady();
         const mode = (typeof activeEditorMode !== 'undefined' && activeEditorMode) ? activeEditorMode : 'microdata';
         return hasByok && (mode === 'python' || mode === 'r' || mode === 'duckdb');
       }
@@ -830,7 +830,7 @@
       // Tolk resultater: strøm en tolkning av output (kommandoer + resultater)
       // inn i en assistent-boble. Speiler runFastQuery, men mot /api/tolk-resultat.
       async function runInterpretQuery(payload, thinkingNode, signal) {
-        const headers = edgeAuthHeaders();
+        const headers = providerAuthHeaders();
         const resp = await fetch('/api/tolk-resultat', {
           method: 'POST',
           headers,
@@ -839,6 +839,7 @@
             output: payload.output || '',
             språk: payload.lang || 'auto',
             ui_lang: (window.M2PY_LANG === 'en') ? 'en' : 'no',
+            provider: providerConfig() || undefined,
           }),
           signal,
         });
@@ -954,7 +955,9 @@
         bubble.className = 'ai-bubble';
         thinkingNode.appendChild(bubble);
 
-        if (!state.anthropicKey) throw new Error(T('Web-modus krever egen Anthropic-nøkkel.'));
+        if (!state.anthropicKey && !customProviderReady()) {
+          throw new Error(T('Web-modus krever egen Anthropic-nøkkel eller en konfigurert AI-leverandør.'));
+        }
         const mode = (typeof activeEditorMode !== 'undefined' && activeEditorMode) ? activeEditorMode : 'python';
 
         // Continuation protocol: Netlify caps CPU per edge invocation, so the
@@ -970,7 +973,7 @@
           if (hop > 40) throw new Error(T('Avbrutt: svaret ble ikke ferdig etter 40 fortsettelses-runder.'));
           const resp = await fetch('/api/data-svar', {
             method: 'POST',
-            headers: edgeAuthHeaders(),
+            headers: providerAuthHeaders(),
             body: JSON.stringify({
               question,
               mode,
@@ -978,10 +981,13 @@
               script: scrubScript((dom.scriptInput && dom.scriptInput.value) || ''),
               repair: repair ? { script: repair.script, error: repair.error, round } : undefined,
               resume: resume || undefined,
+              provider: providerConfig() || undefined,
             }),
           });
           if (resp.status === 401) {
-            throw new Error(T('Ugyldig Anthropic-nøkkel. Sjekk nøkkelen i AI-innstillingene.'));
+            throw new Error(customProviderReady()
+              ? T('AI-leverandøren avviste nøkkelen (401) — sjekk i AI-innstillingene.')
+              : T('Ugyldig Anthropic-nøkkel. Sjekk nøkkelen i AI-innstillingene.'));
           }
           if (resp.status === 403) throw new Error(T('Web-modus krever egen Anthropic-nøkkel.'));
           if (!resp.ok || !resp.body) throw new Error('HTTP ' + resp.status + ' ' + (await resp.text()));
@@ -1588,6 +1594,15 @@
         if (!p || !p.type || p.type === 'anthropic') return null;
         if (!p.base_url || !p.model) return null;
         return { type: p.type, base_url: p.base_url, model: p.model };
+      }
+      function customProviderReady() {
+        return !!(providerConfig() && window.Keys && window.Keys.get('llm'));
+      }
+      function providerAuthHeaders() {
+        if (customProviderReady()) {
+          return { 'X-Llm-Key': window.Keys.get('llm'), 'Content-Type': 'application/json' };
+        }
+        return edgeAuthHeaders();
       }
       function syncProviderFields() {
         if (!dom.aiCfgProviderType || !dom.aiCfgProviderFields) return;

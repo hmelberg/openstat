@@ -70,7 +70,7 @@
   <h2>2. What happens when you use the AI assistant?</h2>
   <p>The AI features (code suggestions, interpreting results, data-minimization assessment, web search) require you to paste your own Anthropic API key under AI settings. When you do:</p>
   <ul>
-    <li><strong>The key</strong> is stored only locally in your browser (<code>localStorage</code>) and sent as a header (<code>X-Anthropic-Key</code>) to our server, which forwards it directly to Anthropic for that one request. We do not store or log the key.</li>
+    <li><strong>The key</strong> is stored only locally in your browser (<code>localStorage</code>) and sent as a header (<code>X-Anthropic-Key</code>) to our server, which forwards it directly to Anthropic for that one request. We do not store or log the key. If you have chosen a custom AI provider in the settings, requests go to the provider you configured instead.</li>
     <li><strong>The question and script excerpt you send</strong> is forwarded to Anthropic to generate a response. We do not store the content of these requests on our own server.</li>
     <li><strong>Your IP address</strong> is used briefly for simple rate limiting to prevent abuse, and is not retained.</li>
     <li>Usage (tokens/cost) is billed to your own Anthropic account — we do not see or store payment information.</li>

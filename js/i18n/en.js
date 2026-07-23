@@ -706,6 +706,8 @@ window.M2PY_I18N.en = {
   "Du må være logget inn eller ha lagt inn egen Anthropic-nøkkel (AI-innstillinger) for å bruke dataminimering.": "You must be logged in or have entered your own Anthropic key (AI settings) to use data minimisation.",
   "Web-modus krever innlogging eller egen Anthropic-nøkkel.": "Web mode requires login or your own Anthropic key.",
   "Web-modus krever admin eller egen Anthropic-nøkkel.": "Web mode requires admin or your own Anthropic key.",
+  "Web-modus krever egen Anthropic-nøkkel eller en konfigurert AI-leverandør.": "Web mode requires your own Anthropic key or a configured AI provider.",
+  "AI-leverandøren avviste nøkkelen (401) — sjekk i AI-innstillingene.": "The AI provider rejected the key (401) — check it in the AI settings.",
 
   "Egen Anthropic-nøkkel er lagret i denne nettleseren. Den brukes bare når du er logget ut.": "Your own Anthropic key is stored in this browser. It is only used while you are logged out.",
   "Fjern nøkkel": "Remove key",
