@@ -128,7 +128,7 @@
     "cors": true,
     "join_nokler": ["TID (år/kvartal)", "OMRÅDE"],
     "sporrings_url_mal": "https://api.statbank.dk/v1/data/{tabell}/CSV?{var}={koder}",
-    "quirks": "Verifisert 2026-07-23: GET /v1/data/{tabell}/CSV med variabelfiltre som query-parametre (f.eks. ?Tid=2024K1) gir CSV med ; som skilletegn; /v1/tableinfo/{tabell}?format=JSON gir variabler og koder; /v1/tables?format=JSON lister alle tabeller ({id,text,firstPeriod,lastPeriod,variables}) — ingen søkeadapter, men denne listen fungerer som katalog; data-endepunktet sender Access-Control-Allow-Origin: * KUN når request har en Origin-header (vanlig CORS-oppførsel, ikke en feil) — bekreftet med curl -H Origin."
+    "quirks": "Verifisert 2026-07-23: GET /v1/data/{tabell}/CSV med variabelfiltre som query-parametre (f.eks. ?Tid=2024K1) gir CSV med ; som skilletegn; /v1/tableinfo/{tabell}?format=JSON gir variabler og koder; /v1/tables?format=JSON lister alle tabeller ({id,text,firstPeriod,lastPeriod,variables}) — ingen søkeadapter, bruk tabellisten som katalog."
   },
   {
     "id": "fhi", "navn": "Folkehelseinstituttet (statistikk-data.fhi.no åpne API)", "utgiver": "Folkehelseinstituttet",
@@ -137,6 +137,6 @@
     "cors": true,
     "join_nokler": ["AAR (år)", "GEO"],
     "sporrings_url_mal": "https://statistikk-data.fhi.no/api/open/v1/{register}/table/{tabell}/data",
-    "quirks": "Verifisert 2026-07-23: Common/source lister registre (daar, nokkel, npr, msis, sysvak, ...); {reg}/table lister tabeller; {reg}/table/{id}/dimension gir dimensjonskoder+kategorier; uttrekk=POST .../table/{id}/data, body {dimensions:[{code,filter:'item',values:[..]}],response:{format:'json-stat2'}} — alle dimensjoner må filtreres (400 ellers); kun json-stat2 (csv avvist); CORS OK (ACAO:* GET+POST); geo-nivå varierer, stikkprøve (26 nokkel-tabeller) viste kun nasjonalt (GEO=1 kat.), kommunenivå ubekreftet."
+    "quirks": "Verifisert 2026-07-23: Common/source lister registre (daar, nokkel, npr, msis, sysvak, ...); {reg}/table lister tabeller; {reg}/table/{id}/dimension gir dimensjonskoder+kategorier; uttrekk=POST .../table/{id}/data — ALLE dimensjoner må filtreres (400 ellers), kun format 'json-stat2' (csv avvist); geo-nivå ofte kun nasjonalt (GEO=1 kategori i stikkprøve), kommunenivå ubekreftet; POST innpakkes via proxy, verifisert eksempel: # load /api/hent?url=<url-enkodet https://statistikk-data.fhi.no/api/open/v1/daar/table/754/data>&body=<url-enkodet {\"dimensions\":[{\"code\":\"DAAR\",\"filter\":\"item\",\"values\":[\"2020\",\"2021\"]},{\"code\":\"KJONN\",\"filter\":\"item\",\"values\":[\"Total\"]},{\"code\":\"HJERTEKAR\",\"filter\":\"item\",\"values\":[\"Total\"]},{\"code\":\"MEASURE_TYPE\",\"filter\":\"item\",\"values\":[\"RATE_NO\"]}],\"response\":{\"format\":\"json-stat2\"}}> as fhi_raw"
   }
 ]
