@@ -9362,29 +9362,21 @@ await micropip.install('plotly')
       } catch (e) {
         console.warn('plotly install:', e);
       }
-      setStatus(leftStatus, 'Fetching m2py, functions, mockdata modules and variable_metadata...');
+      setStatus(leftStatus, 'Fetching m2py and functions...');
       const base = window.location.href.replace(/[^/]+$/, '');
       const _cb = '?v=' + (window.M2PY_VERSION || '1');
-      const [m2pyResp, funcResp, metaResp, coreResp, realismResp, protectResp, staticSrcResp, notebookProseResp] = await Promise.all([
+      const [m2pyResp, funcResp, protectResp, notebookProseResp] = await Promise.all([
         fetch(base + 'm2py.py' + _cb),
         fetch(base + 'functions.py' + _cb),
-        fetch(base + 'variable_metadata.json' + _cb),
-        fetch(base + 'mockdata_core.py' + _cb),
-        fetch(base + 'mockdata_realism.py' + _cb),
         fetch(base + 'protect.py' + _cb).catch(function() { return { ok: false }; }),
-        fetch(base + 'static_source.py' + _cb).catch(function() { return { ok: false }; }),
         fetch(base + 'notebook_prose.py' + _cb).catch(function() { return { ok: false }; })
       ]);
       if (!m2pyResp.ok || !funcResp.ok) {
         throw new Error('Could not load m2py.py or functions.py. Run from a local server (e.g. python -m http.server) from the microdata folder.');
       }
-      try {
-        microdataCatalog = metaResp.ok ? await metaResp.json() : null;
-        if (microdataCatalog && microdataCatalog.variables)
-          microdataVariableNames = Object.keys(microdataCatalog.variables);
-      } catch (e) {
-        microdataCatalog = null;
-      }
+      // Katalog + mockdata-moduler er lazy (plan 2026-07-23-lazy-microdata-
+      // assets): se ensureMicrodataAssets() — kjørestedene awaiter den når
+      // microdata faktisk er involvert.
       const m2pyCode = await m2pyResp.text();
       const funcCode = await funcResp.text();
       const funcRe = /def\s+(\w+)\s*\(/g;
@@ -9437,26 +9429,6 @@ exec(compile(np_code, "notebook_prose.py", "exec"), sys.modules["notebook_prose"
           window.__notebookProseLoaded = true;
         } catch (e) { console.warn('notebook_prose register:', e); }
       }
-      // Register mockdata_core and mockdata_realism (used by m2py's realism dispatch).
-      // Load order: mockdata_core (no deps) -> mockdata_realism (depends on core) -> m2py.
-      if (coreResp.ok && realismResp.ok) {
-        const coreCode = await coreResp.text();
-        const realismCode = await realismResp.text();
-        setStatus(leftStatus, 'Registering mockdata_core and mockdata_realism...');
-        await pyodide.runPythonAsync(`
-core_code = ${JSON.stringify(coreCode)}
-spec_c = importlib.util.spec_from_loader("mockdata_core", loader=None)
-sys.modules["mockdata_core"] = importlib.util.module_from_spec(spec_c)
-exec(compile(core_code, "mockdata_core.py", "exec"), sys.modules["mockdata_core"].__dict__)
-
-realism_code = ${JSON.stringify(realismCode)}
-spec_r = importlib.util.spec_from_loader("mockdata_realism", loader=None)
-sys.modules["mockdata_realism"] = importlib.util.module_from_spec(spec_r)
-exec(compile(realism_code, "mockdata_realism.py", "exec"), sys.modules["mockdata_realism"].__dict__)
-`);
-      } else {
-        console.warn('mockdata_core.py or mockdata_realism.py not available; realism dispatch in m2py will fall back.');
-      }
       setStatus(leftStatus, 'Registering m2py...');
       await pyodide.runPythonAsync(`
 m2py_code = ${JSON.stringify(m2pyCode)}
@@ -9464,19 +9436,6 @@ spec2 = importlib.util.spec_from_loader("m2py", loader=None)
 sys.modules["m2py"] = importlib.util.module_from_spec(spec2)
 exec(compile(m2py_code, "m2py.py", "exec"), sys.modules["m2py"].__dict__)
 `);
-      // Register static_source (statisk datakilde via DuckDB-WASM). Valgfri.
-      if (staticSrcResp && staticSrcResp.ok) {
-        try {
-          const staticCode = await staticSrcResp.text();
-          await pyodide.runPythonAsync(`
-static_code = ${JSON.stringify(staticCode)}
-spec_s = importlib.util.spec_from_loader("static_source", loader=None)
-sys.modules["static_source"] = importlib.util.module_from_spec(spec_s)
-exec(compile(static_code, "static_source.py", "exec"), sys.modules["static_source"].__dict__)
-`);
-          window.__staticSourceLoaded = true;
-        } catch (e) { console.warn('static_source register:', e); }
-      }
       // Speile avsløringskontroll-flagget fra localStorage til m2py.M2PY_DISCLOSURE_CONTROL,
       // og UI-språket til m2py.M2PY_LANG (styrer motorens meldingsspråk).
       window.__applyDisclosureControlToPython = async function () {
@@ -9507,6 +9466,70 @@ has and "int" in (m.get_microdata_functions() or {})
       try { await ensureM2pyRuntime(pyodide); } catch (e) { console.warn('m2py_runtime load:', e); }
       setStatus(leftStatus, functionsLoaded ? t('Ready. (functions.py lastet.)') : 'Ready.');
       return pyodide;
+    }
+
+    // ── Lazy microdata-assets (plan 2026-07-23-lazy-microdata-assets) ──────
+    // Mockdata-modulene trengs bare når microdata-språket kjører (statx-modus,
+    // microdata-modus/-segmenter). m2py.py degraderer pent uten dem (realism-
+    // dispatch faller tilbake), og getInterpreterCorePython sjekker selv
+    // `'static_source' in _sys.modules` — så rene python/duckdb-kjøringer er
+    // upåvirket av at modulene mangler. Registreringskoden er flyttet uendret
+    // fra _loadPyodideAndM2pyImpl (pluss egne sys/importlib-imports: snuttene
+    // kjører nå frittstående, ikke etter functions-registreringens imports).
+    let __mockdataModulesPromise = null;
+    function ensureMockdataModules(py) {
+      if (!__mockdataModulesPromise) {
+        __mockdataModulesPromise = _ensureMockdataModulesImpl(py).catch(function (e) {
+          __mockdataModulesPromise = null;  // tillat retry etter feil
+          throw e;
+        });
+      }
+      return __mockdataModulesPromise;
+    }
+    async function _ensureMockdataModulesImpl(py) {
+      const base = window.location.href.replace(/[^/]+$/, '');
+      const _cb = '?v=' + (window.M2PY_VERSION || '1');
+      const [coreResp, realismResp, staticSrcResp] = await Promise.all([
+        fetch(base + 'mockdata_core.py' + _cb).catch(function () { return { ok: false }; }),
+        fetch(base + 'mockdata_realism.py' + _cb).catch(function () { return { ok: false }; }),
+        fetch(base + 'static_source.py' + _cb).catch(function () { return { ok: false }; })
+      ]);
+      // Load order: mockdata_core (no deps) -> mockdata_realism (depends on core).
+      if (coreResp.ok && realismResp.ok) {
+        const coreCode = await coreResp.text();
+        const realismCode = await realismResp.text();
+        await py.runPythonAsync(`
+import sys, importlib.util
+core_code = ${JSON.stringify(coreCode)}
+spec_c = importlib.util.spec_from_loader("mockdata_core", loader=None)
+sys.modules["mockdata_core"] = importlib.util.module_from_spec(spec_c)
+exec(compile(core_code, "mockdata_core.py", "exec"), sys.modules["mockdata_core"].__dict__)
+
+realism_code = ${JSON.stringify(realismCode)}
+spec_r = importlib.util.spec_from_loader("mockdata_realism", loader=None)
+sys.modules["mockdata_realism"] = importlib.util.module_from_spec(spec_r)
+exec(compile(realism_code, "mockdata_realism.py", "exec"), sys.modules["mockdata_realism"].__dict__)
+`);
+      } else {
+        console.warn('mockdata_core.py or mockdata_realism.py not available; realism dispatch in m2py will fall back.');
+      }
+      // static_source (statisk datakilde via DuckDB-WASM). Valgfri.
+      if (staticSrcResp && staticSrcResp.ok) {
+        try {
+          const staticCode = await staticSrcResp.text();
+          await py.runPythonAsync(`
+import sys, importlib.util
+static_code = ${JSON.stringify(staticCode)}
+spec_s = importlib.util.spec_from_loader("static_source", loader=None)
+sys.modules["static_source"] = importlib.util.module_from_spec(spec_s)
+exec(compile(static_code, "static_source.py", "exec"), sys.modules["static_source"].__dict__)
+`);
+          window.__staticSourceLoaded = true;
+        } catch (e) { console.warn('static_source register:', e); }
+      }
+    }
+    function ensureMicrodataAssets(py) {
+      return Promise.all([ensureMicrodataCatalog(), ensureMockdataModules(py)]);
     }
 
     async function loadPdexplorer(py) {
