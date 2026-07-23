@@ -1634,9 +1634,9 @@
               base_url: (dom.aiCfgProviderUrl ? dom.aiCfgProviderUrl.value.trim() : ''),
               model: (dom.aiCfgProviderModel ? dom.aiCfgProviderModel.value.trim() : ''),
             }));
+            var lk = dom.aiCfgLlmKey ? dom.aiCfgLlmKey.value.trim() : '';
+            if (lk && window.Keys) window.Keys.set('llm', lk);
           }
-          var lk = dom.aiCfgLlmKey ? dom.aiCfgLlmKey.value.trim() : '';
-          if (lk && window.Keys) window.Keys.set('llm', lk);
         }
         closeSettings();
       }
