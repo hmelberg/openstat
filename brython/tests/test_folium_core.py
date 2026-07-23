@@ -87,6 +87,105 @@ def test_runner_protocol():
     assert 'FoliumMap' in repr(m)
 
 
+def test_geojson_dict_and_url():
+    gj = {"type": "FeatureCollection", "features": []}
+    ld = fol.GeoJson(gj, name='Lag', style={'color': '#333'},
+                     tooltip_fields=['navn'])._layer_dict()
+    assert ld['type'] == 'geojson' and ld['data'] == gj
+    assert ld['style'] == {'color': '#333'}
+    assert ld['tooltip_fields'] == ['navn'] and ld['name'] == 'Lag'
+    lu = fol.GeoJson('https://example.com/x.geojson')._layer_dict()
+    assert lu['url'] == 'https://example.com/x.geojson' and 'data' not in lu
+
+
+def test_geojson_callable_style_raises():
+    try:
+        fol.GeoJson({}, style=lambda f: {})
+        assert False
+    except TypeError as e:
+        assert 'style' in str(e)
+
+
+def test_feature_group_and_layer_control():
+    fg = fol.FeatureGroup(name='Punkter')
+    fol.Marker([60, 11]).add_to(fg)
+    fg.add_child(fol.Marker([61, 11]))
+    ld = fg._layer_dict()
+    assert ld['type'] == 'feature_group' and ld['name'] == 'Punkter'
+    assert len(ld['layers']) == 2
+    assert fol.LayerControl()._layer_dict() == {'type': 'layer_control'}
+
+
+def test_choropleth_norge_kommuner():
+    data = {301: 10.0, '1103': 20.0, '5001': 30.0}
+    ld = fol.Choropleth('norge:kommuner', data=data, bins=3,
+                        legend_name='Rate')._layer_dict()
+    assert ld['type'] == 'choropleth' and ld['geo'] == 'norge:kommuner'
+    assert ld['key_on'] == 'nummer'
+    # 301 -> "0301" (zero-padding for norge:kommuner)
+    assert set(ld['colors'].keys()) == {'0301', '1103', '5001'}
+    # lav verdi -> lys, høy -> mørk (YlOrRd 3 bins)
+    assert ld['colors']['0301'] != ld['colors']['5001']
+    lg = ld['legend']
+    assert lg['title'] == 'Rate' and len(lg['colors']) == 3
+    assert len(lg['bins']) == 4 and lg['bins'][0] == 10.0 and lg['bins'][-1] == 30.0
+    assert ld['nan_fill_color'] == '#d9d9d9'
+
+
+def test_choropleth_dataframe_and_columns():
+    import pandas_brython as bpd
+    df = bpd.DataFrame({'fylke': ['03', '11', '50'], 'verdi': [1.0, 2.0, 3.0]})
+    ld = fol.Choropleth('norge:fylker', data=df, columns=['fylke', 'verdi'],
+                        fill_color='Blues', bins=2)._layer_dict()
+    assert set(ld['colors'].keys()) == {'03', '11', '50'}
+    assert len(ld['legend']['colors']) == 2
+
+
+def test_choropleth_explicit_bins_and_nan():
+    data = {'0301': 5.0, '1103': None, '5001': 95.0}
+    ld = fol.Choropleth('norge:kommuner', data=data,
+                        bins=[0, 10, 100])._layer_dict()
+    # None-verdi utelates fra colors (JS bruker nan_fill_color)
+    assert '1103' not in ld['colors']
+    assert ld['legend']['bins'] == [0, 10, 100]
+    assert ld['colors']['0301'] != ld['colors']['5001']
+
+
+def test_choropleth_geojson_dict_and_bad_geo():
+    gj = {"type": "FeatureCollection", "features": []}
+    ld = fol.Choropleth(gj, data={'a': 1.0}, key_on='id')._layer_dict()
+    assert ld['data'] == gj and ld['key_on'] == 'id'
+    assert list(ld['colors'].keys()) == ['a']   # ingen padding utenfor norge:*
+    try:
+        fol.Choropleth(42)
+        assert False
+    except ValueError:
+        pass
+
+
+def test_folium_api_parity():
+    """Våre parameternavn skal være en DELMENGDE av ekte foliums
+    (folium emitter HTML — spec-diff som altair er umulig)."""
+    try:
+        import folium as rf
+        import inspect
+    except ImportError:
+        return
+    pairs = [(fol.Map, rf.Map), (fol.Marker, rf.Marker),
+             (fol.CircleMarker, rf.CircleMarker), (fol.PolyLine, rf.PolyLine),
+             (fol.Choropleth, rf.Choropleth)]
+    for mine, real in pairs:
+        sig = inspect.signature(real.__init__)
+        # ekte folium tar **kwargs mange steder — da er alt gyldig
+        if any(p.kind == inspect.Parameter.VAR_KEYWORD
+               for p in sig.parameters.values()):
+            continue
+        my = set(inspect.signature(mine.__init__).parameters) - {'self'}
+        theirs = set(sig.parameters)
+        extra = my - theirs
+        assert not extra, '%s: parametre utenfor folium: %s' % (mine.__name__, extra)
+
+
 if __name__ == '__main__':
     for name, fn in sorted(globals().items()):
         if name.startswith('test_'):

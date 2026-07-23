@@ -211,3 +211,118 @@ class Polygon(PolyLine):
                         'fill_opacity': fill_opacity})
         for k in extra:
             self._d[k] = extra[k]
+
+
+class GeoJson(_Layer):
+    def __init__(self, data, name=None, style=None, tooltip_fields=None):
+        if callable(style):
+            raise TypeError('style som funksjon er utenfor v1 — bruk en '
+                            'stil-dict ({"color": ..., "weight": ...})')
+        d = {'type': 'geojson', 'name': name, 'style': style,
+             'tooltip_fields': tooltip_fields}
+        if isinstance(data, str):
+            d['url'] = data
+        elif isinstance(data, dict):
+            d['data'] = data
+        else:
+            raise ValueError('GeoJson: forventer dict eller url-streng')
+        self._d = _clean(d)
+
+    def _layer_dict(self):
+        return dict(self._d)
+
+
+class FeatureGroup(_Layer):
+    def __init__(self, name=None):
+        self._name = name
+        self._children = []
+
+    def add_child(self, child):
+        self._children.append(child._layer_dict())
+        return self
+
+    def _layer_dict(self):
+        return _clean({'type': 'feature_group', 'name': self._name,
+                       'layers': list(self._children)})
+
+
+class LayerControl(_Layer):
+    def _layer_dict(self):
+        return {'type': 'layer_control'}
+
+
+def _data_to_pairs(data, columns):
+    """Choropleth-data -> [(nøkkel, verdi)]: dict {kode: verdi} eller
+    DataFrame + columns=[nøkkelkolonne, verdikolonne] (duck-typet som
+    altair_core._records_from_data)."""
+    if hasattr(data, 'columns') and hasattr(data, 'to_dict'):
+        if not columns or len(columns) != 2:
+            raise ValueError('Choropleth med DataFrame krever '
+                             "columns=['nøkkelkolonne', 'verdikolonne']")
+        cols = data.to_dict()
+        keys = list(cols[columns[0]])
+        vals = list(cols[columns[1]])
+        return list(zip(keys, vals))
+    if isinstance(data, dict):
+        return [(k, data[k]) for k in data]
+    raise ValueError('Choropleth: data må være dict {kode: verdi} '
+                     'eller DataFrame med columns=[...]')
+
+
+class Choropleth(_Layer):
+    def __init__(self, geo_data, data=None, columns=None, key_on='nummer',
+                 fill_color='YlOrRd', bins=6, nan_fill_color='#d9d9d9',
+                 fill_opacity=0.7, line_opacity=0.4, legend_name=None,
+                 name=None):
+        d = {'type': 'choropleth', 'key_on': key_on,
+             'nan_fill_color': nan_fill_color, 'fill_opacity': fill_opacity,
+             'line_opacity': line_opacity, 'name': name}
+        pad = 0
+        if geo_data == 'norge:kommuner':
+            d['geo'] = geo_data
+            pad = 4
+        elif geo_data == 'norge:fylker':
+            d['geo'] = geo_data
+            pad = 2
+        elif isinstance(geo_data, str) and (
+                geo_data.startswith('http://')
+                or geo_data.startswith('https://')):
+            d['url'] = geo_data
+        elif isinstance(geo_data, dict):
+            d['data'] = geo_data
+        else:
+            raise ValueError("Choropleth: geo_data må være 'norge:kommuner',"
+                             " 'norge:fylker', en url eller en geojson-dict")
+        pairs = _data_to_pairs(data, columns) if data is not None else []
+        clean_pairs = []
+        for k, v in pairs:
+            if _is_nan(v):
+                continue
+            key = _zpad(k, pad) if pad else str(k)
+            clean_pairs.append((key, float(v)))
+        if clean_pairs:
+            vals = [v for _, v in clean_pairs]
+            if isinstance(bins, (list, tuple)):
+                edges = [float(b) for b in bins]
+                nb = len(edges) - 1
+            else:
+                nb = int(bins)
+                edges = _linear_bins(min(vals), max(vals), nb)
+            colors = _interp_palette(fill_color, nb)
+            code_colors = {}
+            for key, v in clean_pairs:
+                idx = nb - 1
+                for i in range(nb):
+                    if v <= edges[i + 1]:
+                        idx = i
+                        break
+                code_colors[key] = colors[idx]
+            d['colors'] = code_colors
+            d['legend'] = _clean({'title': legend_name, 'bins': edges,
+                                  'colors': colors})
+        else:
+            d['colors'] = {}
+        self._d = _clean(d)
+
+    def _layer_dict(self):
+        return dict(self._d)
