@@ -92,5 +92,15 @@
     "cors": false,
     "oppskrift": { "python": "# load /api/hent?url=<url-enkodet artikkel-URL> as raw_html  →  import micropip; await micropip.install('lxml'); tabeller = pd.read_html(io.StringIO(raw_html)); df = tabeller[i]" },
     "quirks": "tabeller er load-bare via /api/hent + pd.read_html (lxml via micropip); velg riktig tabellindeks; no.wikipedia.org for norske artikler"
+  },
+  {
+    "id": "kaggle", "navn": "Kaggle Datasets", "utgiver": "(varierer — Kaggle-brukere)",
+    "tillit": "etablert", "tilgang": "rest",
+    "base_url": "https://www.kaggle.com/api/v1/",
+    "cors": false,
+    "auth": { "type": "api_key", "user": true, "plassering": "basic" },
+    "nokkel_hint": "brukernavn:nøkkel — lag på kaggle.com → Settings → API",
+    "sporrings_url_mal": "https://www.kaggle.com/api/v1/datasets/download/{eier}/{slug}/{filnavn}",
+    "quirks": "krever brukernøkkel (registreres i AI-innstillingene; sendes som Basic auth via /api/hent); nedlasting redirecter til Google Storage — proxyen følger redirect; enkeltfil-URL gir fila direkte, uten {filnavn} kommer hele datasettet som zip (unngå); verifisert 2026-07-23: uten nøkkel svarte /datasets/download/{eier}/{slug}[/{filnavn}] likevel 302→200 (anonym nedlasting virket for dette åpne datasettet) — stol ikke på dette, krev registrert nøkkel uansett (policy: bygg ikke svar uten registrert nøkkel), da private/konkurranse-datasett faktisk krever den (api/v1/competitions/data/download ga 401 uten nøkkel i test); datasett er ofte UOFFISIELLE KOPIER — foretrekk primærkilder i registeret (SSB/WHO/Verdensbanken/OWID) når de dekker spørsmålet, og sjekk datasettets lisens; discovery via web_search + probe (ingen søkeadapter)"
   }
 ]

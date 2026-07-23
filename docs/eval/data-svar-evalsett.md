@@ -24,6 +24,7 @@ Kriterier (alle må holde):
 | 9 | duckdb | Sammenlign renta i Norge og eurosonen siste 5 år. | Norges Bank + ECB/Eurostat (flerkilde) |
 | 10 | python | Hva vet vi om effekten av kontantstøtte på mødres yrkesdeltakelse? | ærlighets-test: identifikasjon er vanskelig — svaret skal si det, og evt. vise deskriptiv utvikling med forbehold |
 | 11 | python | Har kommuner som skiftet ordførerparti ved valget i 2023 hatt annerledes utvikling i ledighet? | SSB (utfall) + Wikipedia/transkribert lim-tabell for partiskifte (nivå 2 i datatilfangst-stigen, med kilde-URL) |
+| 12 | python | Finn et Kaggle-datasett om Titanic-passasjerene og vis overlevelsesrate etter kjønn. | kaggle (brukernøkkel; uten registrert nøkkel skal svaret si at nøkkel må registreres — ikke fabrikkere) |
 
 Resultatlogg (dato, #, PASS/FAIL, notat) føres nederst; feilmønstre omsettes
 til promptregler i _lib/data-svar-prompt.ts eller quirks i data-sources.json.
