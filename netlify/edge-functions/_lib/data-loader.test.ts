@@ -200,3 +200,17 @@ Deno.test("data-loader: connect-basert user-auth-kilde rutes via proxy med nøkk
   if (!proxy) throw new Error("ingen proxy-kall: " + calls.map((c) => c.url).join(" | "));
   assertEquals(proxy.headers["X-Source-Key"], "bruker:K10");
 });
+
+Deno.test("data-loader: bar URL mot user-auth-kilde rutes via proxy (aldri direkte)", async () => {
+  const calls: { url: string; headers: Record<string, string> }[] = [];
+  const fetchImpl = ((input: string | URL | Request, init?: RequestInit) => {
+    calls.push({ url: String(input), headers: (init?.headers as Record<string, string>) ?? {} });
+    return Promise.resolve(new Response("a,b\n1,2", { status: 200, headers: { "content-type": "text/csv" } }));
+  }) as typeof fetch;
+  const script = "# load https://www.kaggle.com/api/v1/datasets/download/own/slug/fil-d.csv as kag4";
+  const keysApi = { get: (t: string) => (t === "kaggle" ? "bruker:K11" : "") };
+  await DL.resolveAndFetchLoads(script, { fetchImpl, registry: KAGGLE_REG, keysApi });
+  assertEquals(calls.length, 1);
+  if (!calls[0].url.includes("/api/hent?url=")) throw new Error("gikk ikke via proxy: " + calls[0].url);
+  assertEquals(calls[0].headers["X-Source-Key"], "bruker:K11");
+});

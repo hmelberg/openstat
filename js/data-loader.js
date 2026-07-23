@@ -79,7 +79,10 @@
       if (!r0.ok) throw new Error('proxy ' + r0.status + ' for ' + item.alias);
       return r0;
     }
-    if (item.viaProxy) return viaProxy();
+    // User-auth-kilder skal ALLTID via proxy (serveren injiserer nøkkelen
+    // vertsbundet) — også når direktivet er en bar URL som resolve() ikke
+    // proxy-merket (den konsulterer ikke registeret for den greinen).
+    if (item.viaProxy || srcKey['X-Source-Key']) return viaProxy();
     try {
       var r1 = await fetchImpl(item.url);
       if (!r1.ok) throw new Error('HTTP ' + r1.status + ' for ' + item.alias + ' (' + item.url + ')');
