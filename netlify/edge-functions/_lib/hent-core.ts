@@ -29,7 +29,7 @@ export async function handleHent(request: Request, deps: HentDeps): Promise<Resp
   let finalUrl = target;
   const headers: Record<string, string> = {};
   const src = sourceForUrl(deps.registry, target);
-  if (src?.auth) {
+  if (src?.auth && src.auth.env) {
     const key = deps.getEnv(src.auth.env);
     if (!key) return new Response(`Nøkkel for ${src.id} er ikke konfigurert`, { status: 502 });
     const [kind, name] = src.auth.plassering.split(":");
