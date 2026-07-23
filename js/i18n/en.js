@@ -709,6 +709,9 @@ window.M2PY_I18N.en = {
 
   "Egen Anthropic-nøkkel er lagret i denne nettleseren. Den brukes bare når du er logget ut.": "Your own Anthropic key is stored in this browser. It is only used while you are logged out.",
   "Fjern nøkkel": "Remove key",
+  "Datakilde-nøkler": "Data source keys",
+  "nøkkel registrert": "key saved",
+  "lim inn nøkkel": "paste key",
 
   // ── Datasettviser: remote-datasett (B2) ──
   "Server-datasett: viser metadata fra kilden — fordeling og statistikk beregnes ikke lokalt.": "Remote dataset: showing metadata from the source — distributions and statistics are not computed locally.",

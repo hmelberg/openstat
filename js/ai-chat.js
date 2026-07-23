@@ -38,7 +38,7 @@
          'aiThread','aiInput','aiSendFastBtn','aiSendV2Btn','aiSendWebBtn','aiAbortBtn',
          'aiIncludeScript',
          'aiSettingsBackdrop','aiCfgAnthropicKey','aiCfgSave','aiCfgCancel',
-         'aiCfgByokStored','aiCfgByokRemove',
+         'aiCfgByokStored','aiCfgByokRemove','aiCfgSourceKeys',
          'sidebarRight','sidebarOpenTab','scriptInput'
         ].forEach(id => { dom[id] = $(id); });
         dom.containers = document.querySelectorAll('.container');
@@ -1522,9 +1522,64 @@
         if (window.mdSyncWebBtnVisibility) window.mdSyncWebBtnVisibility();
       }
 
+      // Datakilde-nøkler (spec 2026-07-23): radene genereres fra registeret —
+      // én rad per kilde med auth.user. Ny nøkkelkrevende kilde = ny register-
+      // oppføring, ingen UI-kode. Verdier vises aldri igjen etter lagring
+      // (passordfelt + placeholder), men kan erstattes eller fjernes.
+      var _srcKeyRegistry = null;
+      async function userKeySources() {
+        if (!_srcKeyRegistry) {
+          try {
+            var r = await fetch('data/data-sources.json');
+            _srcKeyRegistry = r.ok ? await r.json() : [];
+          } catch (e) { _srcKeyRegistry = []; }
+        }
+        return _srcKeyRegistry.filter(function (s) { return s.auth && s.auth.user; });
+      }
+
+      async function renderSourceKeys() {
+        var box = dom.aiCfgSourceKeys;
+        if (!box) return;
+        var sources = await userKeySources();
+        box.innerHTML = '';
+        if (!sources.length) return;
+        var head = document.createElement('label');
+        head.textContent = T('Datakilde-nøkler');
+        box.appendChild(head);
+        sources.forEach(function (s) {
+          var has = !!(window.Keys && window.Keys.get(s.id));
+          var wrap = document.createElement('div');
+          wrap.style.margin = '6px 0 10px';
+          var lab = document.createElement('div');
+          lab.className = 'ai-modal-help';
+          lab.textContent = s.navn + (has ? ' — ' + T('nøkkel registrert') : '');
+          wrap.appendChild(lab);
+          var inp = document.createElement('input');
+          inp.type = 'password';
+          inp.autocomplete = 'off';
+          inp.dataset.sourceKeyId = s.id;
+          inp.placeholder = has ? '••••••••' : (s.nokkel_hint || T('lim inn nøkkel'));
+          wrap.appendChild(inp);
+          if (has) {
+            var rm = document.createElement('button');
+            rm.type = 'button';
+            rm.className = 'ai-modal-btn';
+            rm.style.marginTop = '4px';
+            rm.textContent = T('Fjern nøkkel');
+            rm.addEventListener('click', function () {
+              window.Keys.remove(s.id);
+              renderSourceKeys();
+            });
+            wrap.appendChild(rm);
+          }
+          box.appendChild(wrap);
+        });
+      }
+
       function openSettings() {
         if (dom.aiCfgAnthropicKey) dom.aiCfgAnthropicKey.value = state.anthropicKey;
         refreshUserPanel();
+        renderSourceKeys();
         dom.aiSettingsBackdrop.classList.add('open');
       }
       function closeSettings() { dom.aiSettingsBackdrop.classList.remove('open'); }
@@ -1534,6 +1589,12 @@
         else window.Keys.remove('anthropic');
         // BYOK-nøkkelen påvirker Web-knappens synlighet (webModeEligible).
         if (window.mdSyncWebBtnVisibility) window.mdSyncWebBtnVisibility();
+        if (dom.aiCfgSourceKeys && window.Keys) {
+          dom.aiCfgSourceKeys.querySelectorAll('input[data-source-key-id]').forEach(function (inp) {
+            var v = inp.value.trim();
+            if (v) window.Keys.set(inp.dataset.sourceKeyId, v);
+          });
+        }
         closeSettings();
       }
 
