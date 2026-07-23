@@ -327,6 +327,9 @@ export interface AgenticResumeState {
   messages: Record<string, unknown>[];
   turn: number;
   clientCalls: number;
+  // openai-responses (spec A6): server-side samtaletilstand — bare id-en
+  // rundtures via klienten; meldingsarrayet bærer da kun siste tool-results.
+  prevResponseId?: string;
   usage: {
     inputTokens: number;
     outputTokens: number;
