@@ -86,8 +86,9 @@ Namespace convention: `import altair as alt`.
 - **Marks:** `mark_point, mark_line, mark_bar, mark_area, mark_circle,
   mark_tick, mark_rect, mark_rule, mark_text, mark_boxplot` — kwargs
   become mark-def properties (`mark_line(point=True, strokeDash=[4,2])`
-  → `{"type": "line", "point": true, ...}`); no kwargs → plain string
-  mark, exactly like real altair.
+  → `{"type": "line", "point": true, ...}`); no kwargs → `{"type": ...}`
+  — altair 5+/6 always emits the dict form (verified against altair
+  6.2.2; the plain-string form was altair-4 behavior).
 - **`encode(**channels)`** — values are shorthand strings or channel
   objects. Shorthand grammar (subset of altair's):
   `'kol'`, `'kol:Q|O|N|T'`, `'agg(kol)'`, `'agg(kol):Q'`, `'count()'`.
