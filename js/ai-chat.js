@@ -844,7 +844,9 @@
           signal,
         });
         if (resp.status === 401) {
-          throw new Error(T('Ugyldig Anthropic-nøkkel. Sjekk nøkkelen i AI-innstillingene.'));
+          throw new Error(customProviderReady()
+            ? T('AI-leverandøren avviste nøkkelen (401) — sjekk i AI-innstillingene.')
+            : T('Ugyldig Anthropic-nøkkel. Sjekk nøkkelen i AI-innstillingene.'));
         }
         if (!resp.ok || !resp.body) {
           throw new Error('HTTP ' + resp.status + ' ' + (await resp.text()));
