@@ -65,6 +65,7 @@ export default async (request: Request): Promise<Response> => {
       messages: body.resume.state.messages,
       turn: body.resume.state.turn,
       clientCalls: body.resume.state.clientCalls,
+      prevResponseId: body.resume.state.prevResponseId,
       usage: {
         inputTokens: Number(u.inputTokens) || 0,
         outputTokens: Number(u.outputTokens) || 0,
@@ -83,7 +84,7 @@ export default async (request: Request): Promise<Response> => {
     ? provider.model
     : (Deno.env.get("DATA_SVAR_MODEL") ?? Deno.env.get("ANTHROPIC_MODEL") ?? "claude-sonnet-4-6");
   if (!apiKey) {
-    console.error("ANTHROPIC_API_KEY is not set");
+    console.error("data-svar: mangler API-nøkkel (env ANTHROPIC_API_KEY eller leverandørnøkkel)");
     return new Response("Server configuration error", { status: 500 });
   }
 
