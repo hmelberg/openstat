@@ -617,7 +617,7 @@
     window.t = window.t || function (s) { return s; };
     window.i18nField = window.i18nField || function (obj, field) { return obj && obj[field]; };
 
-    window.M2PY_VERSION = '2026-07-24b';
+    window.M2PY_VERSION = '2026-07-24c';
 
     // One-time migration: remove obsolete localStorage keys from previous milestones
     // Safe to delete this snippet after a few months when most users have re-loaded
@@ -2499,7 +2499,7 @@
       'randomForest','xgboost','caret','glmnet'
     ];
     const PYTHON_DS_IMPORTS = [
-      'pandas','numpy','matplotlib','matplotlib.pyplot','seaborn','altair',
+      'pandas','numpy','matplotlib','matplotlib.pyplot','seaborn','altair','folium',
       'plotly','plotly.express','scipy','scipy.stats',
       'sklearn','sklearn.linear_model','sklearn.ensemble','sklearn.preprocessing',
       'statsmodels','statsmodels.api','statsmodels.formula.api',
@@ -6287,6 +6287,192 @@ json.dumps(out)
         .catch(function () {});
     }
 
+    var __norgeGeoCache = {};
+    function __norgeGeoFetch(kind) {
+      // 'norge:kommuner' | 'norge:fylker' -> memoisert fetch av static_data
+      if (!__norgeGeoCache[kind]) {
+        var f = kind === 'norge:fylker' ? 'fylker_2024.geojson' : 'kommuner_2024.geojson';
+        __norgeGeoCache[kind] = fetch('static_data/' + f + '?v=' + (window.M2PY_VERSION || '1'))
+          .then(function (r) {
+            if (!r.ok) throw new Error('Kunne ikke hente ' + f + ' (' + r.status + ')');
+            return r.json();
+          });
+      }
+      return __norgeGeoCache[kind];
+    }
+
+    var LEAFLET_TILES = {
+      'OpenStreetMap': { url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                         attribution: '&copy; OpenStreetMap contributors' },
+      'CartoDB positron': { url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+                            attribution: '&copy; OpenStreetMap contributors &copy; CARTO' }
+    };
+
+    function __leafletLegend(map, legend) {
+      var ctl = L.control({ position: 'bottomright' });
+      ctl.onAdd = function () {
+        var d = L.DomUtil.create('div', 'leafletmap-legend');
+        var html = legend.title ? '<b>' + legend.title + '</b><br>' : '';
+        function fmt(x) { return Math.round(x * 100) / 100; }
+        for (var i = 0; i < legend.colors.length; i++) {
+          html += '<i style="background:' + legend.colors[i] + '"></i>'
+                + fmt(legend.bins[i]) + '&ndash;' + fmt(legend.bins[i + 1]) + '<br>';
+        }
+        d.innerHTML = html;
+        return d;
+      };
+      ctl.addTo(map);
+    }
+
+    function mdRenderLeafletMap(div, spec) {
+      // folium-shimet (spec 2026-07-24): oversett den deklarative
+      // lag-spec-en til Leaflet-kall. Choropleth-farger/-bins er allerede
+      // beregnet i python — her gjøres bare oppslag + legend.
+      if (typeof L === 'undefined') return;
+      div.className = 'leafletmap-container';
+      div.style.width = (spec.width || 520) + 'px';
+      div.style.height = (spec.height || 360) + 'px';
+      var tiles = LEAFLET_TILES[spec.tiles] || LEAFLET_TILES['OpenStreetMap'];
+      var map = L.map(div);
+      L.tileLayer(tiles.url, { attribution: tiles.attribution }).addTo(map);
+      var fitables = [];   // lag med getBounds() for auto-fit
+      var overlays = {};   // navngitte lag for LayerControl
+      var wantsControl = false;
+      var pending = [];
+
+      function bindPopupTooltip(layer, ld) {
+        if (ld.popup) layer.bindPopup(String(ld.popup));
+        if (ld.tooltip) layer.bindTooltip(String(ld.tooltip));
+        return layer;
+      }
+
+      function makeGeoJsonLayer(gj, ld) {
+        var opts = { style: function () { return ld.style || {}; } };
+        if (ld.tooltip_fields && ld.tooltip_fields.length) {
+          opts.onEachFeature = function (feat, lyr) {
+            var parts = [];
+            for (var i = 0; i < ld.tooltip_fields.length; i++) {
+              var k = ld.tooltip_fields[i];
+              if (feat.properties && feat.properties[k] !== undefined) {
+                parts.push(k + ': ' + feat.properties[k]);
+              }
+            }
+            if (parts.length) lyr.bindTooltip(parts.join('<br>'));
+          };
+        }
+        return L.geoJSON(gj, opts);
+      }
+
+      function makeChoroplethLayer(gj, ld) {
+        var layer = L.geoJSON(gj, {
+          style: function (feat) {
+            var key = feat.properties ? feat.properties[ld.key_on] : undefined;
+            var color = (ld.colors && ld.colors[key]) || ld.nan_fill_color || '#d9d9d9';
+            return { fillColor: color, fillOpacity: ld.fill_opacity || 0.7,
+                     color: '#666', weight: 1, opacity: ld.line_opacity || 0.4 };
+          },
+          onEachFeature: function (feat, lyr) {
+            var p = feat.properties || {};
+            var key = p[ld.key_on];
+            var navn = p.navn || key;
+            lyr.bindTooltip(String(navn));
+          }
+        });
+        if (ld.legend) __leafletLegend(map, ld.legend);
+        if (gj.attribution) map.attributionControl.addAttribution(gj.attribution);
+        return layer;
+      }
+
+      function buildLayer(ld) {
+        // returnerer L-lag ELLER Promise<L-lag> (geojson/choropleth m/fetch)
+        switch (ld.type) {
+          case 'marker':
+            return bindPopupTooltip(L.marker(ld.location), ld);
+          case 'circle_marker':
+            return bindPopupTooltip(L.circleMarker(ld.location, ld), ld);
+          case 'circle':
+            return bindPopupTooltip(L.circle(ld.location, ld), ld);
+          case 'polyline':
+            return bindPopupTooltip(L.polyline(ld.locations, ld), ld);
+          case 'polygon':
+            return bindPopupTooltip(L.polygon(ld.locations, ld), ld);
+          case 'geojson':
+          case 'choropleth': {
+            var src = ld.geo ? __norgeGeoFetch(ld.geo)
+              : ld.url ? fetch(ld.url).then(function (r) {
+                  if (!r.ok) throw new Error('geojson ' + r.status);
+                  return r.json();
+                })
+              : Promise.resolve(ld.data || {});
+            return src.then(function (gj) {
+              return ld.type === 'choropleth'
+                ? makeChoroplethLayer(gj, ld)
+                : makeGeoJsonLayer(gj, ld);
+            });
+          }
+          case 'feature_group': {
+            var fg = L.featureGroup();
+            (ld.layers || []).forEach(function (sub) {
+              var subl = buildLayer(sub);
+              if (subl && typeof subl.then === 'function') {
+                pending.push(subl.then(function (l) { fg.addLayer(l); }));
+              } else if (subl) {
+                fg.addLayer(subl);
+              }
+            });
+            if (ld.name) overlays[ld.name] = fg;
+            return fg;
+          }
+          case 'layer_control':
+            wantsControl = true;
+            return null;
+          default:
+            return null;
+        }
+      }
+
+      (spec.layers || []).forEach(function (ld) {
+        var l = buildLayer(ld);
+        if (l && typeof l.then === 'function') {
+          pending.push(l.then(function (layer) {
+            layer.addTo(map);
+            fitables.push(layer);
+            if (ld.name && ld.type !== 'feature_group') overlays[ld.name] = layer;
+          }).catch(function (e) {
+            console.warn('leafletmap-lag feilet:', e && e.message);
+          }));
+        } else if (l) {
+          l.addTo(map);
+          fitables.push(l);
+          if (ld.name && ld.type !== 'feature_group') overlays[ld.name] = l;
+        }
+      });
+
+      Promise.all(pending).then(function () {
+        // setTimeout: kartet monteres i DOM-en ETTER at buildOutputNodes
+        // returnerer fragmentet — Leaflet trenger målbar container
+        setTimeout(function () {
+          map.invalidateSize();
+          if (spec.center) {
+            map.setView(spec.center, spec.zoom || 6);
+          } else {
+            var b = null;
+            fitables.forEach(function (l) {
+              try {
+                var lb = l.getBounds ? l.getBounds() : null;
+                if (lb && lb.isValid()) b = b ? b.extend(lb) : lb;
+              } catch (e) {}
+            });
+            if (b) map.fitBounds(b, { padding: [10, 10] });
+            else map.setView([64.5, 12.5], 4);   // Norge-utsnitt
+          }
+          if (wantsControl && Object.keys(overlays).length) {
+            L.control.layers(null, overlays).addTo(map);
+          }
+        }, 0);
+      });
+    }
+
     function buildOutputNodes(raw, asHtml, suppress) {
       const parts = parseOutput(raw);
       const frag = document.createDocumentFragment();
@@ -6405,6 +6591,18 @@ json.dumps(out)
               }
               attachTableCopyHandler(wrapDiv);
               frag.appendChild(wrapDiv);
+            } else if (p.embedType === 'leafletmap' && p.payload && typeof L !== 'undefined') {
+              try {
+                const lmSpec = JSON.parse(p.payload);
+                const lmDiv = document.createElement('div');
+                frag.appendChild(lmDiv);
+                mdRenderLeafletMap(lmDiv, lmSpec);
+              } catch (e) {
+                const pre = document.createElement('pre');
+                pre.className = 'embed-placeholder';
+                pre.textContent = '[Leaflet-kart – kunne ikke tolke JSON]';
+                frag.appendChild(pre);
+              }
             } else if (p.embedType === 'vegalite' && p.payload && typeof vegaEmbed !== 'undefined') {
               try {
                 const vlSpec = JSON.parse(p.payload);
@@ -7487,6 +7685,15 @@ def _show_one(obj):
                 _payload = _mb["application/vnd.jupyter.widget-view+json"]
                 print(_EMBED_S + "ipywidget__" + chr(10) + _json.dumps(_payload) + chr(10) + _EMBED_E)
                 return
+    except Exception:
+        pass
+    try:
+        # ekte folium i pyodide -> html-embed (komplett iframe-HTML fra
+        # _repr_html_; leafletmap-embedden er kun for shim-spec-er)
+        _fmod = getattr(type(obj), "__module__", "") or ""
+        if _fmod.split(".")[0] == "folium" and hasattr(obj, "get_root"):
+            print(_EMBED_S + "html__" + chr(10) + obj._repr_html_() + chr(10) + _EMBED_E)
+            return
     except Exception:
         pass
     try:
