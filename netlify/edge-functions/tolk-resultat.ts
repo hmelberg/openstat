@@ -1,6 +1,6 @@
 import { detectLanguage } from "./_lib/parse-script-context.ts";
 import { streamAnthropic } from "./_lib/anthropic.ts";
-import { extractByokKey, gate, upstreamErrorResponse } from "./_lib/auth.ts";
+import { extractByokKey, extractLlmKey, gate, upstreamErrorResponse } from "./_lib/auth.ts";
 import { parseProviderConfig } from "./_lib/providers/config.ts";
 import { messageOpenAiCompat } from "./_lib/providers/openai-compat.ts";
 import { messageOpenAiResponses } from "./_lib/providers/openai-responses.ts";
@@ -79,7 +79,12 @@ function languageInstruction(requested: string, detected: string): string {
 }
 
 export default async (request: Request): Promise<Response> => {
-  const gateResp = await gate(request, { endpoint: "tolk-resultat", maxBodyBytes: 120_000, allowByok: true });
+  const gateResp = await gate(request, {
+    endpoint: "tolk-resultat",
+    maxBodyBytes: 120_000,
+    allowByok: true,
+    allowLlmKey: true,
+  });
   if (gateResp) return gateResp;
 
   let body: RequestBody;
@@ -94,6 +99,9 @@ export default async (request: Request): Promise<Response> => {
 
   const provider = parseProviderConfig(body.provider, request);
   if (provider && "error" in provider) return provider.error;
+  if (!extractByokKey(request) && extractLlmKey(request) && !provider) {
+    return new Response("X-Llm-Key krever komplett leverandørkonfigurasjon (provider-feltet i forespørselen)", { status: 401 });
+  }
 
   const byokKey = extractByokKey(request);
   const apiKey = byokKey ?? Deno.env.get("ANTHROPIC_API_KEY");
@@ -125,10 +133,10 @@ section headings as: «Hva analysen gjorde» → «What the analysis did»,
   try {
     let stream: ReadableStream<Uint8Array>;
     if (provider && provider.type === "openai-compat") {
-      const r = await messageOpenAiCompat(provider, { system: TOLK_SYSTEM, prompt, maxTokens: 1800 });
+      const r = await messageOpenAiCompat(provider, { system: TOLK_SYSTEM, prompt, maxTokens: 1800 }, { timeoutMs: 90_000 });
       stream = singleTextStream(r.text, r.usage);
     } else if (provider && provider.type === "openai-responses") {
-      const r = await messageOpenAiResponses(provider, { system: TOLK_SYSTEM, prompt, maxTokens: 1800 });
+      const r = await messageOpenAiResponses(provider, { system: TOLK_SYSTEM, prompt, maxTokens: 1800 }, { timeoutMs: 90_000 });
       stream = singleTextStream(r.text, r.usage);
     } else {
       stream = await streamAnthropic({

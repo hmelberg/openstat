@@ -4,6 +4,7 @@
 // key there — hence the SSRF guard and the everything-before-endpoint-name
 // convention ({base}/messages | {base}/chat/completions | {base}/responses).
 import { isPublicHttpUrl } from "../ssrf.ts";
+import { extractLlmKey } from "../auth.ts";
 
 export type ProviderType = "anthropic-compat" | "openai-compat" | "openai-responses";
 
@@ -36,8 +37,8 @@ export function parseProviderConfig(
   if (!MODEL_RE.test(model)) {
     return { error: new Response("Ugyldig modellnavn", { status: 400 }) };
   }
-  const key = (request.headers.get("x-llm-key") ?? "").trim();
-  if (!key || key.length > 250) {
+  const key = extractLlmKey(request);
+  if (!key) {
     return { error: new Response("Mangler eller ugyldig X-Llm-Key", { status: 400 }) };
   }
   return {

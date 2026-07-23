@@ -7,6 +7,14 @@ function apiTarget(apiBase?: string): { url: string; init: Pick<RequestInit, "re
     : { url: ANTHROPIC_API, init: {} };
 }
 
+// With apiBase set, the upstream is a user-chosen gateway rather than
+// api.anthropic.com — its error `detail` could echo the request back
+// (including the x-api-key header), so scrub the key out before it is
+// logged. No-op for the default path (empty/undefined key never matches).
+function scrubDetail(detail: string, key: string): string {
+  return key ? detail.split(key).join("***") : detail;
+}
+
 export interface AnthropicStreamOptions {
   apiKey: string;
   model: string;
@@ -133,7 +141,7 @@ export async function streamAnthropic(
     // Log the upstream detail server-side, but do NOT echo it to the client
     // (it can contain account/key diagnostics). Callers surface a generic 502.
     const detail = await upstream.text().catch(() => "");
-    console.error(`Anthropic API error ${upstream.status}: ${detail}`);
+    console.error(`Anthropic API error ${upstream.status}: ${scrubDetail(detail, opts.apiKey)}`);
     throw new Error(`Anthropic API error ${upstream.status}`);
   }
 
@@ -193,7 +201,7 @@ export async function messageAnthropic(
   );
   if (!resp.ok) {
     const detail = await resp.text().catch(() => "");
-    console.error(`Anthropic API error ${resp.status}: ${detail}`);
+    console.error(`Anthropic API error ${resp.status}: ${scrubDetail(detail, opts.apiKey)}`);
     throw new Error(`Anthropic API error ${resp.status}`);
   }
   const json = await resp.json();
@@ -431,7 +439,7 @@ export function runAgenticStream(opts: AgenticOptions): ReadableStream<Uint8Arra
           }
           if (!resp.ok) {
             const detail = await resp.text().catch(() => "");
-            console.error(`Anthropic API error ${resp.status}: ${detail}`);
+            console.error(`Anthropic API error ${resp.status}: ${scrubDetail(detail, opts.apiKey)}`);
             throw new Error(`Anthropic API error ${resp.status}`);
           }
           const json = await resp.json();

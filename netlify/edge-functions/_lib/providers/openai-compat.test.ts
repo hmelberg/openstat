@@ -20,6 +20,20 @@ function fakeFetch(status: number, body: unknown, captured: { url?: string; body
   }) as typeof fetch;
 }
 
+/** Returns a canned response per call, capturing each call's request body. */
+function sequentialFetch(
+  responses: { status: number; body: unknown }[],
+  captured: { bodies: Record<string, unknown>[] },
+): typeof fetch {
+  let i = 0;
+  return ((_input: string | URL | Request, init?: RequestInit) => {
+    captured.bodies.push(JSON.parse(String(init?.body)));
+    const r = responses[Math.min(i, responses.length - 1)];
+    i++;
+    return Promise.resolve(new Response(JSON.stringify(r.body), { status: r.status }));
+  }) as typeof fetch;
+}
+
 Deno.test("toOpenAiTools: input_schema → function.parameters", () => {
   const out = toOpenAiTools([{ name: "probe", description: "d", input_schema: { type: "object", properties: { url: { type: "string" } }, required: ["url"] } }]) as Record<string, Record<string, unknown>>[];
   assertEquals(out[0].function.name, "probe");
@@ -80,4 +94,62 @@ Deno.test("messageOpenAiCompat: enkel tur uten tools", async () => {
   assertEquals(res.text, "Svar.");
   assertEquals(captured.body?.tools, undefined);
   assertEquals(captured.body?.max_tokens, 55);
+});
+
+// ── Fix 4: max_tokens fallback (some OpenAI chat models reject max_tokens,
+// wanting max_completion_tokens instead; most compat providers still want
+// max_tokens — so send max_tokens first and retry once on rejection). ──
+
+Deno.test("makeOpenAiCompatTurn: 400 max_tokens rejection → retries once with max_completion_tokens", async () => {
+  const captured: { bodies: Record<string, unknown>[] } = { bodies: [] };
+  const turn = makeOpenAiCompatTurn(CFG);
+  const res = await turn(freshState(), {
+    system: "SYS", maxTokens: 123, tools: [],
+    deps: { fetchImpl: sequentialFetch([
+      { status: 400, body: { error: { message: "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead." } } },
+      { status: 200, body: { choices: [{ message: { content: "ok" } }], usage: { prompt_tokens: 1, completion_tokens: 1 } } },
+    ], captured) },
+  });
+  assertEquals(res.text, "ok");
+  assertEquals(captured.bodies.length, 2);
+  assertEquals(captured.bodies[0].max_tokens, 123);
+  assertEquals("max_completion_tokens" in captured.bodies[0], false);
+  assertEquals(captured.bodies[1].max_completion_tokens, 123);
+  assertEquals("max_tokens" in captured.bodies[1], false);
+});
+
+Deno.test("makeOpenAiCompatTurn: non-max_tokens 400 still throws without retry", async () => {
+  const captured: { bodies: Record<string, unknown>[] } = { bodies: [] };
+  const turn = makeOpenAiCompatTurn(CFG);
+  await assertRejects(() => turn(freshState(), {
+    system: "SYS", maxTokens: 10, tools: [],
+    deps: { fetchImpl: sequentialFetch([
+      { status: 400, body: { error: { message: "invalid api key" } } },
+    ], captured), retries: 0 },
+  }), Error);
+  assertEquals(captured.bodies.length, 1);
+});
+
+Deno.test("messageOpenAiCompat: 400 max_tokens rejection → retries once with max_completion_tokens", async () => {
+  const captured: { bodies: Record<string, unknown>[] } = { bodies: [] };
+  const res = await messageOpenAiCompat(CFG, { system: "SYS", prompt: "P", maxTokens: 55 }, {
+    fetchImpl: sequentialFetch([
+      { status: 400, body: { error: { message: "Unsupported parameter: 'max_tokens'" } } },
+      { status: 200, body: { choices: [{ message: { content: "Svar." } }], usage: { prompt_tokens: 5, completion_tokens: 2 } } },
+    ], captured),
+  });
+  assertEquals(res.text, "Svar.");
+  assertEquals(captured.bodies.length, 2);
+  assertEquals(captured.bodies[1].max_completion_tokens, 55);
+  assertEquals("max_tokens" in captured.bodies[1], false);
+});
+
+Deno.test("messageOpenAiCompat: non-max_tokens 400 still throws without retry", async () => {
+  const captured: { bodies: Record<string, unknown>[] } = { bodies: [] };
+  await assertRejects(() => messageOpenAiCompat(CFG, { system: "SYS", prompt: "P", maxTokens: 55 }, {
+    fetchImpl: sequentialFetch([
+      { status: 400, body: { error: { message: "insufficient_quota" } } },
+    ], captured),
+  }), Error);
+  assertEquals(captured.bodies.length, 1);
 });

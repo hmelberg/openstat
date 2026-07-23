@@ -326,11 +326,23 @@ Deno.test("extractLlmKey accepts printable ASCII 8-250, rejects junk", () => {
   assertEquals(extractLlmKey(new Request("https://a.test/x")), null);
 });
 
-Deno.test("runGate: X-Llm-Key bypasses token auth when allowByok", async () => {
+Deno.test("runGate: X-Llm-Key does NOT bypass with only allowByok (allowLlmKey required)", async () => {
   const req = new Request("https://a.test/api/x", {
     method: "POST", headers: { "X-Llm-Key": "sk-proj-abc123XYZ" },
   });
   const resp = await runGate(req, { endpoint: "t", maxBodyBytes: 1000, allowByok: true }, {
+    checkRateLimit: () => Promise.resolve({ allowed: true, retryAfterSeconds: 0 }),
+    validateToken: () => Promise.resolve(false),
+    now: () => 0, cache: new Map(),
+  });
+  assertEquals(resp?.status, 401);
+});
+
+Deno.test("runGate: X-Llm-Key bypasses token auth when allowLlmKey (with allowByok)", async () => {
+  const req = new Request("https://a.test/api/x", {
+    method: "POST", headers: { "X-Llm-Key": "sk-proj-abc123XYZ" },
+  });
+  const resp = await runGate(req, { endpoint: "t", maxBodyBytes: 1000, allowByok: true, allowLlmKey: true }, {
     checkRateLimit: () => Promise.resolve({ allowed: true, retryAfterSeconds: 0 }),
     validateToken: () => Promise.resolve(false),
     now: () => 0, cache: new Map(),

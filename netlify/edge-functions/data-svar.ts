@@ -1,6 +1,6 @@
 // /api/data-svar — Web mode: agentic discovery + generation (admin-only).
 // Spec: docs/superpowers/specs/2026-07-03-web-data-svar-design.md
-import { adminGate, extractByokKey } from "./_lib/auth.ts";
+import { adminGate, extractByokKey, extractLlmKey } from "./_lib/auth.ts";
 import { type AgenticResumeState, runAgenticStream } from "./_lib/anthropic.ts";
 import { loadRegistry, renderRegistryBlock } from "./_lib/registry.ts";
 import { searchCatalog } from "./_lib/tools/search-catalog.ts";
@@ -44,7 +44,12 @@ function validResumeState(s: AgenticResumeState | undefined): s is AgenticResume
 }
 
 export default async (request: Request): Promise<Response> => {
-  const gateResp = await adminGate(request, { endpoint: "data-svar", maxBodyBytes: MAX_BODY_BYTES, allowByok: true });
+  const gateResp = await adminGate(request, {
+    endpoint: "data-svar",
+    maxBodyBytes: MAX_BODY_BYTES,
+    allowByok: true,
+    allowLlmKey: true,
+  });
   if (gateResp) return gateResp;
 
   let body: RequestBody;
@@ -77,6 +82,9 @@ export default async (request: Request): Promise<Response> => {
 
   const provider = parseProviderConfig(body.provider, request);
   if (provider && "error" in provider) return provider.error;
+  if (!extractByokKey(request) && extractLlmKey(request) && !provider) {
+    return new Response("X-Llm-Key krever komplett leverandørkonfigurasjon (provider-feltet i forespørselen)", { status: 401 });
+  }
 
   const byokKey = extractByokKey(request);
   const apiKey = provider ? provider.key : (byokKey ?? Deno.env.get("ANTHROPIC_API_KEY"));
@@ -146,6 +154,10 @@ export default async (request: Request): Promise<Response> => {
     maxClientToolCalls: 12,
     resume: resumeState,
     continueExtra: () => ({ probed }),
+    // Agentic provider turns (non-idempotent, billed) get a longer timeout
+    // than the default (matches anthropic's AGENTIC_TIMEOUT_MS) and fewer
+    // retries — retrying a slow-but-successful turn would double-bill it.
+    deps: { timeoutMs: 180_000, retries: 1 },
   };
   let inner: ReadableStream<Uint8Array>;
   if (provider && provider.type === "openai-compat") {
