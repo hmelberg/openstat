@@ -39,33 +39,66 @@
 
   function pyStr(s) { return JSON.stringify(s); }
 
+  // Registerkilder med auth (spec §2): finn registeroppføringen for URL-ens
+  // vert, uansett auth-type (i motsetning til js/data-loader.js sin
+  // userAuthSourceFor, som bare ser etter auth.user). Samme defensive
+  // try/catch rundt URL-parsing.
+  function findAuthSource(url, registry) {
+    var target = url;
+    if (typeof target === 'string' && target.indexOf('/api/hent?') === 0) {
+      var m = /[?&]url=([^&]+)/.exec(target);
+      if (!m) return null;
+      try { target = decodeURIComponent(m[1]); } catch (e) { return null; }
+    }
+    var host;
+    try { host = new URL(target).host; } catch (e) { return null; }
+    var reg = registry || [];
+    for (var i = 0; i < reg.length; i++) {
+      var s = reg[i];
+      if (!s.auth) continue;
+      try { if (new URL(s.base_url).host === host) return s; } catch (e2) {}
+    }
+    return null;
+  }
+
+  // Marker satt av den nøkkel-plassering-grenen i emitFor når URL-en må
+  // bygges i koden (variabel), ikke som strenglitteral — se emitFor. Denne
+  // markøren skal ALDRI ende opp bokstavelig i emittert kode; urlExpr()
+  // er eneste sted som leser den, og alle emisjonsfunksjoner går via den.
+  function urlExpr(url, item, mode) {
+    if (typeof url === 'string' && url.indexOf('__URLVAR__') === 0) return '_url_' + item.alias;
+    return mode === 'python' ? pyStr(url) : rStr(url);
+  }
+
   // Emisjon for én kilde i python-modus. out.lines fylles; out.needs merkes.
   function emitPython(item, url, body, fmt, out) {
     if (body !== null) {
       out.needs.requests = true;
       out.needs.json = true;
+      // Body inlines som vanlig (escapet) strenglitteral — IKKE r'''...''',
+      // som knekker/korrumperer stille dersom bodyen inneholder ''' selv.
       if (fmt === 'json') {
-        out.lines.push(item.alias + ' = requests.post(' + pyStr(url) + ", json=json.loads(r'''" + body + "''')).json()");
+        out.lines.push(item.alias + ' = requests.post(' + urlExpr(url, item, 'python') + ', json=json.loads(' + pyStr(body) + ')).json()');
       } else {
         out.needs.io = true;
         out.needs.pandas = true;
-        out.lines.push('_resp = requests.post(' + pyStr(url) + ", json=json.loads(r'''" + body + "'''))");
+        out.lines.push('_resp = requests.post(' + urlExpr(url, item, 'python') + ', json=json.loads(' + pyStr(body) + '))');
         out.lines.push(item.alias + ' = pd.read_csv(io.StringIO(_resp.text), sep=None, engine="python")');
       }
       return;
     }
     if (fmt === 'json') {
       out.needs.requests = true;
-      out.lines.push(item.alias + ' = requests.get(' + pyStr(url) + ').json()  # rå JSON — appens binding kan avvike');
+      out.lines.push(item.alias + ' = requests.get(' + urlExpr(url, item, 'python') + ').json()  # rå JSON — appens binding kan avvike');
       return;
     }
     if (fmt === 'parquet') {
       out.needs.pandas = true;
-      out.lines.push(item.alias + ' = pd.read_parquet(' + pyStr(url) + ')  # krever pyarrow');
+      out.lines.push(item.alias + ' = pd.read_parquet(' + urlExpr(url, item, 'python') + ')  # krever pyarrow');
       return;
     }
     out.needs.pandas = true;
-    out.lines.push(item.alias + ' = pd.read_csv(' + pyStr(url) + ', sep=None, engine="python")');
+    out.lines.push(item.alias + ' = pd.read_csv(' + urlExpr(url, item, 'python') + ', sep=None, engine="python")');
   }
 
   // Importblokk for python — bare det som trengs og ikke alt finnes i scriptet.
@@ -81,6 +114,15 @@
   // Én kilde → linjer. Task 3 legger nøkkel/ikke-portabel-grener FØRST her.
   function emitFor(item, mode, registry, warnings, needs) {
     var out = { lines: [], needs: needs };
+    // Ikke-portable kilder (spec §2): krypterte (key), Anvil/SafeStat, remote.
+    // MÅ kjøre FØR noe forsøk på å lese item.url — anvil-oppløste items har
+    // ikke noe .url-felt i det hele tatt (se DataDirectives.resolve), så en
+    // decodeHentUrl(undefined) lenger ned ville kastet TypeError.
+    if (item.anvil || item.exec === 'remote' || item.key) {
+      out.lines.push('# (denne kilden krever OpenStat-appen — hopp over eller erstatt manuelt: «' + item.alias + '»)');
+      warnings.push('«' + item.alias + '»: kilden krever appen (kryptert/registrert/remote) og ble ikke transpilert');
+      return out.lines;
+    }
     var url = item.url, body = null;
     var hent = decodeHentUrl(url);
     if (hent) { url = hent.url; body = hent.body; }
@@ -94,7 +136,37 @@
       warnings.push('«' + item.alias + '»: ' + item.kind + '-kilder eksporteres ikke i v1');
       return out.lines;
     }
+    // fmt regnes ut FØR ev. nøkkel-plassering markerer url som variabel
+    // (__URLVAR__), slik at endelsesniffing i formatFor fortsatt ser den
+    // ekte URL-en.
     var fmt = formatFor(item, url, warnings);
+
+    // Registerkilder med auth: plassholder-nøkkel (aldri verdier) — spec §2.
+    var authSrc = findAuthSource(url, registry);
+    if (authSrc && authSrc.auth) {
+      if (authSrc.auth.valgfri) {
+        out.lines.push('# nøkkel er valgfri for ' + authSrc.id + ' — åpne datasett virker uten; privat-/konkurransedata krever egen nøkkel');
+      } else {
+        var cname = authSrc.id.toUpperCase() + '_API_KEY';
+        needs.placeholders = needs.placeholders || {};
+        needs.placeholders[cname] = true;
+        warnings.push('«' + item.alias + '»: ' + authSrc.id + ' krever egen nøkkel — sett inn verdien i ' + cname);
+        var plass = authSrc.auth.plassering || '';
+        if (plass.indexOf('query:') === 0) {
+          var param = plass.slice(6);
+          // URL-en bygges i koden med nøkkelen limt på:
+          if (mode === 'python') {
+            out.lines.push('_url_' + item.alias + ' = ' + pyStr(url) + ' + "' + (url.indexOf('?') >= 0 ? '&' : '?') + param + '=" + ' + cname);
+          } else {
+            out.lines.push('_url_' + item.alias + ' <- paste0(' + rStr(url) + ', "' + (url.indexOf('?') >= 0 ? '&' : '?') + param + '=", ' + cname + ')');
+          }
+          url = '__URLVAR__' + item.alias;   // marker: emisjonen bruker variabelen (urlExpr)
+        } else {
+          out.lines.push('# ' + authSrc.id + ' bruker ' + plass + '-autentisering — legg nøkkelen i ' + cname + ' og send den som beskrevet i API-dokumentasjonen');
+        }
+      }
+    }
+
     if (mode === 'python') emitPython(item, url, body, fmt, out);
     else emitR(item, url, body, fmt, out);   // Task 2
     return out.lines;
@@ -105,7 +177,7 @@
   function emitR(item, url, body, fmt, out) {
     if (body !== null) {
       out.lines.push('# krever httr (+ jsonlite for JSON-svar):');
-      out.lines.push('_resp <- httr::POST(' + rStr(url) + ', body = ' + rStr(body) + ', encode = "raw", httr::content_type_json())');
+      out.lines.push('_resp <- httr::POST(' + urlExpr(url, item, 'r') + ', body = ' + rStr(body) + ', encode = "raw", httr::content_type_json())');
       if (fmt === 'json') {
         out.lines.push(item.alias + ' <- httr::content(_resp, as = "parsed")');
       } else {
@@ -114,16 +186,16 @@
       return;
     }
     if (fmt === 'json') {
-      out.lines.push(item.alias + ' <- jsonlite::fromJSON(' + rStr(url) + ')  # krever jsonlite');
+      out.lines.push(item.alias + ' <- jsonlite::fromJSON(' + urlExpr(url, item, 'r') + ')  # krever jsonlite');
       return;
     }
     if (fmt === 'parquet') {
       var tmp = '"' + item.alias + '.parquet"';
-      out.lines.push('download.file(' + rStr(url) + ', ' + tmp + ', mode = "wb")');
+      out.lines.push('download.file(' + urlExpr(url, item, 'r') + ', ' + tmp + ', mode = "wb")');
       out.lines.push(item.alias + ' <- arrow::read_parquet(' + tmp + ')  # krever arrow');
       return;
     }
-    out.lines.push(item.alias + ' <- read.csv(' + rStr(url) + ')  # NB: sjekk skilletegn — nordiske CSV-er bruker ofte sep=";"');
+    out.lines.push(item.alias + ' <- read.csv(' + urlExpr(url, item, 'r') + ')  # NB: sjekk skilletegn — nordiske CSV-er bruker ofte sep=";"');
   }
 
   function transpile(script, mode, registry) {
@@ -131,7 +203,12 @@
     var DD = global.DataDirectives;
     var parsed = DD.parse(script);
     if (parsed.errors.length) throw new Error('Direktivfeil: ' + parsed.errors.join('; '));
-    if (!parsed.loads.length) return { code: script, warnings: [] };
+    if (!parsed.loads.length) {
+      var passthrough = DD.scrubKeys(script);
+      return { code: passthrough, warnings: passthrough !== script
+        ? ['key(...)-verdier ble maskert i eksporten — bruk key(ask) eller egen nøkkelhåndtering utenfor appen']
+        : [] };
+    }
     var resolved = DD.resolve(parsed, registry || []);
     var bad = resolved.filter(function (r) { return r.error; });
     if (bad.length) throw new Error('Direktivfeil: ' + bad.map(function (b) { return b.error; }).join('; '));
@@ -161,8 +238,26 @@
     }
 
     var head = HEADER.slice();
+    // Plassholder-konstanter øverst (etter header, før imports): NAVN = "..."
+    // (python) / NAVN <- "..." (r) — én linje per oppdaget plassholder, i
+    // rekkefølgen de ble oppdaget (needs.placeholders-nøkler er unike, så
+    // samme kilde brukt flere ganger gir bare én konstant).
+    var placeholders = Object.keys(needs.placeholders || {});
+    placeholders.forEach(function (name) {
+      head.push(mode === 'python' ? (name + ' = "SETT-INN-EGEN-NØKKEL"') : (name + ' <- "SETT-INN-EGEN-NØKKEL"'));
+    });
     var imports = mode === 'python' ? pythonImports(needs, script) : rImports(needs, script); // rImports: Task 2
     var code = head.concat(imports.length ? imports : []).concat(['']).join('\n') + outLines.join('\n');
+
+    // Til slutt: maskér alle key(<literal>) i output (delelenke-regelen) —
+    // fanger ev. key(...)-literaler som har lekket inn via de bevarte
+    // originaldirektiv-kommentarene (plassholderne over dekker selve
+    // nøkkelverdiene appen kjenner til; dette dekker literaler brukeren
+    // skrev direkte i scriptet).
+    var scrubbed = DD.scrubKeys(code);
+    if (scrubbed !== code) warnings.push('key(...)-verdier ble maskert i eksporten — bruk key(ask) eller egen nøkkelhåndtering utenfor appen');
+    code = scrubbed;
+
     return { code: code, warnings: warnings };
   }
 

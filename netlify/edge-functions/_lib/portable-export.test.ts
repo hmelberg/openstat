@@ -47,7 +47,7 @@ Deno.test("POST-reversering: &body= → requests.post + json.loads", () => {
   const s = "# load /api/hent?url=" + encodeURIComponent(inner) + "&body=" + encodeURIComponent(body) + " as syss\n";
   const out = PE.transpile(s, "python", []);
   if (!out.code.includes("requests.post(")) throw new Error("mangler requests.post:\n" + out.code);
-  if (!out.code.includes("json.loads(r'''" + body + "''')")) throw new Error("body ikke inlinet via json.loads");
+  if (!out.code.includes("json.loads(" + JSON.stringify(body) + ")")) throw new Error("body ikke inlinet via json.loads");
   if (!out.code.includes("io.StringIO(")) throw new Error("csv-respons skal leses via io.StringIO");
   for (const imp of ["import requests", "import io", "import json"]) {
     if (!out.code.includes(imp)) throw new Error("mangler " + imp);
@@ -139,4 +139,57 @@ Deno.test("R: parquet → nedlasting + arrow, med kommentar", () => {
   const out = PE.transpile(s, "r", []);
   if (!out.code.includes('download.file("https://x.example/d.parquet"')) throw new Error("mangler download.file:\n" + out.code);
   if (!out.code.includes("arrow::read_parquet")) throw new Error("mangler arrow::read_parquet");
+});
+
+Deno.test("POST-body med ''' inni lekker/korrumperer ikke — json.loads(<escapet streng>)", () => {
+  const inner = "https://x.example/api";
+  const body = JSON.stringify({ note: "her er '''tre apostrofer''' inni en verdi" });
+  const s = "# load /api/hent?url=" + encodeURIComponent(inner) + "&body=" + encodeURIComponent(body) + " as d\n";
+  const out = PE.transpile(s, "python", []);
+  if (!out.code.includes("json.loads(" + JSON.stringify(body) + ")")) {
+    throw new Error("body med ''' ikke trygt inlinet:\n" + out.code);
+  }
+  if (out.code.includes("json.loads(r'''")) throw new Error("gammel r'''-inlining brukt fortsatt — usikker mot ''' i body:\n" + out.code);
+});
+
+const FRED_REG = [{ id: "fred", navn: "FRED", utgiver: "Fed", tillit: "etablert", tilgang: "rest",
+  base_url: "https://api.stlouisfed.org/fred/", cors: false,
+  auth: { type: "api_key", env: "FRED_API_KEY", plassering: "query:api_key" } }];
+const KAGGLE_REG = [{ id: "kaggle", navn: "Kaggle", utgiver: "K", tillit: "etablert", tilgang: "rest",
+  base_url: "https://www.kaggle.com/api/v1/", cors: false,
+  auth: { type: "api_key", user: true, valgfri: true, plassering: "basic" } }];
+
+Deno.test("nøkkelkilde (query-plassering) → plassholder-konstant + param i URL + warning", () => {
+  const s = "# connect fred\n# load fred/series/observations?series_id=UNRATE&file_type=json as u, kind(json)\n";
+  const out = PE.transpile(s, "python", FRED_REG);
+  if (!out.code.includes('FRED_API_KEY = "SETT-INN-EGEN-NØKKEL"')) throw new Error("mangler plassholder:\n" + out.code);
+  if (!out.code.includes('"&api_key=" + FRED_API_KEY')) throw new Error("nøkkelparam ikke bygget:\n" + out.code);
+  if (!out.warnings.some((w: string) => w.includes("nøkkel"))) throw new Error("mangler warning");
+  if (out.code.includes("SETT-INN-EGEN-NØKKEL\"\nFRED_API_KEY")) throw new Error("plassholder duplisert");
+});
+
+Deno.test("valgfri kilde (kaggle) → anonym eksport + kommentar, ingen plassholder", () => {
+  const s = "# connect kaggle\n# load kaggle/datasets/download/o/s/f.csv as k\n";
+  const out = PE.transpile(s, "python", KAGGLE_REG);
+  if (out.code.includes("SETT-INN-EGEN-NØKKEL")) throw new Error("valgfri kilde skal ikke få plassholder");
+  if (!out.code.includes("# nøkkel er valgfri")) throw new Error("mangler valgfri-kommentar:\n" + out.code);
+  if (!out.code.includes('k = pd.read_csv("https://www.kaggle.com/api/v1/datasets/download/o/s/f.csv"')) {
+    throw new Error("anonym emisjon mangler:\n" + out.code);
+  }
+});
+
+Deno.test("key(<literal>) maskeres i output og gir warning", () => {
+  const s = "# load https://x.example/hemmelig.csv as h, key(supersecret123)\n";
+  const out = PE.transpile(s, "python", []);
+  if (out.code.includes("supersecret123")) throw new Error("nøkkelliteral lekket til eksport");
+  if (!out.code.includes("key(***)")) throw new Error("maskering mangler i kommentarlinjen");
+  if (!out.warnings.some((w: string) => w.includes("h"))) throw new Error("mangler warning for kryptert kilde");
+});
+
+Deno.test("anvil-kilde og exec(remote) → ikke-portabel kommentarblokk, resten eksporteres", () => {
+  const s = "# connect minkilde\n# load minkilde as d\nprint('etterpå')\n";
+  const out = PE.transpile(s, "python", []);   // tomt register → anvil-gren
+  if (!out.code.includes("krever OpenStat-appen")) throw new Error("mangler ikke-portabel-blokk:\n" + out.code);
+  if (!out.code.includes("print('etterpå')")) throw new Error("resten av scriptet mangler");
+  if (!out.warnings.length) throw new Error("mangler warning");
 });
