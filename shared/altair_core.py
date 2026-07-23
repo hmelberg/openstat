@@ -449,6 +449,51 @@ class Chart(_TopLevel):
         return spec
 
 
+class LayerChart(_TopLevel):
+    """chart1 + chart2 -> {"layer": [...]} (flatet: (a+b)+c gir tre lag).
+    Delte data (samme records-innhold) heises til toppnivå — som altair."""
+    def __init__(self, charts):
+        self._charts = []
+        for c in charts:
+            if isinstance(c, LayerChart):
+                for cc in c._charts:
+                    self._charts.append(cc)
+            else:
+                self._charts.append(c)
+        self._props = {}
+        self._params = []
+
+    def __add__(self, other):
+        return LayerChart([self, other])
+
+    def _to_dict(self, top):
+        spec = {}
+        if top:
+            spec['$schema'] = VEGALITE_SCHEMA
+        shared = len(self._charts) > 0
+        base = self._charts[0]._records if shared else None
+        for c in self._charts:
+            if not (c._records is base or c._records == base):
+                shared = False
+                break
+        if shared:
+            spec['data'] = {'values': _json_safe(base)}
+        layers = []
+        for c in self._charts:
+            sub = c._to_dict(False)
+            if shared and 'data' in sub:
+                del sub['data']
+            layers.append(sub)
+        spec['layer'] = layers
+        if top:
+            return self._apply_top(spec)
+        for k in self._props:
+            spec[k] = self._props[k]
+        if self._params:
+            spec['params'] = [dict(p) for p in self._params]
+        return spec
+
+
 def hconcat(*charts):
     raise NotImplementedError('hconcat er utenfor v1')
 

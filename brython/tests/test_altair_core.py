@@ -192,6 +192,46 @@ def test_out_of_scope_raises():
             pass
 
 
+def test_layer_shared_data_hoisted():
+    df = {"x": [1, 2], "y": [3, 4]}
+    # NB: mark_* muterer og returnerer self (dokumentert v1-avvik fra
+    # altairs immutabilitet) — bruk derfor to SEPARATE Chart-objekter:
+    a = alt.Chart(df).mark_line().encode(x="x:Q", y="y:Q")
+    b = alt.Chart(df).mark_point().encode(x="x:Q", y="y:Q")
+    spec = (a + b).to_dict()
+    assert spec["data"] == {"values": [{"x": 1, "y": 3}, {"x": 2, "y": 4}]}
+    assert [sorted(l.keys()) for l in spec["layer"]] == [
+        ["encoding", "mark"], ["encoding", "mark"]]
+    assert spec["layer"][0]["mark"] == {"type": "line"}
+    assert spec["layer"][1]["mark"] == {"type": "point"}
+
+
+def test_layer_flattens_and_props():
+    a = alt.Chart({"x": [1]}).mark_line().encode(x="x:Q")
+    b = alt.Chart({"x": [1]}).mark_point().encode(x="x:Q")
+    c = alt.Chart({"x": [1]}).mark_rule().encode(x="x:Q")
+    spec = ((a + b) + c).properties(title="Lagdelt").to_dict()
+    assert len(spec["layer"]) == 3
+    assert spec["title"] == "Lagdelt"
+    assert spec["$schema"] == alt.VEGALITE_SCHEMA
+
+
+def test_layer_differing_data_stays_per_layer():
+    a = alt.Chart({"x": [1]}).mark_line().encode(x="x:Q")
+    b = alt.Chart({"x": [9]}).mark_point().encode(x="x:Q")
+    spec = (a + b).to_dict()
+    assert "data" not in spec
+    assert spec["layer"][0]["data"] == {"values": [{"x": 1}]}
+    assert spec["layer"][1]["data"] == {"values": [{"x": 9}]}
+
+
+def test_layer_interactive_on_top():
+    a = alt.Chart({"x": [1]}).mark_line().encode(x="x:Q")
+    b = alt.Chart({"x": [1]}).mark_point().encode(x="x:Q")
+    spec = (a + b).interactive().to_dict()
+    assert spec["params"][0]["bind"] == "scales"
+
+
 if __name__ == '__main__':
     for name, fn in sorted(globals().items()):
         if name.startswith('test_'):
