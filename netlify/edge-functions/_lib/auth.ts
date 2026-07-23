@@ -56,6 +56,18 @@ export function extractByokKey(request: Request): string | null {
 }
 
 /**
+ * Custom-provider key from the X-Llm-Key header (spec 2026-07-23-llm-provider-
+ * tiers A1). Format-agnostic (providers differ) but sane: printable ASCII,
+ * 8–250 chars. Same BYOK trust position as extractByokKey: the user brings
+ * their own credentials and billing. Never logged or cached.
+ */
+export function extractLlmKey(request: Request): string | null {
+  const raw = (request.headers.get("x-llm-key") ?? "").trim();
+  if (raw.length < 8 || raw.length > 250) return null;
+  return /^[\x21-\x7E]+$/.test(raw) ? raw : null;
+}
+
+/**
  * Map an upstream Anthropic failure to a client response. With BYOK, a 401
  * from Anthropic means the user's own key is invalid — surface that directly
  * instead of a generic 502 (the anthropic.ts helpers throw
@@ -168,7 +180,7 @@ export async function runGate(
   opts: GateOptions,
   deps: GateDeps,
 ): Promise<Response | null> {
-  const byokKey = opts.allowByok ? extractByokKey(request) : null;
+  const byokKey = opts.allowByok ? (extractByokKey(request) ?? extractLlmKey(request)) : null;
   const { presentedToken, failure } = await runBaseChecks(
     request,
     opts,
@@ -297,7 +309,7 @@ export async function runAdminGate(
   opts: GateOptions,
   deps: AdminGateDeps,
 ): Promise<Response | null> {
-  const byokKey = opts.allowByok ? extractByokKey(request) : null;
+  const byokKey = opts.allowByok ? (extractByokKey(request) ?? extractLlmKey(request)) : null;
   const { presentedToken, failure } = await runBaseChecks(
     request,
     opts,

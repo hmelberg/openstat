@@ -2,6 +2,7 @@ import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   clientIp,
   extractByokKey,
+  extractLlmKey,
   type GateDeps,
   runGate,
   timingSafeEqual,
@@ -311,4 +312,40 @@ Deno.test("runGate: allowByok, valid BYOK header AND invalid Bearer token both p
   const resp = await runGate(request, { endpoint: "t", maxBodyBytes: 100, allowByok: true }, deps);
   assertEquals(resp, null);
   assertEquals(deps.calls.validate, 0); // BYOK short-circuits before token validation
+});
+
+// ── X-Llm-Key: custom-provider key as BYOK-equivalent ──
+
+Deno.test("extractLlmKey accepts printable ASCII 8-250, rejects junk", () => {
+  const mk = (v: string) => new Request("https://a.test/x", { headers: { "X-Llm-Key": v } });
+  assertEquals(extractLlmKey(mk("sk-proj-abc123XYZ")), "sk-proj-abc123XYZ");
+  assertEquals(extractLlmKey(mk("short")), null);                  // < 8
+  assertEquals(extractLlmKey(mk("x".repeat(251))), null);          // too long
+  assertEquals(extractLlmKey(mk("har mellomrom-i-seg")), null);    // space
+  assertEquals(extractLlmKey(mk("nøkkel-med-æøå-1234")), null);    // non-ASCII
+  assertEquals(extractLlmKey(new Request("https://a.test/x")), null);
+});
+
+Deno.test("runGate: X-Llm-Key bypasses token auth when allowByok", async () => {
+  const req = new Request("https://a.test/api/x", {
+    method: "POST", headers: { "X-Llm-Key": "sk-proj-abc123XYZ" },
+  });
+  const resp = await runGate(req, { endpoint: "t", maxBodyBytes: 1000, allowByok: true }, {
+    checkRateLimit: () => Promise.resolve({ allowed: true, retryAfterSeconds: 0 }),
+    validateToken: () => Promise.resolve(false),
+    now: () => 0, cache: new Map(),
+  });
+  assertEquals(resp, null);
+});
+
+Deno.test("runGate: X-Llm-Key does NOT bypass without allowByok", async () => {
+  const req = new Request("https://a.test/api/x", {
+    method: "POST", headers: { "X-Llm-Key": "sk-proj-abc123XYZ" },
+  });
+  const resp = await runGate(req, { endpoint: "t", maxBodyBytes: 1000 }, {
+    checkRateLimit: () => Promise.resolve({ allowed: true, retryAfterSeconds: 0 }),
+    validateToken: () => Promise.resolve(false),
+    now: () => 0, cache: new Map(),
+  });
+  assertEquals(resp?.status, 401);
 });
