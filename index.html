@@ -1537,7 +1537,7 @@
       dropdown.addEventListener('click', function(e) { e.stopPropagation(); });
       document.getElementById('menuExamplesBtn').addEventListener('click', function(e) {
         e.stopPropagation();
-        openExamplesModal(typeof activeEditorMode !== 'undefined' ? activeEditorMode : 'microdata');
+        openExamplesModal(typeof activeEditorMode !== 'undefined' ? activeEditorMode : 'python');
         dropdown.classList.remove('open');
         themeDropdown.classList.remove('open');
         exportDropdown.classList.remove('open');
@@ -3515,7 +3515,7 @@
         } },
     };
     function currentMode() {
-      return modeRegistry[activeEditorMode] || modeRegistry.microdata;
+      return modeRegistry[activeEditorMode] || modeRegistry.python;
     }
 
     // Input-panel visibility: jamovi hides it by default; other modes use the user pref.
@@ -6941,7 +6941,7 @@ json.dumps(out)
     function parseExplainBlocks(src, mode) {
       const blocks = [];
       const groups = (src || '').split(/\n{2,}/);
-      const isMicrodata = (mode === 'microdata' || mode == null);
+      const isMicrodata = (mode === 'microdata');
       for (const group of groups) {
         const lines = group.split('\n').map(l => l.trimEnd());
         if (!lines.some(l => l.trim())) continue;

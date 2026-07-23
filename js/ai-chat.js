@@ -25,7 +25,7 @@
       // (syncWebBtnVisibility() shows/hides #aiSendWebBtn).
       function webModeEligible() {
         const hasByok = !!state.anthropicKey || customProviderReady();
-        const mode = (typeof activeEditorMode !== 'undefined' && activeEditorMode) ? activeEditorMode : 'microdata';
+        const mode = (typeof activeEditorMode !== 'undefined' && activeEditorMode) ? activeEditorMode : 'python';
         return hasByok && (mode === 'python' || mode === 'r' || mode === 'duckdb');
       }
 
@@ -729,7 +729,7 @@
         bubble.textContent = T('Finner relevante variabler…');
         thinkingNode.appendChild(bubble);
 
-        const mode = (typeof activeEditorMode !== 'undefined' && activeEditorMode) ? activeEditorMode : 'microdata';
+        const mode = (typeof activeEditorMode !== 'undefined' && activeEditorMode) ? activeEditorMode : 'python';
         const payload = { question: text, lang, script: scriptContext || '', mode };
         const { accumulated, tokens } = await streamKodeSvarV2(payload, bubble, signal);
 
