@@ -230,6 +230,11 @@ def test_layer_interactive_on_top():
     b = alt.Chart({"x": [1]}).mark_point().encode(x="x:Q")
     spec = (a + b).interactive().to_dict()
     assert spec["params"][0]["bind"] == "scales"
+    # interval-param i lagdelt spec må være view-scopet (ellers kaster
+    # vega-lite "Duplicate signal name" — browser-funn 2026-07-24)
+    assert spec["params"][0]["views"] == ["view_layer_0"]
+    assert spec["layer"][0]["name"] == "view_layer_0"
+    assert "name" not in spec["layer"][1]
 
 
 if __name__ == '__main__':

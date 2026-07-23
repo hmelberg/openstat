@@ -486,7 +486,18 @@ class LayerChart(_TopLevel):
             layers.append(sub)
         spec['layer'] = layers
         if top:
-            return self._apply_top(spec)
+            spec = self._apply_top(spec)
+            if self._params and layers:
+                # interval-params på toppnivå i en lagdelt spec må scopes
+                # til ETT view — ellers kompilerer vega-lite én signal per
+                # lag og feiler med "Duplicate signal name". Altair løser
+                # det ved å navngi første lag og peke params dit via
+                # "views"; vi speiler det (browser-funn 2026-07-24).
+                vname = 'view_layer_0'
+                layers[0]['name'] = vname
+                for p in spec['params']:
+                    p['views'] = [vname]
+            return spec
         for k in self._props:
             spec[k] = self._props[k]
         if self._params:

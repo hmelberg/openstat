@@ -36,6 +36,14 @@ def norm(spec):
             for p in node.get('params') or []:
                 if isinstance(p, dict) and 'name' in p:
                     p['name'] = 'param'
+                if isinstance(p, dict) and 'views' in p:
+                    p['views'] = ['view' for _ in p['views']]
+            # lag-navn (view-scoping for interval-params): altair hasher,
+            # vi teller — normaliser KUN layer-oppføringenes name-nøkkel
+            # (aldri encoding/data-felter som tilfeldigvis heter 'name')
+            for entry in node.get('layer') or []:
+                if isinstance(entry, dict) and isinstance(entry.get('name'), str):
+                    entry['name'] = 'view'
             for v in node.values():
                 walk(v)
         elif isinstance(node, list):
@@ -112,6 +120,16 @@ def test_layer_matches():
     def build(a, df):
         return (a.Chart(df).mark_line().encode(x="aar:O", y="antall:Q")
                 + a.Chart(df).mark_point().encode(x="aar:O", y="antall:Q"))
+    pair(build, build)
+
+
+def test_layer_interactive_matches():
+    if not HAS_ALTAIR:
+        return
+    def build(a, df):
+        return (a.Chart(df).mark_line().encode(x="aar:O", y="antall:Q")
+                + a.Chart(df).mark_point().encode(x="aar:O", y="antall:Q")
+                ).interactive()
     pair(build, build)
 
 
