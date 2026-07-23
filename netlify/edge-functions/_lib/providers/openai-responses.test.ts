@@ -100,3 +100,10 @@ Deno.test("messageOpenAiResponses: enkel tur uten tools", async () => {
   assertEquals(captured.body?.tools, undefined);
   assertEquals(captured.body?.store, false);
 });
+
+Deno.test("messageOpenAiResponses: 400 med 'tool' i detalj gir generisk feil (ingen tools sendt)", async () => {
+  const err = await assertRejects(() => messageOpenAiResponses(CFG, { system: "S", prompt: "P", maxTokens: 10 },
+    { fetchImpl: fakeFetch(400, { error: { message: "model gpt-x-tool-preview not found" } }), retries: 0 }), Error);
+  if (err.message.includes("verktøystøtte")) throw new Error("feilklassifisert som tools-avvisning: " + err.message);
+  if (!err.message.includes("Leverandørfeil 400")) throw new Error("uventet melding: " + err.message);
+});

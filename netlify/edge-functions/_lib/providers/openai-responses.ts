@@ -28,13 +28,13 @@ function safeParseJson(raw: unknown): Record<string, unknown> {
   }
 }
 
-async function throwUpstream(resp: Response, cfg: ProviderConfig): Promise<never> {
+async function throwUpstream(resp: Response, cfg: ProviderConfig, hadTools: boolean): Promise<never> {
   const detail = await resp.text().catch(() => "");
   console.error(`LLM provider error ${resp.status}: ${scrubKey(detail, cfg.key)}`);
   if (resp.status === 400 && /store|previous_response/i.test(detail)) {
     throw new Error("leverandøren støtter ikke lagret samtaletilstand (store) — bruk typen openai-kompatibel i stedet");
   }
-  if (resp.status === 400 && /tool/i.test(detail)) {
+  if (resp.status === 400 && hadTools && /tool/i.test(detail)) {
     throw new Error("data-svar krever en modell med verktøystøtte (tool-calling) — leverandøren avviste tools-parameteren");
   }
   throw new Error(`Leverandørfeil ${resp.status}`);
@@ -99,7 +99,7 @@ export function makeOpenAiResponsesTurn(cfg: ProviderConfig): RunTurn {
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${cfg.key}` },
       body: JSON.stringify(body),
     }, opts.deps);
-    if (!resp.ok) await throwUpstream(resp, cfg);
+    if (!resp.ok) await throwUpstream(resp, cfg, true);
     return parseOutput(await resp.json());
   };
 }
@@ -124,7 +124,7 @@ export async function messageOpenAiResponses(
       input: o.prompt,
     }),
   }, deps);
-  if (!resp.ok) await throwUpstream(resp, cfg);
+  if (!resp.ok) await throwUpstream(resp, cfg, false);
   const parsed = parseOutput(await resp.json());
   return { text: parsed.text, usage: parsed.usage };
 }
