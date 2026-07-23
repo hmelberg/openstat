@@ -6,6 +6,10 @@ const REG = parseRegistry([{
   id: "fred", navn: "FRED", utgiver: "Fed", tillit: "etablert", tilgang: "rest",
   base_url: "https://api.stlouisfed.org/fred/", cors: false,
   auth: { type: "api_key", env: "FRED_API_KEY", plassering: "query:api_key" },
+}, {
+  id: "kaggle", navn: "Kaggle", utgiver: "Kaggle", tillit: "etablert", tilgang: "rest",
+  base_url: "https://www.kaggle.com/api/v1/", cors: false,
+  auth: { type: "api_key", user: true, plassering: "basic" },
 }]);
 
 function fakeFetch(log: string[]): typeof fetch {
@@ -18,6 +22,13 @@ function fakeFetch(log: string[]): typeof fetch {
   }) as typeof fetch;
 }
 
+function headerLoggingFetch(log: { url: string; headers: Record<string, string> }[]): typeof fetch {
+  return ((input: string | URL | Request, init?: RequestInit) => {
+    log.push({ url: String(input), headers: (init?.headers as Record<string, string>) ?? {} });
+    return Promise.resolve(new Response("ok", { status: 200, headers: { "content-type": "text/csv" } }));
+  }) as typeof fetch;
+}
+
 const deps = (log: string[], env: Record<string, string> = {}) => ({
   registry: REG,
   getEnv: (k: string) => env[k],
@@ -26,6 +37,12 @@ const deps = (log: string[], env: Record<string, string> = {}) => ({
 
 function req(qs: string): Request {
   return new Request(`https://app.test/api/hent?${qs}`, { method: "GET" });
+}
+
+function reqWithKey(qs: string, key?: string): Request {
+  const h = new Headers();
+  if (key) h.set("X-Source-Key", key);
+  return new Request(`https://app.test/api/hent?${qs}`, { method: "GET", headers: h });
 }
 
 Deno.test("handleHent proxies a public GET and passes content-type", async () => {
@@ -76,4 +93,45 @@ Deno.test("handleHent never echoes upstream fetch errors (key leak) to the clien
   const text = await r.text();
   if (text.includes("K123")) throw new Error("nøkkel lekket i feilrespons: " + text);
   if (text.includes("stlouisfed")) throw new Error("kilde-URL lekket i feilrespons: " + text);
+});
+
+Deno.test("handleHent injects user key as Basic auth for user-auth registry host", async () => {
+  const log: { url: string; headers: Record<string, string> }[] = [];
+  const d = { registry: REG, getEnv: () => undefined, fetchImpl: headerLoggingFetch(log) };
+  const url = encodeURIComponent("https://www.kaggle.com/api/v1/datasets/download/o/s/f.csv");
+  const r = await handleHent(reqWithKey("url=" + url, "bruker:K42"), d);
+  assertEquals(r.status, 200);
+  assertEquals(log[0].headers["authorization"], "Basic " + btoa("bruker:K42"));
+});
+
+Deno.test("handleHent: missing user key → 401 naming the source, no key/URL echo", async () => {
+  const d = { registry: REG, getEnv: () => undefined, fetchImpl: headerLoggingFetch([]) };
+  const url = encodeURIComponent("https://www.kaggle.com/api/v1/datasets/download/o/s/f.csv");
+  const r = await handleHent(reqWithKey("url=" + url), d);
+  assertEquals(r.status, 401);
+  const text = await r.text();
+  if (!text.includes("kaggle")) throw new Error("feilen navngir ikke kilden: " + text);
+  if (text.includes("kaggle.com/api")) throw new Error("URL lekket: " + text);
+});
+
+Deno.test("handleHent never forwards X-Source-Key to non-user-auth hosts", async () => {
+  const log: { url: string; headers: Record<string, string> }[] = [];
+  const d = { registry: REG, getEnv: (k: string) => ({ FRED_API_KEY: "F1" } as Record<string, string>)[k], fetchImpl: headerLoggingFetch(log) };
+  await handleHent(reqWithKey("url=" + encodeURIComponent("https://example.org/d.csv"), "bruker:K42"), d);
+  await handleHent(reqWithKey("url=" + encodeURIComponent("https://api.stlouisfed.org/fred/series?series_id=U"), "bruker:K42"), d);
+  for (const c of log) {
+    for (const [k, v] of Object.entries(c.headers)) {
+      if (v.includes("K42") || k.toLowerCase() === "x-source-key") {
+        throw new Error("brukernøkkel videresendt til " + c.url);
+      }
+    }
+    if (c.url.includes("K42")) throw new Error("brukernøkkel i URL: " + c.url);
+  }
+});
+
+Deno.test("handleHent caps oversized X-Source-Key", async () => {
+  const d = { registry: REG, getEnv: () => undefined, fetchImpl: headerLoggingFetch([]) };
+  const url = encodeURIComponent("https://www.kaggle.com/api/v1/x.csv");
+  const r = await handleHent(reqWithKey("url=" + url, "x".repeat(301)), d);
+  assertEquals(r.status, 400);
 });
