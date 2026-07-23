@@ -27,6 +27,7 @@ Kriterier (alle må holde):
 | 12 | python | Finn et Kaggle-datasett om Titanic-passasjerene og vis overlevelsesrate etter kjønn. | kaggle (brukernøkkel; uten registrert nøkkel skal svaret si at nøkkel må registreres — ikke fabrikkere) |
 | 13 | python | Hvordan har arbeidsledigheten i Sverige utviklet seg siste 10 år? | scb (search_catalog) |
 | 14 | r | Sammenlign befolkningsveksten i Finland og Norge siden 2000. | statfin + ssb (flerkilde-join på år) |
+| 15 | python | Hvordan har folketallet i Danmark utviklet seg per kvartal siden 2020? | dst |
 
 Resultatlogg (dato, #, PASS/FAIL, notat) føres nederst; feilmønstre omsettes
 til promptregler i _lib/data-svar-prompt.ts eller quirks i data-sources.json.
@@ -80,3 +81,5 @@ proxy-form i tråd med `ssb`-registeroppføringen; `AGENTIC_TIMEOUT_MS` 90s →
 Nytt tverrgående funn logget: modellen dropper `/pxwebapi/`-segmentet i
 SSB-URL-er (forklarer de gjentatte 404/503-probene i Q3/Q5/Q11) — kandidat
 for en quirks-presisering eller promptregel i en senere runde.
+
+2026-07-23: nav-oppføring utsatt — standard CKAN package_search ikke verifisert (forsøkt: https://data.nav.no/api/3/action/package_search?q=arbeidsledighet → 404; https://data.nav.no/, /api/3, /api/3/action/status_show → alle 404 på en ellers levende host). NAVs datasett er allerede indeksert via datanorge/Felles datakatalog (bekreftet: POST https://search.api.fellesdatakatalog.digdir.no/search med q=«nav arbeidsledighet» gir treff), så `datanorge`-oppføringen dekker discovery-behovet inntil et NAV-spesifikt API er identifisert.
