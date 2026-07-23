@@ -17,6 +17,7 @@ interface RequestBody {
   question?: string;
   mode?: string;
   script?: string;
+  available_keys?: unknown;
   repair?: RepairBody;
   resume?: ResumeBody;
 }
@@ -82,7 +83,15 @@ export default async (request: Request): Promise<Response> => {
   }
 
   const mode = coerceDataMode(body.mode);
-  const system = buildDataSvarSystem(mode, renderRegistryBlock(registry));
+  // Kun kilde-ider (aldri verdier): styrer om user-auth-kilder framstår som
+  // brukbare i registerblokken. Endrer prompt-prefikset → egen cache-nøkkel
+  // per nøkkeloppsett; bevisst (få varianter, riktighet > cache-treff).
+  const availableKeys = Array.isArray(body.available_keys)
+    ? (body.available_keys as unknown[])
+      .filter((k): k is string => typeof k === "string" && /^[a-z0-9_-]{1,32}$/.test(k))
+      .slice(0, 20)
+    : [];
+  const system = buildDataSvarSystem(mode, renderRegistryBlock(registry, availableKeys));
 
   // Deterministic source manifest: collected from probe calls, not model text.
   // On resume, re-seeded from the previous invocations' manifest so the final

@@ -973,6 +973,7 @@
             body: JSON.stringify({
               question,
               mode,
+              available_keys: (window.Keys ? window.Keys.registered() : []),
               script: scrubScript((dom.scriptInput && dom.scriptInput.value) || ''),
               repair: repair ? { script: repair.script, error: repair.error, round } : undefined,
               resume: resume || undefined,
