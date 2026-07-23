@@ -3,7 +3,7 @@
        =================================================================== */
     (function aiModule() {
       var T = window.t || function (s, p) { return p ? s.replace(/\{(\w+)\}/g, function (m, k) { return k in p ? p[k] : m; }) : s; };
-      const LS_KEY_ANTHROPIC = 'md_anthropic_key';   // BYOK: brukerens egen Anthropic-nøkkel
+      // BYOK-nøkkelen bor i det felles nøkkellageret (js/keys.js, type 'anthropic').
 
       // key(<literal>) i scriptet er en hemmelighet — maskeres før scriptet
       // sendes til AI-endepunkter (spec 2026-07-05 §5). key(ask) beholdes.
@@ -15,7 +15,7 @@
       const state = {
         sending: false,
         history: [],   // {role, html|text, raw}
-        get anthropicKey() { return localStorage.getItem(LS_KEY_ANTHROPIC) || ''; },
+        get anthropicKey() { return (window.Keys && window.Keys.get('anthropic')) || ''; },
       };
 
       // Web mode requires a user-supplied Anthropic key (BYOK — the agentic
@@ -1530,8 +1530,8 @@
       function closeSettings() { dom.aiSettingsBackdrop.classList.remove('open'); }
       function saveSettings() {
         const akey = dom.aiCfgAnthropicKey ? dom.aiCfgAnthropicKey.value.trim() : '';
-        if (akey) localStorage.setItem(LS_KEY_ANTHROPIC, akey);
-        else localStorage.removeItem(LS_KEY_ANTHROPIC);
+        if (akey) window.Keys.set('anthropic', akey);
+        else window.Keys.remove('anthropic');
         // BYOK-nøkkelen påvirker Web-knappens synlighet (webModeEligible).
         if (window.mdSyncWebBtnVisibility) window.mdSyncWebBtnVisibility();
         closeSettings();
@@ -1558,7 +1558,7 @@
 
         if (dom.aiCfgByokRemove) {
           dom.aiCfgByokRemove.addEventListener('click', () => {
-            localStorage.removeItem(LS_KEY_ANTHROPIC);
+            window.Keys.remove('anthropic');
             if (dom.aiCfgAnthropicKey) dom.aiCfgAnthropicKey.value = '';
             if (dom.aiCfgByokStored) dom.aiCfgByokStored.style.display = 'none';
             if (window.mdSyncWebBtnVisibility) window.mdSyncWebBtnVisibility();
