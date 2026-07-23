@@ -8622,6 +8622,8 @@ json.dumps(out)
           // R-modus kjører uten Pyodide siden fase 1 (btnRun sender py=null) —
           // microdata-segmenter er unntaket som lazy-laster den her.
           if (!py) py = await loadPyodideAndM2py();
+          try { await ensureMicrodataAssets(py); }
+          catch (e) { console.warn('microdata-assets (r-hybrid):', e); }
           // Build catalog JSON to pass to Python for label application
           var _catJson = (microdataCatalog && microdataCatalog.variables)
             ? JSON.stringify(microdataCatalog.variables) : '{}';
@@ -9238,6 +9240,10 @@ json.dumps(out)
       var rightStatus = ctx && ctx.rightStatus ? ctx.rightStatus : window.rightStatus;
       try {
         const py = await loadPyodideAndM2py();
+        // statx kjører alltid mot m2py-emulatoren (use/katalogvariabler) —
+        // hent microdata-assets ubetinget.
+        try { await ensureMicrodataAssets(py); }
+        catch (e) { console.warn('microdata-assets (statx):', e); }
         await loadPdexplorer(py);
         setStatus(rightStatus, t('Kjører statx…'));
         const segments = parseHybridScript(script, 'stata');
@@ -9996,10 +10002,6 @@ options(width = 200)
             return { alias: l.alias, format: l.format, path: _path };
           });
         }
-        const catalogJson = microdataCatalog && microdataCatalog.variables
-          ? JSON.stringify(microdataCatalog.variables)
-          : null;
-        const catalogArg = catalogJson !== null ? JSON.stringify(catalogJson) : 'None';
         const pageBase = window.location.href.replace(/[^/]+$/, '');
         // In Python mode, unmarked code is pyodide; otherwise use the stored runner default.
         // Segmentbygging (parseHybridScript + notatbok-prose + segment-use) er
@@ -10007,6 +10009,17 @@ options(width = 200)
         // at mdRunNotebookCell (per-celle-kjøring) bruker AKKURAT samme vei —
         // "# use" utledes alltid over HELE dokumentets segmenter (forskningsfaktum).
         let segments = await buildDocumentSegments(py, effectiveScript);
+        // Lazy microdata-assets: hent katalog + mockdata-moduler kun når
+        // dokumentet faktisk kjører microdata-språket (modusen selv, eller
+        // #%% microdata-/#micro-segmenter i andre moduser).
+        if (activeEditorMode === 'microdata' || segments.some(function (s) { return s.kind === 'microdata'; })) {
+          try { await ensureMicrodataAssets(py); }
+          catch (e) { console.warn('microdata-assets:', e); }
+        }
+        const catalogJson = microdataCatalog && microdataCatalog.variables
+          ? JSON.stringify(microdataCatalog.variables)
+          : null;
+        const catalogArg = catalogJson !== null ? JSON.stringify(catalogJson) : 'None';
         // If any segment is DuckDB SQL, make sure the bridge module + pyarrow are
         // ready before the Pyodide run loop reaches a #duckdb segment.
         if (segments.some(function (s) { return s.kind === 'duckdb'; })) {
@@ -11595,6 +11608,10 @@ async def _m2py_run_segment(_seg_json):
           } catch (e) { console.warn('forklar # load:', e); }
         }
         if (activeEditorMode !== 'r') {
+          if (activeEditorMode === 'microdata' || activeEditorMode === 'statx') {
+            try { await ensureMicrodataAssets(py); }
+            catch (e) { console.warn('microdata-assets (forklar):', e); }
+          }
           const catalogJson = microdataCatalog && microdataCatalog.variables
             ? JSON.stringify(microdataCatalog.variables)
             : null;
