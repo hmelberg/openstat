@@ -245,3 +245,33 @@ Deno.test("runAgenticStream: API error surfaces as error event", async () => {
   }));
   assertEquals(events.at(-1)?.type, "error");
 });
+
+Deno.test("messageAnthropic: apiBase overstyrer mål-URL og setter redirect:error", async () => {
+  let seenUrl = "", seenRedirect: string | undefined;
+  const fetchImpl = ((input: string | URL | Request, init?: RequestInit) => {
+    seenUrl = String(input);
+    seenRedirect = init?.redirect;
+    return Promise.resolve(new Response(JSON.stringify({
+      content: [{ type: "text", text: "hei" }], usage: { input_tokens: 1, output_tokens: 1 },
+    }), { status: 200 }));
+  }) as typeof fetch;
+  const res = await messageAnthropic(
+    { apiKey: "sk-ant-x", model: "m", prompt: "p", apiBase: "https://gw.example/v1" },
+    { fetchImpl },
+  );
+  assertEquals(seenUrl, "https://gw.example/v1/messages");
+  assertEquals(seenRedirect, "error");
+  assertEquals(res.text, "hei");
+});
+
+Deno.test("messageAnthropic: uten apiBase går kallet til api.anthropic.com uten redirect-opsjon", async () => {
+  let seenUrl = "", seenRedirect: string | undefined = "unset" as string | undefined;
+  const fetchImpl = ((input: string | URL | Request, init?: RequestInit) => {
+    seenUrl = String(input);
+    seenRedirect = init?.redirect;
+    return Promise.resolve(new Response(JSON.stringify({ content: [], usage: {} }), { status: 200 }));
+  }) as typeof fetch;
+  await messageAnthropic({ apiKey: "sk-ant-x", model: "m", prompt: "p" }, { fetchImpl });
+  assertEquals(seenUrl, "https://api.anthropic.com/v1/messages");
+  assertEquals(seenRedirect, undefined);
+});

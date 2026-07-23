@@ -1,6 +1,12 @@
 const ANTHROPIC_API = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
 
+function apiTarget(apiBase?: string): { url: string; init: Pick<RequestInit, "redirect"> } {
+  return apiBase
+    ? { url: `${apiBase}/messages`, init: { redirect: "error" } }
+    : { url: ANTHROPIC_API, init: {} };
+}
+
 export interface AnthropicStreamOptions {
   apiKey: string;
   model: string;
@@ -13,6 +19,11 @@ export interface AnthropicStreamOptions {
   // Cache TTL for the system block. "1h" needs the extended-cache-ttl beta
   // header; "5m" (default) is GA. Ignored when `system` is unset.
   cacheTtl?: "5m" | "1h";
+  // Tier 1 (spec A1/A3): anthropic-compat base-URL override. Convention:
+  // everything before the endpoint name — we call `${apiBase}/messages`.
+  // Custom bases get redirect:"error" (a redirecting LLM API is abnormal and
+  // could leak the auth header); the default path is left byte-for-byte as-is.
+  apiBase?: string;
 }
 
 export interface StreamEvent {
@@ -110,10 +121,12 @@ export async function streamAnthropic(
     ];
   }
 
-  const upstream = await fetchWithRetry(ANTHROPIC_API, {
+  const target = apiTarget(opts.apiBase);
+  const upstream = await fetchWithRetry(target.url, {
     method: "POST",
     headers,
     body: JSON.stringify(requestBody),
+    ...target.init,
   });
 
   if (!upstream.ok || !upstream.body) {
@@ -172,9 +185,10 @@ export async function messageAnthropic(
     ];
   }
 
+  const target = apiTarget(opts.apiBase);
   const resp = await fetchWithRetry(
-    ANTHROPIC_API,
-    { method: "POST", headers, body: JSON.stringify(requestBody) },
+    target.url,
+    { method: "POST", headers, body: JSON.stringify(requestBody), ...target.init },
     deps,
   );
   if (!resp.ok) {
@@ -307,6 +321,7 @@ export interface AgenticOptions {
   progressLabel?: (name: string, input: Record<string, unknown>) => string;
   maxTokens?: number;
   cacheTtl?: "5m" | "1h";
+  apiBase?: string;
   maxClientToolCalls?: number;
   maxTurns?: number;
   // Continuation protocol: Netlify caps CPU per edge invocation, so a run
@@ -355,6 +370,7 @@ export function runAgenticStream(opts: AgenticOptions): ReadableStream<Uint8Arra
   const maxClientCalls = opts.maxClientToolCalls ?? 12;
   const maxTurns = opts.maxTurns ?? 24;
   const deps: RetryDeps = { timeoutMs: AGENTIC_TIMEOUT_MS, ...opts.deps };
+  const target = apiTarget(opts.apiBase);
   const useLongTtl = opts.cacheTtl === "1h";
 
   return new ReadableStream({
@@ -397,7 +413,7 @@ export function runAgenticStream(opts: AgenticOptions): ReadableStream<Uint8Arra
           }, HEARTBEAT_MS);
           let resp: Response;
           try {
-            resp = await fetchWithRetry(ANTHROPIC_API, {
+            resp = await fetchWithRetry(target.url, {
               method: "POST",
               headers,
               body: JSON.stringify({
@@ -408,6 +424,7 @@ export function runAgenticStream(opts: AgenticOptions): ReadableStream<Uint8Arra
                 tools: opts.tools,
                 messages: state.messages,
               }),
+              ...target.init,
             }, deps);
           } finally {
             clearInterval(beat);
