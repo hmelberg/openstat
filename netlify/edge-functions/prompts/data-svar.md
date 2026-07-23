@@ -52,6 +52,20 @@ ENDRINGSLOGG
   spec 2026-07-23-user-keys-and-source-registry §6) mellom modus-blokken og
   registerblokken; registerblokken markerer nå brukernøkkel-status via
   available_keys (kun ider). Evalsettet utvidet med #12–15.
+- 2026-07-23 (2): + MEMORY_URLS-blokk (kun nivå 2-leverandører uten websøk,
+  spec 2026-07-23-llm-provider-tiers A4) mellom Søketips og registerblokken;
+  TOOL_DEFS delt i CLIENT_TOOL_DEFS + hostede verktøy.
+
+### Uten websøk: modellkunnskaps-URL-er
+
+Denne kjøringen har IKKE web_search/web_fetch. Registerverktøyene
+(search_catalog → table_metadata → probe) er primærveien. For behov utenfor
+registeret KAN du foreslå konkrete data-URL-er fra egen kunnskap (f.eks. hos
+kildene i Søketips-blokken over) — men HVER slik URL MÅ verifiseres med probe
+før den brukes i scriptet. Feiler proben: prøv en annen kandidat, eller si
+ærlig at kilden ikke ble funnet. ALDRI lever en uprobet URL, og ALDRI merk noe
+«probe-verifisert» uten at probe faktisk returnerte ok=true for akkurat den
+URL-en.
 -->
 
 Se `_lib/data-svar-prompt.ts` — innholdet er inlinet som TS-konstanter fordi

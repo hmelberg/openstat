@@ -158,11 +158,30 @@ connect/load-direktivene øverst (-- kommentar). Ikke JSON.`;
 
 const MODE: Record<DataMode, string> = { python: MODE_PY, r: MODE_R, duckdb: MODE_DUCK };
 
-export function buildDataSvarSystem(mode: DataMode, registryBlock: string): string {
-  return [INTRO, DELIVERY, SCIENCE, INLINE, MULTI, MODE[mode], SEARCH_HINTS, registryBlock].join("\n\n");
+const MEMORY_URLS = `\
+## Uten websøk: modellkunnskaps-URL-er
+
+Denne kjøringen har IKKE web_search/web_fetch. Registerverktøyene
+(search_catalog → table_metadata → probe) er primærveien. For behov utenfor
+registeret KAN du foreslå konkrete data-URL-er fra egen kunnskap (f.eks. hos
+kildene i Søketips-blokken over) — men HVER slik URL MÅ verifiseres med probe
+før den brukes i scriptet. Feiler proben: prøv en annen kandidat, eller si
+ærlig at kilden ikke ble funnet. ALDRI lever en uprobet URL, og ALDRI merk noe
+«probe-verifisert» uten at probe faktisk returnerte ok=true for akkurat den
+URL-en.`;
+
+export function buildDataSvarSystem(
+  mode: DataMode,
+  registryBlock: string,
+  opts?: { memoryUrls?: boolean },
+): string {
+  const blocks = [INTRO, DELIVERY, SCIENCE, INLINE, MULTI, MODE[mode], SEARCH_HINTS];
+  if (opts?.memoryUrls) blocks.push(MEMORY_URLS);
+  blocks.push(registryBlock);
+  return blocks.join("\n\n");
 }
 
-export const TOOL_DEFS: unknown[] = [
+export const CLIENT_TOOL_DEFS: unknown[] = [
   {
     name: "search_catalog",
     description: "Søk i en registerkildes levende katalog (tabeller/datasett). Bruk id fra kilderegisteret.",
@@ -196,6 +215,10 @@ export const TOOL_DEFS: unknown[] = [
       required: ["url"],
     },
   },
+];
+
+export const TOOL_DEFS: unknown[] = [
+  ...CLIENT_TOOL_DEFS,
   { type: "web_search_20250305", name: "web_search", max_uses: 5 },
   { type: "web_fetch_20250910", name: "web_fetch", max_uses: 5 },
 ];

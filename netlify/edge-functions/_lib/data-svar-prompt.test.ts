@@ -1,6 +1,6 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
-  buildDataSvarSystem, coerceDataMode, progressLabel, questionTurn, repairTurn, TOOL_DEFS,
+  buildDataSvarSystem, coerceDataMode, progressLabel, questionTurn, repairTurn, TOOL_DEFS, CLIENT_TOOL_DEFS,
 } from "./data-svar-prompt.ts";
 
 Deno.test("coerceDataMode defaults to python", () => {
@@ -41,4 +41,23 @@ Deno.test("turns and progress labels", () => {
   if (!progressLabel("search_catalog", { source: "ssb", query: "ledighet" }).includes("ssb")) {
     throw new Error("progress-etikett");
   }
+});
+
+Deno.test("CLIENT_TOOL_DEFS er de tre klientverktøyene; TOOL_DEFS utvider dem", () => {
+  const names = (CLIENT_TOOL_DEFS as { name: string }[]).map((t) => t.name);
+  assertEquals(names, ["search_catalog", "table_metadata", "probe"]);
+  assertEquals(TOOL_DEFS.slice(0, 3), CLIENT_TOOL_DEFS);
+  assertEquals((TOOL_DEFS as { name: string }[]).map((t) => t.name).slice(3), ["web_search", "web_fetch"]);
+});
+
+Deno.test("buildDataSvarSystem: memoryUrls-blokk kun når bedt om, mellom Søketips og register", () => {
+  const reg = "## Kilderegister (kuratert)\n\n- **ssb** …";
+  const uten = buildDataSvarSystem("python", reg);
+  if (uten.includes("modellkunnskaps-URL")) throw new Error("MEMORY_URLS lekket inn i default");
+  const med = buildDataSvarSystem("python", reg, { memoryUrls: true });
+  if (!med.includes("modellkunnskaps-URL")) throw new Error("MEMORY_URLS mangler");
+  const iHints = med.indexOf("## Søketips");
+  const iMem = med.indexOf("## Uten websøk");
+  const iReg = med.indexOf("## Kilderegister");
+  if (!(iHints < iMem && iMem < iReg)) throw new Error("feil blokkrekkefølge");
 });
