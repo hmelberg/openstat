@@ -105,7 +105,7 @@
   function emitR(item, url, body, fmt, out) {
     if (body !== null) {
       out.lines.push('# krever httr (+ jsonlite for JSON-svar):');
-      out.lines.push('_resp <- httr::POST(' + rStr(url) + ", body = '" + body.replace(/'/g, "\\'") + "', encode = \"raw\", httr::content_type_json())");
+      out.lines.push('_resp <- httr::POST(' + rStr(url) + ', body = ' + rStr(body) + ', encode = "raw", httr::content_type_json())');
       if (fmt === 'json') {
         out.lines.push(item.alias + ' <- httr::content(_resp, as = "parsed")');
       } else {

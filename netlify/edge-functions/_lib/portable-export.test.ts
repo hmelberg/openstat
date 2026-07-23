@@ -117,10 +117,21 @@ Deno.test("R: POST-reversering → httr::POST-skjelett", () => {
   const s = "# load /api/hent?url=" + encodeURIComponent(inner) + "&body=" + encodeURIComponent(body) + " as syss\n";
   const out = PE.transpile(s, "r", []);
   if (!out.code.includes('httr::POST("https://statfin.stat.fi/PXWeb/api/v1/en/t.px"')) throw new Error("mangler httr::POST:\n" + out.code);
-  if (!out.code.includes(body.replace(/"/g, '\\"')) && !out.code.includes("'" + body + "'")) {
-    throw new Error("body ikke inlinet:\n" + out.code);
+  if (!out.code.includes("body = " + JSON.stringify(body))) {
+    throw new Error("body ikke inlinet med rStr:\n" + out.code);
   }
   if (!out.code.includes("# krever httr")) throw new Error("mangler pakke-kommentar");
+});
+
+Deno.test("R: POST-body med backslash escapes korrekt (rStr, ikke håndrullet)", () => {
+  const inner = "https://x.example/api";
+  const body = JSON.stringify({ path: "a\\/b", note: "it's" });
+  const s = "# load /api/hent?url=" + encodeURIComponent(inner) + "&body=" + encodeURIComponent(body) + " as d\n";
+  const out = PE.transpile(s, "r", []);
+  // JSON.stringify-escaped dobbeltsitert literal skal inneholde bodyen eksakt:
+  if (!out.code.includes("body = " + JSON.stringify(body))) {
+    throw new Error("body ikke rStr-escapet:\n" + out.code);
+  }
 });
 
 Deno.test("R: parquet → nedlasting + arrow, med kommentar", () => {
