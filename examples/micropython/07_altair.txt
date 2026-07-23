@@ -1,0 +1,25 @@
+# label: altair — deklarative diagram
+# Altair (Vega-Lite) i MicroPython-modus: bygg spec-en deklarativt,
+# vega-embed rendrer.
+import altair as alt
+import pandas_mpy as pd
+
+df = pd.DataFrame({
+    "aar": [2020, 2021, 2022, 2020, 2021, 2022],
+    "antall": [12, 15, 19, 8, 11, 9],
+    "region": ["Øst", "Øst", "Øst", "Vest", "Vest", "Vest"],
+})
+
+# Lagdelt linje + punkt, med gjennomsnitt per år og region
+linjer = alt.Chart(df).mark_line().encode(
+    x="aar:O",
+    y="mean(antall):Q",
+    color="region:N",
+)
+punkter = alt.Chart(df).mark_point().encode(
+    x="aar:O",
+    y="mean(antall):Q",
+    color="region:N",
+    tooltip=["aar:O", "antall:Q", "region:N"],
+)
+(linjer + punkter).properties(title="Antall per region").interactive()

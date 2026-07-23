@@ -134,6 +134,11 @@
       "file": "brython/bry26_containers.txt",
       "label": "Containers — explicit layout",
       "group": null
+    },
+    {
+      "file": "brython/bry27_altair.txt",
+      "label": "altair — deklarative diagram",
+      "group": null
     }
   ],
   "duckdb": [
@@ -727,6 +732,11 @@
       "file": "micropython/06_widget_events.txt",
       "label": "Widget events — ui.on and ui.run_cell (MicroPython)",
       "group": null
+    },
+    {
+      "file": "micropython/07_altair.txt",
+      "label": "altair — deklarative diagram",
+      "group": null
     }
   ],
   "python": [
@@ -773,6 +783,11 @@
     {
       "file": "python/py06_dashboard.txt",
       "label": "Dashboard — distribution explorer",
+      "group": null
+    },
+    {
+      "file": "python/py07_altair.txt",
+      "label": "altair — deklarative diagram",
       "group": null
     },
     {

@@ -616,7 +616,7 @@
     window.t = window.t || function (s) { return s; };
     window.i18nField = window.i18nField || function (obj, field) { return obj && obj[field]; };
 
-    window.M2PY_VERSION = '2026-07-22b';
+    window.M2PY_VERSION = '2026-07-24b';
 
     // One-time migration: remove obsolete localStorage keys from previous milestones
     // Safe to delete this snippet after a few months when most users have re-loaded
@@ -2498,7 +2498,7 @@
       'randomForest','xgboost','caret','glmnet'
     ];
     const PYTHON_DS_IMPORTS = [
-      'pandas','numpy','matplotlib','matplotlib.pyplot','seaborn',
+      'pandas','numpy','matplotlib','matplotlib.pyplot','seaborn','altair',
       'plotly','plotly.express','scipy','scipy.stats',
       'sklearn','sklearn.linear_model','sklearn.ensemble','sklearn.preprocessing',
       'statsmodels','statsmodels.api','statsmodels.formula.api',
@@ -6254,6 +6254,38 @@ json.dumps(out)
       Plotly.newPlot(div, data, layout, { responsive: true, autosizable: true, staticPlot: staticPlot }).catch(function(){});
     }
 
+    function mdRenderVegaFigure(div, spec) {
+      if (typeof vegaEmbed === 'undefined') return;
+      div.className = 'vegalite-container';
+      var styles = getComputedStyle(document.body);
+      var textColor = (styles.getPropertyValue('--text') || '#1a1b26').trim();
+      var borderColor = (styles.getPropertyValue('--border') || '#e4e2dd').trim();
+      var fontStack = 'DejaVu Sans, Arial, sans-serif';
+      // Tema-config ved RENDER-tid (ikke bakt inn i spec-en) — samme
+      // policy som mdRenderPlotlyFigure: transparent bakgrunn + app-farger
+      // i begge temaer.
+      var themeConfig = {
+        background: null,
+        view: { stroke: borderColor },
+        axis: { labelColor: textColor, titleColor: textColor,
+                gridColor: borderColor, domainColor: borderColor,
+                tickColor: borderColor, labelFont: fontStack, titleFont: fontStack },
+        legend: { labelColor: textColor, titleColor: textColor,
+                  labelFont: fontStack, titleFont: fontStack },
+        title: { color: textColor, font: fontStack },
+        text: { color: textColor }
+      };
+      // Visningsdefaults à la plotly-stien — kun når spec-en ikke selv
+      // setter størrelse, og aldri for fasetterte spec-er (column/row
+      // styrer egen panelstørrelse i vega-lite).
+      var enc = spec.encoding || {};
+      var faceted = !!(enc.column || enc.row || spec.facet);
+      if (!faceted && spec.width === undefined) spec.width = 440;
+      if (!faceted && spec.height === undefined) spec.height = 260;
+      vegaEmbed(div, spec, { actions: false, config: themeConfig })
+        .catch(function () {});
+    }
+
     function buildOutputNodes(raw, asHtml, suppress) {
       const parts = parseOutput(raw);
       const frag = document.createDocumentFragment();
@@ -6372,6 +6404,18 @@ json.dumps(out)
               }
               attachTableCopyHandler(wrapDiv);
               frag.appendChild(wrapDiv);
+            } else if (p.embedType === 'vegalite' && p.payload && typeof vegaEmbed !== 'undefined') {
+              try {
+                const vlSpec = JSON.parse(p.payload);
+                const vlDiv = document.createElement('div');
+                frag.appendChild(vlDiv);
+                mdRenderVegaFigure(vlDiv, vlSpec);
+              } catch (e) {
+                const pre = document.createElement('pre');
+                pre.className = 'embed-placeholder';
+                pre.textContent = '[Vega-Lite figure – could not parse JSON]';
+                frag.appendChild(pre);
+              }
             } else if (p.embedType === 'figure' && p.payload && typeof Plotly !== 'undefined') {
               try {
                 const spec = JSON.parse(p.payload);
@@ -7442,6 +7486,16 @@ def _show_one(obj):
                 _payload = _mb["application/vnd.jupyter.widget-view+json"]
                 print(_EMBED_S + "ipywidget__" + chr(10) + _json.dumps(_payload) + chr(10) + _EMBED_E)
                 return
+    except Exception:
+        pass
+    try:
+        # ekte altair i pyodide-modus -> samme vegalite__-embed som
+        # brython/micropython-shimene (spec 2026-07-23); duck-typet på
+        # modulnavn + to_json så vi slipper å importere altair her
+        _omod = getattr(type(obj), "__module__", "") or ""
+        if _omod.split(".")[0] == "altair" and hasattr(obj, "to_json") and hasattr(obj, "to_dict"):
+            print(_EMBED_S + "vegalite__" + chr(10) + obj.to_json() + chr(10) + _EMBED_E)
+            return
     except Exception:
         pass
     try:
