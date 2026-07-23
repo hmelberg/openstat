@@ -214,3 +214,23 @@ Deno.test("data-loader: bar URL mot user-auth-kilde rutes via proxy (aldri direk
   if (!calls[0].url.includes("/api/hent?url=")) throw new Error("gikk ikke via proxy: " + calls[0].url);
   assertEquals(calls[0].headers["X-Source-Key"], "bruker:K11");
 });
+
+const KAGGLE_FRI_REG = [{
+  id: "kagglefri", navn: "KaggleFri", utgiver: "K", tillit: "etablert", tilgang: "rest",
+  base_url: "https://open.kagglefri.example/api/", cors: false,
+  auth: { type: "api_key", user: true, valgfri: true, plassering: "basic" },
+}];
+
+Deno.test("data-loader: valgfri kilde uten nøkkel kaster ikke — via proxy uten X-Source-Key", async () => {
+  const calls: { url: string; headers: Record<string, string> }[] = [];
+  const fetchImpl = ((input: string | URL | Request, init?: RequestInit) => {
+    calls.push({ url: String(input), headers: (init?.headers as Record<string, string>) ?? {} });
+    return Promise.resolve(new Response("a,b\n1,2", { status: 200, headers: { "content-type": "text/csv" } }));
+  }) as typeof fetch;
+  const inner = encodeURIComponent("https://open.kagglefri.example/api/fil-e.csv");
+  const out = await DL.resolveAndFetchLoads("# load /api/hent?url=" + inner + " as fri",
+    { fetchImpl, registry: KAGGLE_FRI_REG, keysApi: { get: () => "" } });
+  assertEquals(out.loads[0].alias, "fri");
+  const proxy = calls.find((c) => c.url.includes("/api/hent?url="));
+  assertEquals(proxy?.headers["X-Source-Key"], undefined);
+});

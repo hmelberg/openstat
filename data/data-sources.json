@@ -98,10 +98,10 @@
     "tillit": "etablert", "tilgang": "rest",
     "base_url": "https://www.kaggle.com/api/v1/",
     "cors": false,
-    "auth": { "type": "api_key", "user": true, "plassering": "basic" },
+    "auth": { "type": "api_key", "user": true, "valgfri": true, "plassering": "basic" },
     "nokkel_hint": "brukernavn:nøkkel — lag på kaggle.com → Settings → API",
     "sporrings_url_mal": "https://www.kaggle.com/api/v1/datasets/download/{eier}/{slug}/{filnavn}",
-    "quirks": "krever brukernøkkel (Basic auth via /api/hent); anonym nedlasting kan virke for åpne datasett, men nøkkel kreves; nedlasting redirecter til Google Storage (proxyen følger); enkeltfil-URL gir fila, uten {filnavn} kommer hele datasettet som zip (unngå); datasett er ofte uoffisielle kopier — foretrekk primærkilder og sjekk lisens; discovery via web_search + probe"
+    "quirks": "krever brukernøkkel (Basic auth via /api/hent); åpne datasett kan hentes uten nøkkel; privat-/konkurransedata krever registrert nøkkel; nedlasting redirecter til Google Storage (proxyen følger); enkeltfil-URL gir fila, uten {filnavn} kommer hele datasettet som zip (unngå); datasett er ofte uoffisielle kopier — foretrekk primærkilder og sjekk lisens; discovery via web_search + probe"
   },
   {
     "id": "scb", "navn": "Statistikmyndigheten SCB (PxWebApi 2)", "utgiver": "SCB",

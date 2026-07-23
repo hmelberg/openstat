@@ -10,6 +10,10 @@ const REG = parseRegistry([{
   id: "kaggle", navn: "Kaggle", utgiver: "Kaggle", tillit: "etablert", tilgang: "rest",
   base_url: "https://www.kaggle.com/api/v1/", cors: false,
   auth: { type: "api_key", user: true, plassering: "basic" },
+}, {
+  id: "kagglefri", navn: "KaggleFri", utgiver: "K", tillit: "etablert", tilgang: "rest",
+  base_url: "https://open.kagglefri.example/api/", cors: false,
+  auth: { type: "api_key", user: true, valgfri: true, plassering: "basic" },
 }]);
 
 function fakeFetch(log: string[]): typeof fetch {
@@ -145,4 +149,21 @@ Deno.test("handleHent: nøkkel på nøyaktig 300 tegn aksepteres", async () => {
   const r = await handleHent(reqWithKey("url=" + url, "k".repeat(300)), d);
   assertEquals(r.status, 200);
   assertEquals(log[0].headers["authorization"], "Basic " + btoa("k".repeat(300)));
+});
+
+Deno.test("handleHent: valgfri kilde uten nøkkel → anonym henting uten auth-header", async () => {
+  const log: { url: string; headers: Record<string, string> }[] = [];
+  const d = { registry: REG, getEnv: () => undefined, fetchImpl: headerLoggingFetch(log) };
+  const url = encodeURIComponent("https://open.kagglefri.example/api/d.csv");
+  const r = await handleHent(reqWithKey("url=" + url), d);
+  assertEquals(r.status, 200);
+  assertEquals(log[0].headers["authorization"], undefined);
+});
+
+Deno.test("handleHent: valgfri kilde MED nøkkel → Basic som før", async () => {
+  const log: { url: string; headers: Record<string, string> }[] = [];
+  const d = { registry: REG, getEnv: () => undefined, fetchImpl: headerLoggingFetch(log) };
+  const url = encodeURIComponent("https://open.kagglefri.example/api/e.csv");
+  await handleHent(reqWithKey("url=" + url, "bruker:K1"), d);
+  assertEquals(log[0].headers["authorization"], "Basic " + btoa("bruker:K1"));
 });

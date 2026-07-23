@@ -6,6 +6,7 @@ export interface SourceAuth {
   type: "api_key";
   env?: string;       // Netlify env var (site-nøkkel) — gjensidig utelukkende med user
   user?: boolean;     // true = brukernøkkel via X-Source-Key (js/keys.js), injiseres av /api/hent
+  valgfri?: boolean;  // kun med user:true — nøkkel valgfri (anonym tilgang mulig)
   plassering: string; // "query:<param>" | "header:<name>" | "basic"
 }
 
@@ -56,6 +57,9 @@ export function parseRegistry(json: unknown): DataSource[] {
       if (a.user === true && typeof plass === "string" && plass.startsWith("query:")) {
         throw new Error(`kilde ${e.id}: brukernøkkel kan ikke ha query-plassering (nøkkel ville havnet i URL og logger)`);
       }
+      if (a.valgfri !== undefined && (a.valgfri !== true || a.user !== true)) {
+        throw new Error(`kilde ${e.id}: auth.valgfri krever user:true (og må være true)`);
+      }
     }
     return e as unknown as DataSource;
   });
@@ -95,7 +99,11 @@ export function renderRegistryBlock(reg: DataSource[], userKeys: string[] = []):
   const lines = reg.map((s) => {
     const bits = [`${s.tilgang}, base ${s.base_url}`];
     if (s.sok_endepunkt) bits.push("søkbar via search_catalog");
-    if (s.auth?.user) {
+    if (s.auth?.user && s.auth.valgfri) {
+      bits.push(userKeys.includes(s.id)
+        ? "brukernøkkel valgfri (registrert) → hentes alltid via /api/hent"
+        : "brukernøkkel valgfri — offentlige datasett kan hentes uten nøkkel; privat-/konkurransedata krever registrert nøkkel (AI-innstillingene)");
+    } else if (s.auth?.user) {
       bits.push(userKeys.includes(s.id)
         ? "krever brukernøkkel (registrert) → hentes alltid via /api/hent"
         : "krever brukernøkkel — IKKE registrert: ikke bygg svaret på denne kilden; nevn i så fall at nøkkel kan registreres i AI-innstillingene");

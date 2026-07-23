@@ -62,7 +62,10 @@
     if (!src) return {};
     var K = keysApi || global.Keys;
     var val = K && K.get(src.id);
-    if (!val) throw new Error('«' + src.id + '» krever API-nøkkel — registrer den i AI-innstillingene.');
+    if (!val) {
+      if (src.auth && src.auth.valgfri) return {};   // valgfri: anonym henting
+      throw new Error('«' + src.id + '» krever API-nøkkel — registrer den i AI-innstillingene.');
+    }
     return { 'X-Source-Key': val };
   }
 

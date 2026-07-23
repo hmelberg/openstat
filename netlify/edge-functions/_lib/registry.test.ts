@@ -98,3 +98,25 @@ Deno.test("shipped data/data-sources.json parses against the schema", async () =
   const reg = parseRegistry(raw);
   if (reg.length < 11) throw new Error("uventet få kilder: " + reg.length);
 });
+
+Deno.test("parseRegistry: auth.valgfri krever user:true", () => {
+  const base = { id: "k", navn: "K", utgiver: "K", tillit: "etablert", tilgang: "rest",
+    base_url: "https://api.k.example/", cors: false };
+  const ok = parseRegistry([{ ...base, auth: { type: "api_key", user: true, valgfri: true, plassering: "basic" } }]);
+  assertEquals(ok[0].auth?.valgfri, true);
+  assertThrows(() => parseRegistry([{ ...base, auth: { type: "api_key", env: "X", valgfri: true, plassering: "basic" } }]));
+  assertThrows(() => parseRegistry([{ ...base, auth: { type: "api_key", user: true, valgfri: "ja", plassering: "basic" } }]));
+});
+
+Deno.test("renderRegistryBlock: valgfri-kilde markeres som brukbar uten nøkkel", () => {
+  const reg = parseRegistry([{
+    id: "kaggle", navn: "Kaggle", utgiver: "Kaggle", tillit: "etablert", tilgang: "rest",
+    base_url: "https://www.kaggle.com/api/v1/", cors: false,
+    auth: { type: "api_key", user: true, valgfri: true, plassering: "basic" },
+  }]);
+  const uten = renderRegistryBlock(reg);
+  if (!uten.includes("brukernøkkel valgfri")) throw new Error("mangler valgfri-markering:\n" + uten);
+  if (uten.includes("IKKE registrert: ikke bygg")) throw new Error("valgfri kilde feilmarkert som ubrukelig");
+  const med = renderRegistryBlock(reg, ["kaggle"]);
+  if (!med.includes("valgfri (registrert)")) throw new Error("mangler registrert-markering:\n" + med);
+});
