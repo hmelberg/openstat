@@ -9371,18 +9371,21 @@ await micropip.install('plotly')
       setStatus(leftStatus, 'Fetching m2py and functions...');
       const base = window.location.href.replace(/[^/]+$/, '');
       const _cb = '?v=' + (window.M2PY_VERSION || '1');
-      const [m2pyResp, funcResp, protectResp, notebookProseResp] = await Promise.all([
+      const [m2pyResp, funcResp, coreResp, protectResp, notebookProseResp] = await Promise.all([
         fetch(base + 'm2py.py' + _cb),
         fetch(base + 'functions.py' + _cb),
+        fetch(base + 'mockdata_core.py' + _cb),
         fetch(base + 'protect.py' + _cb).catch(function() { return { ok: false }; }),
         fetch(base + 'notebook_prose.py' + _cb).catch(function() { return { ok: false }; })
       ]);
-      if (!m2pyResp.ok || !funcResp.ok) {
-        throw new Error('Could not load m2py.py or functions.py. Run from a local server (e.g. python -m http.server) from the microdata folder.');
+      if (!m2pyResp.ok || !funcResp.ok || !coreResp.ok) {
+        throw new Error('Could not load m2py.py, functions.py or mockdata_core.py. Run from a local server (e.g. python -m http.server) from the microdata folder.');
       }
-      // Katalog + mockdata-moduler er lazy (plan 2026-07-23-lazy-microdata-
-      // assets): se ensureMicrodataAssets() — kjørestedene awaiter den når
-      // microdata faktisk er involvert.
+      // Katalog + de TUNGE microdata-assetene er lazy (plan 2026-07-23-lazy-
+      // microdata-assets): se ensureMicrodataAssets() — kjørestedene awaiter
+      // den når microdata faktisk er involvert. mockdata_core (185 linjer,
+      // delte konstanter) er unntaket: m2py.py importerer den på toppnivå
+      // (m2py.py:1668) og den MÅ registreres før m2py under.
       const m2pyCode = await m2pyResp.text();
       const funcCode = await funcResp.text();
       const funcRe = /def\s+(\w+)\s*\(/g;
@@ -9435,6 +9438,15 @@ exec(compile(np_code, "notebook_prose.py", "exec"), sys.modules["notebook_prose"
           window.__notebookProseLoaded = true;
         } catch (e) { console.warn('notebook_prose register:', e); }
       }
+      // mockdata_core FØR m2py: toppnivå `from mockdata_core import …` i m2py.py.
+      const coreCode = await coreResp.text();
+      setStatus(leftStatus, 'Registering mockdata_core...');
+      await pyodide.runPythonAsync(`
+core_code = ${JSON.stringify(coreCode)}
+spec_c = importlib.util.spec_from_loader("mockdata_core", loader=None)
+sys.modules["mockdata_core"] = importlib.util.module_from_spec(spec_c)
+exec(compile(core_code, "mockdata_core.py", "exec"), sys.modules["mockdata_core"].__dict__)
+`);
       setStatus(leftStatus, 'Registering m2py...');
       await pyodide.runPythonAsync(`
 m2py_code = ${JSON.stringify(m2pyCode)}
@@ -9475,11 +9487,13 @@ has and "int" in (m.get_microdata_functions() or {})
     }
 
     // ── Lazy microdata-assets (plan 2026-07-23-lazy-microdata-assets) ──────
-    // Mockdata-modulene trengs bare når microdata-språket kjører (statx-modus,
-    // microdata-modus/-segmenter). m2py.py degraderer pent uten dem (realism-
-    // dispatch faller tilbake), og getInterpreterCorePython sjekker selv
-    // `'static_source' in _sys.modules` — så rene python/duckdb-kjøringer er
-    // upåvirket av at modulene mangler. Registreringskoden er flyttet uendret
+    // mockdata_realism og static_source trengs bare når microdata-språket
+    // kjører (statx-modus, microdata-modus/-segmenter): m2py importerer
+    // mockdata_realism lazy (realism-dispatch faller pent tilbake uten den),
+    // og getInterpreterCorePython sjekker selv `'static_source' in
+    // _sys.modules` — så rene python/duckdb-kjøringer er upåvirket av at
+    // modulene mangler. (mockdata_core er derimot en toppnivå-import i
+    // m2py.py og bor i kjernebooten.) Registreringskoden er flyttet uendret
     // fra _loadPyodideAndM2pyImpl (pluss egne sys/importlib-imports: snuttene
     // kjører nå frittstående, ikke etter functions-registreringens imports).
     let __mockdataModulesPromise = null;
@@ -9495,29 +9509,22 @@ has and "int" in (m.get_microdata_functions() or {})
     async function _ensureMockdataModulesImpl(py) {
       const base = window.location.href.replace(/[^/]+$/, '');
       const _cb = '?v=' + (window.M2PY_VERSION || '1');
-      const [coreResp, realismResp, staticSrcResp] = await Promise.all([
-        fetch(base + 'mockdata_core.py' + _cb).catch(function () { return { ok: false }; }),
+      const [realismResp, staticSrcResp] = await Promise.all([
         fetch(base + 'mockdata_realism.py' + _cb).catch(function () { return { ok: false }; }),
         fetch(base + 'static_source.py' + _cb).catch(function () { return { ok: false }; })
       ]);
-      // Load order: mockdata_core (no deps) -> mockdata_realism (depends on core).
-      if (coreResp.ok && realismResp.ok) {
-        const coreCode = await coreResp.text();
+      // mockdata_realism depends on mockdata_core, which core boot registered.
+      if (realismResp.ok) {
         const realismCode = await realismResp.text();
         await py.runPythonAsync(`
 import sys, importlib.util
-core_code = ${JSON.stringify(coreCode)}
-spec_c = importlib.util.spec_from_loader("mockdata_core", loader=None)
-sys.modules["mockdata_core"] = importlib.util.module_from_spec(spec_c)
-exec(compile(core_code, "mockdata_core.py", "exec"), sys.modules["mockdata_core"].__dict__)
-
 realism_code = ${JSON.stringify(realismCode)}
 spec_r = importlib.util.spec_from_loader("mockdata_realism", loader=None)
 sys.modules["mockdata_realism"] = importlib.util.module_from_spec(spec_r)
 exec(compile(realism_code, "mockdata_realism.py", "exec"), sys.modules["mockdata_realism"].__dict__)
 `);
       } else {
-        console.warn('mockdata_core.py or mockdata_realism.py not available; realism dispatch in m2py will fall back.');
+        console.warn('mockdata_realism.py not available; realism dispatch in m2py will fall back.');
       }
       // static_source (statisk datakilde via DuckDB-WASM). Valgfri.
       if (staticSrcResp && staticSrcResp.ok) {

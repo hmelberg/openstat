@@ -8,6 +8,14 @@
 
 **Tech Stack:** Vanilla JS i `index.html` (inline script), Pyodide, node:test (`tests/js/`), pytest (`tests/`), browserverifisering via lokal `python3 -m http.server`.
 
+> **Avvik funnet under utførelse (2026-07-23):** `mockdata_core.py` kan IKKE
+> lazy-lastes — `m2py.py:1668` har en toppnivå `from mockdata_core import …`
+> (delte konstanter, dedup 2026-07-07), så modulen må registreres FØR m2py i
+> kjernebooten. Task 2 ble justert: mockdata_core (185 linjer) ble værende i
+> `_loadPyodideAndM2pyImpl`; kun `mockdata_realism.py`, `static_source.py` og
+> `variable_metadata.json` er lazy. Funnet via browserverifisering (boot
+> feilet med ModuleNotFoundError før justeringen).
+
 ## Global Constraints
 
 - `m2py.py`, `functions.py`, `m2py_translate.py`, `m2py_runtime/`, `mockdata_*.py`, `protect.py` er byte-identiske med søsterrepoene — **ingen av dem skal endres** i denne planen.
