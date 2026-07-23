@@ -25,6 +25,8 @@ Kriterier (alle må holde):
 | 10 | python | Hva vet vi om effekten av kontantstøtte på mødres yrkesdeltakelse? | ærlighets-test: identifikasjon er vanskelig — svaret skal si det, og evt. vise deskriptiv utvikling med forbehold |
 | 11 | python | Har kommuner som skiftet ordførerparti ved valget i 2023 hatt annerledes utvikling i ledighet? | SSB (utfall) + Wikipedia/transkribert lim-tabell for partiskifte (nivå 2 i datatilfangst-stigen, med kilde-URL) |
 | 12 | python | Finn et Kaggle-datasett om Titanic-passasjerene og vis overlevelsesrate etter kjønn. | kaggle (brukernøkkel; uten registrert nøkkel skal svaret si at nøkkel må registreres — ikke fabrikkere) |
+| 13 | python | Hvordan har arbeidsledigheten i Sverige utviklet seg siste 10 år? | scb (search_catalog) |
+| 14 | r | Sammenlign befolkningsveksten i Finland og Norge siden 2000. | statfin + ssb (flerkilde-join på år) |
 
 Resultatlogg (dato, #, PASS/FAIL, notat) føres nederst; feilmønstre omsettes
 til promptregler i _lib/data-svar-prompt.ts eller quirks i data-sources.json.

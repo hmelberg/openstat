@@ -102,5 +102,23 @@
     "nokkel_hint": "brukernavn:nøkkel — lag på kaggle.com → Settings → API",
     "sporrings_url_mal": "https://www.kaggle.com/api/v1/datasets/download/{eier}/{slug}/{filnavn}",
     "quirks": "krever brukernøkkel (Basic auth via /api/hent); anonym nedlasting kan virke for åpne datasett, men nøkkel kreves; nedlasting redirecter til Google Storage (proxyen følger); enkeltfil-URL gir fila, uten {filnavn} kommer hele datasettet som zip (unngå); datasett er ofte uoffisielle kopier — foretrekk primærkilder og sjekk lisens; discovery via web_search + probe"
+  },
+  {
+    "id": "scb", "navn": "Statistikmyndigheten SCB (PxWebApi 2)", "utgiver": "SCB",
+    "tillit": "offisiell", "tilgang": "pxweb",
+    "base_url": "https://api.scb.se/ov0104/v2beta/api/v2/",
+    "sok_endepunkt": "https://api.scb.se/ov0104/v2beta/api/v2/tables?query={q}&lang=sv",
+    "cors": true,
+    "join_nokler": ["region", "år", "kön"],
+    "sporrings_url_mal": "https://api.scb.se/ov0104/v2beta/api/v2/tables/{id}/data?valueCodes[{var}]={koder}&outputFormat=csv&lang=sv",
+    "quirks": "Verifisert 2026-07-23: søk (GET .../tables?query={q}&lang=sv|en) gir {\"tables\":[{id,label,firstPeriod,lastPeriod,...}]} — adapter-kompatibel; i motsetning til SSB virker /data på SAMME v2beta-sti (ingen v2/v2-beta-splitt); outputFormat=csv gir CSV direkte uten filter, og med valueCodes[dim]=kode når man vil begrense; dataendepunktet sender Access-Control-Allow-Origin: * (CORS OK, verifisert med curl -sI mot .../data); valueCodes-nøkler må være metadata-dimensjonskoder (f.eks. 'Alder', 'Kon', 'Tid' — fra /tables/{id}/metadata), IKKE søkeresultatets variableNames-etiketter (som er små bokstaver, f.eks. 'region', 'år', 'kön'); mangler obligatorisk dimensjon gir HTTP 400 'Missing selection for mandantory variable'."
+  },
+  {
+    "id": "statfin", "navn": "Statistikcentralen StatFin", "utgiver": "Tilastokeskus",
+    "tillit": "offisiell", "tilgang": "rest",
+    "base_url": "https://statfin.stat.fi/PXWeb/api/v1/en/StatFin/",
+    "cors": false,
+    "join_nokler": ["Vuosi (år)", "Alue (region)"],
+    "quirks": "Verifisert 2026-07-23: ingen PxWebApi 2 finnes (pxdata.stat.fi/api/v2, api.stat.fi/v2 osv. gir alle 404) — kun v1 (PXWeb) finnes, derfor ingen sok_endepunkt/pxweb-adapter; mappenavigasjon er GET/JSON, f.eks. .../StatFin/ og .../StatFin/tyti/ (tyti=arbeidskraftsundersøkelsen) lister tabeller ({id,type,text,updated}); tabell-metadata (variabelkoder) hentes med GET på tabell-URLen (f.eks. .../StatFin/tyti/135y.px), MEN selve datauttrekket krever POST med JSON-body {query:[{code,selection:{filter:'item',values:[...]}}, ...],response:{format:'csv'}}; navigasjon+metadata (GET) sender Access-Control-Allow-Origin: *, men datauttrekket (POST) sender INGEN CORS-header — må derfor alltid gå via /api/hent-proxy; mønster: POST-uttrekk GET-innpakkes via proxyens body-param, f.eks. GET /api/hent?url=<url-enkodet https://statfin.stat.fi/PXWeb/api/v1/en/StatFin/tyti/135y.px>&body=<url-enkodet {\"query\":[{\"code\":\"timeperiod_m\",\"selection\":{\"filter\":\"item\",\"values\":[\"2026M05\"]}}],\"response\":{\"format\":\"csv\"}}> as tabell; finn tabell-id og variabelkoder ved å navigere mappestrukturen (web_search + probe) og lese metadata før uttrekk."
   }
 ]
