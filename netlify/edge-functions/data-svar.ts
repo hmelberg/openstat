@@ -154,16 +154,16 @@ export default async (request: Request): Promise<Response> => {
     maxClientToolCalls: 12,
     resume: resumeState,
     continueExtra: () => ({ probed }),
-    // Agentic provider turns (non-idempotent, billed) get a longer timeout
-    // than the default (matches anthropic's AGENTIC_TIMEOUT_MS) and fewer
-    // retries — retrying a slow-but-successful turn would double-bill it.
-    deps: { timeoutMs: 180_000, retries: 1 },
   };
+  // Agentic provider turns (non-idempotent, billed) get a longer timeout
+  // than the default (matches anthropic's AGENTIC_TIMEOUT_MS) and fewer
+  // retries — retrying a slow-but-successful turn would double-bill it.
+  const providerDeps = { timeoutMs: 180_000, retries: 1 };
   let inner: ReadableStream<Uint8Array>;
   if (provider && provider.type === "openai-compat") {
-    inner = runProviderAgenticStream({ ...commonOpts, runTurn: makeOpenAiCompatTurn(provider), tools: CLIENT_TOOL_DEFS });
+    inner = runProviderAgenticStream({ ...commonOpts, deps: providerDeps, runTurn: makeOpenAiCompatTurn(provider), tools: CLIENT_TOOL_DEFS });
   } else if (provider && provider.type === "openai-responses") {
-    inner = runProviderAgenticStream({ ...commonOpts, runTurn: makeOpenAiResponsesTurn(provider), tools: CLIENT_TOOL_DEFS });
+    inner = runProviderAgenticStream({ ...commonOpts, deps: providerDeps, runTurn: makeOpenAiResponsesTurn(provider), tools: CLIENT_TOOL_DEFS });
   } else {
     inner = runAgenticStream({
       ...commonOpts,
