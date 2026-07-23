@@ -53,6 +53,9 @@ export function parseRegistry(json: unknown): DataSource[] {
       if (hasEnv === (a.user === true)) {
         throw new Error(`kilde ${e.id}: auth må ha nøyaktig én av env eller user:true`);
       }
+      if (a.user === true && typeof plass === "string" && plass.startsWith("query:")) {
+        throw new Error(`kilde ${e.id}: brukernøkkel kan ikke ha query-plassering (nøkkel ville havnet i URL og logger)`);
+      }
     }
     return e as unknown as DataSource;
   });

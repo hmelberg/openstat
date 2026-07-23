@@ -74,6 +74,12 @@ Deno.test("parseRegistry validates auth: env xor user, plassering incl. basic", 
   assertThrows(() => parseRegistry([{ ...base, auth: { type: "api_key", user: true, plassering: "query:" } }]));
 });
 
+Deno.test("parseRegistry rejects user-key with query-plassering (nøkkel ville havnet i URL/logg)", () => {
+  const base = { id: "q", navn: "Q", utgiver: "Q", tillit: "etablert", tilgang: "rest",
+    base_url: "https://api.q.example/", cors: false };
+  assertThrows(() => parseRegistry([{ ...base, auth: { type: "api_key", user: true, plassering: "query:key" } }]));
+});
+
 Deno.test("renderRegistryBlock marks user-key sources by registration state", () => {
   const reg = parseRegistry([{
     id: "kaggle", navn: "Kaggle", utgiver: "Kaggle", tillit: "etablert", tilgang: "rest",
