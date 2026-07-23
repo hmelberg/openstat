@@ -1524,3 +1524,22 @@ body.present-active .panel-left, body.present-active #resizer { display: none; }
    .nb-cell:focus-within allerede bruker for kant-farge alene (uten layout-
    skiftende border-bredde-endring, se den kommentaren lenger opp i fila). */
 .doc-cell.doc-active { box-shadow: inset 3px 0 0 var(--accent); }
+
+/* folium-shimets choropleth-legend (mdRenderLeafletMap) */
+.leafletmap-legend {
+  background: var(--bg-code, #fff);
+  color: var(--text, #1a1b26);
+  border: 1px solid var(--border, #e4e2dd);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.leafletmap-legend i {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 5px;
+  vertical-align: -1px;
+}
+.leafletmap-container { margin: 6px 0; }

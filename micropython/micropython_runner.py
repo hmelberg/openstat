@@ -48,6 +48,9 @@ def _fmt(obj):
         except Exception:
             pass
         return ''
+    if hasattr(obj, 'to_leaflet_json_str'):
+        # folium-shimet (spec 2026-07-24): Leaflet-rendring i JS
+        return _EMBED_S + 'leafletmap__' + '\n' + obj.to_leaflet_json_str() + '\n' + _EMBED_E
     if hasattr(obj, 'to_vegalite_json_str'):
         # altair-shimet (spec 2026-07-23): vega-embed-rendring i JS
         return _EMBED_S + 'vegalite__' + '\n' + obj.to_vegalite_json_str() + '\n' + _EMBED_E

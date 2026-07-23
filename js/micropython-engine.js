@@ -47,7 +47,16 @@
       { url: 'https://cdn.jsdelivr.net/npm/vega-embed@6.26.0/build/vega-embed.min.js', global: 'vegaEmbed' }
                           ] },
     altair_core:        { aliases: [], deps: [], js: [],
-                          path: 'shared/altair_core.py' }
+                          path: 'shared/altair_core.py' },
+    // folium (spec 2026-07-24): samme mønster som altair — delt kjerne i
+    // shared/, Leaflet lastes lazy ved `import folium` (CSS statisk i
+    // index.html-head).
+    folium_mpy:         { aliases: ['folium'], deps: ['folium_core'],
+                          js: [
+      { url: 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.min.js', global: 'L' }
+                          ] },
+    folium_core:        { aliases: [], deps: [], js: [],
+                          path: 'shared/folium_core.py' }
   };
 
   function scanImports(code) {
