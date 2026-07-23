@@ -1267,7 +1267,7 @@
         if (state.sending) return;
         const text = dom.aiInput.value.trim();
         if (!text) return;
-        if (!state.anthropicKey) {
+        if (!state.anthropicKey && !customProviderReady()) {
           openSettings();
           return;
         }
@@ -1763,7 +1763,7 @@
           payload = payload || {};
           if (!payload.output || !payload.output.trim()) return;
           if (state.sending) return;
-          if (!state.anthropicKey) { openSettings(); return; }
+          if (!state.anthropicKey && !customProviderReady()) { openSettings(); return; }
           setOpen(true);
           if (state.history.length === 0) dom.aiThread.innerHTML = '';
           appendUserMessage(T('Tolk resultatene fra forrige kjøring.'));
