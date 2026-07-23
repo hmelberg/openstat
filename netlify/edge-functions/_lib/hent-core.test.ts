@@ -134,4 +134,15 @@ Deno.test("handleHent caps oversized X-Source-Key", async () => {
   const url = encodeURIComponent("https://www.kaggle.com/api/v1/x.csv");
   const r = await handleHent(reqWithKey("url=" + url, "x".repeat(301)), d);
   assertEquals(r.status, 400);
+  const text = await r.text();
+  assertEquals(text, "X-Source-Key for lang");
+});
+
+Deno.test("handleHent: nøkkel på nøyaktig 300 tegn aksepteres", async () => {
+  const log: { url: string; headers: Record<string, string> }[] = [];
+  const d = { registry: REG, getEnv: () => undefined, fetchImpl: headerLoggingFetch(log) };
+  const url = encodeURIComponent("https://www.kaggle.com/api/v1/z.csv");
+  const r = await handleHent(reqWithKey("url=" + url, "k".repeat(300)), d);
+  assertEquals(r.status, 200);
+  assertEquals(log[0].headers["authorization"], "Basic " + btoa("k".repeat(300)));
 });

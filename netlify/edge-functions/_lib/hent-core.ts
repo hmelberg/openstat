@@ -52,7 +52,13 @@ export async function handleHent(request: Request, deps: HentDeps): Promise<Resp
       if (!key) return new Response(`Nøkkel for ${src.id} er ikke konfigurert`, { status: 502 });
     }
     if (a.plassering === "basic") {
-      headers["authorization"] = "Basic " + btoa(key);
+      try {
+        headers["authorization"] = "Basic " + btoa(key);
+      } catch (_e) {
+        // btoa kaster på tegn utenfor Latin1 (typisk copy-paste-artefakter).
+        // Fast kropp — aldri nøkkelinnhold i feilsvar.
+        return new Response("Ugyldig X-Source-Key (tegn utenfor Latin1)", { status: 400 });
+      }
     } else {
       const [kind, name] = a.plassering.split(":");
       if (kind === "query") {
