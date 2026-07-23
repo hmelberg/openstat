@@ -10,8 +10,9 @@ SCIENCE (rå→justert, identifikasjon, heterogenitet, ærlighet — utvidet fra
 INFERENCE_STRATEGY_PYR i kode-svar.ts), INLINE (datatilfangst-stigen:
 probet → transkribert-fra-web_fetch → modellkunnskap; aldri utfall fra
 nivå 3), MULTI (merge til ÉN analysedataframe, join-nøkler, radtall
-før/etter), MODE_PY/R/DUCK (miljø + svarformat), + registerblokk
-(renderRegistryBlock, byte-stabil). Hosted tools: web_search + web_fetch.
+før/etter), MODE_PY/R/DUCK (miljø + svarformat), SEARCH_HINTS (meta-kataloger
+som web_search-startpunkter), + registerblokk (renderRegistryBlock,
+byte-stabil). Hosted tools: web_search + web_fetch.
 
 Prompt-utviklingsloop (spec §7): endringer kjøres mot evalsettet
 (docs/eval/data-svar-evalsett.md) før deploy; feilmønstre fra evals og
@@ -47,6 +48,10 @@ ENDRINGSLOGG
   fila). Q3/Q5/Q11 kjørt på nytt mot evalsettet — se
   `docs/eval/data-svar-evalsett.md` for resultatene. `data-svar-prompt.test.ts`
   og hele `_lib/`-suiten grønn etter endringen.
+- 2026-07-23: + SEARCH_HINTS-blokk (meta-kataloger som web_search-startpunkter,
+  spec 2026-07-23-user-keys-and-source-registry §6) mellom modus-blokken og
+  registerblokken; registerblokken markerer nå brukernøkkel-status via
+  available_keys (kun ider). Evalsettet utvidet med #12–15.
 -->
 
 Se `_lib/data-svar-prompt.ts` — innholdet er inlinet som TS-konstanter fordi

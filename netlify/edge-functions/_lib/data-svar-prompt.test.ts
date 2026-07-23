@@ -17,6 +17,7 @@ Deno.test("system prompt: byte-stable, mode-specific, carries core rules", () =>
   for (const needle of [
     "connect", "load", "probe", "aldri", "konfunder", "heterogenitet",
     "join", "Kilderegister", "transkribert", "modellkunnskap", "site:",
+    "Søketips", "awesome-public-datasets",
   ]) {
     if (!a.toLowerCase().includes(needle.toLowerCase())) throw new Error("mangler: " + needle);
   }

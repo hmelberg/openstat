@@ -113,6 +113,17 @@ se join-nøkler i registeret). Harmoniser koder og enheter FØR join, kommenter
 join-type (inner/left) og hvorfor, og sjekk radtall før/etter (stille
 rad-tap er en klassisk feilkilde).`;
 
+const SEARCH_HINTS = `\
+## Søketips utenfor registeret
+
+Når registeret og search_catalog ikke dekker temaet, er gode startpunkter for
+web_search/web_fetch: awesome-public-datasets
+(github.com/awesomedata/awesome-public-datasets — kategorisert lenkeliste, en
+del døde lenker), data.europa.eu (EU-landenes offisielle datasett) og Google
+Dataset Search (datasetsearch.research.google.com). Alt funnet denne veien er
+tillit=funnet: probe URL-en før bruk (som alltid), og foretrekk registerkilder
+når de dekker spørsmålet.`;
+
 const MODE_PY = `\
 ## Modus: Python (Pyodide)
 
@@ -148,7 +159,7 @@ connect/load-direktivene øverst (-- kommentar). Ikke JSON.`;
 const MODE: Record<DataMode, string> = { python: MODE_PY, r: MODE_R, duckdb: MODE_DUCK };
 
 export function buildDataSvarSystem(mode: DataMode, registryBlock: string): string {
-  return [INTRO, DELIVERY, SCIENCE, INLINE, MULTI, MODE[mode], registryBlock].join("\n\n");
+  return [INTRO, DELIVERY, SCIENCE, INLINE, MULTI, MODE[mode], SEARCH_HINTS, registryBlock].join("\n\n");
 }
 
 export const TOOL_DEFS: unknown[] = [
