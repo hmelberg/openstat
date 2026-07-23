@@ -754,4 +754,13 @@ window.M2PY_I18N.en = {
   "OpenAI-kompatibel URL": "OpenAI-compatible URL",
   "OpenAI Responses (med websøk)": "OpenAI Responses (with web search)",
   "Base-URL er alt før endepunktnavnet (typisk t.o.m. /v1). Nøkkelen lagres kun i denne nettleseren; forespørsler går via appens server til leverandøren du velger, og forbruk (inkludert eventuelt websøk hos OpenAI) belastes din konto der. Web-modus med OpenAI-typene krever en modell med verktøystøtte. Microdata-AI krever fortsatt Anthropic-nøkkel.": "The base URL is everything before the endpoint name (typically up to /v1). The key is stored only in this browser; requests go via the app's server to the provider you choose, and usage (including any web search at OpenAI) is billed to your account there. Web mode with the OpenAI types requires a model with tool support. The microdata AI still requires an Anthropic key.",
+
+  // ── Portabel eksport (spec 2026-07-23-portable-export-design) ──
+  "Last ned portabelt script": "Download portable script",
+  "Kopier portabelt script": "Copy portable script",
+  "Last ned scriptet med # load-direktivene oversatt til frittstående kode (pd.read_csv/requests eller read.csv) — kan kjøres i Jupyter/RStudio utenfor appen.": "Download the script with the # load directives translated to freestanding code (pd.read_csv/requests or read.csv) — runs in Jupyter/RStudio outside the app.",
+  "Editoren er tom — ingenting å eksportere.": "The editor is empty — nothing to export.",
+  "Kunne ikke eksportere: {msg}": "Could not export: {msg}",
+  "Eksportert med {n} merknader — se kommentarene i scriptet": "Exported with {n} notes — see the comments in the script",
+  "Portabelt script kopiert til utklippstavlen": "Portable script copied to the clipboard",
 };

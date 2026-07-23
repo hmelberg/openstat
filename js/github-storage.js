@@ -138,6 +138,64 @@
         }
       }
 
+      // --- Portabel eksport (spec 2026-07-23-portable-export-design) ---
+      var _peRegistry = null;
+      async function peRegistry() {
+        if (_peRegistry) return _peRegistry;
+        try {
+          const r = await fetch('data/data-sources.json');
+          _peRegistry = r.ok ? await r.json() : [];
+        } catch (e) { _peRegistry = []; }   // offline: URL-loads virker fortsatt
+        return _peRegistry;
+      }
+
+      async function portableCode() {
+        const si = $('scriptInput');
+        const script = si ? si.value : '';
+        if (!script.trim()) { alert(T('Editoren er tom — ingenting å eksportere.')); return null; }
+        const mode = (window.M2PY && window.M2PY.currentMode && window.M2PY.currentMode().id) || 'python';
+        try {
+          return window.PortableExport.transpile(script, mode, await peRegistry());
+        } catch (e) {
+          alert(T('Kunne ikke eksportere: {msg}', { msg: e.message || e }));
+          return null;
+        }
+      }
+
+      function peToastWarnings(w) {
+        if (w && w.length) toast(T('Eksportert med {n} merknader — se kommentarene i scriptet', { n: w.length }));
+      }
+
+      async function portableSave() {
+        closeMenu();
+        const out = await portableCode();
+        if (!out) return;
+        const mode = (window.M2PY && window.M2PY.currentMode && window.M2PY.currentMode().id) || 'python';
+        const ext = mode === 'r' ? '.R' : '.py';
+        const name = (($('scriptName') && $('scriptName').value) || 'script').trim().replace(/\.(txt|py|r)$/i, '') + ext;
+        const blob = new Blob([out.code], { type: 'text/plain' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = name;
+        a.click();
+        URL.revokeObjectURL(a.href);
+        peToastWarnings(out.warnings);
+      }
+
+      async function portableCopy() {
+        closeMenu();
+        const out = await portableCode();
+        if (!out) return;
+        try {
+          await navigator.clipboard.writeText(out.code);
+          toast(T('Portabelt script kopiert til utklippstavlen'));
+          peToastWarnings(out.warnings);
+        } catch (e) {
+          // Clipboard utilgjengelig → fall tilbake til nedlasting (spec §4).
+          portableSave();
+        }
+      }
+
       async function fetchFirstOk(urls) {
         for (var i = 0; i < urls.length; i++) {
           try { const r = await fetch(urls[i]); if (r.ok) return await r.text(); } catch (_) {}
@@ -804,6 +862,8 @@
             menuLoad: FOLDER,
             menuShareLink: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>',
             menuSave: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
+            menuPortableSave: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
+            menuPortableCopy: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>',
             menuWebExamples: '<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>',
             ghMenuSettings: SETTINGS,
             ghMenuOpen: FOLDER,
@@ -821,6 +881,8 @@
         })();
 
         on('menuShareLink', shareLink);
+        on('menuPortableSave', portableSave);
+        on('menuPortableCopy', portableCopy);
         on('menuOpenUrl', openUrlModal);
 
         on('openUrlCancel', () => { $('openUrlBackdrop').style.display = 'none'; });
