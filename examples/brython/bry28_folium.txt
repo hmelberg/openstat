@@ -1,0 +1,21 @@
+# label: folium — kart og choropleth
+# Folium (Leaflet) i brython-modus: markører + norsk fylkes-choropleth.
+import folium
+
+m = folium.Map()
+
+folium.Marker([59.9139, 10.7522], popup="Oslo", tooltip="Hovedstaden").add_to(m)
+folium.CircleMarker([60.3913, 5.3221], radius=10, color="#c0392b",
+                    fill=True, tooltip="Bergen").add_to(m)
+
+folium.Choropleth(
+    "norge:fylker",
+    data={"03": 12.5, "11": 9.8, "15": 7.1, "18": 8.4, "31": 10.2,
+          "32": 9.1, "33": 8.8, "34": 7.9, "39": 9.5, "40": 8.2,
+          "42": 9.9, "46": 8.6, "50": 9.3, "55": 6.8, "56": 7.4},
+    legend_name="Rate per 1000",
+    fill_color="YlGnBu",
+    bins=5,
+).add_to(m)
+
+m

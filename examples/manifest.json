@@ -139,6 +139,11 @@
       "file": "brython/bry27_altair.txt",
       "label": "altair — deklarative diagram",
       "group": null
+    },
+    {
+      "file": "brython/bry28_folium.txt",
+      "label": "folium — kart og choropleth",
+      "group": null
     }
   ],
   "duckdb": [
@@ -737,6 +742,11 @@
       "file": "micropython/07_altair.txt",
       "label": "altair — deklarative diagram",
       "group": null
+    },
+    {
+      "file": "micropython/08_folium.txt",
+      "label": "folium — kart og choropleth",
+      "group": null
     }
   ],
   "python": [
@@ -788,6 +798,11 @@
     {
       "file": "python/py07_altair.txt",
       "label": "altair — deklarative diagram",
+      "group": null
+    },
+    {
+      "file": "python/py08_folium.txt",
+      "label": "folium — kart",
       "group": null
     },
     {

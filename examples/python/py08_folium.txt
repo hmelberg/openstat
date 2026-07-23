@@ -1,0 +1,9 @@
+# label: folium — kart
+# Ekte folium i python-modus (pyodide): rendres som HTML-iframe.
+import folium
+
+m = folium.Map(location=[65.0, 13.0], zoom_start=4)
+folium.Marker([59.9139, 10.7522], popup="Oslo", tooltip="Hovedstaden").add_to(m)
+folium.CircleMarker([60.3913, 5.3221], radius=10, color="#c0392b",
+                    fill=True, tooltip="Bergen").add_to(m)
+m
