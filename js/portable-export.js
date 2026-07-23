@@ -100,7 +100,31 @@
     return out.lines;
   }
 
-  function emitR() { throw new Error('R-eksport kommer i neste oppgave'); } // erstattes i Task 2
+  function rStr(s) { return JSON.stringify(s); }
+
+  function emitR(item, url, body, fmt, out) {
+    if (body !== null) {
+      out.lines.push('# krever httr (+ jsonlite for JSON-svar):');
+      out.lines.push('_resp <- httr::POST(' + rStr(url) + ", body = '" + body.replace(/'/g, "\\'") + "', encode = \"raw\", httr::content_type_json())");
+      if (fmt === 'json') {
+        out.lines.push(item.alias + ' <- httr::content(_resp, as = "parsed")');
+      } else {
+        out.lines.push(item.alias + ' <- read.csv(text = httr::content(_resp, as = "text"))  # NB: sjekk skilletegn (sep=";")');
+      }
+      return;
+    }
+    if (fmt === 'json') {
+      out.lines.push(item.alias + ' <- jsonlite::fromJSON(' + rStr(url) + ')  # krever jsonlite');
+      return;
+    }
+    if (fmt === 'parquet') {
+      var tmp = '"' + item.alias + '.parquet"';
+      out.lines.push('download.file(' + rStr(url) + ', ' + tmp + ', mode = "wb")');
+      out.lines.push(item.alias + ' <- arrow::read_parquet(' + tmp + ')  # krever arrow');
+      return;
+    }
+    out.lines.push(item.alias + ' <- read.csv(' + rStr(url) + ')  # NB: sjekk skilletegn — nordiske CSV-er bruker ofte sep=";"');
+  }
 
   function transpile(script, mode, registry) {
     if (mode !== 'python' && mode !== 'r') throw new Error('portabel eksport støtter python og r, ikke «' + mode + '»');
@@ -142,7 +166,7 @@
     return { code: code, warnings: warnings };
   }
 
-  function rImports() { return []; } // erstattes i Task 2
+  function rImports() { return []; }   // R: pakker refereres med :: — ingen import-blokk
 
   global.PortableExport = { transpile: transpile };
 })(typeof window !== 'undefined' ? window : globalThis);

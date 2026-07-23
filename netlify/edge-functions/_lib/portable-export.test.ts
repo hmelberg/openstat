@@ -94,3 +94,38 @@ Deno.test("direktivfeil → Error('Direktivfeil: …')", () => {
 Deno.test("ukjent mode → Error", () => {
   assertThrows(() => PE.transpile("print(1)", "duckdb", []), Error);
 });
+
+Deno.test("R: GET csv → read.csv m/ separator-kommentar", () => {
+  const s = "-- load https://x.example/d.csv as df\nsummary(df)\n";
+  const out = PE.transpile(s, "r", []);
+  if (!out.code.includes('df <- read.csv("https://x.example/d.csv")  # NB: sjekk skilletegn — nordiske CSV-er bruker ofte sep=";"')) {
+    throw new Error("feil R-csv-emisjon:\n" + out.code);
+  }
+});
+
+Deno.test("R: kind(json) → jsonlite::fromJSON", () => {
+  const s = "# load https://x.example/d as j, kind(json)\n";
+  const out = PE.transpile(s, "r", []);
+  if (!out.code.includes('j <- jsonlite::fromJSON("https://x.example/d")  # krever jsonlite')) {
+    throw new Error("feil R-json-emisjon:\n" + out.code);
+  }
+});
+
+Deno.test("R: POST-reversering → httr::POST-skjelett", () => {
+  const inner = "https://statfin.stat.fi/PXWeb/api/v1/en/t.px";
+  const body = JSON.stringify({ query: [], response: { format: "csv" } });
+  const s = "# load /api/hent?url=" + encodeURIComponent(inner) + "&body=" + encodeURIComponent(body) + " as syss\n";
+  const out = PE.transpile(s, "r", []);
+  if (!out.code.includes('httr::POST("https://statfin.stat.fi/PXWeb/api/v1/en/t.px"')) throw new Error("mangler httr::POST:\n" + out.code);
+  if (!out.code.includes(body.replace(/"/g, '\\"')) && !out.code.includes("'" + body + "'")) {
+    throw new Error("body ikke inlinet:\n" + out.code);
+  }
+  if (!out.code.includes("# krever httr")) throw new Error("mangler pakke-kommentar");
+});
+
+Deno.test("R: parquet → nedlasting + arrow, med kommentar", () => {
+  const s = "# load https://x.example/d.parquet as p\n";
+  const out = PE.transpile(s, "r", []);
+  if (!out.code.includes('download.file("https://x.example/d.parquet"')) throw new Error("mangler download.file:\n" + out.code);
+  if (!out.code.includes("arrow::read_parquet")) throw new Error("mangler arrow::read_parquet");
+});
