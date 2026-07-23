@@ -39,6 +39,7 @@
          'aiIncludeScript',
          'aiSettingsBackdrop','aiCfgAnthropicKey','aiCfgSave','aiCfgCancel',
          'aiCfgByokStored','aiCfgByokRemove','aiCfgSourceKeys',
+         'aiCfgProviderType','aiCfgProviderFields','aiCfgProviderUrl','aiCfgProviderModel','aiCfgLlmKey',
          'sidebarRight','sidebarOpenTab','scriptInput'
         ].forEach(id => { dom[id] = $(id); });
         dom.containers = document.querySelectorAll('.container');
@@ -1577,10 +1578,37 @@
         });
       }
 
+      // Global AI-leverandør (spec 2026-07-23-llm-provider-tiers A1): type +
+      // base-URL + modell i md_llm_provider (ikke hemmelig); nøkkelen i det
+      // felles nøkkellageret (js/keys.js, type 'llm').
+      var LS_PROVIDER = 'md_llm_provider';
+      function providerConfig() {
+        var p = null;
+        try { p = JSON.parse(localStorage.getItem(LS_PROVIDER) || 'null'); } catch (e) { /* korrupt → ignorer */ }
+        if (!p || !p.type || p.type === 'anthropic') return null;
+        if (!p.base_url || !p.model) return null;
+        return { type: p.type, base_url: p.base_url, model: p.model };
+      }
+      function syncProviderFields() {
+        if (!dom.aiCfgProviderType || !dom.aiCfgProviderFields) return;
+        var custom = dom.aiCfgProviderType.value !== 'anthropic';
+        dom.aiCfgProviderFields.style.display = custom ? '' : 'none';
+        if (dom.aiCfgLlmKey) {
+          dom.aiCfgLlmKey.placeholder = (window.Keys && window.Keys.get('llm'))
+            ? '••••••••' : T('lim inn nøkkel');
+        }
+      }
       function openSettings() {
         if (dom.aiCfgAnthropicKey) dom.aiCfgAnthropicKey.value = state.anthropicKey;
         refreshUserPanel();
         renderSourceKeys();
+        var provRaw = null;
+        try { provRaw = JSON.parse(localStorage.getItem(LS_PROVIDER) || 'null'); } catch (e) {}
+        if (dom.aiCfgProviderType) dom.aiCfgProviderType.value = (provRaw && provRaw.type) || 'anthropic';
+        if (dom.aiCfgProviderUrl) dom.aiCfgProviderUrl.value = (provRaw && provRaw.base_url) || '';
+        if (dom.aiCfgProviderModel) dom.aiCfgProviderModel.value = (provRaw && provRaw.model) || '';
+        if (dom.aiCfgLlmKey) dom.aiCfgLlmKey.value = '';
+        syncProviderFields();
         dom.aiSettingsBackdrop.classList.add('open');
       }
       function closeSettings() { dom.aiSettingsBackdrop.classList.remove('open'); }
@@ -1595,6 +1623,20 @@
             var v = inp.value.trim();
             if (v) window.Keys.set(inp.dataset.sourceKeyId, v);
           });
+        }
+        if (dom.aiCfgProviderType) {
+          var ptype = dom.aiCfgProviderType.value;
+          if (ptype === 'anthropic') {
+            localStorage.removeItem(LS_PROVIDER);
+          } else {
+            localStorage.setItem(LS_PROVIDER, JSON.stringify({
+              type: ptype,
+              base_url: (dom.aiCfgProviderUrl ? dom.aiCfgProviderUrl.value.trim() : ''),
+              model: (dom.aiCfgProviderModel ? dom.aiCfgProviderModel.value.trim() : ''),
+            }));
+          }
+          var lk = dom.aiCfgLlmKey ? dom.aiCfgLlmKey.value.trim() : '';
+          if (lk && window.Keys) window.Keys.set('llm', lk);
         }
         closeSettings();
       }
@@ -1617,6 +1659,8 @@
         dom.aiSettingsBackdrop.addEventListener('click', (e) => {
           if (e.target === dom.aiSettingsBackdrop) closeSettings();
         });
+
+        if (dom.aiCfgProviderType) dom.aiCfgProviderType.addEventListener('change', syncProviderFields);
 
         if (dom.aiCfgByokRemove) {
           dom.aiCfgByokRemove.addEventListener('click', () => {

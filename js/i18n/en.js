@@ -744,4 +744,12 @@ window.M2PY_I18N.en = {
   // ── Editor-konvergens: markør-/seleksjonskjøring (plan 4b Task 2) ──
   "Merk tekst innenfor én kodecelle for å kjøre et utvalg": "Select text within a single code cell to run a selection",
   "Markøren står utenfor cellene": "The cursor is outside the cells",
+
+  // ── AI-leverandør-valg (spec 2026-07-23-llm-provider-tiers) ──
+  "AI-leverandør": "AI provider",
+  "Anthropic (standard)": "Anthropic (default)",
+  "Anthropic-kompatibel URL": "Anthropic-compatible URL",
+  "OpenAI-kompatibel URL": "OpenAI-compatible URL",
+  "OpenAI Responses (med websøk)": "OpenAI Responses (with web search)",
+  "Base-URL er alt før endepunktnavnet (typisk t.o.m. /v1). Nøkkelen lagres kun i denne nettleseren; forespørsler går via appens server til leverandøren du velger, og forbruk (inkludert eventuelt websøk hos OpenAI) belastes din konto der. Web-modus med OpenAI-typene krever en modell med verktøystøtte. Microdata-AI krever fortsatt Anthropic-nøkkel.": "The base URL is everything before the endpoint name (typically up to /v1). The key is stored only in this browser; requests go via the app's server to the provider you choose, and usage (including any web search at OpenAI) is billed to your account there. Web mode with the OpenAI types requires a model with tool support. The microdata AI still requires an Anthropic key.",
 };

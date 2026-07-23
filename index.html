@@ -223,6 +223,22 @@
 
       <div id="aiCfgSourceKeys" style="margin-bottom:18px;"></div>
 
+      <div style="margin-bottom:18px;">
+        <label for="aiCfgProviderType" data-i18n>AI-leverandør</label>
+        <select id="aiCfgProviderType">
+          <option value="anthropic" data-i18n>Anthropic (standard)</option>
+          <option value="anthropic-compat" data-i18n>Anthropic-kompatibel URL</option>
+          <option value="openai-compat" data-i18n>OpenAI-kompatibel URL</option>
+          <option value="openai-responses" data-i18n>OpenAI Responses (med websøk)</option>
+        </select>
+        <div id="aiCfgProviderFields" style="display:none; margin-top:6px;">
+          <input type="text" id="aiCfgProviderUrl" placeholder="https://api.openai.com/v1" autocomplete="off">
+          <input type="text" id="aiCfgProviderModel" placeholder="gpt-5.6" autocomplete="off" style="margin-top:4px;">
+          <input type="password" id="aiCfgLlmKey" autocomplete="off" style="margin-top:4px;">
+          <div class="ai-modal-help" data-i18n>Base-URL er alt før endepunktnavnet (typisk t.o.m. /v1). Nøkkelen lagres kun i denne nettleseren; forespørsler går via appens server til leverandøren du velger, og forbruk (inkludert eventuelt websøk hos OpenAI) belastes din konto der. Web-modus med OpenAI-typene krever en modell med verktøystøtte. Microdata-AI krever fortsatt Anthropic-nøkkel.</div>
+        </div>
+      </div>
+
       <div class="ai-modal-actions" style="margin-top:14px;">
         <button type="button" class="ai-modal-btn" id="aiCfgCancel" data-i18n>Lukk</button>
         <button type="button" class="ai-modal-btn primary" id="aiCfgSave" data-i18n>Lagre innstillinger</button>
