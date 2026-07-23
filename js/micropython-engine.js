@@ -35,7 +35,19 @@
     // fase 3 (spec 2026-07-20): delt fasadekjerne — én fil for alle tre
     // python-runtimene; path-feltet overstyrer katalogkonvensjonen.
     ui_core:            { aliases: [], deps: [], js: [],
-                          path: 'shared/ui_core.py' }
+                          path: 'shared/ui_core.py' },
+    // altair (spec 2026-07-23): delt dialektfri kjerne i shared/ — samme
+    // path-overstyring som ui_core. Vega-stakken lastes lazy ved
+    // `import altair`; rekkefølgen er bindende (vega -> vega-lite ->
+    // vega-embed), lasteren går sekvensielt gjennom js-listen.
+    altair_mpy:         { aliases: ['altair'], deps: ['altair_core'],
+                          js: [
+      { url: 'https://cdn.jsdelivr.net/npm/vega@5.30.0/build/vega.min.js', global: 'vega' },
+      { url: 'https://cdn.jsdelivr.net/npm/vega-lite@5.21.0/build/vega-lite.min.js', global: 'vegaLite' },
+      { url: 'https://cdn.jsdelivr.net/npm/vega-embed@6.26.0/build/vega-embed.min.js', global: 'vegaEmbed' }
+                          ] },
+    altair_core:        { aliases: [], deps: [], js: [],
+                          path: 'shared/altair_core.py' }
   };
 
   function scanImports(code) {

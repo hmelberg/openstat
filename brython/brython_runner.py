@@ -31,6 +31,9 @@ def _fmt(obj):
         except Exception:
             pass
         return ''
+    if hasattr(obj, 'to_vegalite_json_str'):
+        # altair-shimet (spec 2026-07-23): vega-embed-rendring i JS
+        return _EMBED_S + 'vegalite__' + '\n' + obj.to_vegalite_json_str() + '\n' + _EMBED_E
     if hasattr(obj, 'to_plotly_json_str'):
         return _EMBED_S + 'figure__' + '\n' + obj.to_plotly_json_str() + '\n' + _EMBED_E
     if hasattr(obj, 'to_html'):
