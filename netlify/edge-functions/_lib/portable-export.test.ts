@@ -186,6 +186,23 @@ Deno.test("key(<literal>) maskeres i output og gir warning", () => {
   if (!out.warnings.some((w: string) => w.includes("h"))) throw new Error("mangler warning for kryptert kilde");
 });
 
+Deno.test("legitim key(...)-formet kode (data.table::key m.fl.) overlever byte-identisk — scrub skopet til direktivlinjer", () => {
+  const s = "dt <- data.table::key(dt)\nx = mapping.key(5)\n# load https://x.example/scrub-safe.csv as s\n";
+  const out = PE.transpile(s, "python", []);
+  if (!out.code.includes("dt <- data.table::key(dt)")) throw new Error("data.table::key(dt) mangla/mangla byte-identisk:\n" + out.code);
+  if (!out.code.includes("x = mapping.key(5)")) throw new Error("mapping.key(5) mangla byte-identisk:\n" + out.code);
+  if (out.code.includes("key(***)")) throw new Error("legitim kode ble maskert:\n" + out.code);
+  if (!out.code.includes('s = pd.read_csv("https://x.example/scrub-safe.csv"')) throw new Error("direktivlinjen virker ikke lenger:\n" + out.code);
+  if (out.warnings.some((w: string) => w.includes("maskert"))) throw new Error("falsk maskerings-warning: " + JSON.stringify(out.warnings));
+});
+
+Deno.test("key(<literal>) på connect-linje maskeres også", () => {
+  const s = "# connect https://x.example/enc as c, key(hemmelig999)\n# load c/d.csv as d\n";
+  const out = PE.transpile(s, "python", []);
+  if (out.code.includes("hemmelig999")) throw new Error("connect-nøkkelliteral lekket til eksport:\n" + out.code);
+  if (!out.code.includes("key(***)")) throw new Error("maskering mangler på connect-linjen:\n" + out.code);
+});
+
 Deno.test("anvil-kilde og exec(remote) → ikke-portabel kommentarblokk, resten eksporteres", () => {
   const s = "# connect minkilde\n# load minkilde as d\nprint('etterpå')\n";
   const out = PE.transpile(s, "python", []);   // tomt register → anvil-gren

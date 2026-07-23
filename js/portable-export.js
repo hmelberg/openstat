@@ -13,6 +13,20 @@
     '# Generert av appen — rediger fritt.',
   ];
 
+  // key(<literal>)-maskering SKOPET til direktivlinjer (connect/load/require):
+  // en helskript-scrub ødela legitim kode med key(...)-formede kall — f.eks.
+  // ble «dt <- data.table::key(dt)» til «data.table::key(***)». Bare linjer
+  // som ser ut som direktiv-kommentarer kan bære nøkkelliteraler.
+  var DIRECTIVE_LINE_RE = /^[ \t]*(?:#|--|\/\/)[ \t]*(connect|load|require)\b/i;
+  var MASK_WARNING = 'key(...)-verdier ble maskert i eksporten — bruk key(ask) eller egen nøkkelhåndtering utenfor appen';
+
+  function scrubDirectiveLine(line, DD, state) {
+    if (!DIRECTIVE_LINE_RE.test(line)) return line;
+    var scrubbed = DD.scrubKeys(line);
+    if (scrubbed !== line) state.masked = true;
+    return scrubbed;
+  }
+
   // /api/hent?url=<enc>[&body=<enc-json>] → {url, body|null}; ellers null.
   function decodeHentUrl(target) {
     if (target.indexOf('/api/hent?') !== 0) return null;
@@ -204,10 +218,15 @@
     var parsed = DD.parse(script);
     if (parsed.errors.length) throw new Error('Direktivfeil: ' + parsed.errors.join('; '));
     if (!parsed.loads.length) {
-      var passthrough = DD.scrubKeys(script);
-      return { code: passthrough, warnings: passthrough !== script
-        ? ['key(...)-verdier ble maskert i eksporten — bruk key(ask) eller egen nøkkelhåndtering utenfor appen']
-        : [] };
+      // Ingen direktiver i det hele tatt → byte-identisk passthrough (planens
+      // garanti). Connect-linjer ER direktiver og kan bære key(<literal>) —
+      // de linje-skopes gjennom samme scrub selv uten loads.
+      if (!parsed.connects.length) return { code: script, warnings: [] };
+      var st0 = { masked: false };
+      var passthrough = String(script).split('\n').map(function (l) {
+        return scrubDirectiveLine(l, DD, st0);
+      }).join('\n');
+      return { code: passthrough, warnings: st0.masked ? [MASK_WARNING] : [] };
     }
     var resolved = DD.resolve(parsed, registry || []);
     var bad = resolved.filter(function (r) { return r.error; });
@@ -221,6 +240,7 @@
     });
 
     var outLines = [];
+    var maskState = { masked: false };
     var lines = String(script).split('\n');
     for (var i = 0; i < lines.length; i++) {
       var trimmed = lines[i].trim();
@@ -229,13 +249,16 @@
         if (queue[q] && queue[q].line === trimmed) { qi = q; break; }
       }
       if (qi >= 0) {
-        outLines.push(lines[i]);                 // originaldirektivet som kommentar
+        // originaldirektivet som kommentar — key(<literal>) maskeres
+        outLines.push(scrubDirectiveLine(lines[i], DD, maskState));
         outLines.push.apply(outLines, queue[qi].emitted);
         queue[qi] = null;                        // konsumert (duplikatlinjer i rekkefølge)
       } else {
-        outLines.push(lines[i]);
+        // passthrough — connect-linjer (også direktiver) linje-skopes
+        outLines.push(scrubDirectiveLine(lines[i], DD, maskState));
       }
     }
+    if (maskState.masked) warnings.push(MASK_WARNING);
 
     var head = HEADER.slice();
     // Plassholder-konstanter øverst (etter header, før imports): NAVN = "..."
@@ -248,16 +271,6 @@
     });
     var imports = mode === 'python' ? pythonImports(needs, script) : rImports(needs, script); // rImports: Task 2
     var code = head.concat(imports.length ? imports : []).concat(['']).join('\n') + outLines.join('\n');
-
-    // Til slutt: maskér alle key(<literal>) i output (delelenke-regelen) —
-    // fanger ev. key(...)-literaler som har lekket inn via de bevarte
-    // originaldirektiv-kommentarene (plassholderne over dekker selve
-    // nøkkelverdiene appen kjenner til; dette dekker literaler brukeren
-    // skrev direkte i scriptet).
-    var scrubbed = DD.scrubKeys(code);
-    if (scrubbed !== code) warnings.push('key(...)-verdier ble maskert i eksporten — bruk key(ask) eller egen nøkkelhåndtering utenfor appen');
-    code = scrubbed;
-
     return { code: code, warnings: warnings };
   }
 
