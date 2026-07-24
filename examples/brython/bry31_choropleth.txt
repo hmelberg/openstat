@@ -1,0 +1,23 @@
+# label: plotly — choropleth (land + norske kommuner)
+# Landnivåkart med plotly express, og norske kommuner via folium-shimets
+# geometri (geojson="norge:kommuner").
+import pandas_brython as pd
+import plotly_express_brython as pe
+
+nordisk = pd.DataFrame({
+    "land": ["NOR", "SWE", "DNK", "FIN", "ISL"],
+    "navn": ["Norge", "Sverige", "Danmark", "Finland", "Island"],
+    "rate": [3.1, 2.5, 2.9, 3.4, 2.2],
+})
+show(pe.choropleth(nordisk, locations="land", locationmode="ISO-3",
+                   color="rate", hover_name="navn", scope="europe",
+                   labels={"rate": "Rate per 1000"},
+                   title="Nordiske land"))
+
+kommuner = pd.DataFrame({
+    "kommnr": ["0301", "1103", "5001", "4601", "3301"],
+    "antall": [713, 149, 212, 291, 95],
+})
+pe.choropleth(kommuner, geojson="norge:kommuner", locations="kommnr",
+              color="antall", labels={"antall": "Antall"},
+              title="Norske kommuner")

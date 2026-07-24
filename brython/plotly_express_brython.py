@@ -1287,79 +1287,103 @@ def box(data, x=None, y=None, color=None, text=None, hover_name=None, hover_data
     }
     return PlotlyFigure(plot_data)
 
-def choropleth(data, lat=None, lon=None, locations=None, locationmode='country names', 
-               geojson=None, featureidkey="id", color=None, 
-               title='Choropleth Map', labels=None, 
-               color_continuous_scale='Viridis', range_color=None, 
-               projection='mercator', scope='world', center=None, 
-               fitbounds=None, basemap_visible=True, width=800, height=600, config=None, static=None,
-               # Enhanced axis customization
-               xaxis_title=None, yaxis_title=None, xaxis_range=None, yaxis_range=None):
-    
+def _zpad(s, n):
+    """Zero-padding uten str.zfill (MicroPython-byggavhengig; delt
+    konvensjon med folium_core)."""
+    s = str(s)
+    while len(s) < n:
+        s = '0' + s
+    return s
+
+
+def choropleth(data=None, lat=None, lon=None, locations=None,
+               locationmode='country names', geojson=None,
+               featureidkey='id', color=None, hover_name=None,
+               labels=None, title=None,
+               color_continuous_scale='Viridis', range_color=None,
+               projection=None, scope=None, center=None, fitbounds=None,
+               basemap_visible=True, width=None, height=None,
+               config=None, static=None):
+    """px.choropleth-subset (ryddet 2026-07-24, spec
+    2026-07-24-px-choropleth-cleanup-design.md): landnivåkart via
+    plotly.js' innebygde geometri (locationmode) eller medbrakt
+    geojson=/featureidkey=. Markørstrengene geojson='norge:kommuner'/
+    'norge:fylker' gjenbruker folium-shimets geometri (lazy-lastet på
+    JS-siden; locations zero-paddes, featureidkey defaulter til
+    'properties.nummer', fitbounds til 'locations'). Avvik fra px:
+    colorscale er trace-nivå med plotly.js' NAVNGITTE skalaer
+    ('Viridis' default — plotly.js mangler px' 'Plasma');
+    locationmode-default er 'country names' (bakoverkompatibelt).
+    width/height aksepteres for px-paritet, men CSS styrer størrelsen
+    (som resten av shimet)."""
     data = ensure_data_dict(data)
-    traces = []
-    
-    locations_data = list(data.get(locations, []))
-    lat_data = list(data.get(lat, []))
-    lon_data = list(data.get(lon, []))
-    color_data = list(data.get(color, []))
-
-    trace = remove_none({
-        "type": "choropleth",
-        "lat": lat_data if lat_data else None,
-        "lon": lon_data if lon_data else None,
-        "locations": locations_data if locations_data else None,
-        "locationmode": locationmode,
-        "geojson": geojson,
-        "featureidkey": featureidkey,
-        "z": color_data if color_data else None,
-        "colorscale": color_continuous_scale,
-        "zmin": range_color[0] if range_color else None,
-        "zmax": range_color[1] if range_color else None,
-        "name": labels if isinstance(labels, str) else None
-    })
-
-    traces.append(trace)
-
-    # Let CSS handle all sizing - no dimension calculations needed
-    layout = remove_none({
-        "title": title,
-        "geo": remove_none({
-            "scope": scope,
-            "projection": {"type": projection} if projection else None,
-            "center": center,
-            "fitbounds": fitbounds,
-            "showland": basemap_visible
-        })
-    })
-
-    # Enhanced axis customization for geographic plots
-    if xaxis_title or yaxis_title or xaxis_range or yaxis_range:
-        if 'xaxis' not in layout:
-            layout['xaxis'] = {}
-        if 'yaxis' not in layout:
-            layout['yaxis'] = {}
-            
-        if xaxis_title:
-            layout['xaxis']['title'] = xaxis_title
-        if yaxis_title:
-            layout['yaxis']['title'] = yaxis_title
-        if xaxis_range:
-            layout['xaxis']['range'] = xaxis_range
-        if yaxis_range:
-            layout['yaxis']['range'] = yaxis_range
-    
-    # Return JSON string with special prefix for JavaScript detection
-    import json
-    clean_layout = remove_none(layout)
+    locations_data = list(data.get(locations, [])) if locations else None
+    lat_data = list(data.get(lat, [])) if lat else None
+    lon_data = list(data.get(lon, [])) if lon else None
+    color_data = list(data.get(color, [])) if color else None
+    if color_data:
+        color_data = [None if _is_nan(v) else v for v in color_data]
+    # norge-geometri (spec-tillegget 2026-07-24): gjenbruk folium-shimets
+    # geojson-filer — JS-siden (mdRenderPlotlyFigure) løser markørstrengen
+    # via samme memoiserte fetch. Padding/nøkkel/fitbounds som folium.
+    _norge = geojson if geojson in ('norge:kommuner', 'norge:fylker') else None
+    if _norge and locations_data:
+        _pad = 4 if _norge == 'norge:kommuner' else 2
+        locations_data = [_zpad(v, _pad) for v in locations_data]
+    if _norge and featureidkey == 'id':
+        featureidkey = 'properties.nummer'
+    if _norge and fitbounds is None:
+        fitbounds = 'locations'
+    trace = {
+        'type': 'choropleth',
+        'locations': locations_data,
+        'lat': lat_data,
+        'lon': lon_data,
+        # geojson-modus: locationmode utelates (plotly.js bruker
+        # featureidkey-oppslaget i stedet)
+        'locationmode': None if geojson else locationmode,
+        'geojson': geojson,
+        'featureidkey': featureidkey if geojson else None,
+        'z': color_data,
+        'colorscale': color_continuous_scale,
+        'zmin': range_color[0] if range_color else None,
+        'zmax': range_color[1] if range_color else None,
+    }
+    if hover_name:
+        hn = list(data.get(hover_name, []))
+        if hn:
+            trace['hovertext'] = hn
+            trace['hovertemplate'] = '<b>%{hovertext}</b><br>%{z}<extra></extra>'
+    if color is not None:
+        cb = labels.get(color, color) if isinstance(labels, dict) else color
+        trace['colorbar'] = {'title': str(cb)}
+    # NB: remove_none renser kun dict-nøkler — None-innslag i z-LISTEN
+    # (nan-vaskede celler) skal overleve
+    trace = remove_none(trace)
+    geo = {}
+    if scope:
+        geo['scope'] = scope
+    if projection:
+        geo['projection'] = {'type': projection}
+    if center:
+        geo['center'] = center
+    if fitbounds:
+        geo['fitbounds'] = fitbounds
+    if not basemap_visible:
+        geo['visible'] = False
+    layout = {}
+    if title:
+        layout['title'] = title
+    if geo:
+        layout['geo'] = geo
     clean_config = remove_none(config or {})
     if resolve_static(static):
-        clean_config["staticPlot"] = True
+        clean_config['staticPlot'] = True
     plot_data = {
-        "type": "plotly",
-        "data": traces,
-        "layout": clean_layout,
-        "config": clean_config
+        'type': 'plotly',
+        'data': [trace],
+        'layout': layout,
+        'config': clean_config
     }
     return PlotlyFigure(plot_data)
 

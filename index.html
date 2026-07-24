@@ -617,7 +617,7 @@
     window.t = window.t || function (s) { return s; };
     window.i18nField = window.i18nField || function (obj, field) { return obj && obj[field]; };
 
-    window.M2PY_VERSION = '2026-07-24e';
+    window.M2PY_VERSION = '2026-07-24g';
 
     // One-time migration: remove obsolete localStorage keys from previous milestones
     // Safe to delete this snippet after a few months when most users have re-loaded
@@ -6276,7 +6276,35 @@ json.dumps(out)
         });
       }
       var layout = Object.assign(baseLayout, spec.layout || {});
-      Plotly.newPlot(div, data, layout, { responsive: true, autosizable: true, staticPlot: staticPlot }).catch(function(){});
+      // norge-geometri i px.choropleth (spec-tillegget 2026-07-24):
+      // markørstrengene løses her med samme memoiserte fetch som
+      // folium-shimet (__norgeGeoFetch, delt cache). Uten markører:
+      // synkron sti som før.
+      var norgeKinds = [];
+      data.forEach(function (tr) {
+        if (tr && (tr.geojson === 'norge:kommuner' || tr.geojson === 'norge:fylker')
+            && norgeKinds.indexOf(tr.geojson) === -1) norgeKinds.push(tr.geojson);
+      });
+      function doPlot() {
+        Plotly.newPlot(div, data, layout, { responsive: true, autosizable: true, staticPlot: staticPlot }).catch(function(){});
+      }
+      if (norgeKinds.length) {
+        Promise.all(norgeKinds.map(__norgeGeoFetch)).then(function (geos) {
+          data.forEach(function (tr) {
+            var i = tr ? norgeKinds.indexOf(tr.geojson) : -1;
+            if (i !== -1) tr.geojson = geos[i];
+          });
+          // CC BY 4.0-attribusjon når norsk geometri brukes
+          layout.annotations = (layout.annotations || []).concat([{
+            text: 'Grenser: Kartverket (CC BY 4.0)', showarrow: false,
+            xref: 'paper', yref: 'paper', x: 1, y: 0, xanchor: 'right',
+            yanchor: 'top', font: { size: 9, color: textColor }
+          }]);
+          doPlot();
+        }).catch(function (e) { console.warn('norge-geojson (plotly):', e); doPlot(); });
+      } else {
+        doPlot();
+      }
     }
 
     function mdRenderVegaFigure(div, spec) {
