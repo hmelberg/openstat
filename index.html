@@ -2278,6 +2278,17 @@
           await this.conn.query('DROP ' + kind + ' IF EXISTS "' +
             String(names[i]).replace(/"/g, '""') + '"');
         }
+        // Re-registrer format(duckdb)-monterte views (view-registeret
+        // {navn: sql}, js/duckdb-views.js): øktene er ferske per kjøring —
+        // drop-alt over fjernet også dem. Feil her skal ikke drepe en
+        // uavhengig SQL-kjøring (den hørbare feilen kom ved montering):
+        // warn + fortsett; et manglende view gir uansett tydelig
+        // «does not exist»-feil hvis noen spør etter det.
+        const _regs = window.DuckdbViews ? window.DuckdbViews.registrationStatements() : [];
+        for (let i = 0; i < _regs.length; i++) {
+          try { await this.conn.query(_regs[i].sql); }
+          catch (e) { if (!_regs[i].ignoreError) console.warn('view-replay:', _regs[i].sql, e); }
+        }
       },
       async registerTable(name, parquetBytes) {
         if (!this.conn) throw new Error('__duck: call begin() before registerTable()');
@@ -11334,6 +11345,7 @@ async def _m2py_run_segment(_seg_json):
   <script src="js/data-directives.js"></script>
   <script src="js/enc-crypto.js"></script>
   <script src="js/data-loader.js"></script>
+  <script src="js/duckdb-views.js"></script>
   <script src="js/assembly-duckdb.js"></script>
   <script src="js/duckdb-native.js"></script>
   <script src="js/ai-chat.js"></script>
