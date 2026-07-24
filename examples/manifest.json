@@ -149,6 +149,11 @@
       "file": "brython/bry29_lifelines.txt",
       "label": "lifelines — overlevelsesanalyse",
       "group": null
+    },
+    {
+      "file": "brython/bry30_tabulator.txt",
+      "label": "tabulator — interaktive tabeller",
+      "group": null
     }
   ],
   "duckdb": [
@@ -757,6 +762,11 @@
       "file": "micropython/09_lifelines.txt",
       "label": "lifelines — overlevelsesanalyse",
       "group": null
+    },
+    {
+      "file": "micropython/10_tabulator.txt",
+      "label": "tabulator — interaktive tabeller",
+      "group": null
     }
   ],
   "python": [
@@ -818,6 +828,11 @@
     {
       "file": "python/py09_lifelines.txt",
       "label": "lifelines — overlevelsesanalyse",
+      "group": null
+    },
+    {
+      "file": "python/py10_tabulator.txt",
+      "label": "tabulator — interaktive tabeller",
       "group": null
     },
     {

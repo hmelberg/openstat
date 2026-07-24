@@ -1,0 +1,14 @@
+# label: tabulator — interaktive tabeller
+# Tabulator-wrapperen i python-modus (pyodide) på ekte pandas.
+import tabulator
+import pandas as pd
+
+df = pd.DataFrame({
+    "kommune": ["Oslo", "Bergen", "Trondheim", "Stavanger", "Tromsø"],
+    "aar": [2024, 2024, 2024, 2024, 2024],
+    "antall": [713, 291, 212, 149, 78],
+    "rate": [12.5, 9.8, 9.3, 8.6, 6.8],
+})
+
+tabulator.table(df, filters=True, title="Interaktiv tabell",
+                options={"movableColumns": True})

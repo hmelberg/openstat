@@ -1,0 +1,19 @@
+# label: tabulator — interaktive tabeller
+# Sorterbare/filtrerbare tabeller (Tabulator) i MicroPython-modus.
+import tabulator
+import pandas_mpy as pd
+
+df = pd.DataFrame({
+    "kommune": ["Oslo", "Bergen", "Trondheim", "Stavanger", "Tromsø"],
+    "aar": [2024, 2024, 2024, 2024, 2024],
+    "antall": [713, 291, 212, 149, 78],
+    "rate": [12.5, 9.8, 9.3, 8.6, 6.8],
+})
+
+# show(df) gir interaktiv tabell som standard:
+show(df, title="Med show()")
+
+# eller eksplisitt med flere valg (alle Tabulator-opsjoner kan sendes
+# via options={...} — se tabulator.info for dokumentasjonen):
+tabulator.table(df, filters=True, title="Med filter",
+                options={"movableColumns": True})
