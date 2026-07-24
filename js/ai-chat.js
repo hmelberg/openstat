@@ -128,6 +128,18 @@
         scrollToBottom();
       }
 
+      // Avbrudd er ikke en feil: behold delvis strømmet innhold i noden
+      // (appendError wiper den) og legg på en nøytral notis.
+      function appendCancelNote(node) {
+        const dots = node.querySelector('.ai-thinking');
+        if (dots) dots.remove();
+        const note = document.createElement('div');
+        note.className = 'ai-repair-note';
+        note.textContent = T('Avbrutt.');
+        node.appendChild(note);
+        scrollToBottom();
+      }
+
       function appendAssistantText(node, text, meta) {
         node.innerHTML = '';
         const bubble = document.createElement('div');
@@ -923,21 +935,26 @@
         const reader = resp.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          let nl;
-          while ((nl = buffer.indexOf('\n\n')) >= 0) {
-            const event = buffer.slice(0, nl);
-            buffer = buffer.slice(nl + 2);
-            const dataLine = event.split('\n').find(l => l.startsWith('data:'));
-            if (!dataLine) continue;
-            let obj;
-            try { obj = JSON.parse(dataLine.slice(5).trim()); }
-            catch (_) { continue; }   // ignore non-JSON keep-alive lines
-            onEvent(obj);
+        try {
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            let nl;
+            while ((nl = buffer.indexOf('\n\n')) >= 0) {
+              const event = buffer.slice(0, nl);
+              buffer = buffer.slice(nl + 2);
+              const dataLine = event.split('\n').find(l => l.startsWith('data:'));
+              if (!dataLine) continue;
+              let obj;
+              try { obj = JSON.parse(dataLine.slice(5).trim()); }
+              catch (_) { continue; }   // ignore non-JSON keep-alive lines
+              onEvent(obj);
+            }
           }
+        } finally {
+          // onEvent kan kaste (error-event) — ikke la strømmen bli hengende åpen.
+          try { reader.cancel(); } catch (_) { /* allerede lukket */ }
         }
       }
 
@@ -947,7 +964,7 @@
       // appends a ✅/⚠️ source list once the `sources` event arrives. thinkingNode
       // is the wrap created by appendThinking() — the "assistant bubble" container
       // pattern already used everywhere else in this file (see runFastQuery et al.).
-      async function runWebAnswer(question, thinkingNode, repair, round) {
+      async function runWebAnswer(question, thinkingNode, repair, round, signal) {
         const t0 = Date.now();
         thinkingNode.innerHTML = '';
         const progressBox = document.createElement('div');
@@ -976,6 +993,7 @@
           const resp = await fetch('/api/data-svar', {
             method: 'POST',
             headers: providerAuthHeaders(),
+            signal: signal,
             body: JSON.stringify({
               question,
               mode,
@@ -1109,7 +1127,7 @@
       // message instead of reading `.error` — this ends the repair loop as a
       // failure and leaves the script in the editor, rather than reporting a
       // false success or feeding a stale error into the next repair round.
-      async function runScriptAndCaptureError() {
+      async function runScriptAndCaptureError(signal) {
         const btn = document.getElementById('btnRun');
         const outputArea = document.getElementById('outputArea');
         if (!btn) return T('Fant ikke Kjør-knappen.');
@@ -1126,8 +1144,10 @@
         // AND no run already in progress; give up loudly (return an error
         // string, never click) if that doesn't happen within the timeout.
         while ((btn.disabled || window.mdIsScriptRunning()) && waited < 20000) {
+          if (signal && signal.aborted) return T('Avbrutt.');
           await sleep(200); waited += 200;
         }
+        if (signal && signal.aborted) return T('Avbrutt.');
         if (btn.disabled) return T('Kjør-knappen er ikke klar (miljøet laster fortsatt).');
         if (window.mdIsScriptRunning()) {
           return T('Kan ikke starte automatisk kjøring — en annen kjøring pågår allerede.');
@@ -1136,6 +1156,10 @@
         await sleep(50);   // let the click handler's async body flip the running flag
         const start = Date.now();
         while (window.mdIsScriptRunning() && Date.now() - start < 180000) {
+          // Abort avslutter bare OVERVÅKINGEN (selve kjøringen stoppes med
+          // Kjør-knappens egen Avbryt); webAnswerWithRepair sjekker signalet
+          // rett etterpå og stopper reparasjonsløkka uten å bruke returverdien.
+          if (signal && signal.aborted) return T('Avbrutt.');
           await sleep(150);
         }
         if (window.mdIsScriptRunning()) {
@@ -1163,7 +1187,7 @@
       function getAutorunPref() {
         try { return localStorage.getItem('md_ai_autorun') === '1'; } catch (e) { return false; }
       }
-      function confirmAutoRun() {
+      function confirmAutoRun(signal) {
         if (getAutorunPref()) return Promise.resolve(true);
         return new Promise(function (resolve) {
           const wrap = document.createElement('div');
@@ -1188,7 +1212,10 @@
           bubble.appendChild(bar);
           dom.aiThread.appendChild(wrap);
           scrollToBottom();
+          let done = false;
           function settle(ok) {
+            if (done) return;
+            done = true;
             runBtn.disabled = true;
             cancelBtn.disabled = true;
             bar.remove();
@@ -1200,6 +1227,8 @@
           }
           runBtn.addEventListener('click', function () { settle(true); });
           cancelBtn.addEventListener('click', function () { settle(false); });
+          // Avbryt-knappen i AI-panelet skal også avbryte mens vi venter på svar her.
+          if (signal) signal.addEventListener('abort', function () { settle(false); }, { once: true });
         });
       }
 
@@ -1209,23 +1238,26 @@
       // (S2 above) — once the user has opted in for this answer, repair-round
       // re-runs proceed automatically, since the user already agreed to run
       // scripts for this question.
-      async function webAnswerWithRepair(question, thinkingNode) {
+      async function webAnswerWithRepair(question, thinkingNode, signal) {
         const mode = (typeof activeEditorMode !== 'undefined' && activeEditorMode) ? activeEditorMode : 'python';
+        const aborted = () => signal && signal.aborted;
         let round = 0, lastError = null, script = null, confirmed = false;
-        let result = await runWebAnswer(question, thinkingNode, null, 0);
+        let result = await runWebAnswer(question, thinkingNode, null, 0, signal);
         while (true) {
           script = extractWebScriptBlock(result.markdown, mode);
           if (!script) return;   // prose-only answer (e.g. honest "fant ikke data") — already rendered, nothing to run
           insertScriptIntoEditor(script);
           if (!confirmed) {
-            const ok = await confirmAutoRun();
-            if (!ok) return;   // user declined — script stays in the editor, nothing runs
+            const ok = await confirmAutoRun(signal);
+            if (!ok) return;   // user declined (or aborted) — script stays in the editor, nothing runs
             confirmed = true;
           }
           try {
-            lastError = await runScriptAndCaptureError();
+            lastError = await runScriptAndCaptureError(signal);
+            if (aborted()) return;   // avbrutt under lokal kjøring — ikke start reparasjonsrunde
             if (!lastError) return;   // success
           } catch (e) { lastError = (e && e.message) ? e.message : String(e); }
+          if (aborted()) return;
           round++;
           if (round > 3) {
             const giveUp = document.createElement('div');
@@ -1246,14 +1278,15 @@
           scrollToBottom();
           const repairNode = appendThinking();
           try {
-            result = await runWebAnswer(question, repairNode, { script, error: lastError }, round);
+            result = await runWebAnswer(question, repairNode, { script, error: lastError }, round, signal);
           } catch (e) {
             // A thrown error here (401, SSE `error` event, network drop) must land
             // in THIS round's own bubble (repairNode) — not bubble up to
             // sendWebMessage's outer catch, which would target thinkingNode
             // (round 0) and wipe out the already-rendered first answer. Stop the
             // loop on failure; the previous answer(s) stay intact.
-            appendError(repairNode, '✗ ' + ((e && e.message) ? e.message : String(e)));
+            if (e && e.name === 'AbortError') appendCancelNote(repairNode);
+            else appendError(repairNode, '✗ ' + ((e && e.message) ? e.message : String(e)));
             return;
           }
         }
@@ -1280,12 +1313,22 @@
         dom.aiInput.value = '';
         autoresize();
         const thinkingNode = appendThinking();
+        // Samme avbrytbarhets-mønster som sendMessage()/mdInterpretResults:
+        // én controller per sending; Avbryt-knappen (init, aiAbortBtn) kaller
+        // state.abortCtrl.abort(). Signalet følger hele web-løpet: fetch/SSE i
+        // runWebAnswer, bekreftelses-boblen og overvåkingen av lokal kjøring.
+        const ctrl = new AbortController();
+        state.abortCtrl = ctrl;
+        if (dom.aiAbortBtn) dom.aiAbortBtn.style.display = '';
         try {
-          await webAnswerWithRepair(text, thinkingNode);
+          await webAnswerWithRepair(text, thinkingNode, ctrl.signal);
           state.history.push({ role: 'assistant', meta: { intent: 'web' } });
         } catch (e) {
-          appendError(thinkingNode, '✗ ' + ((e && e.message) ? e.message : String(e)));
+          if (e && e.name === 'AbortError') appendCancelNote(thinkingNode);
+          else appendError(thinkingNode, '✗ ' + ((e && e.message) ? e.message : String(e)));
         } finally {
+          state.abortCtrl = null;
+          if (dom.aiAbortBtn) dom.aiAbortBtn.style.display = 'none';
           state.sending = false;
           if (dom.aiSendFastBtn) dom.aiSendFastBtn.disabled = false;
           if (dom.aiSendWebBtn) dom.aiSendWebBtn.disabled = false;
