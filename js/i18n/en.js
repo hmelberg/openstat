@@ -2,7 +2,8 @@
 // whitespace-collapsed — exactly what the DOM/t() sees). Missing entry = the
 // UI shows the Norwegian source; nothing breaks. Values for elements marked
 // data-i18n-html may contain HTML (authored here, in-repo).
-window.M2PY_I18N = window.M2PY_I18N || {};
+window.M2PY_I18N = window.M2PY_I18N || {  "OpenStat er en motor for å stille spørsmål som kan besvares med kode og statistikk — og for å se og endre koden som gir svaret. Skriv i Python, R, SQL (DuckDB) eller Stata-stil (Statx); kjør i nettleseren.": "OpenStat is an engine for asking questions that can be answered with code and statistics — and for seeing and revising the code behind the answer. Write in Python, R, SQL (DuckDB) or Stata-style (Statx); run in the browser.",
+};
 window.M2PY_I18N.en = {
   "Venter på Python-motoren (første gang kan ta opptil ett minutt)…": "Waiting for the Python engine (the first time can take up to a minute)…",
   "Meny": "Menu",
@@ -163,12 +164,9 @@ window.M2PY_I18N.en = {
   "Lim inn 3-ordskoden fra e-posten, eller klikk lenken for å logge inn direkte. Koden er gyldig i 30 dager og kan brukes på flere maskiner.": "Paste the 3-word code from the email, or click the link to log in directly. The code is valid for 30 days and can be used on several machines.",
   "Kode": "Code",
   "⏳ Logger inn…": "⏳ Logging in…",
-  "Velkommen til SafeStat!": "Welcome to SafeStat!",
   "Velkommen!": "Welcome!",
   "Velkommen til {app}!": "Welcome to {app}!",
   "Øv på å kjøre analyser i microdata.no-stil. Inneholder ikke ekte tall; et hobbyprosjekt, ikke laget av microdata.no.": "Practise running analyses in the microdata.no style. No real figures; a hobby project, not made by microdata.no.",
-  "OpenStat er en motor for å stille spørsmål som kan besvares med kode og statistikk — og for å se og endre koden som gir svaret. Skriv i Python, R, DuckDB eller microdata-stil; kjør i nettleseren.": "OpenStat is an engine for asking questions that can be answered with code and statistics — and for seeing and revising the code behind the answer. Write in Python, R, DuckDB or microdata style; run in the browser.",
-  "SafeStat er en motor for å stille spørsmål som kan besvares med kode og statistikk — og for å se og endre koden som gir svaret. I tillegg kan SafeStat dele og gi tilgang til sensitive data: bare analyser som bruker et begrenset sett kommandoer slipper gjennom, slik at resultatene viser aggregater — aldri opplysninger om enkeltpersoner. Søsterversjonen OpenStat er en åpen, forenklet utgave uten innlogging.": "SafeStat is an engine for asking questions that can be answered with code and statistics — and for seeing and revising the code behind the answer. SafeStat can additionally distribute and grant access to sensitive data: only analyses using a restricted set of commands are permitted, so results show aggregates — never information about individuals. The sister version <a href=\"https://github.com/hmelberg/openstat\" target=\"_blank\" rel=\"noopener\">OpenStat</a> is an open, simplified edition with no login.",
   "‹ Vis kode": "‹ Show code",
   "Kjøre scriptet fra {src}? Det kjører kode i nettleseren din.": "Run the script from {src}? It runs code in your browser.",
   "lenken": "the link",

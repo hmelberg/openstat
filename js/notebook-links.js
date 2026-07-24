@@ -74,8 +74,9 @@
   };
 
   NL.welcomeVariant = function (hostname, app, isOutputOnly) {
+    // openstat har bare én velkomstvariant (safestat-varianten fjernet 2026-07-24).
     if (isOutputOnly) return null;
-    return app === 'safestat' ? 'safestat_general' : 'openstat_general';
+    return 'openstat_general';
   };
 
   var MD_START = '__micro_transform_start_markdown__';
@@ -104,7 +105,9 @@
   };
 
   NL.autorunNeedsGate = function (app, hasSecret) {
-    return app === 'safestat' || !!hasSecret;
+    // Gaten styres av lagrede hemmeligheter (PAT/API-nøkler) — safestat-grenen
+    // er fjernet 2026-07-24 (openstat har ingen safestat-modus).
+    return !!hasSecret;
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = NL;

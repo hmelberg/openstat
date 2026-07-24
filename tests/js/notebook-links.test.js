@@ -66,14 +66,10 @@ test('classifyHash: non-matching returns null', () => {
 test('welcomeVariant: output-only shows nothing', () => {
   assert.equal(NL.welcomeVariant('micro.safestat.app', 'safestat', true), null);
 });
-test('welcomeVariant: micro-hosts får generell velkomst (ingen micro-variant lenger)', () => {
+test('welcomeVariant: alltid openstat-varianten (safestat-varianten fjernet 2026-07-24)', () => {
   assert.equal(NL.welcomeVariant('microdata.run', 'openstat', false), 'openstat_general');
-  assert.equal(NL.welcomeVariant('micro.safestat.app', 'safestat', false), 'safestat_general');
-});
-test('welcomeVariant: general framing per app', () => {
   assert.equal(NL.welcomeVariant('py.openstat.app', 'openstat', false), 'openstat_general');
-  assert.equal(NL.welcomeVariant('safestat.app', 'safestat', false), 'safestat_general');
-  assert.equal(NL.welcomeVariant('r.safestat.app', 'safestat', false), 'safestat_general');
+  assert.equal(NL.welcomeVariant('micro.safestat.app', 'safestat', false), 'openstat_general');
 });
 
 test('rProsePrep: contiguous #\' block becomes one markdown cat', () => {
@@ -94,9 +90,10 @@ test('rProsePrep: END marker in content is neutralized', () => {
   assert.doesNotMatch(out.replace(/__micro_transform_end__\\n"\)/,''), /__micro_transform_end__ there/);
 });
 
-test('autorunNeedsGate: safestat always gates', () => {
-  assert.equal(NL.autorunNeedsGate('safestat', false), true);
-  assert.equal(NL.autorunNeedsGate('safestat', true), true);
+test('autorunNeedsGate: styres kun av lagrede hemmeligheter (safestat-grenen fjernet)', () => {
+  assert.equal(NL.autorunNeedsGate('safestat', false), false);
+  assert.equal(NL.autorunNeedsGate('openstat', false), false);
+  assert.equal(NL.autorunNeedsGate('openstat', true), true);
 });
 test('autorunNeedsGate: openstat gates only when a secret is present', () => {
   assert.equal(NL.autorunNeedsGate('openstat', false), false);
