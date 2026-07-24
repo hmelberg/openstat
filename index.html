@@ -7431,31 +7431,62 @@ async def _run_duck_sql(_sql, _fresh=True):
     // når scriptet ikke har monterings-direktiver; {pushdown:false} når en
     // kilde ikke er pushdown-egnet (python-modus har pandas-fallback, de
     // andre gir ærlig feil).
-    async function resolveAssemblyColumns(script, statusEl) {
+    // Kjør en DuckdbViews-statementliste: ignoreError-setninger (DETACH-
+    // idempotensvernet) svelges, resten feiler hørbart.
+    async function __duckExecStatements(conn, stmts) {
+      for (var i = 0; i < stmts.length; i++) {
+        if (stmts[i].ignoreError) { try { await conn.query(stmts[i].sql); } catch (e) {} }
+        else await conn.query(stmts[i].sql);
+      }
+    }
+    async function resolveAssemblyColumns(script, statusEl, opts) {
       var DD = window.DataDirectives;
       if (!DD || !DD.parseAssembly) return null;
       var parsed = DD.parseAssembly(script);
       if (parsed.errors.length) throw new Error('Monteringsfeil: ' + parsed.errors.join('; '));
       if (!(parsed.spec.datasets || []).length) return null;
       var deps = { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey };
+      // format(duckdb)-montering (økt 2026-07-24): datasett med format duckdb
+      // materialiseres IKKE — den kompilerte SQL-en blir CREATE OR REPLACE
+      // VIEW i den delte katalogen, og view-registeret (js/duckdb-views.js)
+      // replayes ved hver __duck.begin(). opts.defaultFormat ('duckdb' i
+      // duckdb-modus) gjelder datasett uten eksplisitt format().
       var formats = {};
-      (parsed.spec.datasets || []).forEach(function (d) { if (d.format) formats[d.name] = d.format; });
+      var defFmt = opts && opts.defaultFormat;
+      (parsed.spec.datasets || []).forEach(function (d) {
+        if (d.format) formats[d.name] = d.format;
+        else if (defFmt) formats[d.name] = defFmt;
+      });
+      var hasDuckFmt = Object.keys(formats).some(function (n) { return formats[n] === 'duckdb'; });
       var so = await window.DataLoader.resolveSourcesOnly(script, deps);
       if (!window.AssemblyDuckdb.canPushdown(so.spec, so.descriptors)) {
+        if (hasDuckFmt) {
+          throw new Error(t('format(duckdb) krever kilder DuckDB kan lese direkte (parquet/csv/duckdb/sqlite).'));
+        }
         return { pushdown: false, parsed: parsed, deps: deps, formats: formats };
       }
       if (statusEl) setStatus(statusEl, t('Monterer datasett (DuckDB)…'));
       var cmp = window.AssemblyDuckdb.compile(so.spec, so.descriptors);
+      var views = {};
+      cmp.datasetStatements.forEach(function (d) {
+        if (formats[d.name] === 'duckdb') views[d.name] = d.sql;
+      });
+      // Registeret erstattes i sin helhet — scriptet er sannheten; uten
+      // format(duckdb)-datasett tømmes det (ingen gjenferd fra forrige run).
+      window.DuckdbViews.set({ views: views, attaches: cmp.attaches });
       var db = await __ensureDuckDB();
       var conn = await db.connect();
       try {
-        for (var i = 0; i < cmp.attaches.length; i++) await conn.query(cmp.attaches[i].sql);
+        // DETACH+ATTACH (+ CREATE VIEW for de monterte) via samme statement-
+        // bygger som øktstart-replayen; her feiler alt unntatt DETACH hørbart.
+        await __duckExecStatements(conn, window.DuckdbViews.statementsFor({ views: views, attaches: cmp.attaches }));
         var cols = {};
         for (var j = 0; j < cmp.datasetStatements.length; j++) {
           var d = cmp.datasetStatements[j];
+          if (views[d.name] !== undefined) continue;   // montert som view over
           cols[d.name] = __arrowToColumns(await conn.query(d.sql));
         }
-        return { pushdown: true, datasets: cols, formats: formats };
+        return { pushdown: true, datasets: cols, formats: formats, mounted: Object.keys(views) };
       } finally { await conn.close(); }
     }
 
