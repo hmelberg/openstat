@@ -1,13 +1,25 @@
 (function (global) {
   'use strict';
   var NL = {};
-  var LABEL_MODE = { py: 'python', r: 'r', duck: 'duckdb' }; // extensible: statx, jamovi
+  // Subdomene -> oppstartsmodus (2026-07-24, Hans' kart for openstat.app).
+  // Bare-domenet (ingen match, ingenting lagret) faller til brython — rask
+  // motor og interaktivt starteksempel på sekunder; Pyodide er SW-precachet
+  // og klar i bakgrunnen. Eksplisitt subdomene vinner alltid over fallback;
+  // lagret modusvalg (md_editor_mode) håndteres av restoreEditorMode.
+  var LABEL_MODE = {
+    py: 'python', pyodide: 'python',
+    r: 'r',
+    duck: 'duckdb', sql: 'duckdb',
+    micro: 'micropython', m: 'micropython', micropython: 'micropython',
+    b: 'brython', brython: 'brython',
+    jamovi: 'jamovi', j: 'jamovi', gui: 'jamovi'
+  };
 
   NL.hostnameMode = function (hostname) {
     var host = String(hostname || '').toLowerCase();
     var firstLabel = host.split('.')[0];
     if (Object.prototype.hasOwnProperty.call(LABEL_MODE, firstLabel)) return LABEL_MODE[firstLabel];
-    return 'python';
+    return 'brython';
   };
 
   // urlHasMicro og 'micro'-hostname-grenen er fjernet (2026-07-10):

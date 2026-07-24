@@ -555,7 +555,7 @@
     window.t = window.t || function (s) { return s; };
     window.i18nField = window.i18nField || function (obj, field) { return obj && obj[field]; };
 
-    window.M2PY_VERSION = '2026-07-24m';
+    window.M2PY_VERSION = '2026-07-24n';
 
     // One-time migration: remove obsolete localStorage keys from previous milestones
     // Safe to delete this snippet after a few months when most users have re-loaded
@@ -3144,15 +3144,30 @@
     ].join('\n');
 
     const _STARTUP_BRYTHON = [
-      '# OpenStat — Brython: lettvekts-Python som laster på et par sekunder.',
-      '# Bra for dashboards. Full pandas/statistikk: bytt til Python-modus.',
-      '# load ' + _DATA_RAW + 'iris.csv as iris',
-      'import pandas_brython as pd',
-      'import plotly_express_brython as pe',
+      '# OpenStat — try the controls: the chart updates instantly.',
+      '# This is lightweight Python (Brython); full Python, R and SQL live in the mode menu.',
+      '# load ' + _DATA_RAW + 'penguins.csv as penguins',
+      'import ui',
+      'import plotly_express_brython as px',
       '',
-      'show(iris.head())',
-      'pe.scatter(iris, x="sepal_length", y="sepal_width", color="species",',
-      '           title="Iris — begerbladlengde mot -bredde")',
+      'layout = ui.grid("side main", cols="230px 1fr")',
+      '',
+      'def update(_=None):',
+      '    sub = penguins if species.value == "All" else penguins[penguins["species"] == species.value]',
+      '    sub = sub[sub["body_mass_g"] >= minmass.value]',
+      '    fig = px.scatter(sub, x="bill_length_mm", y="bill_depth_mm", color="species",',
+      '                     title=str(len(sub)) + " penguins — bill length vs depth")',
+      '    layout.add(ui.image(fig), area="main")',
+      '',
+      'panel = ui.column(gap="0.75rem")',
+      'species = ui.dropdown(["All", "Adelie", "Chinstrap", "Gentoo"], value="All",',
+      '                      label="Species", into=panel, on_change=update)',
+      'minmass = ui.slider(2700, 6300, value=2700, step=100,',
+      '                    label="Min body mass (g)", into=panel, on_change=update)',
+      '',
+      'layout.add(panel, area="side")',
+      'update()',
+      'layout.show()',
     ].join('\n');
 
     const _STARTUP_JS = [
@@ -3312,11 +3327,19 @@
       // Microdata-modus er FJERNET fra openstat (2026-07-24) — et gammelt
       // lagret valg faller tilbake til hostname-default.
       if (saved === 'microdata') saved = null;
-      var mode = (saved && Object.prototype.hasOwnProperty.call(modeRegistry, saved))
-        ? saved
+      var mode = (saved && (Object.prototype.hasOwnProperty.call(modeRegistry, saved) || MODE_MODULES[saved]))
+        ? saved   // lazy modus (jamovi) er gyldig boot-mål selv om den ikke er registrert ennå
         : (window.NotebookLinks ? window.NotebookLinks.hostnameMode(location.hostname) : 'python');
       if (mode && mode !== activeEditorMode && Object.prototype.hasOwnProperty.call(modeRegistry, mode)) {
         switchEditorMode(mode);
+      } else if (mode && MODE_MODULES[mode] && !Object.prototype.hasOwnProperty.call(modeRegistry, mode)) {
+        // Lazy modus (jamovi) som boot-mål — via subdomene (jamovi./j./gui.)
+        // eller lagret valg: modulen er ikke registrert ved boot, så last den
+        // asynkront og bytt når registreringen er på plass. (Løser roadmap-
+        // punktet «kan ikke starte rett i jamovi-modus» for openstat.)
+        loadModeModule(mode).then(function () {
+          if (Object.prototype.hasOwnProperty.call(modeRegistry, mode)) switchEditorMode(mode);
+        }).catch(function (e) { console.warn('boot-modus ' + mode + ':', e); });
       }
       // Boot: switchEditorMode() over dekker bytte-tilfellet, men når lagret
       // modus === init-verdien skjer ingen switch — kall eksplisitt så

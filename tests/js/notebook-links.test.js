@@ -3,24 +3,30 @@ const test = require('node:test');
 const assert = require('node:assert');
 const NL = require('../../js/notebook-links.js');
 
-test('hostnameMode: exact first-label prefixes', () => {
+test('hostnameMode: subdomene-kartet (2026-07-24)', () => {
   assert.equal(NL.hostnameMode('py.openstat.app'), 'python');
-  assert.equal(NL.hostnameMode('r.safestat.app'), 'r');
+  assert.equal(NL.hostnameMode('pyodide.openstat.app'), 'python');
+  assert.equal(NL.hostnameMode('r.openstat.app'), 'r');
   assert.equal(NL.hostnameMode('duck.openstat.app'), 'duckdb');
+  assert.equal(NL.hostnameMode('sql.openstat.app'), 'duckdb');
+  assert.equal(NL.hostnameMode('micro.openstat.app'), 'micropython');
+  assert.equal(NL.hostnameMode('m.openstat.app'), 'micropython');
+  assert.equal(NL.hostnameMode('micropython.openstat.app'), 'micropython');
+  assert.equal(NL.hostnameMode('b.openstat.app'), 'brython');
+  assert.equal(NL.hostnameMode('brython.openstat.app'), 'brython');
+  assert.equal(NL.hostnameMode('jamovi.openstat.app'), 'jamovi');
+  assert.equal(NL.hostnameMode('j.openstat.app'), 'jamovi');
+  assert.equal(NL.hostnameMode('gui.openstat.app'), 'jamovi');
 });
-test('hostnameMode: micro-hosts er ikke lenger spesielle (emulatoren bor i microdata-repoen)', () => {
-  assert.equal(NL.hostnameMode('micro.safestat.app'), 'python');
-  assert.equal(NL.hostnameMode('microdata.run'), 'python');
-});
-test('hostnameMode: bare/dev hosts default to python', () => {
-  assert.equal(NL.hostnameMode('openstat.app'), 'python');
-  assert.equal(NL.hostnameMode('safestat.app'), 'python');
-  assert.equal(NL.hostnameMode('localhost'), 'python');
-  assert.equal(NL.hostnameMode('deploy-preview-1--safestat.netlify.app'), 'python');
+test('hostnameMode: bare/dev hosts default to brython (rask start, 2026-07-24)', () => {
+  assert.equal(NL.hostnameMode('openstat.app'), 'brython');
+  assert.equal(NL.hostnameMode('localhost'), 'brython');
+  assert.equal(NL.hostnameMode('hmelberg.github.io'), 'brython');
+  assert.equal(NL.hostnameMode('deploy-preview-1--openstat.netlify.app'), 'brython');
 });
 test('hostnameMode: no false prefix hit (spy != py)', () => {
-  assert.equal(NL.hostnameMode('spy.openstat.app'), 'python'); // falls through to default, still python
-  assert.equal(NL.hostnameMode('rstudio.example.com'), 'python'); // 'rstudio' != 'r'
+  assert.equal(NL.hostnameMode('spy.openstat.app'), 'brython'); // ukjent label -> bare-domene-default
+  assert.equal(NL.hostnameMode('rstudio.example.com'), 'brython'); // 'rstudio' != 'r'
 });
 
 test('classifyHash: dotted open → main+master candidates', () => {
