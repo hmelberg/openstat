@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="preconnect" href="https://cdn.plot.ly" crossorigin>
   <link rel="preload" as="script" href="https://cdn.jsdelivr.net/pyodide/v314.0.2/full/pyodide.js">
-  <link rel="stylesheet" href="app.css?v=2026-07-24a">
+  <link rel="stylesheet" href="app.css?v=2026-07-24b">
 </head>
 <body data-theme="light">
   <header class="topbar">
@@ -597,8 +597,8 @@
        app.css sin ?v= over (statiske <script>-tagger kan ikke lese
        window.M2PY_VERSION — det settes av en senere <script>-blokk, lenge
        etter at nettleseren allerede har startet disse to lastingene). -->
-  <script src="js/brython-engine.js?v=2026-07-24a"></script>
-  <script src="js/micropython-engine.js?v=2026-07-24a"></script>
+  <script src="js/brython-engine.js?v=2026-07-24b"></script>
+  <script src="js/micropython-engine.js?v=2026-07-24b"></script>
   <script src="js/javascript-engine.js?v=2026-07-19a"></script>
   <script src="js/cells.js?v=2026-07-19a"></script>
   <script src="js/ui.js?v=2026-07-22a"></script>
@@ -617,7 +617,7 @@
     window.t = window.t || function (s) { return s; };
     window.i18nField = window.i18nField || function (obj, field) { return obj && obj[field]; };
 
-    window.M2PY_VERSION = '2026-07-24d';
+    window.M2PY_VERSION = '2026-07-24e';
 
     // One-time migration: remove obsolete localStorage keys from previous milestones
     // Safe to delete this snippet after a few months when most users have re-loaded
@@ -2499,7 +2499,7 @@
       'randomForest','xgboost','caret','glmnet'
     ];
     const PYTHON_DS_IMPORTS = [
-      'pandas','numpy','matplotlib','matplotlib.pyplot','seaborn','altair','folium',
+      'pandas','numpy','matplotlib','matplotlib.pyplot','seaborn','altair','folium','tabulator',
       'plotly','plotly.express','scipy','scipy.stats',
       'sklearn','sklearn.linear_model','sklearn.ensemble','sklearn.preprocessing',
       'statsmodels','statsmodels.api','statsmodels.formula.api',
@@ -3311,6 +3311,12 @@
                   'await _mp.install("lifelines", deps=False)');
               }
             } catch (e) { console.warn('lifelines-install:', e); }
+          }
+          // tabulator (spec 2026-07-24): registrer shared/tabulator_core.py
+          // som modulen `tabulator` (ingen PyPI-pakke å micropip-e).
+          if (/^\s*(?:import|from)\s+tabulator\b/m.test(script)) {
+            try { await __ensureTabulatorPy(ctx.py); }
+            catch (e) { console.warn('tabulator-modul:', e); }
           }
           try {
             setStatus(ctx.rightStatus, t('Sjekker pakker…'));
@@ -6609,6 +6615,36 @@ json.dumps(out)
               }
               attachTableCopyHandler(wrapDiv);
               frag.appendChild(wrapDiv);
+            } else if (p.embedType === 'tabulator' && p.payload && typeof Tabulator !== 'undefined') {
+              try {
+                const tbSpec = JSON.parse(p.payload);
+                const tbWrap = document.createElement('div');
+                tbWrap.className = 'tabulator-embed';
+                if (tbSpec.title) {
+                  const tbTitle = document.createElement('div');
+                  tbTitle.className = 'tabulator-embed-title';
+                  tbTitle.textContent = tbSpec.title;
+                  tbWrap.appendChild(tbTitle);
+                }
+                const tbDiv = document.createElement('div');
+                tbWrap.appendChild(tbDiv);
+                frag.appendChild(tbWrap);
+                // setTimeout: Tabulator måler containeren — fragmentet
+                // monteres først ETTER at buildOutputNodes returnerer
+                setTimeout(function () {
+                  new Tabulator(tbDiv, Object.assign({
+                    data: tbSpec.data,
+                    columns: tbSpec.columns,
+                    layout: 'fitDataTable',
+                    placeholder: '(ingen data)'
+                  }, tbSpec.options || {}));
+                }, 0);
+              } catch (e) {
+                const pre = document.createElement('pre');
+                pre.className = 'embed-placeholder';
+                pre.textContent = '[Tabulator-tabell – kunne ikke tolke JSON]';
+                frag.appendChild(pre);
+              }
             } else if (p.embedType === 'leafletmap' && p.payload && typeof L !== 'undefined') {
               try {
                 const lmSpec = JSON.parse(p.payload);
@@ -7703,6 +7739,14 @@ def _show_one(obj):
                 _payload = _mb["application/vnd.jupyter.widget-view+json"]
                 print(_EMBED_S + "ipywidget__" + chr(10) + _json.dumps(_payload) + chr(10) + _EMBED_E)
                 return
+    except Exception:
+        pass
+    try:
+        if hasattr(obj, "to_tabulator_json_str"):
+            # tabulator-wrapperen (spec 2026-07-24) -> samme embed som
+            # brython/micropython-runnerne
+            print(_EMBED_S + "tabulator__" + chr(10) + obj.to_tabulator_json_str() + chr(10) + _EMBED_E)
+            return
     except Exception:
         pass
     try:
@@ -9277,6 +9321,29 @@ json.dumps(out)
         })
         .catch(function (e) { __uiP = null; throw e; });
       return __uiP;
+    }
+
+    var __tabulatorPyP = null;
+    function __ensureTabulatorPy(py) {
+      // tabulator-modulen i python-modus (spec 2026-07-24): kjernen ER
+      // modulen (ingen pyodide-fasade nødvendig — ren dict-bygging).
+      // Samme fetch/materialize-idiom som __ensureUi over.
+      if (__tabulatorPyP) return __tabulatorPyP;
+      var base = window.location.href.replace(/[^/]+$/, '');
+      __tabulatorPyP = fetch(base + 'shared/tabulator_core.py?v=' + (window.M2PY_VERSION || '1'))
+        .then(function (r) { if (!r.ok) throw new Error('shared/tabulator_core.py: ' + r.status); return r.text(); })
+        .then(function (code) {
+          return py.runPythonAsync(
+            'import sys, importlib.util\n' +
+            'def _reg_tabulator(src):\n' +
+            '    spec = importlib.util.spec_from_loader("tabulator", loader=None)\n' +
+            '    mod = importlib.util.module_from_spec(spec)\n' +
+            '    sys.modules["tabulator"] = mod\n' +
+            '    exec(compile(src, "tabulator_core.py", "exec"), mod.__dict__)\n' +
+            '_reg_tabulator(' + JSON.stringify(code) + ')');
+        })
+        .catch(function (e) { __tabulatorPyP = null; throw e; });
+      return __tabulatorPyP;
     }
 
     // ── #tag.import: laster, kuratert register (sl/pico), dynamiske

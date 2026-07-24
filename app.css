@@ -1543,3 +1543,7 @@ body.present-active .panel-left, body.present-active #resizer { display: none; }
   vertical-align: -1px;
 }
 .leafletmap-container { margin: 6px 0; }
+
+/* tabulator-wrapperens embed (buildOutputNodes) */
+.tabulator-embed { margin: 6px 0; }
+.tabulator-embed-title { font-weight: 600; font-size: 13px; margin: 2px 0 6px; color: var(--text); }
