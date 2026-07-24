@@ -190,6 +190,87 @@ def test_no_null_noise_in_traces():
         no_nulls(t)
 
 
+def test_choropleth_matches_px():
+    if not HAS_PX:
+        return
+    d = {"land": ["NOR", "SWE", "DNK"], "verdi": [3.1, 2.5, 2.9]}
+    mine = spec_of(pe.choropleth(bpd.DataFrame(d), locations="land",
+                                 locationmode="ISO-3", color="verdi",
+                                 scope="europe", hover_name="land"))
+    ref = px.choropleth(rpd.DataFrame(d), locations="land",
+                        locationmode="ISO-3", color="verdi",
+                        scope="europe", hover_name="land")
+    t, rt = mine["data"][0], ref.data[0]
+    assert t["locations"] == list(rt.locations)
+    assert t["z"] == [float(v) for v in rt.z]
+    assert t["locationmode"] == rt.locationmode
+    assert t["hovertext"] == list(rt.hovertext)
+    assert mine["layout"]["geo"]["scope"] == "europe"
+    # ryddet: ingen påtvungne nøkler (spec 2026-07-24)
+    assert "projection" not in mine["layout"]["geo"]
+    assert "showland" not in mine["layout"]["geo"]
+    assert "width" not in mine["layout"] and "height" not in mine["layout"]
+    assert "title" not in mine["layout"]
+
+
+def test_choropleth_geojson_passthrough():
+    gj = {"type": "FeatureCollection", "features": []}
+    spec = spec_of(pe.choropleth(bpd.DataFrame({"k": ["a"], "v": [1.0]}),
+                                 locations="k", geojson=gj,
+                                 featureidkey="properties.nummer", color="v"))
+    t = spec["data"][0]
+    assert t["geojson"] == gj and t["featureidkey"] == "properties.nummer"
+    assert "locationmode" not in t
+
+
+def test_choropleth_nan_and_colorbar_label():
+    df = bpd.DataFrame({"k": ["a", "b"], "v": [1.0, bpd.nan]})
+    spec = spec_of(pe.choropleth(df, locations="k", color="v",
+                                 labels={"v": "Rate"}))
+    t = spec["data"][0]
+    assert t["z"][1] is None
+    assert t["colorbar"]["title"] == "Rate"
+    # basemap_visible=False -> geo.visible False (px-semantikken)
+    s2 = spec_of(pe.choropleth(df, locations="k", color="v",
+                               basemap_visible=False))
+    assert s2["layout"]["geo"]["visible"] is False
+
+
+def test_choropleth_norge_marker():
+    df = bpd.DataFrame({"kommnr": [301, 1103], "rate": [1.0, 2.0]})
+    spec = spec_of(pe.choropleth(df, geojson="norge:kommuner",
+                                 locations="kommnr", color="rate"))
+    t = spec["data"][0]
+    assert t["geojson"] == "norge:kommuner"          # markør urørt til JS
+    assert t["locations"] == ["0301", "1103"]        # zero-paddet
+    assert t["featureidkey"] == "properties.nummer"  # geometrifilens nøkkel
+    assert spec["layout"]["geo"]["fitbounds"] == "locations"
+    # fylker: 2-sifret padding; eksplisitt featureidkey vinner
+    s2 = spec_of(pe.choropleth(bpd.DataFrame({"f": [3], "v": [1.0]}),
+                               geojson="norge:fylker", locations="f",
+                               color="v", featureidkey="properties.navn"))
+    assert s2["data"][0]["locations"] == ["03"]
+    assert s2["data"][0]["featureidkey"] == "properties.navn"
+
+
+def test_choropleth_brython_mpy_parity():
+    import os as _os, sys as _sys
+    _sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), '..', '..', 'micropython'))
+    import plotly_express_mpy as pemp
+    d = {"land": ["NOR", "SWE"], "verdi": [1.0, 2.0]}
+    kw = dict(locations="land", color="verdi", hover_name="land",
+              scope="europe", labels={"verdi": "Rate"})
+    a = spec_of(pe.choropleth(d, **kw))
+    b = json.loads(pemp.choropleth(d, **kw).to_plotly_json_str())
+    assert a["data"] == b["data"] and a["layout"] == b["layout"]
+    dn = {"kommnr": [301], "rate": [1.0]}
+    an = spec_of(pe.choropleth(dn, geojson="norge:kommuner",
+                               locations="kommnr", color="rate"))
+    bn = json.loads(pemp.choropleth(dn, geojson="norge:kommuner",
+                                    locations="kommnr", color="rate").to_plotly_json_str())
+    assert an["data"] == bn["data"] and an["layout"] == bn["layout"]
+
+
 if __name__ == '__main__':
     for name, fn in sorted(globals().items()):
         if name.startswith('test_'):
