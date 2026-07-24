@@ -283,14 +283,14 @@
       <!-- Visningsmodus samlet i én dropdown (før: tre ikonknapper) —
            kolonner/stablet/kun output/skrittvis. -->
       <div class="mode-dropdown-wrap">
-        <button type="button" class="mode-dropdown-btn" id="viewModeBtn" data-i18n-title title="Velg visning (rad, kolonne, kun output/dashboard, skrittvis, presentasjon)">
+        <button type="button" class="mode-dropdown-btn" id="viewModeBtn" data-i18n-title title="Velg visning (rad, kolonne, kun output, skrittvis, presentasjon)">
           <span id="viewModeLabel" data-i18n>Kolonne</span>
           <span class="chevron">▲</span>
         </button>
         <div class="mode-dropdown-menu" id="viewModeMenu">
           <button type="button" data-view="stacked" data-i18n>Rad</button>
           <button type="button" data-view="columns" class="active" data-i18n>Kolonne</button>
-          <button type="button" data-view="output" data-i18n>Kun output / dashboard</button>
+          <button type="button" data-view="output" data-i18n>Kun output</button>
           <button type="button" data-view="forklar" data-i18n>Skrittvis</button>
           <button type="button" data-view="present" data-i18n>Presentasjon</button>
         </div>
@@ -555,7 +555,7 @@
     window.t = window.t || function (s) { return s; };
     window.i18nField = window.i18nField || function (obj, field) { return obj && obj[field]; };
 
-    window.M2PY_VERSION = '2026-07-24p';
+    window.M2PY_VERSION = '2026-07-24q';
 
     // One-time migration: remove obsolete localStorage keys from previous milestones
     // Safe to delete this snippet after a few months when most users have re-loaded
@@ -716,6 +716,22 @@
         else container.style.removeProperty('--outonly-maxw');
         container.classList.toggle('outonly-show-active', opts.show_active_cell === true);
         container.classList.toggle('outonly-show-copy', opts.show_copy === true);
+        // #options.data_sidebar = False (2026-07-24): skjul datasett-sidebaren
+        // helt (panel + åpne-tab) — nyttig i presentasjon/kun output. Uten
+        // direktivet (eller = True) gjenopprettes normal synlighet, så et
+        // dokument uten direktivet rydder opp etter et som skjulte den.
+        var _sb = document.getElementById('sidebarRight');
+        var _sbTab = document.getElementById('sidebarOpenTab');
+        var _hideSb = opts.data_sidebar === false;
+        if (_sb) {
+          _sb.style.display = _hideSb ? 'none' : '';
+          if (_hideSb) {
+            _sb.classList.add('collapsed');
+            var _cont = document.querySelector('.container');
+            if (_cont) _cont.classList.remove('sidebar-open');
+          }
+        }
+        if (_sbTab) _sbTab.style.display = _hideSb ? 'none' : '';
       }
       window.mdApplyOutputViewOpts = applyOutputViewOpts;
 
@@ -3058,7 +3074,7 @@
       var menu = document.getElementById('viewModeMenu');
       var label = document.getElementById('viewModeLabel');
       if (!btn || !menu) return;
-      var LABELS = { columns: t('Kolonne'), stacked: t('Rad'), output: t('Kun output / dashboard'),
+      var LABELS = { columns: t('Kolonne'), stacked: t('Rad'), output: t('Kun output'),
                      forklar: t('Skrittvis'), present: t('Presentasjon') };
       function setActive(view) {
         if (label) label.textContent = LABELS[view] || view;
