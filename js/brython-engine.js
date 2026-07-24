@@ -106,7 +106,12 @@
                               deps: ['lifelines_core', 'plotly_express_brython',
                                      'pandas_brython'], js: [] },
     lifelines_core:         { aliases: [], deps: [], js: [],
-                              path: 'shared/lifelines_core.py' }
+                              path: 'shared/lifelines_core.py' },
+    // tabulator (spec 2026-07-24): interaktive tabeller — ingen js-deps
+    // (Tabulator 6.3.1 er statisk lastet i index.html-head).
+    tabulator_brython:      { aliases: ['tabulator'], deps: ['tabulator_core'], js: [] },
+    tabulator_core:         { aliases: [], deps: [], js: [],
+                              path: 'shared/tabulator_core.py' }
   };
 
   function scanImports(code) {
