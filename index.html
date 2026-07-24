@@ -2721,7 +2721,7 @@
             if (_asmX && !_asmX.pushdown) {
               throw new Error(t('Montering i denne modusen krever parquet/csv-kilder — bruk python-modus for andre formater.'));
             }
-            assertAssemblyFormats(_asmX, ['pandas', 'data.frame'], 'Brython');
+            assertAssemblyFormats(_asmX, ['pandas', 'data.frame', 'duckdb'], 'Brython');
             res = await window.BrythonEngine.run(script, { loads: _dl.loads, extraDatasets: _asmX && _asmX.datasets });
             if (!refreshDatasetSidebarFromEngineInfo(window.BrythonEngine.datasetInfo(), 'brython', 'Brython')) {
               refreshDatasetSidebarFromLoads(_dl.loads, 'brython', 'Brython');
@@ -2789,7 +2789,7 @@
             if (_asmX && !_asmX.pushdown) {
               throw new Error(t('Montering i denne modusen krever parquet/csv-kilder — bruk python-modus for andre formater.'));
             }
-            assertAssemblyFormats(_asmX, ['pandas', 'data.frame'], 'MicroPython');
+            assertAssemblyFormats(_asmX, ['pandas', 'data.frame', 'duckdb'], 'MicroPython');
             res = await window.MicroPythonEngine.run(script, { loads: _dl.loads, extraDatasets: _asmX && _asmX.datasets });
             if (!refreshDatasetSidebarFromEngineInfo(window.MicroPythonEngine.datasetInfo(), 'micropython', 'MicroPython')) {
               refreshDatasetSidebarFromLoads(_dl.loads, 'micropython', 'MicroPython');
@@ -2843,7 +2843,7 @@
             if (_asmX && !_asmX.pushdown) {
               throw new Error(t('Montering i denne modusen krever parquet/csv-kilder — bruk python-modus for andre formater.'));
             }
-            assertAssemblyFormats(_asmX, ['arquero'], 'JavaScript');
+            assertAssemblyFormats(_asmX, ['arquero', 'duckdb'], 'JavaScript');
             res = await window.JsEngine.run(script, { loads: _dl.loads, extraDatasets: _asmX && _asmX.datasets });
             if (_asmX && _asmX.datasets) {
             var _jsInfo = {};
@@ -7698,6 +7698,14 @@ if _asm.get('spec'):
       // Hybride/notatbok-skript har ##-segmentmarkører som ikke er gyldig SQL —
       // overlat dem til pyodide-segmentløkken.
       if (/^\s*(\/\/|##?)\s*(duckdb|duck|sql|python|py|pyodide|r|microdata|micro)\s*$/im.test(script)) return { handled: false, res: null };
+      // Variabel-montering i duckdb-modus (format(duckdb) er defaulten her):
+      // datasettene monteres som views i katalogen — materialisering til et
+      // frameformat har ingen mottaker i den native veien og avvises av
+      // tillatt-listen. Ikke-pushdown-kilder feiler allerede høylytt inne i
+      // resolveAssemblyColumns (defaulten gjør alle datasett til duckdb-format).
+      refreshConnectedSources(script);   // fire-and-forget: kildekatalog + tab
+      var _asm = await resolveAssemblyColumns(script, ctx.rightStatus, { defaultFormat: 'duckdb' });
+      assertAssemblyFormats(_asm, ['duckdb'], 'duckdb');
       setStatus(ctx.rightStatus, t('Kjører…'));
       // Direktivlinjene er metadata (og «# load» er ikke gyldig SQL) — fjern dem før exec.
       var _sql = script.replace(/^[ \t]*(?:#|--|\/\/)[ \t]*(?:connect|load|require|import|join|create-dataset)\b[^\n]*\n?/gim, '');
@@ -7738,6 +7746,9 @@ if _asm.get('spec'):
         } finally {
           await window.__duck.end();
         }
+      }
+      if (_asm && _asm.mounted && _asm.mounted.length) {
+        _out.unshift('Montert som view i DuckDB: ' + _asm.mounted.join(', '));
       }
       // Speil legacy-veiens tilstand så outputMode-radioene re-rendrer
       // ferske SQL-resultater, ikke forrige kjørings innhold.
@@ -8467,7 +8478,7 @@ json.dumps(out)
       if (_asmR && !_asmR.pushdown) {
         throw new Error(t('Montering i denne modusen krever parquet/csv-kilder — bruk python-modus for andre formater.'));
       }
-      assertAssemblyFormats(_asmR, ['data.frame', 'data.table', 'tibble'], 'R');
+      assertAssemblyFormats(_asmR, ['data.frame', 'data.table', 'tibble', 'duckdb'], 'R');
       if (_asmR) {
         var _rFmts = _asmR.formats || {};
         var _needPkg = Object.keys(_rFmts).map(function (n) { return _rFmts[n]; })
@@ -9649,11 +9660,18 @@ options(width = 200)
         // parquet hentes med range requests), pandas-fallback ellers.
         var _asmPayload = null;
         refreshConnectedSources(effectiveScript);   // fire-and-forget: kildekatalog + tab
-        var _asmRes = await resolveAssemblyColumns(effectiveScript, rightStatus);
+        // duckdb-modus (pyodide-fallbacken deler denne veien med python-
+        // modus): montering defaulter til view i katalogen — materialisering
+        // til et frameformat har ingen mottaker der og avvises av listen.
+        var _asmDuckMode = activeEditorMode === 'duckdb';
+        var _asmRes = await resolveAssemblyColumns(effectiveScript, rightStatus,
+          _asmDuckMode ? { defaultFormat: 'duckdb' } : null);
         if (_asmRes && _asmRes.formats && Object.values(_asmRes.formats).indexOf('polars') >= 0) {
           throw new Error(t('format(polars) er ikke tilgjengelig i nettleseren ennå (polars mangler wasm-bygg) — dropp format() for pandas.'));
         }
-        assertAssemblyFormats(_asmRes, ['pandas', 'data.frame'], 'python');
+        assertAssemblyFormats(_asmRes,
+          _asmDuckMode ? ['duckdb'] : ['pandas', 'data.frame', 'duckdb'],
+          _asmDuckMode ? 'duckdb' : 'python');
         if (_asmRes && _asmRes.pushdown) {
           _asmPayload = { cols: _asmRes.datasets };
         } else if (_asmRes) {
