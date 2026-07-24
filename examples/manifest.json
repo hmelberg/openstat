@@ -154,6 +154,11 @@
       "file": "brython/bry30_tabulator.txt",
       "label": "tabulator — interaktive tabeller",
       "group": null
+    },
+    {
+      "file": "brython/bry31_choropleth.txt",
+      "label": "plotly — choropleth (land + norske kommuner)",
+      "group": null
     }
   ],
   "duckdb": [
@@ -766,6 +771,11 @@
     {
       "file": "micropython/10_tabulator.txt",
       "label": "tabulator — interaktive tabeller",
+      "group": null
+    },
+    {
+      "file": "micropython/11_choropleth.txt",
+      "label": "plotly — choropleth (land + norske kommuner)",
       "group": null
     }
   ],
