@@ -48,6 +48,9 @@ def _fmt(obj):
         except Exception:
             pass
         return ''
+    if hasattr(obj, 'to_tabulator_json_str'):
+        # tabulator-wrapperen (spec 2026-07-24): interaktiv tabell i JS
+        return _EMBED_S + 'tabulator__' + '\n' + obj.to_tabulator_json_str() + '\n' + _EMBED_E
     if hasattr(obj, 'to_leaflet_json_str'):
         # folium-shimet (spec 2026-07-24): Leaflet-rendring i JS
         return _EMBED_S + 'leafletmap__' + '\n' + obj.to_leaflet_json_str() + '\n' + _EMBED_E
@@ -147,8 +150,91 @@ def _tail_suppressed(tail):
     return False
 
 
-def _show(*objs):
+def _df_tabulator_spec(df, opts):
+    """DataFrame -> tabulator-embed-spec. BEVISST duplisert fra
+    shared/tabulator_core.py OG brython_runner.py (identisk output —
+    håndhevet av test_spec_parity_with_core): show(df) skal virke uten
+    at tabulator-modulen er importert/registrert i økten."""
+    keys = [str(c) for c in list(df.columns)]
+    raw = df.to_dict()
+    norm = {}
+    for c0 in raw:
+        v = raw[c0]
+        norm[str(c0)] = list(v.values()) if isinstance(v, dict) else list(v)
+    n = 0
+    for k in keys:
+        n = max(n, len(norm.get(k, [])))
+    def _cell(v):
+        if v is None:
+            return None
+        if type(v).__name__ == 'NaN':
+            return None
+        if isinstance(v, float) and v != v:
+            return None
+        if isinstance(v, (bool, int, float, str)):
+            return v
+        return str(v)
+    recs = []
+    for i in range(n):
+        row = {}
+        for k in keys:
+            seq = norm.get(k, [])
+            row[k] = _cell(seq[i]) if i < len(seq) else None
+        recs.append(row)
+    colspecs = []
+    for k in keys:
+        saw = False
+        ok = True
+        for r in recs:
+            v = r.get(k)
+            if v is None:
+                continue
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                ok = False
+                break
+            saw = True
+        numeric = ok and saw
+        c = {'title': k, 'field': k,
+             'sorter': 'number' if numeric else 'string'}
+        if numeric:
+            c['hozAlign'] = 'right'
+        if opts.get('filters'):
+            c['headerFilter'] = 'input'
+        if opts.get('sortable') is False:
+            c['headerSort'] = False
+        colspecs.append(c)
+    o = {}
+    pag = opts.get('pagination')
+    if pag is None or pag is True:
+        if len(recs) > 200:
+            o['pagination'] = 'local'
+            o['paginationSize'] = 20
+    elif pag is not False:
+        o['pagination'] = 'local'
+        o['paginationSize'] = int(pag)
+    if opts.get('height') is not None:
+        o['height'] = opts['height']
+    spec = {'columns': colspecs, 'data': recs, 'options': o}
+    if opts.get('title') is not None:
+        spec['title'] = opts['title']
+    return spec
+
+
+def _show(*objs, **kwargs):
+    # DataFrames vises som interaktiv Tabulator-tabell som DEFAULT
+    # (spec 2026-07-24); format='html' gir den gamle statiske tabellen.
+    fmtv = kwargs.pop('format', None)
     for o in objs:
+        if (hasattr(o, 'to_html') and hasattr(o, 'columns')
+                and not hasattr(o, 'to_tabulator_json_str')):
+            if fmtv is None or fmtv == 'tabulator':
+                spec = _df_tabulator_spec(o, kwargs)
+                print(_EMBED_S + 'tabulator__' + '\n' + json.dumps(spec)
+                      + '\n' + _EMBED_E)
+                continue
+            if fmtv != 'html':
+                raise ValueError("show(format=...): gyldige verdier er "
+                                 "'tabulator' og 'html'")
         # Speiler `if shown: print(shown)`-vakten i _execute_code (~linje
         # 150-152): et ui.html.*-Element formaterer til '' (_fmt monterer det
         # i stedet for å repr-printe, se _fmt sin _openstat_el_id-gren over)
