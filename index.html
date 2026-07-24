@@ -556,7 +556,7 @@
     window.t = window.t || function (s) { return s; };
     window.i18nField = window.i18nField || function (obj, field) { return obj && obj[field]; };
 
-    window.M2PY_VERSION = '2026-07-24u';
+    window.M2PY_VERSION = '2026-07-24v';
 
     // One-time migration: remove obsolete localStorage keys from previous milestones
     // Safe to delete this snippet after a few months when most users have re-loaded
@@ -7726,6 +7726,12 @@ if _asm.get('spec'):
       }
     }
 
+    // Direktivlinjene er metadata («# load» er ikke gyldig SQL) — fjernes fra
+    // duckdb-SQL før exec. Delt av native-veien og buildDocumentSegments.
+    function stripDataDirectiveLines(text) {
+      return String(text || '').replace(/^[ \t]*(?:#|--|\/\/)[ \t]*(?:connect|load|require|import|join|create-dataset)\b[^\n]*\n?/gim, '');
+    }
+
     // ── Fase 1: native duckdb-kjørevei, uten Pyodide (plan 2026-07-11 i
     // safestat-repoen) ────────────────────────────────────────────────────
     // Kjører rene SQL-scripts direkte mot duckdb-wasm. Returnerer true når
@@ -7772,8 +7778,7 @@ if _asm.get('spec'):
       var _asm = await resolveAssemblyColumns(script, ctx.rightStatus, { defaultFormat: 'duckdb' });
       assertAssemblyFormats(_asm, ['duckdb'], 'duckdb');
       setStatus(ctx.rightStatus, t('Kjører…'));
-      // Direktivlinjene er metadata (og «# load» er ikke gyldig SQL) — fjern dem før exec.
-      var _sql = script.replace(/^[ \t]*(?:#|--|\/\/)[ \t]*(?:connect|load|require|import|join|create-dataset)\b[^\n]*\n?/gim, '');
+      var _sql = stripDataDirectiveLines(script);
       var DN = window.DuckdbNative;
       var _out = [];
       // Kun kommentarer (f.eks. en innledende --/​/* */-notis) → ingen SQL å
@@ -9645,6 +9650,14 @@ options(width = 200)
         if (_segUse.errors.length) throw new Error(_segUse.errors.join('; '));
         segments = _segUse.segments;
       }
+      // Direktivlinjene er metadata («# load» er ikke gyldig SQL) — strippes
+      // fra duckdb-segmentene også her: pyodide-fallbacken hadde hullet
+      // (flate duckdb-scripts med direktiver ga parserfeil når Pyodide alt
+      // var bootet — funnet i pxweb-økten 2026-07-24). I python/R-segmenter
+      // er direktivlinjene ufarlige kommentarer og beholdes.
+      segments.forEach(function (s) {
+        if (s.kind === 'duckdb') s.text = stripDataDirectiveLines(s.text);
+      });
       return segments;
     }
 

@@ -226,13 +226,21 @@ prøve fra PyPI eller GitHub. Nivåene:
       {navn: sql} i js/duckdb-views.js re-registrerer ved hver øktstart
       (øktene er ferske per kjøring). I duckdb-modus er view-montering
       defaulten for alle monteringsdatasett. Levert 2026-07-24.
-- [ ] **API-kilder (SSB/PxWeb først)** — nytt connect-kind (`kind(pxweb)`),
-      metadata-endepunktet mater kildekatalogen (`__connectedSources`) og
-      tab-fullføringen UTEN nedlasting. HARD forutsetning som må løses
-      først: composite keys — `key(region aar)` i create-dataset og
-      `USING (a, b)` i AssemblyDuckdb-kompilatoren (dagens nøkkel er én
-      kolonne hele veien). Eurostat/OECD gjenbruker samme kind-mønster
-      etterpå. Egen økt.
+- [x] **API-kilder (SSB/PxWeb først)** — LEVERT 2026-07-24 (spec
+      2026-07-24-pxweb-sources-design.md): `kind(pxweb)` med
+      `# load ssb/<tabellid>[?valueCodes…] as navn`; data hentes som
+      json-stat2 (lang-format, UTF-8 — default-CSV-en er pivotert og
+      iso-8859-1) og konverteres i js/pxweb.js til koder + value;
+      metadata-endepunktet mater kildekatalogen og `ssb/05839.`-tab UTEN
+      nedlasting. Composite keys levert som forutsetning: `key(region aar)`
+      og `join … on a, b` er arrays hele veien, `USING (a, b)` i
+      kompilatoren og `merge(on=liste)` i pandas-fallbacken. Bifangst:
+      duckdb-fallbackveien (Pyodide alt bootet) strippet aldri
+      direktivlinjer fra SQL-segmenter — fikset (stripDataDirectiveLines).
+- [ ] **Eurostat/OECD som pxweb-gjenbruk** — Eurostat leverer også
+      json-stat2; samme kind + konvertering, kun base-URL/param-forskjeller.
+      Vurder også `<dim>_label`-kolonner som opt-in og tabell-SØK
+      (`/tables?query=`) i katalogen. Liten økt når Hans vil.
 
 ## Diverse / uavklart
 
