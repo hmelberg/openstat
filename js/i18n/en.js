@@ -16,6 +16,7 @@ window.M2PY_I18N = window.M2PY_I18N || {  "OpenStat er en motor for å stille sp
   "format({f}) støttes ikke i {m}-modus (støttet: {ok}).": "format({f}) is not supported in {m} mode (supported: {ok}).",
   "format(polars) er ikke tilgjengelig i nettleseren ennå (polars mangler wasm-bygg) — dropp format() for pandas.": "format(polars) is not available in the browser yet (polars has no wasm build) — drop format() to get pandas.",
   "format(duckdb) krever kilder DuckDB kan lese direkte (parquet/csv/duckdb/sqlite).": "format(duckdb) requires sources DuckDB can read directly (parquet/csv/duckdb/sqlite).",
+  "Henter PxWeb-uttrekk…": "Fetching PxWeb extract…",
 };
 window.M2PY_I18N.en = {
   "Venter på Python-motoren (første gang kan ta opptil ett minutt)…": "Waiting for the Python engine (the first time can take up to a minute)…",

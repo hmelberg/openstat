@@ -4650,6 +4650,16 @@ json.dumps(out)
     // live mens man skriver (requireWord=true krever tegn før slashen, så vi ikke
     // popper på enhver «/», f.eks. divisjon med tall).
     function microdataSlashSuggest(lineSoFar, pos, requireWord) {
+      // pxweb-tabeller: «alias/tabell.<prefix>» foreslår tabellens kolonner
+      // (katalognøkkel «alias/tabell», skjema fra metadata-endepunktet).
+      const mt = lineSoFar.match(/([A-Za-z_]\w*)\/(\w+)\.([A-Za-z0-9_]*)$/);
+      if (mt && window.__connectedSources && window.__connectedSources[mt[1] + '/' + mt[2]]) {
+        const tCols = window.__connectedSources[mt[1] + '/' + mt[2]].columns || [];
+        const tpfx = (mt[3] || '').toLowerCase();
+        const tsuggs = tCols.filter(function (c) { return c.toLowerCase().startsWith(tpfx); }).sort()
+          .map(function (c) { return { label: c, kind: 'variable', detail: t('kilde: {a} (ikke nedlastet)', { a: mt[1] + '/' + mt[2] }) }; });
+        if (tsuggs.length) { showAutocomplete(tsuggs, pos - (mt[3] || '').length, pos); return true; }
+      }
       // Tilkoblede kilder (# connect) vinner: tab etter alias/ foreslår
       // kildens kolonner (ikke nedlastet — skjema via DuckDB DESCRIBE).
       const mc = lineSoFar.match(/([A-Za-z_]\w*)\/([A-Za-z0-9_]*)$/);
@@ -7470,6 +7480,28 @@ async def _run_duck_sql(_sql, _fresh=True):
       });
       var hasDuckFmt = Object.keys(formats).some(function (n) { return formats[n] === 'duckdb'; });
       var so = await window.DataLoader.resolveSourcesOnly(script, deps);
+      // pxweb-kilder (spec 2026-07-24-pxweb-sources-design §2): materialiser
+      // uttrekket (json-stat2 → csv-bytes via lastelaget, delt cache),
+      // registrer som filbuffer i duckdb-wasm og omskriv deskriptoren til
+      // csv — pushdown, composite-joins og format(duckdb)-views virker da
+      // uendret. Ærlig unntak: px-uttrekk er API-nedlastinger; «null
+      // minnekost» gjelder remote parquet, ikke pxweb.
+      var _pxKeys = Object.keys(so.descriptors).filter(function (k) { return so.descriptors[k].format === 'pxweb'; });
+      if (_pxKeys.length) {
+        if (statusEl) setStatus(statusEl, t('Henter PxWeb-uttrekk…'));
+        var _pxItems = _pxKeys.map(function (k) {
+          var d0 = so.descriptors[k];
+          return { alias: k, url: d0.url, kind: 'pxweb', table: d0.table };
+        });
+        var _pxLoaded = await window.DataLoader.fetchResolvedItems(_pxItems, deps);
+        var _pxDb = await __ensureDuckDB();
+        for (var _pi = 0; _pi < _pxLoaded.length; _pi++) {
+          var _pl = _pxLoaded[_pi];
+          var _pf = '_px_' + _pl.alias + '.csv';
+          await _pxDb.registerFileBuffer(_pf, _pl.bytes);
+          so.descriptors[_pl.alias] = { url: _pf, format: 'csv', table: _pl.table };
+        }
+      }
       if (!window.AssemblyDuckdb.canPushdown(so.spec, so.descriptors)) {
         if (hasDuckFmt) {
           throw new Error(t('format(duckdb) krever kilder DuckDB kan lese direkte (parquet/csv/duckdb/sqlite).'));
@@ -7567,6 +7599,39 @@ async def _run_duck_sql(_sql, _fresh=True):
             } finally { await conn.close(); }
           } catch (e) { console.warn('kildeskjema (' + r.alias + '):', e); }
         }
+        // pxweb-tabeller (spec 2026-07-24-pxweb-sources-design §2): metadata-
+        // endepunktet mater katalogen UTEN datanedlasting — oppføringer for
+        // tabellene scriptet faktisk refererer (load-linjer + import-kilder),
+        // katalognøkkel «alias/tabellid», sep '.' (matcher import-syntaksen).
+        var pxPairs = {};
+        function collectPx(parsedLoads) {
+          var res = DD.resolve(parsedLoads, []);
+          res.forEach(function (r, i) {
+            if (r.error || r.kind !== 'pxweb' || !r.table) return;
+            var head = String(parsedLoads.loads[i].target).split('/')[0];
+            pxPairs[head + '/' + r.table] = r;
+          });
+        }
+        collectPx(DD.parse(script));
+        if (DD.parseAssembly) {
+          var pa = DD.parseAssembly(script);
+          var st = (pa.spec && pa.spec.sourceTables) || {};
+          var stLines = Object.keys(st).map(function (k) { return '# load ' + st[k].source + '/' + st[k].table + ' as ' + k; });
+          if (stLines.length) collectPx(DD.parse(connectLines + '\n' + stLines.join('\n')));
+        }
+        for (var pk in pxPairs) {
+          try {
+            var pr = pxPairs[pk];
+            var mresp = await fetch(window.PxWeb.metadataUrl(pr.url));
+            if (!mresp.ok) throw new Error('HTTP ' + mresp.status);
+            var meta = await mresp.json();
+            window.__connectedSources[pk] = {
+              url: pr.url, format: 'pxweb',
+              columns: (meta.id || []).concat(['value']),
+              types: [], sep: '.'
+            };
+          } catch (e) { console.warn('pxweb-metadata (' + pk + '):', e); }
+        }
         updateSidebarSources();
       } catch (e) { console.warn('refreshConnectedSources:', e); }
     }
@@ -7582,7 +7647,7 @@ async def _run_duck_sql(_sql, _fresh=True):
             return '<div class="sidebar-dataset-meta">' + escapeHtml(a) + ' — '
               + escapeHtml(String(srcInfo.columns.length)) + ' ' + escapeHtml(t('variabler (ikke nedlastet)')) + '</div>'
               + '<div class="sidebar-vars">' + srcInfo.columns.map(function (c) {
-                  return '<div class="sidebar-var-row" style="opacity:.65">' + escapeHtml(a + '/' + c) + '</div>';
+                  return '<div class="sidebar-var-row" style="opacity:.65">' + escapeHtml(a + (srcInfo.sep || '/') + c) + '</div>';
                 }).join('') + '</div>';
           }).join('') + '</div>';
     }
