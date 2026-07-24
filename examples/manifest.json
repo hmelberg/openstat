@@ -144,6 +144,11 @@
       "file": "brython/bry28_folium.txt",
       "label": "folium — kart og choropleth",
       "group": null
+    },
+    {
+      "file": "brython/bry29_lifelines.txt",
+      "label": "lifelines — overlevelsesanalyse",
+      "group": null
     }
   ],
   "duckdb": [
@@ -747,6 +752,11 @@
       "file": "micropython/08_folium.txt",
       "label": "folium — kart og choropleth",
       "group": null
+    },
+    {
+      "file": "micropython/09_lifelines.txt",
+      "label": "lifelines — overlevelsesanalyse",
+      "group": null
     }
   ],
   "python": [
@@ -803,6 +813,11 @@
     {
       "file": "python/py08_folium.txt",
       "label": "folium — kart",
+      "group": null
+    },
+    {
+      "file": "python/py09_lifelines.txt",
+      "label": "lifelines — overlevelsesanalyse",
       "group": null
     },
     {
