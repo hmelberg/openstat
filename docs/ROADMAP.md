@@ -219,6 +219,21 @@ prøve fra PyPI eller GitHub. Nivåene:
 - [ ] Tydelig feilmelding når en pakke ikke finnes som wasm (med peker til
       hva som faktisk støttes)
 
+## Datalag / montering (lagt til 2026-07-24)
+
+- [x] **format(duckdb)** — montert datasett som view i DuckDB-katalogen
+      (null minnekost, kolonne-henting ved behov); view-registeret
+      {navn: sql} i js/duckdb-views.js re-registrerer ved hver øktstart
+      (øktene er ferske per kjøring). I duckdb-modus er view-montering
+      defaulten for alle monteringsdatasett. Levert 2026-07-24.
+- [ ] **API-kilder (SSB/PxWeb først)** — nytt connect-kind (`kind(pxweb)`),
+      metadata-endepunktet mater kildekatalogen (`__connectedSources`) og
+      tab-fullføringen UTEN nedlasting. HARD forutsetning som må løses
+      først: composite keys — `key(region aar)` i create-dataset og
+      `USING (a, b)` i AssemblyDuckdb-kompilatoren (dagens nøkkel er én
+      kolonne hele veien). Eurostat/OECD gjenbruker samme kind-mønster
+      etterpå. Egen økt.
+
 ## Diverse / uavklart
 
 - [ ] Pandas-basert GUI som egen modus (Hans' idé — holdes adskilt fra
