@@ -1,27 +1,12 @@
 # label: regression — lm + glm
 # Example: regression — linear and logistic
-# lm() -> regress, glm(family=binomial) -> logit.
+# load https://raw.githubusercontent.com/hmelberg/openstat/main/data/person_year_sample.csv as folk
 
-#micro
-require no.ssb.fdb:54 as fd
-create-dataset folk
-import fd/INNTEKT_WLONN 2022-01-01 as income
-import fd/BEFOLKNING_KJOENN as gender
-import fd/BEFOLKNING_FOEDSELS_AAR_MND as birth_ym
-
-#r
-# use folk
 library(dplyr)
 
-folk <- folk |>
-  mutate(
-    age  = 2022 - floor(birth_ym / 100),
-    male = ifelse(gender == 1, 1, 0)
-  )
-
-# Linear regression of income on age and sex
-lm(income ~ age + male, data = folk)
+# Linear regression of income on age and status
+lm(income ~ age + factor(status), data = folk)
 
 # Logistic regression: probability of high income
-folk <- folk |> mutate(high_income = ifelse(income > 600000, 1, 0))
-glm(high_income ~ age + male, family = binomial(), data = folk)
+folk <- folk |> mutate(high_income = ifelse(!is.na(income) & income > 600000, 1, 0))
+glm(high_income ~ age, family = binomial(), data = folk)

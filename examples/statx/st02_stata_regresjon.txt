@@ -1,15 +1,7 @@
 # label: Stata — regression
 * Example: Stata – linear regression (OLS)
-* The first block imports variables via microdata.
-* The second block runs a simple OLS regression of income on sex.
-* Read the coefficient for gender: positive means higher income for the group.
+* The "# load" line fetches the dataset. Then OLS of income on age.
+# load https://raw.githubusercontent.com/hmelberg/openstat/main/data/person_year_sample.csv as people
 
-#micro
-require no.ssb.fdb:54 as fd
-create-dataset people
-import fd/BEFOLKNING_KJOENN as gender
-import fd/INNTEKT_WLONN 2022-01-01 as income
-
-#stata
 summarize income
-regress income gender
+regress income age

@@ -1,14 +1,8 @@
-# label: matplotlib + #micro
+# label: matplotlib — histogram and boxplot
 # Example: pandas + matplotlib — histogram and boxplot
-# Microdata fetches variables. matplotlib plots directly.
+# `# load` fetches the data. matplotlib plots directly.
+# load https://raw.githubusercontent.com/hmelberg/openstat/main/data/person_year_sample.csv as plot_data
 
-#micro
-require no.ssb.fdb:54 as fd
-create-dataset plot_data
-import fd/BEFOLKNING_KJOENN as gender
-import fd/INNTEKT_WLONN 2022-01-01 as income
-
-#python
 import matplotlib.pyplot as plt
 
 plot_data["income_thousand"] = plot_data["income"] / 1000
@@ -18,8 +12,8 @@ plt.xlabel("Income (thousand kr)")
 plt.title("Distribution of wage income")
 plt.show()
 
-plot_data.boxplot(column="income_thousand", by="gender")
+plot_data.boxplot(column="income_thousand", by="status", rot=45)
 plt.suptitle("")
-plt.title("Wage income by gender")
+plt.title("Wage income by status")
 plt.ylabel("Income (thousand kr)")
 plt.show()

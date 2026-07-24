@@ -1,15 +1,8 @@
 # label: Stata — generate/egen
 * Example: Stata – generate and egen
-* The first block imports variables via microdata.
-* The second block creates new variables: log income and mean income.
+* Creates new variables: log income and mean income.
+# load https://raw.githubusercontent.com/hmelberg/openstat/main/data/person_year_sample.csv as people
 
-#micro
-require no.ssb.fdb:54 as fd
-create-dataset people
-import fd/BEFOLKNING_KJOENN as gender
-import fd/INNTEKT_WLONN 2022-01-01 as income
-
-#stata
 generate log_income = log(income)
 egen mean_income = mean(income)
 summarize log_income mean_income

@@ -1,25 +1,16 @@
 # label: dplyr — across + slice_sample
 # Example: across() and random sampling
-# across() -> one generate per column; set.seed + slice_sample -> sample.
+# load https://raw.githubusercontent.com/hmelberg/openstat/main/data/person_year_sample.csv as folk
 
-#micro
-require no.ssb.fdb:54 as fd
-create-dataset folk
-import fd/INNTEKT_WLONN 2022-01-01 as wage
-import fd/INNTEKT_WKAPINNT 2022-01-01 as capital
-import fd/BEFOLKNING_KJOENN as gender
-
-#r
-# use folk
 library(dplyr)
 
 # Scale several amount columns at once to thousands of kroner
-folk <- folk |> mutate(across(c(wage, capital), ~ .x / 1000))
+folk <- folk |> mutate(across(c(income, total_income), ~ .x / 1000))
 
 # Random sample — the seed gives a reproducible result
 set.seed(2022)
 sampled <- folk |> slice_sample(prop = 0.3)
 
 sampled |>
-  group_by(gender) |>
-  summarise(mean_wage = mean(wage))
+  group_by(status) |>
+  summarise(mean_income = mean(income, na.rm = TRUE))

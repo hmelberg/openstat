@@ -1,19 +1,10 @@
 # label: Stata — use (multiple datasets)
 * Example: Stata – use (switch between datasets)
-* The first block creates two datasets: 'people' and 'people2'.
-* The second block demonstrates 'use NAME' to switch the active dataset.
+* Two "# load" lines create two datasets; "use NAME" switches between them.
+# load https://raw.githubusercontent.com/hmelberg/openstat/main/data/person_year_sample.csv as people
+# load https://raw.githubusercontent.com/hmelberg/openstat/main/data/person_year_sample.csv as people2
 
-#micro
-require no.ssb.fdb:54 as fd
-create-dataset people
-import fd/BEFOLKNING_KJOENN as gender
-import fd/INNTEKT_WLONN 2022-01-01 as income
-create-dataset people2
-import fd/BEFOLKNING_KJOENN as gender
-import fd/INNTEKT_WLONN 2022-01-01 as income
-
-#stata
 use people
 summarize income
 use people2
-tabulate gender
+tabulate status

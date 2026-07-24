@@ -1,0 +1,9 @@
+# label: pandas — groupby on open data
+# Example: pandas on an open dataset
+# The `# load` directive fetches a CSV and binds it as a DataFrame
+# (the alias after "as" becomes the variable name).
+# load https://raw.githubusercontent.com/hmelberg/openstat/main/data/person_year_sample.csv as people
+
+people.head()
+
+people.groupby("status")["income"].agg(["mean", "median", "count"]).round(0)

@@ -1,0 +1,15 @@
+# label: tidyverse — group_by/summarise
+# Example: tidyverse on an open dataset
+# The `# load` directive fetches a CSV and binds it as a data frame
+# named after the alias.
+# load https://raw.githubusercontent.com/hmelberg/openstat/main/data/person_year_sample.csv as folk
+
+library(dplyr)
+
+folk %>%
+  group_by(status) %>%
+  summarise(
+    mean_income   = mean(income, na.rm = TRUE),
+    median_income = median(income, na.rm = TRUE),
+    n             = n()
+  )

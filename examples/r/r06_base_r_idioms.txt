@@ -1,20 +1,12 @@
 # label: base R — subset/transform/aggregate
 # Example: base R — subset, transform, aggregate
-# These translate to keep if / generate / collapse.
+# load https://raw.githubusercontent.com/hmelberg/openstat/main/data/person_year_sample.csv as folk
 
-#micro
-require no.ssb.fdb:54 as fd
-create-dataset folk
-import fd/BEFOLKNING_KJOENN as gender
-import fd/INNTEKT_WLONN 2022-01-01 as income
-
-#r
-# use folk
-# Keep only people with positive income
-adults <- subset(folk, income > 0)
+# Keep only people with positive wage income
+adults <- subset(folk, !is.na(income) & income > 0)
 
 # Create a new variable (income in thousands of kroner)
 adults <- transform(adults, income_thousands = income / 1000)
 
-# Mean income per sex
-aggregate(income ~ gender, data = adults, FUN = mean)
+# Mean income per status
+aggregate(income ~ status, data = adults, FUN = mean)

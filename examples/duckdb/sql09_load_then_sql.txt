@@ -1,0 +1,8 @@
+# label: SQL — # load → DuckDB
+# load https://raw.githubusercontent.com/hmelberg/openstat/main/data/person_year_sample.csv as folk
+-- DuckDB/SQL uses -- for comments, not #.
+CREATE OR REPLACE TABLE high_earners AS
+SELECT * FROM folk WHERE income > 600000;
+
+SELECT count(*) AS n, round(avg(income)) AS mean_income
+FROM high_earners;

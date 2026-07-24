@@ -1,0 +1,17 @@
+# label: ggplot2 — histogram and boxplot
+# Example: ggplot2 — histogram and boxplot on an open dataset
+# `# load` fetches the data. ggplot2 plots.
+# load https://raw.githubusercontent.com/hmelberg/openstat/main/data/person_year_sample.csv as plottdata
+
+library(ggplot2)
+
+plottdata$income_thousands <- plottdata$income / 1000
+
+ggplot(plottdata, aes(x = income_thousands)) +
+  geom_histogram(bins = 30, fill = "steelblue", colour = "white") +
+  labs(x = "Income (thousand kr)", title = "Distribution of wage income")
+
+ggplot(plottdata, aes(x = status, y = income_thousands, fill = status)) +
+  geom_boxplot() +
+  labs(y = "Income (thousand kr)", title = "Wage income by status") +
+  theme(legend.position = "none")

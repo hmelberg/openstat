@@ -1,16 +1,10 @@
 # label: statsmodels — OLS regression
 # Example: statsmodels — OLS regression with a formula
-# Microdata fetches variables. statsmodels.formula.api runs OLS.
+# `# load` fetches the data. statsmodels.formula.api runs OLS.
+# load https://raw.githubusercontent.com/hmelberg/openstat/main/data/person_year_sample.csv as reg
 
-#micro
-require no.ssb.fdb:54 as fd
-create-dataset reg
-import fd/BEFOLKNING_KJOENN as gender
-import fd/INNTEKT_WLONN 2022-01-01 as income
-
-#python
 import statsmodels.formula.api as smf
 
 reg["income_thousand"] = reg["income"] / 1000
-model = smf.ols("income_thousand ~ C(gender)", data=reg).fit()
+model = smf.ols("income_thousand ~ age + C(status)", data=reg).fit()
 model.summary()
