@@ -143,7 +143,7 @@ Deno.test("resolveAndAssemble: fetches spec sources + returns spec", async () =>
   const out = await DL.resolveAndAssemble(script, { fetchImpl, registry: [] });
   assertEquals(out.remote, []);
   assertEquals(out.sources.map((x: {alias: string}) => x.alias).sort(), ["p", "s"]);
-  assertEquals(out.spec.datasets.find((d: {name: string}) => d.name === "panel").key, "pid");
+  assertEquals(out.spec.datasets.find((d: {name: string}) => d.name === "panel").key, ["pid"]);
   const p = out.sources.find((x: {alias: string}) => x.alias === "p");
   assertEquals(new TextDecoder().decode(p.bytes), "pid,income\n1,10\n2,20");
 });
