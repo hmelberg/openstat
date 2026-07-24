@@ -96,7 +96,7 @@
           btn.addEventListener('click', () => {
             dom.aiInput.value = btn.dataset.q;
             autoresize();
-            sendMessage();
+            sendWebMessage();
           });
         });
       }
@@ -421,53 +421,6 @@
         return (window.M2PY_LANG === 'en') ? 'en' : 'no';
       }
 
-      async function sendMessage(useV2) {
-        if (state.sending) return;
-        const text = dom.aiInput.value.trim();
-        if (!text) return;
-        // Gate on BYOK: no Anthropic key configured yet → open Settings to add one.
-        if (!state.anthropicKey) {
-          openSettings();
-          return;
-        }
-        state.sending = true;
-        if (dom.aiSendFastBtn) dom.aiSendFastBtn.disabled = true;
-        if (dom.aiSendWebBtn) dom.aiSendWebBtn.disabled = true;
-
-        // Clear empty state on first message
-        if (state.history.length === 0) dom.aiThread.innerHTML = '';
-
-        appendUserMessage(text);
-        state.history.push({ role: 'user', text });
-        dom.aiInput.value = '';
-        autoresize();
-
-        const thinkingNode = appendThinking();
-        const lang = detectLang(text);
-
-        const includeScript = dom.aiIncludeScript.checked && dom.scriptInput && dom.scriptInput.value.trim();
-
-        // Single-shot, no-repair edge function. Streams markdown; the result
-        // is validated locally via Pyodide+m2py (see runFastQuery).
-        const ctrl = new AbortController();
-        state.abortCtrl = ctrl;
-        if (dom.aiAbortBtn) dom.aiAbortBtn.style.display = '';
-        try {
-          const meta = useV2
-            ? await runFastQueryV2(text, lang, includeScript ? scrubScript(dom.scriptInput.value) : '', thinkingNode, ctrl.signal)
-            : await runFastQuery(text, lang, includeScript ? scrubScript(dom.scriptInput.value) : '', thinkingNode, ctrl.signal);
-          state.history.push({ role: 'assistant', meta });
-        } catch (e) {
-          if (e.name !== 'AbortError') appendError(thinkingNode, '✗ ' + e.message);
-        } finally {
-          state.abortCtrl = null;
-          if (dom.aiAbortBtn) dom.aiAbortBtn.style.display = 'none';
-          state.sending = false;
-          if (dom.aiSendFastBtn) dom.aiSendFastBtn.disabled = false;
-          if (dom.aiSendWebBtn) dom.aiSendWebBtn.disabled = false;
-          dom.aiInput.focus();
-        }
-      }
 
       // ── Fast path: stream from the /api/kode-svar edge function (single-shot,
       //    no repair), render markdown live, then validate the emitted script
@@ -482,151 +435,10 @@
         bubble.textContent = textMd || '';
       }
 
-      async function runFastQuery(text, lang, scriptContext, thinkingNode, signal) {
-        const headers = edgeAuthHeaders();
-        const t0 = Date.now();
-        const resp = await fetch('/api/kode-svar', {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ question: text, lang, script: scriptContext || '' }),
-          signal,
-        });
-        if (resp.status === 401) {
-          throw new Error(T('Ugyldig Anthropic-nøkkel. Sjekk nøkkelen i AI-innstillingene.'));
-        }
-        if (!resp.ok || !resp.body) {
-          throw new Error('HTTP ' + resp.status + ' ' + (await resp.text()));
-        }
-
-        // Render incrementally into an assistant bubble.
-        thinkingNode.innerHTML = '';
-        const bubble = document.createElement('div');
-        bubble.className = 'ai-bubble';
-        thinkingNode.appendChild(bubble);
-
-        const reader = resp.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        let accumulated = '';
-        let _lastRender = 0;
-        let inputTokens = 0, outputTokens = 0, cacheRead = 0, cacheCreate = 0;
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          let nl;
-          while ((nl = buffer.indexOf('\n\n')) >= 0) {
-            const event = buffer.slice(0, nl);
-            buffer = buffer.slice(nl + 2);
-            const dataLine = event.split('\n').find(l => l.startsWith('data:'));
-            if (!dataLine) continue;
-            let obj;
-            try { obj = JSON.parse(dataLine.slice(5).trim()); }
-            catch (_) { continue; }   // ignore non-JSON keep-alive lines
-            if (obj.type === 'text') {
-              accumulated += obj.text;
-              // Render markdown live (lett strupet) i stedet for rå tekst.
-              const _now = Date.now();
-              if (_now - _lastRender > 70) {
-                _lastRender = _now;
-                streamRenderMd(bubble, accumulated);
-                scrollToBottom();
-              }
-            } else if (obj.type === 'done') {
-              inputTokens = obj.inputTokens || 0;
-              outputTokens = obj.outputTokens || 0;
-              cacheRead = obj.cacheReadTokens || 0;
-              cacheCreate = obj.cacheCreationTokens || 0;
-            } else if (obj.type === 'error') {
-              throw new Error(obj.message || T('Ukjent feil fra server'));
-            }
-          }
-        }
-
-        // Final markdown render + code-block action buttons (reuse existing).
-        if (md) {
-          try { bubble.innerHTML = md.render(accumulated || ''); }
-          catch (_) { bubble.textContent = accumulated; }
-        } else {
-          bubble.textContent = accumulated;
-        }
-        attachCodeBlockActions(bubble);
-        bubble._rawMd = accumulated;
-
-        const meta = {
-          intent: 'raskt',
-          model: 'kode-svar',
-          latency_ms: Date.now() - t0,
-          tokens: { input: inputTokens, output: outputTokens, cacheRead, cacheCreate },
-        };
-        appendMeta(thinkingNode, meta);
-        attachResponseInsertBar(thinkingNode, accumulated);
-
-        // Valider første microdata-kodeblokk lokalt (ikke-blokkerende).
-        // Vi viser ingen «validert»-tekst ved suksess (støy) — kun advarsler ved feil.
-        const script = extractFirstMicrodataBlock(accumulated);
-        if (script) {
-          validateMicrodataLocal(script).then(vr => {
-            if (vr.skipped || vr.passed) return;
-            const warn = renderValidationWarnings(vr);
-            if (warn) bubble.appendChild(warn);
-          }).catch(() => {});
-        }
-        return meta;
-      }
 
       // One streaming request to /api/kode-svar-v2. Renders markdown live into
       // `bubble`. Returns { accumulated, tokens }. Mirrors runFastQuery's stream
       // parsing; factored out so the repair round can call it again.
-      async function streamKodeSvarV2(payload, bubble, signal) {
-        const headers = edgeAuthHeaders();
-        const resp = await fetch('/api/kode-svar-v2', {
-          method: 'POST', headers, body: JSON.stringify(payload), signal,
-        });
-        if (resp.status === 401) {
-          throw new Error(T('Ugyldig Anthropic-nøkkel. Sjekk nøkkelen i AI-innstillingene.'));
-        }
-        if (!resp.ok || !resp.body) {
-          throw new Error('HTTP ' + resp.status + ' ' + (await resp.text()));
-        }
-        const reader = resp.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '', accumulated = '', _lastRender = 0;
-        let inputTokens = 0, outputTokens = 0, cacheRead = 0, cacheCreate = 0;
-        let firstByte = false;
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          let nl;
-          while ((nl = buffer.indexOf('\n\n')) >= 0) {
-            const event = buffer.slice(0, nl);
-            buffer = buffer.slice(nl + 2);
-            const dataLine = event.split('\n').find(l => l.startsWith('data:'));
-            if (!dataLine) continue;
-            let obj;
-            try { obj = JSON.parse(dataLine.slice(5).trim()); } catch (_) { continue; }
-            if (obj.type === 'text') {
-              if (!firstByte) { firstByte = true; bubble.textContent = ''; }
-              accumulated += obj.text;
-              const _now = Date.now();
-              if (_now - _lastRender > 70) {
-                _lastRender = _now;
-                streamRenderMd(bubble, accumulated);
-                scrollToBottom();
-              }
-            } else if (obj.type === 'done') {
-              inputTokens = obj.inputTokens || 0;
-              outputTokens = obj.outputTokens || 0;
-              cacheRead = obj.cacheReadTokens || 0;
-              cacheCreate = obj.cacheCreationTokens || 0;
-            } else if (obj.type === 'error') {
-              throw new Error(obj.message || T('Ukjent feil fra server'));
-            }
-          }
-        }
-        return { accumulated, tokens: { input: inputTokens, output: outputTokens, cacheRead, cacheCreate } };
-      }
 
       // Concatenate all fenced code-block bodies (any language) so name-grounding
       // can scan the #micro import inside a python/r answer without prose noise.
@@ -696,16 +508,10 @@
       // funnet — sløyfen kjører da ikke), (b) validate(script) → Promise som
       // løser til {passed,errors[]} eller {skipped:true}, (c)
       // unknownNames(mdText, script) → liste over ukjente katalog-variabelnavn.
-      // microdata-oppføringen kaller EKSAKT de samme funksjonene, i samme
-      // rekkefølge, som før refaktoreringen (validateMicrodataLocal/
-      // extractFirstMicrodataBlock/findUnknownVarNames er uendret) — dette
-      // holder microdata-veien byte-frosset selv om løkka rundt er blitt generisk.
+      // (microdata-oppføringen er fjernet med kode-svar-flyten 2026-07-24;
+      // python/r-oppføringene står klare til den planlagte klientvalidatoren,
+      // se docs/ROADMAP.md §AI-assistenten.)
       const _v2Validators = {
-        microdata: {
-          extract: extractFirstMicrodataBlock,
-          validate: validateMicrodataLocal,
-          unknownNames: function (_mdText, script) { return findUnknownVarNames(script); },
-        },
         // Syntaks-sjekk kjører KUN mot en allerede lastet/lastende Pyodide-økt
         // (validatePythonSyntax under) — den booter aldri en ny 30s-runtime
         // bare for å validere ett AI-svar. Kolonnenavn-sjekk (df["kol"]) er
@@ -733,111 +539,6 @@
         },
       };
 
-      async function runFastQueryV2(text, lang, scriptContext, thinkingNode, signal) {
-        const t0 = Date.now();
-        thinkingNode.innerHTML = '';
-        const bubble = document.createElement('div');
-        bubble.className = 'ai-bubble';
-        bubble.textContent = T('Finner relevante variabler…');
-        thinkingNode.appendChild(bubble);
-
-        const mode = (typeof activeEditorMode !== 'undefined' && activeEditorMode) ? activeEditorMode : 'python';
-        const payload = { question: text, lang, script: scriptContext || '', mode };
-        const { accumulated, tokens } = await streamKodeSvarV2(payload, bubble, signal);
-
-        // Final render + actions (reuse v1 helpers).
-        if (md) { try { bubble.innerHTML = md.render(accumulated || ''); } catch (_) { bubble.textContent = accumulated; } }
-        else { bubble.textContent = accumulated; }
-        attachCodeBlockActions(bubble);
-        bubble._rawMd = accumulated;
-
-        const meta = { intent: 'raskt-v2', model: 'kode-svar-v2', latency_ms: Date.now() - t0, tokens };
-        appendMeta(thinkingNode, meta);
-        attachResponseInsertBar(thinkingNode, accumulated);
-
-        const dispatch = _v2Validators[mode];
-        let currentMd = accumulated;
-        let script = dispatch ? dispatch.extract(currentMd) : '';
-        // python/r whose answer didn't follow the fenced-code svarformat at all
-        // (dispatch.extract found no ```python/py/r fence) has nothing to feed
-        // the repair loop — route it to the old passive-warning path below
-        // instead of silently skipping validation for that answer entirely.
-        // mode==='microdata' keeps its pre-refactor behavior: an empty extract
-        // there just means "nothing to validate yet" and stays silent.
-        const useRepairLoop = dispatch && (script || mode === 'microdata');
-        if (useRepairLoop) {
-          // Validate; on failure, attempt ONE repair round, then badge.
-          // (Generic over mode — see _v2Validators above. For mode==='microdata'
-          // this is call-for-call identical to the pre-refactor code.)
-          let repaired = false;
-          let finalBubble = bubble;
-          while (script) {
-            let vr;
-            try { vr = await dispatch.validate(script); } catch (_) { vr = { skipped: true }; }
-            const unknown = dispatch.unknownNames(currentMd, script);
-            const hasErrors = (!vr.skipped && !vr.passed) || unknown.length > 0;
-            if (!hasErrors || repaired) {
-              if (hasErrors) {
-                const warn = renderValidationWarnings(
-                  vr.skipped ? { passed: false, errors: unknown.map(n => ({ kind: 'unknown_variable', token: n, message: 'finnes ikke i katalogen' })) } : vr
-                );
-                if (warn) finalBubble.appendChild(warn);
-              }
-              break;
-            }
-            // One repair round: new bubble, re-call with prior script + errors.
-            repaired = true;
-            const note = document.createElement('div');
-            note.className = 'ai-thinking';
-            note.textContent = T('Retter feil og prøver på nytt…');
-            thinkingNode.appendChild(note);
-            const repairBubble = document.createElement('div');
-            repairBubble.className = 'ai-bubble';
-            thinkingNode.appendChild(repairBubble);
-            const errStr = buildRepairErrors(vr, unknown);
-            let r2;
-            try {
-              r2 = await streamKodeSvarV2(
-                { question: text, lang, script: scriptContext || '', mode, prior_script: script, errors: errStr },
-                repairBubble, signal,
-              );
-            } catch (e) {
-              note.remove();
-              repairBubble.textContent = '✗ ' + (e && e.message ? e.message : String(e));
-              break;
-            }
-            note.remove();
-            if (md) { try { repairBubble.innerHTML = md.render(r2.accumulated || ''); } catch (_) { repairBubble.textContent = r2.accumulated; } }
-            else { repairBubble.textContent = r2.accumulated; }
-            attachCodeBlockActions(repairBubble);
-            repairBubble._rawMd = r2.accumulated;
-            attachResponseInsertBar(thinkingNode, r2.accumulated);
-            finalBubble = repairBubble;
-            meta.tokens.input += r2.tokens.input; meta.tokens.output += r2.tokens.output;
-            meta.tokens.cacheRead += r2.tokens.cacheRead; meta.tokens.cacheCreate += r2.tokens.cacheCreate;
-            currentMd = r2.accumulated;
-            script = dispatch.extract(currentMd);
-          }
-        } else {
-          // Andre moduser uten nivå 1-validator ennå (javascript, duckdb, …) —
-          // OG python/r-svar som ikke fulgte svarformatet (dispatch.extract fant
-          // ingen ```python/py/r-fence i det hele tatt, f.eks. en ren prosetekst-
-          // avvisning): behold den opprinnelige, ikke-reparerende oppførselen
-          // uendret — kun en advarsel om ukjente katalogvariabler i svaret.
-          // (mode==='microdata' uten treff i extract er UENDRET fra før: den
-          // faller IKKE hit — dette er kun nivå 1-reparasjonsløkkas eget stille
-          // "ingenting å validere ennå"-tilfelle, samme som pre-refactor.)
-          const unknown = findUnknownVarNames(extractAllCode(accumulated));
-          if (unknown.length) {
-            const warn = renderValidationWarnings({
-              passed: false,
-              errors: unknown.map(n => ({ kind: 'unknown_variable', token: n, message: 'finnes ikke i katalogen' })),
-            });
-            if (warn) bubble.appendChild(warn);
-          }
-        }
-        return meta;
-      }
 
       // Tolk resultater: strøm en tolkning av output (kommandoer + resultater)
       // inn i en assistent-boble. Speiler runFastQuery, men mot /api/tolk-resultat.
@@ -1338,117 +1039,11 @@
 
       // Pull the first ```microdata / ``` code block that looks like a
       // microdata script out of streamed markdown.
-      function extractFirstMicrodataBlock(textMd) {
-        if (!textMd) return '';
-        const re = /```(\w*)\s*\n([\s\S]*?)```/g;
-        let m;
-        while ((m = re.exec(textMd)) !== null) {
-          const lang = (m[1] || '').toLowerCase();
-          const body = (m[2] || '').trim();
-          if (lang === 'python' || lang === 'py' || lang === 'r') continue;
-          if (/\b(require|create-dataset|import\s+\w+\/|use\s+\w)/.test(body)) return body;
-          if (lang === 'microdata') return body;
-        }
-        return '';
-      }
 
       // Run the script through a throwaway m2py interpreter on synthetic data
       // (disclosure control off, so only structural/runtime errors surface).
       // Returns {passed, errors:[{kind,message}]} or {skipped:true}.
-      async function validateMicrodataLocal(script) {
-        let py;
-        try { py = await loadPyodideAndM2py(); }
-        catch (_) { return { skipped: true }; }
-        if (!py) return { skipped: true };
-        const base = window.location.href.replace(/[^/]+$/, '');
-        const catalogJson = (typeof microdataCatalog !== 'undefined' && microdataCatalog && microdataCatalog.variables)
-          ? JSON.stringify(microdataCatalog.variables) : null;
-        const pyCode =
-          'import json, sys\n' +
-          '_script = ' + JSON.stringify(script) + '\n' +
-          '_catalog_json = ' + (catalogJson !== null ? JSON.stringify(catalogJson) : 'None') + '\n' +
-          '_base = ' + JSON.stringify(base) + '\n' +
-          '_m = sys.modules.get("m2py")\n' +
-          '_prev_dc = getattr(_m, "M2PY_DISCLOSURE_CONTROL", "0") if _m is not None else "0"\n' +
-          '_out = json.dumps({"passed": False, "errors": [{"kind": "runtime", "message": "validator unavailable"}]})\n' +
-          'try:\n' +
-          '    if _m is not None:\n' +
-          '        _m.M2PY_DISCLOSURE_CONTROL = "0"\n' +
-          '    from m2py import MicroInterpreter\n' +
-          '    _cat = json.loads(_catalog_json) if _catalog_json else None\n' +
-          '    _vi = MicroInterpreter(catalog=_cat, metadata_base_url=_base)\n' +
-          '    try:\n' +
-          '        _vi.data_engine.default_rows = 200\n' +
-          '    except Exception:\n' +
-          '        pass\n' +
-          '    _err = None\n' +
-          '    try:\n' +
-          '        if hasattr(_vi, "run_script_async"):\n' +
-          '            _err = "ASYNC"\n' +
-          '        else:\n' +
-          '            _vi.run_script(_script)\n' +
-          '    except Exception as _ex:\n' +
-          '        _err = f"{type(_ex).__name__}: {_ex}"\n' +
-          '    if _err == "ASYNC":\n' +
-          '        _out = json.dumps({"async": True})\n' +
-          '    elif _err is None:\n' +
-          '        _out = json.dumps({"passed": True, "errors": []})\n' +
-          '    else:\n' +
-          '        _out = json.dumps({"passed": False, "errors": [{"kind": "runtime", "message": _err}]})\n' +
-          'except Exception as _ex2:\n' +
-          '    _out = json.dumps({"skipped": True, "error": f"{type(_ex2).__name__}: {_ex2}"})\n' +
-          'finally:\n' +
-          '    if _m is not None:\n' +
-          '        _m.M2PY_DISCLOSURE_CONTROL = _prev_dc\n' +
-          '_out\n';
-        let raw;
-        try { raw = await py.runPythonAsync(pyCode); }
-        catch (_) { return { skipped: true }; }
-        let parsed;
-        try { parsed = JSON.parse(raw); } catch (_) { return { skipped: true }; }
-        if (parsed.skipped) return { skipped: true };
-        // Async interpreter variant — run via the async API and re-check.
-        if (parsed.async) {
-          return await validateMicrodataLocalAsync(py, script, catalogJson, base);
-        }
-        return parsed;
-      }
 
-      async function validateMicrodataLocalAsync(py, script, catalogJson, base) {
-        const setup =
-          'import json, sys\n' +
-          '_script = ' + JSON.stringify(script) + '\n' +
-          '_catalog_json = ' + (catalogJson !== null ? JSON.stringify(catalogJson) : 'None') + '\n' +
-          '_base = ' + JSON.stringify(base) + '\n' +
-          '_m = sys.modules.get("m2py")\n' +
-          'globals()["_prev_dc"] = getattr(_m, "M2PY_DISCLOSURE_CONTROL", "0") if _m is not None else "0"\n' +
-          'if _m is not None:\n' +
-          '    _m.M2PY_DISCLOSURE_CONTROL = "0"\n' +
-          'from m2py import MicroInterpreter\n' +
-          '_cat = json.loads(_catalog_json) if _catalog_json else None\n' +
-          '_vi = MicroInterpreter(catalog=_cat, metadata_base_url=_base)\n' +
-          'try:\n' +
-          '    _vi.data_engine.default_rows = 200\n' +
-          'except Exception:\n' +
-          '    pass\n' +
-          'globals()["_vi"] = _vi\n';
-        try { await py.runPythonAsync(setup); } catch (_) { return { skipped: true }; }
-        let raw;
-        try {
-          raw = await py.runPythonAsync(
-            '_err = None\n' +
-            'try:\n' +
-            '    await _vi.run_script_async(_script)\n' +
-            'except Exception as _ex:\n' +
-            '    _err = f"{type(_ex).__name__}: {_ex}"\n' +
-            'finally:\n' +
-            '    if _m is not None:\n' +
-            '        _m.M2PY_DISCLOSURE_CONTROL = _prev_dc\n' +
-            'json.dumps({"passed": _err is None, "errors": [] if _err is None else [{"kind": "runtime", "message": _err}]})\n'
-          );
-        } catch (_) { return { skipped: true }; }
-        try { return JSON.parse(raw); } catch (_) { return { skipped: true }; }
-      }
 
       // Isolate the #python/#r code segment out of a python/r kode-svar-v2
       // candidate script (which is ALWAYS a single hybrid blob: a `#micro`
@@ -1735,18 +1330,12 @@
         // (kode-svar); otherwise the agentic data-svar flow (search data → script
         // in the active mode's language → run → revise).
         function sendCurrent() {
-          var _m = window.M2PY && window.M2PY.currentMode && window.M2PY.currentMode();
-          if (_m && _m.id === 'microdata') {
-            // v2-flyten (2-stegs variabelvalg + auto-retting) gir best svar;
-            // den gamle enstegsflyten nås ikke lenger fra UI.
-            sendMessage(true);
-          } else {
-            sendWebMessage();
-          }
+          // Microdata-modusen (kode-svar/v2-flyten) er fjernet fra openstat
+          // (2026-07-24) — alle moduser går data-svar-veien.
+          sendWebMessage();
         }
         if (dom.aiSendFastBtn) dom.aiSendFastBtn.addEventListener('click', sendCurrent);
-        // Send⚗︎ er nå bakt inn i Send (microdata-modus → v2); knappen holdes skjult.
-        if (dom.aiSendV2Btn) { dom.aiSendV2Btn.style.display = 'none'; dom.aiSendV2Btn.addEventListener('click', () => sendMessage(true)); }
+        if (dom.aiSendV2Btn) dom.aiSendV2Btn.style.display = 'none';
         // The old Web button is subsumed by the URL-routed Send; keep it hidden.
         if (dom.aiSendWebBtn) { dom.aiSendWebBtn.style.display = 'none'; dom.aiSendWebBtn.addEventListener('click', () => { sendWebMessage(); }); }
         if (dom.aiAbortBtn) dom.aiAbortBtn.addEventListener('click', () => { if (state.abortCtrl) state.abortCtrl.abort(); });
@@ -1798,7 +1387,7 @@
           setOpen(true);
           dom.aiInput.value = question;
           autoresize();
-          sendMessage();
+          sendWebMessage();
         };
 
         // Offentlig: åpne AI-panelet og tolk resultatene (output) fra forrige kjøring.
@@ -1845,7 +1434,6 @@
       if (typeof module !== 'undefined' && module.exports) {
         module.exports = {
           extractFirstCodeBlock: extractFirstCodeBlock,
-          extractFirstMicrodataBlock: extractFirstMicrodataBlock,
           extractLangSegment: extractLangSegment,
           extractAllCode: extractAllCode,
           findUnknownVarNames: findUnknownVarNames,

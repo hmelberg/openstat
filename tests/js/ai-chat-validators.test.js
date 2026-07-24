@@ -91,8 +91,9 @@ test('findUnknownVarNames + buildRepairErrors: uendret format', () => {
 
 // ---- _v2Validators: nivå 1-dispatch-tabellens form -------------------------
 
-test('_v2Validators: har microdata/python/r med extract+validate+unknownNames', () => {
-  ['microdata', 'python', 'r'].forEach((k) => {
+test('_v2Validators: har python/r med extract+validate+unknownNames (microdata fjernet 2026-07-24)', () => {
+  assert.equal(aiChat._v2Validators.microdata, undefined, 'microdata-oppføringen skal være fjernet');
+  ['python', 'r'].forEach((k) => {
     const entry = aiChat._v2Validators[k];
     assert.ok(entry, 'mangler oppføring for ' + k);
     assert.equal(typeof entry.extract, 'function');
