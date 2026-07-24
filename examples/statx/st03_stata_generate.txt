@@ -1,8 +1,0 @@
-# label: Stata — generate/egen
-* Example: Stata – generate and egen
-* Creates new variables: log income and mean income.
-# load https://raw.githubusercontent.com/hmelberg/openstat/main/data/person_year_sample.csv as people
-
-generate log_income = log(income)
-egen mean_income = mean(income)
-summarize log_income mean_income

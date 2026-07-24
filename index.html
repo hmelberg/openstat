@@ -257,7 +257,7 @@
     <div class="ai-modal" style="max-width:600px;">
       <h3 style="font-size:20px;" id="welcomeHeading" data-i18n>Velkommen til OpenStat!</h3>
       <div id="welcomeBodyOpen" class="ai-modal-help" style="margin-bottom:14px; font-size:14px; line-height:1.5;" data-i18n>
-        OpenStat er en motor for å stille spørsmål som kan besvares med kode og statistikk — og for å se og endre koden som gir svaret. Skriv i Python, R, SQL (DuckDB) eller Stata-stil (Statx); kjør i nettleseren.
+        OpenStat er en motor for å stille spørsmål som kan besvares med kode og statistikk — og for å se og endre koden som gir svaret. Skriv i Python, R eller SQL (DuckDB); kjør i nettleseren.
       </div>
       <div style="margin:14px 0; padding:12px 14px; background:var(--bg-code);
                   border-left:3px solid var(--accent); border-radius:4px;">
@@ -297,14 +297,13 @@
       </div>
       <div style="width:1px;height:20px;background:var(--border);margin:0 6px;flex-shrink:0"></div>
       <div class="mode-dropdown-wrap">
-        <button type="button" class="mode-dropdown-btn" id="editorModeBtn" data-i18n-title title="Velg modus (Python, R, Statx, Jamovi, SQL - DuckDB, Brython)">
+        <button type="button" class="mode-dropdown-btn" id="editorModeBtn" data-i18n-title title="Velg modus (Python, R, Jamovi, SQL - DuckDB, Brython)">
           <span id="editorModeLabel">Python</span>
           <span class="chevron">▲</span>
         </button>
         <div class="mode-dropdown-menu" id="editorModeMenu">
           <button type="button" data-mode="python">Python</button>
           <button type="button" data-mode="r">R</button>
-          <button type="button" data-mode="statx">Statx</button>
           <button type="button" data-mode="jamovi">Jamovi</button>
           <button type="button" data-mode="duckdb">SQL - DuckDB</button>
           <button type="button" data-mode="brython">Brython</button>
@@ -556,7 +555,7 @@
     window.t = window.t || function (s) { return s; };
     window.i18nField = window.i18nField || function (obj, field) { return obj && obj[field]; };
 
-    window.M2PY_VERSION = '2026-07-24k';
+    window.M2PY_VERSION = '2026-07-24l';
 
     // One-time migration: remove obsolete localStorage keys from previous milestones
     // Safe to delete this snippet after a few months when most users have re-loaded
@@ -1015,7 +1014,7 @@
           if (!r.ok) throw new Error(r.status);
           return r.text();
         }).then(function(text) {
-          if (mode && (mode === 'python' || mode === 'r' || mode === 'statx' || mode === 'duckdb' || mode === 'brython' || mode === 'micropython' || mode === 'javascript')
+          if (mode && (mode === 'python' || mode === 'r' || mode === 'duckdb' || mode === 'brython' || mode === 'micropython' || mode === 'javascript')
               && typeof switchEditorMode === 'function'
               && typeof activeEditorMode !== 'undefined') {
             if (typeof editorContent !== 'undefined') editorContent[mode] = text;
@@ -1903,9 +1902,6 @@
     const R_HL_FN  = new Set(R_FUNCTIONS);
     const PY_HL_CFG = { commentChar: '#', triple: true,  identStart: /[A-Za-z_]/,  identPart: /[A-Za-z0-9_]/,  kw: PY_HL_KW, fn: PY_HL_FN };
     const R_HL_CFG  = { commentChar: '#', triple: false, identStart: /[A-Za-z_.]/, identPart: /[A-Za-z0-9_.]/, kw: R_HL_KW,  fn: R_HL_FN  };
-    const STATA_HL_KW = new Set(['use','clear','summarize','sum','regress','reg','tabulate','tab','generate','gen','replace','egen','collapse','keep','drop','sort','by','bysort','merge','append','describe','list','browse','if','in','rename','label']);
-    const STATA_HL_FN = new Set(['mean','sd','min','max','count','total','r','e']);
-    const STATA_HL_CFG = { commentChar: '*', triple: false, identStart: /[A-Za-z_]/, identPart: /[A-Za-z0-9_]/, kw: STATA_HL_KW, fn: STATA_HL_FN };
     const SQL_HL_KW = new Set(['SELECT','FROM','WHERE','GROUP','BY','ORDER','HAVING','LIMIT','OFFSET',
       'JOIN','LEFT','RIGHT','INNER','OUTER','FULL','CROSS','NATURAL','ON','USING','AS','WITH',
       'CREATE','OR','REPLACE','TABLE','TEMP','TEMPORARY','VIEW','IF','NOT','EXISTS','DROP','ALTER',
@@ -2029,7 +2025,7 @@
       if (!__microdataCatalogPromise) {
         const base = window.location.href.replace(/[^/]+$/, '');
         // Navneliste generert fra safestat/microdatas variable_metadata.json
-        // (scope B, 2026-07-24): kun autocomplete-navn for statx/duckdb-tab —
+        // (scope B, 2026-07-24): kun autocomplete-navn for duckdb-tab —
         // beskrivelser/datoer forsvant med motoren (konsumentene guarder selv).
         __microdataCatalogPromise = fetch(base + 'data/variable_names.json?v=' + (window.M2PY_VERSION || '1'))
           .then(r => r.ok ? r.json() : null)
@@ -2652,14 +2648,6 @@
           catch (e) { console.warn('#tag.import (R runSelf):', e); }
           await runHybridR(script, ctx.py, { showCommands: ctx.showCommands, profile: ctx.profile, displayAll: ctx.displayAll });
         } },
-      statx: { id: 'statx', label: 'Statx',
-        hlConfig: STATA_HL_CFG,
-        handleTab: microdataHandleTab,
-        onActivate: function () {
-          ensureMicrodataCatalog();
-          if (!pdexplorerReady && !pdexplorerLoading) loadPyodideAndM2py().then(loadPdexplorer);
-        },
-        runSelf: async function (script, ctx) { await runStatxScript(script, ctx); } },
       duckdb: { id: 'duckdb', label: 'SQL - DuckDB', hlConfig: SQL_HL_CFG, handleTab: microdataHandleTab,
         // Fase 1 (2026-07-11): SQL-modus varmer duckdb-wasm, ikke Pyodide —
         // rene SQL-kjøringer går native (maybeRunDuckNative); hybride faller
@@ -2853,7 +2841,7 @@
     // btnRun/bootstrap/modusbytte ruter alle gjennom runtimeForMode()
     // (plan 2026-07-09: R uten Pyodide, fremtidig brython/subdomene-boot).
     var RUNTIME_FOR_MODE = { python: 'pyodide', duckdb: 'duckdb',
-                             jamovi: 'pyodide', statx: 'pyodide',
+                             jamovi: 'pyodide',
                              brython: 'brython', micropython: 'micropython',
                              javascript: 'javascript', r: 'webr' };
     function runtimeForMode(id) { return RUNTIME_FOR_MODE[id] || 'pyodide'; }  // ukjent → trygt valg
@@ -3293,8 +3281,8 @@
     }
     // ── Editor mode (always-on, controlled by bottom-bar dropdown) ──────
     let activeEditorMode  = 'microdata'; // 'microdata' | 'python' | 'r'
-    const editorContent   = { python: '', r: '', statx: '', jamovi: '', duckdb: '', brython: '', micropython: '', javascript: '' };
-    const editorBP        = { microdata: new Set(), python: new Set(), r: new Set(), statx: new Set(), jamovi: new Set(), duckdb: new Set(), brython: new Set(), micropython: new Set(), javascript: new Set() };
+    const editorContent   = { python: '', r: '', jamovi: '', duckdb: '', brython: '', micropython: '', javascript: '' };
+    const editorBP        = { python: new Set(), r: new Set(), jamovi: new Set(), duckdb: new Set(), brython: new Set(), micropython: new Set(), javascript: new Set() };
     // B4/B5 (docs/REVIEW_2026-07-07.md §3): switchEditorMode() persists
     // md_editor_mode but nothing ever read it back, so a reload always
     // landed on 'microdata'. Restore it here, synchronously, as part of this
@@ -3352,7 +3340,6 @@
     scriptInput.focus();
     if (window.Cells) window.Cells.init(activeEditorMode);
 
-    let pdexplorerReady = false, pdexplorerLoading = false;
     let explainAbortRef = null;
     let explainRunActive = false;
     let forklarPaused = false;
@@ -6339,7 +6326,7 @@ json.dumps(out)
     }
     function parseHybridScript(text, defaultMode) {
       var lines = text.split(/\r?\n/);
-      var mode = defaultMode === 'r' ? 'r' : defaultMode === 'stata' ? 'stata' : defaultMode === 'duckdb' ? 'duckdb' : 'pyodide';
+      var mode = defaultMode === 'r' ? 'r' : defaultMode === 'duckdb' ? 'duckdb' : 'pyodide';
       var buf = [];
       var segments = [];
       function flush() {
@@ -6937,7 +6924,7 @@ import builtins
 class DatasetStore:
     """Slankt datasett-register (erstattet MicroInterpreter 2026-07-24, scope B):
     limet bak # load-aliaser, # use på tvers av moduser/celler, to_microdata()
-    og statx (pdexplorer). Ingen tolking — bare navn -> DataFrame."""
+    Ingen tolking — bare navn -> DataFrame."""
     def __init__(self):
         self.datasets = {}
         self.active_name = None
@@ -8786,59 +8773,6 @@ json.dumps(out)
       return __ipwP;
     }
 
-    // Statx-datavei (PLAN_remove_microdata_mode Task 5, 2026-07-24): data inn
-    // via «# load»-direktiver — filene materialiseres som pandas-frames i
-    // e.datasets (buildWebDataLoaderPreamble/to_microdata, samme mekanisme som
-    // python-veien), og pdexplorer analyserer derfra med `use ALIAS`. Første
-    // load-alias blir aktivt datasett, så én-datasett-script slipper `use`.
-    // #micro-blokker hard-feiler — de hører til microdata-appen/safestat.
-    async function runStatxScript(script, ctx) {
-      var rightStatus = ctx && ctx.rightStatus ? ctx.rightStatus : window.rightStatus;
-      try {
-        const py = await loadPyodideAndM2py();
-        // Katalogen brukes kun til labels/autocomplete; mockdata-modulene
-        // trengs ikke lenger (micro-segmenter kjører ikke i statx).
-        try { await ensureMicrodataCatalog(); }
-        catch (e) { console.warn('katalog (statx):', e); }
-        await loadPdexplorer(py);
-        setStatus(rightStatus, t('Kjører statx…'));
-        const segments = parseHybridScript(script, 'stata');
-        if (segments.some(function (s) { return s.kind === 'microdata'; })) {
-          throw microdataBlocksRemovedError();
-        }
-        // «# load»/«# connect» → Pyodide-FS (samme vei som python/duckdb).
-        var _dl = await window.DataLoader.resolveAndFetchLoads(script,
-          { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey });
-        if (_dl.loads.some(function (l) { return l.bytes; })) py.FS.mkdirTree('/home/pyodide/_webdata');
-        var _pyLoads = _dl.loads.map(function (l) {
-          var _path = '/home/pyodide/_webdata/' + l.alias + '.' + l.format;
-          py.FS.writeFile(_path, l.bytes);
-          return { alias: l.alias, format: l.format, path: _path };
-        });
-        // pdexplorer parser ikke #-linjer: strip direktiver/kommentarer med #
-        // (Stata-kommentarer er * og //, de håndteres av statx_runner).
-        const statxCode = segments
-          .filter(function (s) { return s.kind === 'stata' || s.kind === 'statx'; })
-          .map(function (s) { return s.text; }).join('\n')
-          .replace(/^[ \t]*#[^\n]*$/gm, '');
-        const pageBase = window.location.href.replace(/[^/]+$/, '');
-        const activateFirst = _pyLoads.length
-          ? '\ne.active_name = ' + JSON.stringify(String(_pyLoads[0].alias)) + '\n'
-          : '';
-        await py.runPythonAsync(getInterpreterCorePython(pageBase, '[]')
-          + buildWebDataLoaderPreamble(_pyLoads) + activateFirst);
-        // Run statx commands via statx_runner
-        py.globals.set('_statx_src', statxCode);
-        const out = await py.runPythonAsync('import statx_runner\nstatx_runner.run_statx(e, _statx_src)');
-        renderOutput(String(out || ''), false, false);
-        setStatus(rightStatus, '');
-      } catch (err) {
-        const errMsg = (err && err.message) ? err.message : String(err);
-        renderOutput('Statx-feil:\n' + errMsg, false, false);
-        setStatus(rightStatus, t('statx-feil'), true);
-      }
-    }
-
     async function ensurePyarrowFor(py, onInstalling) {
       var needPa = await py.runPythonAsync('import importlib.util as _iu\n_iu.find_spec("pyarrow") is None');
       if (needPa) {
@@ -8941,42 +8875,6 @@ exec(compile(np_code, "notebook_prose.py", "exec"), sys.modules["notebook_prose"
       return pyodide;
     }
 
-    async function loadPdexplorer(py) {
-      if (pdexplorerReady) return;
-      pdexplorerLoading = true;
-      try {
-        const base = window.location.href.replace(/[^/]+$/, '');
-        setStatus(leftStatus, 'Installing pdexplorer…');
-        // 1) stub the desktop-only modules pdexplorer imports at top level (xlwings pulls
-        //    pywintypes; pynput needs OS input) BEFORE importing — never available in Pyodide
-        // 2) install pdexplorer without its pinned deps; use Pyodide's bundled pandas/statsmodels
-        // 3) install its pure-python import deps
-        await py.runPythonAsync(
-          'import sys, micropip\n' +
-          'from unittest.mock import MagicMock\n' +
-          'for _m in ("pywintypes","xlwings","pynput"):\n' +
-          '    sys.modules.setdefault(_m, MagicMock())\n' +
-          'await micropip.install("pdexplorer", deps=False)\n' +
-          'await micropip.install(["rich","click","requests"])\n' +
-          'import pdexplorer\n'
-        );
-        // load our runner module into Pyodide (mirror exec/compile pattern used for functions.py)
-        setStatus(leftStatus, t('Laster statx_runner…'));
-        const src = await fetch(base + 'statx_runner.py?v=' + (window.M2PY_VERSION || '1'), { cache: 'no-store' }).then(r => r.text());
-        await py.runPythonAsync(
-          'import sys, importlib.util\n' +
-          'src = ' + JSON.stringify(src) + '\n' +
-          'spec = importlib.util.spec_from_loader("statx_runner", loader=None)\n' +
-          'mod = importlib.util.module_from_spec(spec)\n' +
-          'sys.modules["statx_runner"] = mod\n' +
-          'exec(compile(src, "statx_runner.py", "exec"), mod.__dict__)\n'
-        );
-        pdexplorerReady = true;
-        setStatus(leftStatus, t('Klar.'));
-      } finally {
-        pdexplorerLoading = false;
-      }
-    }
 
     // Memoisert etter mønster av __pyodidePromise: FØR denne wrapperen
     // returnerte et nr. 2-kall umiddelbart mens lastingen fortsatt pågikk
@@ -9305,6 +9203,9 @@ options(width = 200)
         // med presis melding i stedet for å kjøre microdata-kode.
         if (segments.some(function (s) { return s.kind === 'microdata'; })) {
           throw microdataBlocksRemovedError();
+        }
+        if (segments.some(function (s) { return s.kind === 'stata'; })) {
+          throw new Error(t('Statx/Stata-modus er fjernet fra OpenStat — bruk python eller R.'));
         }
         // If any segment is DuckDB SQL, make sure the bridge module + pyarrow are
         // ready before the Pyodide run loop reaches a #duckdb segment.

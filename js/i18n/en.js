@@ -2,7 +2,8 @@
 // whitespace-collapsed — exactly what the DOM/t() sees). Missing entry = the
 // UI shows the Norwegian source; nothing breaks. Values for elements marked
 // data-i18n-html may contain HTML (authored here, in-repo).
-window.M2PY_I18N = window.M2PY_I18N || {  "OpenStat er en motor for å stille spørsmål som kan besvares med kode og statistikk — og for å se og endre koden som gir svaret. Skriv i Python, R, SQL (DuckDB) eller Stata-stil (Statx); kjør i nettleseren.": "OpenStat is an engine for asking questions that can be answered with code and statistics — and for seeing and revising the code behind the answer. Write in Python, R, SQL (DuckDB) or Stata-style (Statx); run in the browser.",
+window.M2PY_I18N = window.M2PY_I18N || {  "OpenStat er en motor for å stille spørsmål som kan besvares med kode og statistikk — og for å se og endre koden som gir svaret. Skriv i Python, R eller SQL (DuckDB); kjør i nettleseren.": "OpenStat is an engine for asking questions that can be answered with code and statistics — and for seeing and revising the code behind the answer. Write in Python, R or SQL (DuckDB); run in the browser.",
+  "Statx/Stata-modus er fjernet fra OpenStat — bruk python eller R.": "Statx/Stata mode has been removed from OpenStat — use python or R.",
 };
 window.M2PY_I18N.en = {
   "Venter på Python-motoren (første gang kan ta opptil ett minutt)…": "Waiting for the Python engine (the first time can take up to a minute)…",
@@ -446,13 +447,10 @@ window.M2PY_I18N.en = {
   "Installerer: {pkgs}…": "Installing: {pkgs}…",
   "Klar (R).": "Ready (R).",
   "parquet støttes ikke i R-modus ennå ({alias})": "parquet is not supported in R mode yet ({alias})",
-  "Setter opp data…": "Setting up data…",
   "Henter use-datasett…": "Fetching use datasets…",
   "#py-blokker støttes ikke i R-modus — kjør dem i python-modus og hent resultatet med «# use <navn> from r», eller hent python-data hit med «# use <navn> from python»": "#py blocks are not supported in R mode — run them in python mode and fetch the result with \"# use <name> from r\", or pull python data here with \"# use <name> from python\"",
   "use i #micro-blokker støttes ikke i R-modus ennå — legg use-linjen i R-blokken i stedet": "use in #micro blocks is not supported in R mode yet — put the use line in the R block instead",
   "Kjører R…": "Running R…",
-  "Kjører statx…": "Running statx…",
-  "statx-feil": "statx error",
   "Ready. (functions.py lastet.)": "Ready. (functions.py loaded.)",
   "Laster statx_runner…": "Loading statx_runner…",
   "Klar.": "Ready.",

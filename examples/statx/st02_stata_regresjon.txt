@@ -1,7 +1,0 @@
-# label: Stata — regression
-* Example: Stata – linear regression (OLS)
-* The "# load" line fetches the dataset. Then OLS of income on age.
-# load https://raw.githubusercontent.com/hmelberg/openstat/main/data/person_year_sample.csv as people
-
-summarize income
-regress income age

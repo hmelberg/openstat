@@ -1,8 +1,0 @@
-# label: Stata — descriptives
-* Example: Stata – descriptive statistics
-* The "# load" line fetches the dataset; the alias becomes the active dataset.
-# load https://raw.githubusercontent.com/hmelberg/openstat/main/data/person_year_sample.csv as people
-
-describe
-summarize income
-tabulate status
