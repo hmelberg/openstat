@@ -3,7 +3,9 @@
 > **For agentiske arbeidere:** ANBEFALT SUB-SKILL: superpowers:subagent-driven-development eller
 > superpowers:executing-plans; kryss av task-for-task, verifiser i nettleser etter hver kjøresti-endring.
 
-**Status:** utkast 2026-07-24, venter på Hans' beslutningspunkter. Forutsetter at
+**Status:** UNDER UTFØRELSE 2026-07-24. Alle fire beslutningspunkter avgjort av Hans (anbefalt
+alternativ på alle): (1) scrub/protect fjernes helt, (2) verdietiketter droppes, (3) lite generert
+navne-JSON erstatter variable_metadata.json, (4) sync_check dropper openstat-benet. Forutsetter at
 `PLAN_remove_microdata_mode.md` (scope A) er utført — all microdata-*kjøring* hard-feiler allerede;
 motoren står igjen som passasjer i booten.
 

@@ -6981,19 +6981,6 @@ json.dumps(out)
       outputArea.addEventListener('animationend', done, { once: true });
     }
 
-    /** Tekst fra siste microdata-blokk i Forklar (ikke avhengig av stdout-akku / slice). */
-    async function forklarReadLastChunkOut(py) {
-      try {
-        const r = await py.runPythonAsync('import json\njson.dumps(_forklar_last_chunk_out)');
-        let j = '';
-        if (typeof r === 'string') j = r;
-        else if (r && typeof r.toJs === 'function') j = String(r.toJs());
-        else j = String(r);
-        return JSON.parse(j);
-      } catch (e) {
-        return '';
-      }
-    }
 
     // Web-modus: connect/load-direktiver — bygger et Python-forspill som binder
     // hentede filer (allerede skrevet til Pyodide-FS) inn i e.datasets/_g FØR
@@ -7031,36 +7018,31 @@ except Exception:
     pass`;
     }
 
-    function getInterpreterCorePython(catalogArg, pageBase, segmentsStrForInit) {
+    function getInterpreterCorePython(pageBase, segmentsStrForInit) {
       const segAssign = segmentsStrForInit != null
         ? `_segments = json.loads(${JSON.stringify(segmentsStrForInit)})\n`
         : '';
       return `
-from m2py import MicroInterpreter
-import m2py as _m2py_mod
 import ast
 import json
 import numpy as np
 import pandas as pd
 import builtins
-_catalog = ${catalogArg}
-catalog = json.loads(_catalog) if _catalog is not None else None
-e = MicroInterpreter(catalog=catalog, metadata_base_url=${JSON.stringify(pageBase)})
-e.data_engine.default_rows = ${getImportLimit()}
-e.default_decimals = ${getDecimals()}
-e._apply_float_format()
-# Statisk datakilde (Innstillinger: data-source=static). Cache fylles i pre-fetch.
-import sys as _sys
+class DatasetStore:
+    """Slankt datasett-register (erstattet MicroInterpreter 2026-07-24, scope B):
+    limet bak # load-aliaser, # use på tvers av moduser/celler, to_microdata()
+    og statx (pdexplorer). Ingen tolking — bare navn -> DataFrame."""
+    def __init__(self):
+        self.datasets = {}
+        self.active_name = None
+    def sync_datasets_to_globals(self, g):
+        for _name, _df in self.datasets.items():
+            g[_name] = _df
+e = DatasetStore()
 try:
-    if ${isStaticDataSource() ? 'True' : 'False'} and 'static_source' in _sys.modules:
-        import static_source as _ss_mod
-        _m2py_mod.M2PY_DATA_SOURCE = 'static'
-        e.static_source = _ss_mod.StaticDataSource(catalog or {}, {})
-    else:
-        _m2py_mod.M2PY_DATA_SOURCE = 'dynamic'
+    pd.set_option("display.float_format", ("{:." + str(${getDecimals()}) + "f}").format)
 except Exception:
-    _m2py_mod.M2PY_DATA_SOURCE = 'dynamic'
-${buildM2pyDefaultsSnippet()}
+    pass
 import __main__
 __main__.micro_interpreter = e
 ${segAssign}_EMBED_S = "__micro_transform_start_"
@@ -7209,41 +7191,12 @@ def to_microdata(df, name=None, make_active=True):
     e.datasets[name] = df
     if make_active:
         e.active_name = name
-    try:
-        e.label_manager.refresh_after_catalog_mutation()
-    except Exception:
-        pass
     e.sync_datasets_to_globals(_g)
-    _apply_labels_to_globals(_g, catalog)
     _g["show"] = show
     _g["to_microdata"] = to_microdata
 _g = {"__name__": "__main__", "__builtins__": builtins, "e": e, "micro_interpreter": e, "pd": pd, "np": np, "numpy": np, "pandas": pd}
 _g["show"] = show
 _g["to_microdata"] = to_microdata
-try:
-    import protect as _scrub_mod
-    _g["scrub"] = _scrub_mod
-    _g["protect"] = _scrub_mod
-except Exception:
-    pass
-def _apply_labels_to_globals(_g, _cat):
-    if not _cat:
-        return
-    import pandas as _pd2
-    for _k, _v in list(_g.items()):
-        if not isinstance(_v, _pd2.DataFrame):
-            continue
-        for _col in list(_v.columns):
-            _meta = _cat.get(_col) or _cat.get(_col.upper()) or _cat.get(_col.lower())
-            if _meta and _meta.get('labels'):
-                _lbl = _meta['labels']
-                _mapped = _v[_col].astype(str).map(_lbl)
-                if _mapped.notna().any():
-                    _cats = list(dict.fromkeys(_lbl.values()))
-                    _v[_col] = _pd2.Categorical(
-                        _mapped.where(_mapped.notna(), _v[_col].astype(str)),
-                        categories=_cats
-                    )
 def _exec_pyodide_block(code, g, show_commands=False, only_last=False):
     """REPL-style: alle Expr-setninger vises (tabell, Plotly, matplotlib PNG).
     Hvis show_commands=True echoes hver top-level statement med '>>> ' /
@@ -8995,15 +8948,11 @@ json.dumps(out)
           .filter(function (s) { return s.kind === 'stata' || s.kind === 'statx'; })
           .map(function (s) { return s.text; }).join('\n')
           .replace(/^[ \t]*#[^\n]*$/gm, '');
-        const catalogJson = microdataCatalog && microdataCatalog.variables
-          ? JSON.stringify(microdataCatalog.variables)
-          : null;
-        const catalogArg = catalogJson !== null ? JSON.stringify(catalogJson) : 'None';
         const pageBase = window.location.href.replace(/[^/]+$/, '');
         const activateFirst = _pyLoads.length
           ? '\ne.active_name = ' + JSON.stringify(String(_pyLoads[0].alias)) + '\n'
           : '';
-        await py.runPythonAsync(getInterpreterCorePython(catalogArg, pageBase, '[]')
+        await py.runPythonAsync(getInterpreterCorePython(pageBase, '[]')
           + buildWebDataLoaderPreamble(_pyLoads) + activateFirst);
         // Run statx commands via statx_runner
         py.globals.set('_statx_src', statxCode);
@@ -9667,10 +9616,6 @@ options(width = 200)
         if (segments.some(function (s) { return s.kind === 'microdata'; })) {
           throw microdataBlocksRemovedError();
         }
-        const catalogJson = microdataCatalog && microdataCatalog.variables
-          ? JSON.stringify(microdataCatalog.variables)
-          : null;
-        const catalogArg = catalogJson !== null ? JSON.stringify(catalogJson) : 'None';
         // If any segment is DuckDB SQL, make sure the bridge module + pyarrow are
         // ready before the Pyodide run loop reaches a #duckdb segment.
         if (segments.some(function (s) { return s.kind === 'duckdb'; })) {
@@ -9686,7 +9631,7 @@ options(width = 200)
         }
         const segmentsStr = JSON.stringify(segments);
         const _dataPreamble = buildWebDataLoaderPreamble(_pyLoads);
-        const setupCode = getInterpreterCorePython(catalogArg, pageBase, segmentsStr) + _dataPreamble + `
+        const setupCode = getInterpreterCorePython(pageBase, segmentsStr) + _dataPreamble + `
 import asyncio as _asyncio
 # ── Statisk datakilde: pre-fetch alle importer via DuckDB-WASM (JS) før kjøring ──
 if getattr(_m2py_mod, 'M2PY_DATA_SOURCE', 'dynamic') == 'static' and getattr(e, 'static_source', None) is not None:
@@ -9721,24 +9666,9 @@ async def _m2py_run_segment(_seg_json):
     _st = (_seg.get("text") or "").strip()
     if not _st:
         return "ok"
-    _k = _seg.get("kind") or "microdata"
-    if _k == "microdata":
-        # run_script(_async) returnerer hele output_log; uten clear her
-        # akkumuleres alle tidligere segmenters output i senere celler
-        # (per-segment attribusjon krever et rent log per segment-kjøring).
-        e.output_log.clear()
-        if hasattr(e, 'run_script_async'):
-            result = await e.run_script_async(_st)
-        else:
-            result = e.run_script(_st)
-        print(result)
+    _k = _seg.get("kind") or "pyodide"
+    if _k == "pyodide":
         e.sync_datasets_to_globals(_g)
-        _apply_labels_to_globals(_g, catalog)
-        _g["show"] = show
-        _g["to_microdata"] = to_microdata
-    elif _k == "pyodide":
-        e.sync_datasets_to_globals(_g)
-        _apply_labels_to_globals(_g, catalog)
         _g["show"] = show
         _g["to_microdata"] = to_microdata
         # _nb (satt av JS-segmentløkken, kun for notatbok-celler): overstyrer
@@ -9748,7 +9678,6 @@ async def _m2py_run_segment(_seg_json):
         _sc = bool(_nb.get("echo")) if "echo" in _nb else ${_showCmds ? 'True' : 'False'}
         _exec_pyodide_block(_st, _g, _sc, bool(_nb.get("last")))
         e.sync_datasets_to_globals(_g)
-        _apply_labels_to_globals(_g, catalog)
         _g["show"] = show
         _g["to_microdata"] = to_microdata
     elif _k == "duckdb":
@@ -9762,7 +9691,6 @@ async def _m2py_run_segment(_seg_json):
             print("DuckDB-feil: " + str(_de))
             return "stop"
         e.sync_datasets_to_globals(_g)
-        _apply_labels_to_globals(_g, catalog)
         _g["show"] = show
         _g["to_microdata"] = to_microdata
     return "ok"
@@ -11041,11 +10969,9 @@ async def _m2py_run_segment(_seg_json):
             await py.runPythonAsync(
               'import json\n_st = json.loads(' + JSON.stringify(JSON.stringify(block.code)) + ')\n' +
               'e.sync_datasets_to_globals(_g)\n' +
-              '_apply_labels_to_globals(_g, catalog)\n' +
               '_g["show"] = show\n_g["to_microdata"] = to_microdata\n' +
               '_exec_pyodide_block(_st, _g)\n' +
               'e.sync_datasets_to_globals(_g)\n' +
-              '_apply_labels_to_globals(_g, catalog)\n' +
               '_g["show"] = show\n_g["to_microdata"] = to_microdata\n'
             );
             await new Promise(function(resolve) { setTimeout(resolve, 0); });
@@ -11193,29 +11119,8 @@ async def _m2py_run_segment(_seg_json):
           } catch (e) { console.warn('forklar # load:', e); }
         }
         if (activeEditorMode !== 'r') {
-          const catalogJson = microdataCatalog && microdataCatalog.variables
-            ? JSON.stringify(microdataCatalog.variables)
-            : null;
-          const catalogArg = catalogJson !== null ? JSON.stringify(catalogJson) : 'None';
           const pageBase = window.location.href.replace(/[^/]+$/, '');
-          explainInit = getInterpreterCorePython(catalogArg, pageBase, null) + buildWebDataLoaderPreamble(_forklarPyLoads) + `
-_forklar_last_chunk_out = ""
-def _run_microdata_chunk(_code):
-    global result, _forklar_last_chunk_out
-    # run_script returnerer hele output_log; uten clear akkumuleres alle tidligere Forklar-steg.
-    e.output_log.clear()
-    _code = (_code or "").strip()
-    if not _code:
-        _forklar_last_chunk_out = ""
-        return
-    result = e.run_script(_code)
-    _forklar_last_chunk_out = str(result)
-    print(result)
-    e.sync_datasets_to_globals(_g)
-    _apply_labels_to_globals(_g, catalog)
-    _g["show"] = show
-    _g["to_microdata"] = to_microdata
-`;
+          explainInit = getInterpreterCorePython(pageBase, null) + buildWebDataLoaderPreamble(_forklarPyLoads);
           await py.runPythonAsync(explainInit);
           // Forklar bygger sitt EGET e/_g her (nå MED # load-dataene bundet inn,
           // se _forklarPyLoads over) — notatbok-sesjonen (fase B1) er død
@@ -11275,24 +11180,16 @@ def _run_microdata_chunk(_code):
             var block = forklarBlocks[ri];
             var codeTrim = (block.code || '').trim();
             if (!codeTrim) continue;
-            if (activeEditorMode === 'microdata') {
-              await py.runPythonAsync(
-                'import json\n_run_microdata_chunk(json.loads(' + JSON.stringify(JSON.stringify(block.code)) + '))'
-              );
-              lastOutput = (await forklarReadLastChunkOut(py) || '').trim();
-              renderOutput(lastOutput, asHtml, suppress);
-            } else {
+            {
               forklarChunkStdout = '';
               forklarChunkCapture = true;
               try {
                 await py.runPythonAsync(
                   'import json\n_st = json.loads(' + JSON.stringify(JSON.stringify(block.code)) + ')\n' +
                   'e.sync_datasets_to_globals(_g)\n' +
-                  '_apply_labels_to_globals(_g, catalog)\n' +
                   '_g["show"] = show\n_g["to_microdata"] = to_microdata\n' +
                   '_exec_pyodide_block(_st, _g)\n' +
                   'e.sync_datasets_to_globals(_g)\n' +
-                  '_apply_labels_to_globals(_g, catalog)\n' +
                   '_g["show"] = show\n_g["to_microdata"] = to_microdata\n'
                 );
                 await new Promise(function(resolve) { setTimeout(resolve, 0); });
