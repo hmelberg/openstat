@@ -175,6 +175,7 @@
         _snapshot: mp.globals.get('_snapshot'),
         _rollback: mp.globals.get('_rollback'),
         _bind_datasets: mp.globals.get('_bind_datasets'),
+        _dataset_info: mp.globals.get('_dataset_info'),
         _reset: mp.globals.get('_reset'),
         _sync_var: mp.globals.get('_sync_var')
       };
@@ -433,6 +434,13 @@
       if (!__loadedHandles) return '';
       try { return __loadedHandles._sync_var(name, valueJson) || ''; }
       catch (e) { return (e && e.message) || String(e); }
+    },
+    // Sidebar-refleksjon (2026-07-24): alle DataFrames i _shared_vars —
+    // # load-bundne OG avledede. {} når motoren ikke er lastet/feiler.
+    datasetInfo: function () {
+      if (!__loadedHandles) return {};
+      try { return JSON.parse(__loadedHandles._dataset_info() || '{}'); }
+      catch (e) { return {}; }
     }
   };
 })(typeof window !== 'undefined' ? window : globalThis);

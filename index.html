@@ -555,7 +555,7 @@
     window.t = window.t || function (s) { return s; };
     window.i18nField = window.i18nField || function (obj, field) { return obj && obj[field]; };
 
-    window.M2PY_VERSION = '2026-07-24o';
+    window.M2PY_VERSION = '2026-07-24p';
 
     // One-time migration: remove obsolete localStorage keys from previous milestones
     // Safe to delete this snippet after a few months when most users have re-loaded
@@ -2689,7 +2689,9 @@
           var res;
           try {
             res = await window.BrythonEngine.run(script, { loads: _dl.loads });
-            refreshDatasetSidebarFromLoads(_dl.loads, 'brython', 'Brython');
+            if (!refreshDatasetSidebarFromEngineInfo(window.BrythonEngine.datasetInfo(), 'brython', 'Brython')) {
+              refreshDatasetSidebarFromLoads(_dl.loads, 'brython', 'Brython');
+            }
           } finally {
             nbUiRunCtx = null;
             if (window.Ui && window.Ui.endCellRun) window.Ui.endCellRun(null);
@@ -2749,7 +2751,9 @@
           var res;
           try {
             res = await window.MicroPythonEngine.run(script, { loads: _dl.loads });
-            refreshDatasetSidebarFromLoads(_dl.loads, 'micropython', 'MicroPython');
+            if (!refreshDatasetSidebarFromEngineInfo(window.MicroPythonEngine.datasetInfo(), 'micropython', 'MicroPython')) {
+              refreshDatasetSidebarFromLoads(_dl.loads, 'micropython', 'MicroPython');
+            }
           } finally {
             nbUiRunCtx = null;
             if (window.Ui && window.Ui.endCellRun) window.Ui.endCellRun(null);
@@ -7591,6 +7595,17 @@ async def _run_duck_sql(_sql, _fresh=True):
     // brython-, micropython- og javascript-modusene, der datasettene bindes
     // inne i egne VM-er som Py/R/duck-refleksjonene ikke når. csv/json gir
     // kolonner + radtall; parquet vises med navn (skjema krever DuckDB).
+    // Motor-refleksjon (info fra VM-en: # load-bundne OG avledede df-er).
+    function refreshDatasetSidebarFromEngineInfo(info, runtime, badge) {
+      try {
+        var names = Object.keys(info || {});
+        if (!names.length) return false;
+        names.forEach(function (n) { info[n].runtime = runtime; });
+        window.lastDatasetInfo = info;
+        updateSidebarDatasets(info, badge);
+        return true;
+      } catch (e) { console.warn('sidebar fra motor:', e); return false; }
+    }
     function refreshDatasetSidebarFromLoads(loads, runtime, badge) {
       try {
         var info = {};

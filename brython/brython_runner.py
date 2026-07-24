@@ -418,6 +418,29 @@ def _bind_datasets(spec_json):
     except Exception:
         return traceback.format_exc()
 
+def _dataset_info():
+    """Sidebar-refleksjon (2026-07-24): alle DataFrames i brukerens globals —
+    både # load-bundne og AVLEDEDE (df-er scriptet selv lagde) — som JSON.
+    Speiler pyodide-veiens kontrakt {name: {columns, dtypes, nrows}}."""
+    try:
+        import pandas_brython as _pd
+        out = {}
+        for _k in list(_shared_vars.keys()):
+            _v = _shared_vars[_k]
+            if not isinstance(_k, str) or _k.startswith('_'):
+                continue
+            if not isinstance(_v, _pd.DataFrame):
+                continue
+            try:
+                out[_k] = {'columns': [str(_c) for _c in _v.columns],
+                           'dtypes': {}, 'nrows': len(_v)}
+            except Exception:
+                pass
+        return json.dumps(out)
+    except Exception:
+        return '{}'
+
+
 def _sync_var(name, value_json):
     """ui sync_to (fase 3): skriv en widget-verdi inn i _shared_vars uten
     kjøring. Speiler _bind_datasets-kontrakten: '' ved suksess, ellers
