@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>OpenStat — microdata script runner</title>
+  <title>OpenStat — script runner</title>
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="preconnect" href="https://cdn.plot.ly" crossorigin>
   <link rel="preload" as="script" href="https://cdn.jsdelivr.net/pyodide/v314.0.2/full/pyodide.js">
@@ -228,7 +228,7 @@
           <input type="text" id="aiCfgProviderUrl" placeholder="https://api.openai.com/v1" autocomplete="off">
           <input type="text" id="aiCfgProviderModel" placeholder="gpt-5.6" autocomplete="off" style="margin-top:4px;">
           <input type="password" id="aiCfgLlmKey" autocomplete="off" style="margin-top:4px;">
-          <div class="ai-modal-help" data-i18n>Base-URL er alt før endepunktnavnet (typisk t.o.m. /v1). Nøkkelen lagres kun i denne nettleseren; forespørsler går via appens server til leverandøren du velger, og forbruk (inkludert eventuelt websøk hos OpenAI) belastes din konto der. Web-modus med OpenAI-typene krever en modell med verktøystøtte. Microdata-AI krever fortsatt Anthropic-nøkkel.</div>
+          <div class="ai-modal-help" data-i18n>Base-URL er alt før endepunktnavnet (typisk t.o.m. /v1). Nøkkelen lagres kun i denne nettleseren; forespørsler går via appens server til leverandøren du velger, og forbruk (inkludert eventuelt websøk hos OpenAI) belastes din konto der. Web-modus med OpenAI-typene krever en modell med verktøystøtte.</div>
         </div>
       </div>
 
@@ -396,30 +396,6 @@
           <input type="number" id="settingBlockPause" min="0" max="10" step="0.1" value="1.0">
           <p class="settings-hint" data-i18n>Ventetid etter blokker uten kommentarer i Kj&#248;r skrittvis. 0 = ingen pause.</p>
         </div>
-        <!-- Microdata-innstillinger: gjelder bare microdata-språket. Alltid
-             synlige (ingen modus-gating); planen er å fase dem ut av
-             openstat/safestat på sikt — emulatoren i microdata-repoen er
-             hjemmet deres. -->
-        <div class="settings-section" data-i18n>Microdata</div>
-        <div class="settings-field">
-          <label for="settingImportLimit" data-i18n>Antall observasjoner ved import</label>
-          <input type="number" id="settingImportLimit" min="10" max="100000" step="100" value="10000">
-          <p class="settings-hint" data-i18n>Maks antall rader per import-kommando (10 &ndash; 100 000).</p>
-        </div>
-        <div class="settings-field">
-          <label for="settingLabelFormat" data-i18n>Etiketter i tabulate</label>
-          <select id="settingLabelFormat">
-            <option value="both" selected data-i18n>Kode og etikett (standard)</option>
-            <option value="label" data-i18n>Bare etikett</option>
-            <option value="code" data-i18n>Bare kode</option>
-          </select>
-          <p class="settings-hint" data-i18n-html>Standardvisning i <code>tabulate</code>. Kan overstyres per kommando med opsjonene <code>nolabels</code> / <code>novalues</code>, eller per script med <code>// m2py: label-format=both|label|code</code>.</p>
-        </div>
-        <div class="settings-field">
-          <label data-i18n>Datakilde</label>
-          <button type="button" class="btn btn-secondary" id="menuDataSource" data-i18n-title title="Statisk: import laster fra ferdige, konsistente datafiler (static_data/*.parquet) via DuckDB-WASM (standard). Variabler/datoer som ikke finnes statisk faller tilbake til generering. Dynamisk: variabler genereres på nytt ved hver kjøring. Kan også settes per script med // m2py: data-source=dynamic.">Datakilde: Statisk</button>
-          <p class="settings-hint" data-i18n-html>Statisk = last fra <code>static_data/*.parquet</code> (standard). Dynamisk = generer ved kjøring. Per script: <code>// m2py: data-source=dynamic</code>.</p>
-        </div>
       </div>
       <div class="settings-buttons">
         <button type="button" class="btn btn-secondary" id="settingsCancelBtn" data-i18n>Avbryt</button>
@@ -580,7 +556,7 @@
     window.t = window.t || function (s) { return s; };
     window.i18nField = window.i18nField || function (obj, field) { return obj && obj[field]; };
 
-    window.M2PY_VERSION = '2026-07-24i';
+    window.M2PY_VERSION = '2026-07-24j';
 
     // One-time migration: remove obsolete localStorage keys from previous milestones
     // Safe to delete this snippet after a few months when most users have re-loaded
@@ -600,7 +576,6 @@
         "Bruk Tab i kode-feltet for å få kommando- og variabel-forslag.",
         "Klikk på linjenummer for å sette stoppunkt og kjøre skrittvis.",
         "Skriv `help <kommando>` for å se syntaks og eksempler.",
-        "Du kan blande microdata-, Python- og R-kode i samme script.",
         "Last ned plott som PNG ved å høyreklikke på figuren.",
         "Bruk `import` for å laste eksempel-datasett (f.eks. `import inntekt`).",
         "AI-assistenten i sidemenyen kan forklare og forbedre koden din.",
@@ -1063,7 +1038,7 @@
           if (window.location.protocol === 'file:') {
             alert(t('Filen er åpnet direkte i nettleseren (file://). Start en lokal webserver og åpne via http://localhost for å laste eksempler.\n\nEks: åpne terminal i m2py-mappen og kjør:\npython -m http.server 8000\n\nÅpne deretter http://localhost:8000/microdata_runner.html'));
           } else {
-            alert(t('Kunne ikke laste eksempel: {file}\nFeil: {msg}\n\nSjekk at examples-mappen ligger i samme mappe som microdata_runner.html og at serveren har tilgang til den.', { file: file, msg: err && err.message ? err.message : String(err) }));
+            alert(t('Kunne ikke laste eksempel: {file}\nFeil: {msg}\n\nSjekk at examples-mappen ligger i samme mappe som index.html og at serveren har tilgang til den.', { file: file, msg: err && err.message ? err.message : String(err) }));
           }
         });
       }
@@ -1755,7 +1730,7 @@
       if (!overlay || !contentEl) return;
       headerEl.style.display = '';
       kickerEl.textContent = t('Hjelp');
-      titleEl.textContent = 'Microdata Script Runner';
+      titleEl.textContent = 'OpenStat';
       contentEl.innerHTML = [
         t('<p class="var-detail-prose" style="margin-bottom:10px">Skriv og kjør microdata.no-kode, Python og R direkte i nettleseren.</p>'),
         t('<p class="var-detail-prose" style="margin-bottom:10px;font-size:12px;color:var(--text-muted)">NB: Dette er et hobbyprosjekt &mdash; ikke laget av microdata.no. Tallene er ikke ekte, og det gis ingen garantier for korrekthet.</p>'),
@@ -2433,7 +2408,7 @@
 
       function openSettings() {
         if (langSel) langSel.value = window.M2PY_LANG || 'no';
-        limitIn.value = getImportLimit();
+        if (limitIn) limitIn.value = getImportLimit();
         fontSel.value = document.body.getAttribute('data-font-size') || '';
         rateIn.value  = getTtsRate();
         rateVal.textContent = parseFloat(rateIn.value).toFixed(1) + '\u00d7';
@@ -2453,9 +2428,11 @@
       });
 
       saveBtn.addEventListener('click', function() {
-        var lim = parseInt(limitIn.value, 10);
-        if (lim >= 10 && lim <= 100000) {
-          try { localStorage.setItem(IMPORT_LIMIT_KEY, String(lim)); } catch(e2) {}
+        if (limitIn) {
+          var lim = parseInt(limitIn.value, 10);
+          if (lim >= 10 && lim <= 100000) {
+            try { localStorage.setItem(IMPORT_LIMIT_KEY, String(lim)); } catch(e2) {}
+          }
         }
         if (applyFontSize) applyFontSize(fontSel.value);
         var rate = parseFloat(rateIn.value);
