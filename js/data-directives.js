@@ -18,7 +18,10 @@
 
   // Project A (variable-level assembly): create-dataset/import/join/load ->
   // AssemblySpec. See docs/superpowers/plans/2026-07-05-variable-level-assembly.md.
-  var CREATE_RE = /^[ \t]*(?:#|--|\/\/)[ \t]*create-dataset[ \t]+([A-Za-z_]\w*)[ \t]*,[ \t]*key\(\s*([A-Za-z_]\w*)\s*\)[ \t]*$/gim;
+  // format(<navn>) (2026-07-24): lever datasettet direkte i valgt frameformat
+  // uten konverteringslinje — data.table/tibble i R, pandas i python (polars
+  // når wasm-bygget finnes). Ustøttede kombinasjoner feiler høyt ved binding.
+  var CREATE_RE = /^[ \t]*(?:#|--|\/\/)[ \t]*create-dataset[ \t]+([A-Za-z_]\w*)[ \t]*,[ \t]*key\(\s*([A-Za-z_]\w*)\s*\)(?:[ \t]*,[ \t]*format\(\s*([A-Za-z_.]+)\s*\))?[ \t]*$/gim;
   var IMPORT_RE = /^[ \t]*(?:#|--|\/\/)[ \t]*import[ \t]+(\S+(?:[ \t]*,[ \t]*\S+)*)[ \t]+into[ \t]+([A-Za-z_]\w*)(?:[ \t]+(left|inner|outer))?[ \t]*$/gim;
   var JOIN_RE = /^[ \t]*(?:#|--|\/\/)[ \t]*join[ \t]+([A-Za-z_]\w*)[ \t]+into[ \t]+([A-Za-z_]\w*)[ \t]+on[ \t]+([A-Za-z_]\w*)(?:[ \t]+(left|inner|outer))?[ \t]*$/gim;
   var LOADAS_RE = /^[ \t]*(?:#|--|\/\/)[ \t]*load[ \t]+([A-Za-z_]\w*(?:\/[A-Za-z_]\w*)?)[ \t]+as[ \t]+([A-Za-z_]\w*)[ \t]*$/gim;
@@ -125,7 +128,7 @@
     CREATE_RE.lastIndex = 0;
     while ((m = CREATE_RE.exec(script)) !== null) {
       if (byName[m[1]]) { errors.push('datasettet «' + m[1] + '» er allerede opprettet'); continue; }
-      var d = { name: m[1], key: m[2], steps: [] };
+      var d = { name: m[1], key: m[2], format: (m[3] || '').toLowerCase() || null, steps: [] };
       datasets.push(d); byName[m[1]] = d;
     }
     LOADAS_RE.lastIndex = 0;

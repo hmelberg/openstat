@@ -68,3 +68,22 @@ test('_topoSort: sirkulær avhengighet kaster', () => {
   ];
   assert.throws(() => AD._topoSort(ds), /sirkulær/);
 });
+
+// ── format()-argumentet i create-dataset (parses i data-directives) ─────────
+require('../../js/data-directives.js');
+const DD = globalThis.DataDirectives;
+
+test('parseAssembly: format(data.table) fanges, default null', () => {
+  const r = DD.parseAssembly([
+    '# connect https://x/p.parquet as p',
+    '# create-dataset a, key(pid), format(data.table)',
+    '# import p/inntekt into a',
+    '# create-dataset b, key(pid)',
+    '# import p/alder into b',
+  ].join('\n'));
+  assert.equal(r.errors.length, 0);
+  const byName = {};
+  r.spec.datasets.forEach(d => { byName[d.name] = d; });
+  assert.equal(byName.a.format, 'data.table');
+  assert.equal(byName.b.format, null);
+});

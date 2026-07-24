@@ -556,7 +556,7 @@
     window.t = window.t || function (s) { return s; };
     window.i18nField = window.i18nField || function (obj, field) { return obj && obj[field]; };
 
-    window.M2PY_VERSION = '2026-07-24s';
+    window.M2PY_VERSION = '2026-07-24t';
 
     // One-time migration: remove obsolete localStorage keys from previous milestones
     // Safe to delete this snippet after a few months when most users have re-loaded
@@ -2710,6 +2710,7 @@
             if (_asmX && !_asmX.pushdown) {
               throw new Error(t('Montering i denne modusen krever parquet/csv-kilder — bruk python-modus for andre formater.'));
             }
+            assertAssemblyFormats(_asmX, ['pandas', 'data.frame'], 'Brython');
             res = await window.BrythonEngine.run(script, { loads: _dl.loads, extraDatasets: _asmX && _asmX.datasets });
             if (!refreshDatasetSidebarFromEngineInfo(window.BrythonEngine.datasetInfo(), 'brython', 'Brython')) {
               refreshDatasetSidebarFromLoads(_dl.loads, 'brython', 'Brython');
@@ -2777,6 +2778,7 @@
             if (_asmX && !_asmX.pushdown) {
               throw new Error(t('Montering i denne modusen krever parquet/csv-kilder — bruk python-modus for andre formater.'));
             }
+            assertAssemblyFormats(_asmX, ['pandas', 'data.frame'], 'MicroPython');
             res = await window.MicroPythonEngine.run(script, { loads: _dl.loads, extraDatasets: _asmX && _asmX.datasets });
             if (!refreshDatasetSidebarFromEngineInfo(window.MicroPythonEngine.datasetInfo(), 'micropython', 'MicroPython')) {
               refreshDatasetSidebarFromLoads(_dl.loads, 'micropython', 'MicroPython');
@@ -2830,6 +2832,7 @@
             if (_asmX && !_asmX.pushdown) {
               throw new Error(t('Montering i denne modusen krever parquet/csv-kilder — bruk python-modus for andre formater.'));
             }
+            assertAssemblyFormats(_asmX, ['arquero'], 'JavaScript');
             res = await window.JsEngine.run(script, { loads: _dl.loads, extraDatasets: _asmX && _asmX.datasets });
             if (_asmX && _asmX.datasets) {
             var _jsInfo = {};
@@ -7204,7 +7207,14 @@ def show(*args):
 def to_microdata(df, name=None, make_active=True):
     """Legg DataFrame inn i e.datasets slik at påfølgende microdata ser den. name=None bruker aktivt datasett."""
     if not isinstance(df, pd.DataFrame):
-        raise TypeError("to_microdata: forventet pandas.DataFrame")
+        # Polars/pyarrow/cudf-aktige: konverter via .to_pandas() i stedet for
+        # å kaste — pyarrow.Table er tilgjengelig i Pyodide og dukker opp når
+        # folk jobber med parquet (herding 2026-07-24).
+        _conv = getattr(df, "to_pandas", None)
+        if callable(_conv):
+            df = _conv()
+        else:
+            raise TypeError("to_microdata: forventet pandas.DataFrame (eller et objekt med .to_pandas(), f.eks. polars/pyarrow)")
     if name is None:
         name = e.active_name
     if not name:
@@ -7428,9 +7438,11 @@ async def _run_duck_sql(_sql, _fresh=True):
       if (parsed.errors.length) throw new Error('Monteringsfeil: ' + parsed.errors.join('; '));
       if (!(parsed.spec.datasets || []).length) return null;
       var deps = { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey };
+      var formats = {};
+      (parsed.spec.datasets || []).forEach(function (d) { if (d.format) formats[d.name] = d.format; });
       var so = await window.DataLoader.resolveSourcesOnly(script, deps);
       if (!window.AssemblyDuckdb.canPushdown(so.spec, so.descriptors)) {
-        return { pushdown: false, parsed: parsed, deps: deps };
+        return { pushdown: false, parsed: parsed, deps: deps, formats: formats };
       }
       if (statusEl) setStatus(statusEl, t('Monterer datasett (DuckDB)…'));
       var cmp = window.AssemblyDuckdb.compile(so.spec, so.descriptors);
@@ -7443,8 +7455,21 @@ async def _run_duck_sql(_sql, _fresh=True):
           var d = cmp.datasetStatements[j];
           cols[d.name] = __arrowToColumns(await conn.query(d.sql));
         }
-        return { pushdown: true, datasets: cols };
+        return { pushdown: true, datasets: cols, formats: formats };
       } finally { await conn.close(); }
+    }
+
+    // format(<navn>)-vakt: hver modus støtter et kjent sett frameformater —
+    // ustøttet valg feiler høyt med modusnavn (aldri stille konvertering).
+    function assertAssemblyFormats(asm, allowed, modeName) {
+      if (!asm || !asm.formats) return;
+      Object.keys(asm.formats).forEach(function (n) {
+        var f = asm.formats[n];
+        if (allowed.indexOf(f) < 0) {
+          throw new Error(t('format({f}) støttes ikke i {m}-modus (støttet: {ok}).',
+            { f: f, m: modeName, ok: allowed.join(', ') }));
+        }
+      });
     }
 
     // Kolonnesett -> CSV-tekst (for R: webR.FS + read.csv — enkleste
@@ -7880,7 +7905,14 @@ import json
 e = __main__.micro_interpreter
 d = {}
 for name, df in e.datasets.items():
-    d[name] = {"columns": list(df.columns), "nrows": len(df), "dtypes": {c: str(t) for c, t in df.dtypes.items()}}
+    try:
+        d[name] = {"columns": [str(c) for c in df.columns], "nrows": len(df), "dtypes": {c: str(t) for c, t in df.dtypes.items()}}
+    except Exception:
+        # Ikke-pandas-aktig objekt: vis navnet i stedet for å velte hele refleksjonen.
+        try:
+            d[name] = {"columns": [str(c) for c in getattr(df, "columns", [])], "nrows": None, "dtypes": {}}
+        except Exception:
+            d[name] = {"columns": [], "nrows": None, "dtypes": {}}
 out = {"datasets": d, "active": e.active_name}
 json.dumps(out)
 `);
@@ -8393,11 +8425,25 @@ json.dumps(out)
       if (_asmR && !_asmR.pushdown) {
         throw new Error(t('Montering i denne modusen krever parquet/csv-kilder — bruk python-modus for andre formater.'));
       }
+      assertAssemblyFormats(_asmR, ['data.frame', 'data.table', 'tibble'], 'R');
       if (_asmR) {
+        var _rFmts = _asmR.formats || {};
+        var _needPkg = Object.keys(_rFmts).map(function (n) { return _rFmts[n]; })
+          .filter(function (f) { return f === 'data.table' || f === 'tibble'; });
+        if (_needPkg.length) {
+          try { await webR.installPackages([].concat(_needPkg.indexOf('data.table') >= 0 ? ['data.table'] : [],
+                                                     _needPkg.indexOf('tibble') >= 0 ? ['tibble'] : []), { quiet: true }); }
+          catch (e) { console.warn('format-pakke:', e); }
+        }
         for (var _arn in _asmR.datasets) {
           var _arp = '/home/web_user/_asm_' + _arn + '.csv';
           await webR.FS.writeFile(_arp, new TextEncoder().encode(__colsToCsv(_asmR.datasets[_arn])));
-          await webR.evalRVoid(_arn + ' <- read.csv(' + JSON.stringify(_arp) + ', check.names = FALSE)');
+          var _read = 'read.csv(' + JSON.stringify(_arp) + ', check.names = FALSE)';
+          var _fmt = _rFmts[_arn];
+          var _expr = _fmt === 'data.table' ? 'data.table::as.data.table(' + _read + ')'
+                    : _fmt === 'tibble' ? 'tibble::as_tibble(' + _read + ')'
+                    : _read;
+          await webR.evalRVoid(_arn + ' <- ' + _expr);
         }
       }
 
@@ -9562,6 +9608,10 @@ options(width = 200)
         var _asmPayload = null;
         refreshConnectedSources(effectiveScript);   // fire-and-forget: kildekatalog + tab
         var _asmRes = await resolveAssemblyColumns(effectiveScript, rightStatus);
+        if (_asmRes && _asmRes.formats && Object.values(_asmRes.formats).indexOf('polars') >= 0) {
+          throw new Error(t('format(polars) er ikke tilgjengelig i nettleseren ennå (polars mangler wasm-bygg) — dropp format() for pandas.'));
+        }
+        assertAssemblyFormats(_asmRes, ['pandas', 'data.frame'], 'python');
         if (_asmRes && _asmRes.pushdown) {
           _asmPayload = { cols: _asmRes.datasets };
         } else if (_asmRes) {

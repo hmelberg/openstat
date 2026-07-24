@@ -13,6 +13,8 @@ window.M2PY_I18N = window.M2PY_I18N || {  "OpenStat er en motor for å stille sp
   "Tilkoblede kilder": "Connected sources",
   "variabler (ikke nedlastet)": "variables (not downloaded)",
   "kilde: {a} (ikke nedlastet)": "source: {a} (not downloaded)",
+  "format({f}) støttes ikke i {m}-modus (støttet: {ok}).": "format({f}) is not supported in {m} mode (supported: {ok}).",
+  "format(polars) er ikke tilgjengelig i nettleseren ennå (polars mangler wasm-bygg) — dropp format() for pandas.": "format(polars) is not available in the browser yet (polars has no wasm build) — drop format() to get pandas.",
 };
 window.M2PY_I18N.en = {
   "Venter på Python-motoren (første gang kan ta opptil ett minutt)…": "Waiting for the Python engine (the first time can take up to a minute)…",
