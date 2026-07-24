@@ -69,8 +69,35 @@ def choropleth(data=None, lat=None, lon=None, locations=None,
 4. **Browser:** begge modusene — kartet rendres med fargeskala og
    hover; `M2PY_VERSION` bumpes (runtime-fetchede .py-filer endres).
 
+## Tillegg (Hans, midt i syklusen): `geojson='norge:kommuner'`
+
+Det «billige grepet» tas med likevel: de to markørstrengene
+`'norge:kommuner'` og `'norge:fylker'` gjenbruker folium-shimets
+geometri og lazy-fetch.
+
+- **Python-siden (begge shimene):** når `geojson` er en av
+  markørstrengene: (1) locations-verdiene zero-paddes som i folium
+  (4-sifret kommune / 2-sifret fylke — `301` → `'0301'`; egen
+  `_zpad`-hjelper, ikke `zfill`); (2) `featureidkey`-defaulten ('id')
+  byttes til `'properties.nummer'` (geometrifilenes egenskap);
+  (3) `fitbounds` None → `'locations'` (ellers vises et verdenskart
+  med et lite Norge); (4) markørstrengen sendes URØRT som
+  `trace.geojson` — JS-siden løser den. Andre geojson-STRENGER sendes
+  også urørt (plotly.js støtter URL-strenger); dicts som før.
+- **JS-siden (`mdRenderPlotlyFigure`):** før `Plotly.newPlot`: skann
+  tracene for `geojson === 'norge:kommuner'|'norge:fylker'` → hent via
+  den MEMOISERTE `__norgeGeoFetch` (delt cache med folium, med
+  M2PY_VERSION-cachebuster), erstatt markørstrengen med objektet, og
+  legg til en liten Kartverket-attribusjon (CC BY 4.0-kravet) som
+  layout-annotasjon nederst når norge-geometri brukes. Uten markører:
+  synkron sti som før (null endring for alle eksisterende figurer).
+- **Tester:** python-siden (padding, featureidkey-default,
+  fitbounds-default, markør-passthrough) + mpy-paritet; browser-tasken
+  verifiserer et faktisk kommunekart i plotly.
+
 ## Utenfor omfang
 
-Norsk kommune-/fylkesgeometri (folium-shimet), scatter_geo,
-choropleth_map/mapbox (tile-baserte), facetter/animasjon på choropleth,
-coloraxis-migrering.
+scatter_geo, choropleth_map/mapbox (tile-baserte), facetter/animasjon
+på choropleth, coloraxis-migrering. (Norsk geometri VAR utenfor, men
+ble tatt inn — se tillegget over; folium-shimet forblir førstevalget
+for kartbehov med tooltips/legend/tiles.)
