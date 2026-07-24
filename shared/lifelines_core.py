@@ -399,3 +399,83 @@ class NelsonAalenFitter(_UnivariateFitter):
     def plot(self, ci_show=True, fig=None):
         return self._plot(self._cumhaz, self._ci_lower, self._ci_upper,
                           ci_show, fig, 'H(t)')
+
+
+# ---- logrank ------------------------------------------------------------
+
+class StatisticalResult:
+    def __init__(self, test_statistic, p_value, degrees_of_freedom, test_name):
+        self.test_statistic = test_statistic
+        self.p_value = p_value
+        self.degrees_of_freedom = degrees_of_freedom
+        self.test_name = test_name
+
+    def print_summary(self):
+        print(self.test_name)
+        print('df = ' + str(self.degrees_of_freedom))
+        print('test_statistic = %.6f, p = %.6f' % (self.test_statistic, self.p_value))
+
+    def __repr__(self):
+        return ('<StatisticalResult: ' + self.test_name
+                + ' | test_statistic=%.6f, p=%.6f>' % (self.test_statistic, self.p_value))
+
+
+def multivariate_logrank_test(event_durations, groups, event_observed=None):
+    T = [float(t) for t in _as_list(event_durations)]
+    G = _as_list(groups)
+    E = ([1] * len(T) if event_observed is None
+         else [1 if e else 0 for e in _as_list(event_observed)])
+    labels = []
+    for g in G:
+        if g not in labels:
+            labels.append(g)
+    labels = sorted(labels, key=lambda v: str(v))
+    k = len(labels)
+    if k < 2:
+        raise ValueError('logrank krever minst to grupper')
+    gidx = [labels.index(g) for g in G]
+    times = sorted({t for t, e in zip(T, E) if e})
+    O = [0.0] * k
+    Ex = [0.0] * k
+    V = [[0.0] * k for _ in range(k)]
+    for t in times:
+        n_at = [0] * k
+        d_at = [0] * k
+        for i in range(len(T)):
+            if T[i] >= t:
+                n_at[gidx[i]] += 1
+                if T[i] == t and E[i]:
+                    d_at[gidx[i]] += 1
+        n = sum(n_at)
+        d = sum(d_at)
+        if n < 1 or d == 0:
+            continue
+        for j in range(k):
+            O[j] += d_at[j]
+            Ex[j] += d * n_at[j] / float(n)
+        if n > 1:
+            f = d * (n - d) / float(n - 1)
+            for a in range(k):
+                for b in range(k):
+                    if a == b:
+                        V[a][b] += f * (n_at[a] / float(n)) * (1.0 - n_at[a] / float(n))
+                    else:
+                        V[a][b] += -f * n_at[a] * n_at[b] / float(n * n)
+    z = [O[j] - Ex[j] for j in range(k - 1)]
+    Vsub = [[V[a][b] for b in range(k - 1)] for a in range(k - 1)]
+    sol = _solve(Vsub, z)
+    stat = sum(z[i] * sol[i] for i in range(k - 1))
+    p = _chi2_sf(stat, k - 1)
+    return StatisticalResult(stat, p, k - 1, 'multivariate_logrank_test')
+
+
+def logrank_test(durations_A, durations_B, event_observed_A=None,
+                 event_observed_B=None):
+    TA = _as_list(durations_A)
+    TB = _as_list(durations_B)
+    EA = ([1] * len(TA) if event_observed_A is None else _as_list(event_observed_A))
+    EB = ([1] * len(TB) if event_observed_B is None else _as_list(event_observed_B))
+    r = multivariate_logrank_test(list(TA) + list(TB),
+                                  ['A'] * len(TA) + ['B'] * len(TB),
+                                  list(EA) + list(EB))
+    return StatisticalResult(r.test_statistic, r.p_value, 1, 'logrank_test')

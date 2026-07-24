@@ -127,6 +127,35 @@ def test_plot_builds_plotly_figure():
         ll._pe = None
 
 
+TA = [5, 6, 6, 2, 4, 4, 6, 7, 3, 9]
+EA = [1, 0, 1, 1, 1, 0, 1, 1, 1, 0]
+TB = [1, 4, 4, 5, 8, 9]
+EB = [1, 1, 0, 1, 1, 1]
+
+
+def test_logrank_matches_probe():
+    r = ll.logrank_test(TA, TB, EA, EB)
+    assert abs(r.test_statistic - 0.02639709685012403) < 1e-10, r.test_statistic
+    assert abs(r.p_value - 0.8709343067602499) < 1e-10, r.p_value
+    assert r.degrees_of_freedom == 1
+    assert 'p' in repr(r)
+
+
+def test_multivariate_logrank_two_groups_equals_logrank():
+    mr = ll.multivariate_logrank_test(TA + TB, ['a'] * 10 + ['b'] * 6, EA + EB)
+    assert abs(mr.test_statistic - 0.02639709685012403) < 1e-10
+    assert abs(mr.p_value - 0.8709343067602499) < 1e-10
+
+
+def test_multivariate_logrank_three_groups():
+    T3 = TA + TB + [2, 3, 5, 7, 11]
+    G3 = ['a'] * 10 + ['b'] * 6 + ['c'] * 5
+    E3 = EA + EB + [1, 1, 0, 1, 1]
+    mr = ll.multivariate_logrank_test(T3, G3, E3)
+    assert mr.degrees_of_freedom == 2
+    assert 0.0 <= mr.p_value <= 1.0 and mr.test_statistic >= 0.0
+
+
 if __name__ == '__main__':
     for name, fn in sorted(globals().items()):
         if name.startswith('test_'):
