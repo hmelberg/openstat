@@ -7606,17 +7606,17 @@ if _asm.get('spec'):
         if _ds.get('load'):
             to_microdata(_asrc[_ds['load']].copy(), name=_ds['name'], make_active=False)
             continue
-        _key = _ds.get('key')
+        _key = list(_ds.get('key') or [])   # composite keys: alltid liste
         _acc = None
         for _st in _ds.get('steps') or []:
             if _st['op'] == 'import':
-                _cols = [_key] + [c for c in _st['columns'] if c != _key]
+                _cols = _key + [c for c in _st['columns'] if c not in _key]
                 _piece = _asrc[_st['source']][_cols]
                 _acc = _piece.copy() if _acc is None else _acc.merge(_piece, on=_key, how=_st['how'])
             else:
                 if _acc is None:
                     raise ValueError('join krever minst én import først i «' + _ds['name'] + '»')
-                _acc = _acc.merge(e.datasets[_st['from']], on=_st['on'], how=_st['how'])
+                _acc = _acc.merge(e.datasets[_st['from']], on=list(_st['on']), how=_st['how'])
         to_microdata(_acc, name=_ds['name'], make_active=False)
 `;
     }

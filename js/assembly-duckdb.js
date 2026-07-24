@@ -107,18 +107,21 @@
         datasetStatements.push({ name: ds.name, sql: 'SELECT * FROM ' + ref });
         return;
       }
-      var key = ds.key, sql = null;
+      // Composite keys (spec 2026-07-24-pxweb-sources-design §1): ds.key og
+      // step.on er arrays — USING/EXCLUDE tar hele listen.
+      var keys = ds.key, sql = null;
+      var keyList = keys.map(quoteIdent).join(', ');
       (ds.steps || []).forEach(function (step) {
         if (step.op === 'import') {
           var ref = relationRef(step.source, descriptors, att.aliasByUrl);
-          var cols = step.columns.filter(function (c) { return c !== key; });
-          var selectCols = [quoteIdent(key)].concat(cols.map(quoteIdent)).join(', ');
+          var cols = step.columns.filter(function (c) { return keys.indexOf(c) < 0; });
+          var selectCols = keys.map(quoteIdent).concat(cols.map(quoteIdent)).join(', ');
           var piece = '(SELECT ' + selectCols + ' FROM ' + ref + ')';
           if (sql === null) {
             sql = piece;
           } else {
-            sql = '(SELECT acc.*, piece.* EXCLUDE (' + quoteIdent(key) + ') FROM (' + sql + ') acc ' +
-              step.how.toUpperCase() + ' JOIN ' + piece + ' piece USING (' + quoteIdent(key) + '))';
+            sql = '(SELECT acc.*, piece.* EXCLUDE (' + keyList + ') FROM (' + sql + ') acc ' +
+              step.how.toUpperCase() + ' JOIN ' + piece + ' piece USING (' + keyList + '))';
           }
         } else if (step.op === 'join') {
           // Portert til openstat 2026-07-24 m/ guard for review-funnet
@@ -126,8 +129,9 @@
           if (sql === null) throw new Error('join krever minst én import først i «' + ds.name + '»');
           var otherSql = datasetStatements.find(function (s) { return s.name === step.from; });
           if (!otherSql) throw new Error('ukjent datasett «' + step.from + '» (join into «' + ds.name + '»)');
-          sql = '(SELECT acc.*, other.* EXCLUDE (' + quoteIdent(step.on) + ') FROM (' + sql + ') acc ' +
-            step.how.toUpperCase() + ' JOIN (' + otherSql.sql + ') other USING (' + quoteIdent(step.on) + '))';
+          var onList = step.on.map(quoteIdent).join(', ');
+          sql = '(SELECT acc.*, other.* EXCLUDE (' + onList + ') FROM (' + sql + ') acc ' +
+            step.how.toUpperCase() + ' JOIN (' + otherSql.sql + ') other USING (' + onList + '))';
         }
       });
       datasetStatements.push({ name: ds.name, sql: 'SELECT * FROM ' + sql });

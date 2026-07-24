@@ -17,9 +17,35 @@ test('canPushdown: parquet+csv ja, other nei', () => {
   assert.equal(AD.canPushdown({ sources: ['p', 'o'] }, DESC), false);
 });
 
+test('compile: composite key gir USING/EXCLUDE med hele nøkkellisten', () => {
+  const spec = { sources: ['p', 's'], datasets: [
+    { name: 'd', key: ['kommune_nr', 'year'], steps: [
+      { op: 'import', source: 'p', columns: ['skatt'], how: 'left' },
+      { op: 'import', source: 's', columns: ['avfall'], how: 'left' },
+    ] },
+  ] };
+  const sql = AD.compile(spec, DESC).datasetStatements[0].sql;
+  assert.match(sql, /"kommune_nr", "year", "skatt"/);
+  assert.match(sql, /USING \("kommune_nr", "year"\)/);
+  assert.match(sql, /EXCLUDE \("kommune_nr", "year"\)/);
+});
+
+test('compile: join-steg med flerkolonne-on gir USING-liste', () => {
+  const spec = { sources: ['p', 's'], datasets: [
+    { name: 'a', load: 's' },
+    { name: 'b', key: ['pid'], steps: [
+      { op: 'import', source: 'p', columns: ['inntekt'], how: 'left' },
+      { op: 'join', from: 'a', on: ['region', 'aar'], how: 'inner' },
+    ] },
+  ] };
+  const sql = AD.compile(spec, DESC).datasetStatements.find(d => d.name === 'b').sql;
+  assert.match(sql, /INNER JOIN .* USING \("region", "aar"\)/);
+  assert.match(sql, /EXCLUDE \("region", "aar"\)/);
+});
+
 test('compile: import plukker kolonner + nøkkel fra read_parquet', () => {
   const spec = { sources: ['p'], datasets: [
-    { name: 'demo', key: 'unit_id', steps: [{ op: 'import', source: 'p', columns: ['inntekt', 'alder'], how: 'left' }] },
+    { name: 'demo', key: ['unit_id'], steps: [{ op: 'import', source: 'p', columns: ['inntekt', 'alder'], how: 'left' }] },
   ] };
   const out = AD.compile(spec, DESC);
   const sql = out.datasetStatements[0].sql;
@@ -29,7 +55,7 @@ test('compile: import plukker kolonner + nøkkel fra read_parquet', () => {
 
 test('compile: to import-steg blir USING-join med EXCLUDE av nøkkelen', () => {
   const spec = { sources: ['p', 's'], datasets: [
-    { name: 'demo', key: 'pid', steps: [
+    { name: 'demo', key: ['pid'], steps: [
       { op: 'import', source: 'p', columns: ['inntekt'], how: 'left' },
       { op: 'import', source: 's', columns: ['belop'], how: 'left' },
     ] },
@@ -43,16 +69,16 @@ test('compile: to import-steg blir USING-join med EXCLUDE av nøkkelen', () => {
 test('compile: join som første steg gir ærlig feil (review-funn, ikke FROM (null))', () => {
   const spec = { sources: ['p'], datasets: [
     { name: 'a', load: 'p' },
-    { name: 'b', key: 'pid', steps: [{ op: 'join', from: 'a', on: 'pid', how: 'left' }] },
+    { name: 'b', key: ['pid'], steps: [{ op: 'join', from: 'a', on: ['pid'], how: 'left' }] },
   ] };
   assert.throws(() => AD.compile(spec, DESC), /join krever minst én import først/);
 });
 
 test('compile: topo-sortering lar join referere senere deklarert datasett', () => {
   const spec = { sources: ['p', 's'], datasets: [
-    { name: 'b', key: 'pid', steps: [
+    { name: 'b', key: ['pid'], steps: [
       { op: 'import', source: 'p', columns: ['inntekt'], how: 'left' },
-      { op: 'join', from: 'a', on: 'pid', how: 'inner' },
+      { op: 'join', from: 'a', on: ['pid'], how: 'inner' },
     ] },
     { name: 'a', load: 's' },
   ] };
@@ -63,8 +89,8 @@ test('compile: topo-sortering lar join referere senere deklarert datasett', () =
 
 test('_topoSort: sirkulær avhengighet kaster', () => {
   const ds = [
-    { name: 'a', key: 'k', steps: [{ op: 'join', from: 'b', on: 'k', how: 'left' }] },
-    { name: 'b', key: 'k', steps: [{ op: 'join', from: 'a', on: 'k', how: 'left' }] },
+    { name: 'a', key: ['k'], steps: [{ op: 'join', from: 'b', on: ['k'], how: 'left' }] },
+    { name: 'b', key: ['k'], steps: [{ op: 'join', from: 'a', on: ['k'], how: 'left' }] },
   ];
   assert.throws(() => AD._topoSort(ds), /sirkulær/);
 });
