@@ -3,7 +3,7 @@
 // duplicated across this file (PYODIDE_VERSION below), index.html and
 // export_data*.html — update all together when upgrading Pyodide.
 const PYODIDE_VERSION = 'v314.0.2';
-const CACHE = 'm2py-v33';
+const CACHE = 'm2py-v34';
 const CDN_HOSTS = new Set([
   'cdn.jsdelivr.net',
   'cdn.plot.ly',
@@ -19,7 +19,7 @@ const CDN_HOSTS = new Set([
 // etter deploy tre ganger 2026-07-20..22). Nå dekkes ALLE lokale .py-filer
 // av én suffiks-regel, så nye filer aldri kan glemmes.
 function isLocalPySwr(pathname) {
-  return pathname.endsWith('.py') || pathname.endsWith('/variable_metadata.json');
+  return pathname.endsWith('.py');
 }
 
 const PRECACHE_URLS = [

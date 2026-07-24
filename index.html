@@ -2028,7 +2028,10 @@
     function ensureMicrodataCatalog() {
       if (!__microdataCatalogPromise) {
         const base = window.location.href.replace(/[^/]+$/, '');
-        __microdataCatalogPromise = fetch(base + 'variable_metadata.json?v=' + (window.M2PY_VERSION || '1'))
+        // Navneliste generert fra safestat/microdatas variable_metadata.json
+        // (scope B, 2026-07-24): kun autocomplete-navn for statx/duckdb-tab —
+        // beskrivelser/datoer forsvant med motoren (konsumentene guarder selv).
+        __microdataCatalogPromise = fetch(base + 'data/variable_names.json?v=' + (window.M2PY_VERSION || '1'))
           .then(r => r.ok ? r.json() : null)
           .then(meta => {
             if (meta && meta.variables) {
