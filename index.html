@@ -1347,19 +1347,6 @@
       window.__applyShowIndividataToSidebar = applyShowIndividataToSidebar;
 
       // Datakilde-bryter: dynamisk (generer) vs statisk (DuckDB-WASM + Parquet)
-      function updateDataSourceLabel() {
-        const b = document.getElementById('menuDataSource');
-        if (b) b.textContent = isStaticDataSource() ? t('Datakilde: Statisk') : t('Datakilde: Dynamisk');
-      }
-      updateDataSourceLabel();
-      const menuDataSourceBtn = document.getElementById('menuDataSource');
-      if (menuDataSourceBtn) {
-        menuDataSourceBtn.addEventListener('click', function() {
-          setDataSource(!isStaticDataSource());
-          updateDataSourceLabel();
-          dropdown.classList.remove('open');
-        });
-      }
 
       (function bindPlotMenuTogglesIfPresent() {
         var ms = document.getElementById('menuToggleSuppress');
@@ -2056,21 +2043,6 @@
     }
 
     // ── Innstillinger ─────────────────────────────────────────────────────────
-    const IMPORT_LIMIT_KEY = 'microdata_import_limit';
-    const TTS_RATE_KEY     = 'microdata_tts_rate';
-    const BLOCK_PAUSE_KEY  = 'microdata_block_pause_ms';
-    const DECIMALS_KEY     = 'microdata_decimals';
-    const LABEL_FORMAT_KEY = 'microdata_label_format';
-    const LABEL_FORMAT_VALUES = ['both', 'label', 'code'];
-    const SHOW_COMMANDS_KEY = 'microdata_show_commands';
-
-    // Konfigurerbare avsløringsterskler (Innstillinger). Standardene matcher
-    // microdata.no og skaleres IKKE automatisk til mock-populasjonen.
-
-    function getImportLimit() {
-      try { var v = parseInt(localStorage.getItem(IMPORT_LIMIT_KEY), 10); if (v >= 10) return v; } catch(e) {}
-      return 10000;
-    }
 
     // BYOK-nøkkel (via Keys-API fra js/keys.js) — brukes av
     // data-loaderen mot /api/hent når brukeren ikke har en lagret nøkkel.
@@ -2116,18 +2088,6 @@
     }
 
     // ── Datakilde: dynamisk (generer) vs statisk (DuckDB-WASM + Parquet) ──────
-    const DATA_SOURCE_KEY = 'microdata_data_source';
-    const STATIC_TABLES = ['person', 'person_year', 'jobb', 'kjoretoy', 'kurs',
-                           'npr', 'malepunkt', 'trafikkulykke', 'person_i_trafikkulykke'];
-    function isStaticDataSource() {
-      // Fase 2 (plan 2026-07-11): statisk er DEFAULT — dynamisk generering er
-      // opt-in (Innstillinger eller // m2py: data-source=dynamic). Uendret for
-      // brukere som alt har valgt eksplisitt (lagret 'static'/'dynamic').
-      try { return localStorage.getItem(DATA_SOURCE_KEY) !== 'dynamic'; } catch (e) { return true; }
-    }
-    function setDataSource(on) {
-      try { localStorage.setItem(DATA_SOURCE_KEY, on ? 'static' : 'dynamic'); } catch (e) {}
-    }
     let __duckdbPromise = null;
     function __ensureDuckDB() {
       // Memoize the in-flight promise: two concurrent callers would otherwise
@@ -2186,13 +2146,6 @@
       }
       return cols;
     }
-    // Awaited from Pyodide during a run: execute one routed query, return columns.
-    window.runStaticQuery = async function (sql) {
-      const db = await __ensureDuckDB();
-      const conn = await db.connect();
-      try { return __arrowToColumns(await conn.query(sql)); }
-      finally { await conn.close(); }
-    };
     // Brython-modus: konverter vilkårlige parquet-bytes til kolonne-arrays via
     // DuckDB-WASM (lastes lat — kun når en brython-kjøring faktisk laster parquet).
     let __brythonParquetSeq = 0;
@@ -2254,21 +2207,6 @@
         try { return __arrowToColumns(await conn.query(sql)); }
         finally { await conn.close(); }
       }
-    };
-    // Column lists per static table (so routing knows what's materialised).
-    window.runStaticSchemas = async function (base) {
-      const db = await __ensureDuckDB();
-      const conn = await db.connect();
-      const out = {};
-      try {
-        for (const t of STATIC_TABLES) {
-          try {
-            const r = await conn.query("SELECT * FROM read_parquet('" + base + "static_data/" + t + ".parquet?v=" + (window.M2PY_VERSION || '1') + "') LIMIT 0");
-            out[t] = r.schema.fields.map(f => f.name);
-          } catch (e) { /* table absent */ }
-        }
-      } finally { await conn.close(); }
-      return out;
     };
     // ── DuckDB editor mode: per-run connection over the same worker ──────────
     // Datasets are registered as views from Parquet buffers; results come back
@@ -2363,13 +2301,6 @@
       try { var v = parseInt(localStorage.getItem(DECIMALS_KEY), 10); if (!isNaN(v) && v >= 0 && v <= 8) return v; } catch(e) {}
       return 2;
     }
-    function getLabelFormat() {
-      try {
-        var v = localStorage.getItem(LABEL_FORMAT_KEY);
-        if (LABEL_FORMAT_VALUES.indexOf(v) >= 0) return v;
-      } catch(e) {}
-      return 'both';
-    }
     function getShowCommandsDefault() {
       try {
         var v = localStorage.getItem(SHOW_COMMANDS_KEY);
@@ -2389,13 +2320,11 @@
 
     (function initSettings() {
       var overlay   = document.getElementById('settingsOverlay');
-      var limitIn   = document.getElementById('settingImportLimit');
       var fontSel   = document.getElementById('settingFontSize');
       var rateIn    = document.getElementById('settingTtsRate');
       var rateVal   = document.getElementById('settingTtsRateVal');
       var pauseIn    = document.getElementById('settingBlockPause');
       var decimalsEl = document.getElementById('settingDecimals');
-      var labelFmtEl = document.getElementById('settingLabelFormat');
       var showCmdsEl = document.getElementById('settingShowCommands');
       var saveBtn   = document.getElementById('settingsSaveBtn');
       var cancelBtn = document.getElementById('settingsCancelBtn');
@@ -2408,13 +2337,11 @@
 
       function openSettings() {
         if (langSel) langSel.value = window.M2PY_LANG || 'no';
-        if (limitIn) limitIn.value = getImportLimit();
         fontSel.value = document.body.getAttribute('data-font-size') || '';
         rateIn.value  = getTtsRate();
         rateVal.textContent = parseFloat(rateIn.value).toFixed(1) + '\u00d7';
         pauseIn.value = getBlockPauseSec();
         if (decimalsEl) decimalsEl.value = getDecimals();
-        if (labelFmtEl) labelFmtEl.value = getLabelFormat();
         if (showCmdsEl) showCmdsEl.value = getShowCommandsDefault() ? 'on' : 'off';
         overlay.classList.add('open');
       }
@@ -2428,12 +2355,6 @@
       });
 
       saveBtn.addEventListener('click', function() {
-        if (limitIn) {
-          var lim = parseInt(limitIn.value, 10);
-          if (lim >= 10 && lim <= 100000) {
-            try { localStorage.setItem(IMPORT_LIMIT_KEY, String(lim)); } catch(e2) {}
-          }
-        }
         if (applyFontSize) applyFontSize(fontSel.value);
         var rate = parseFloat(rateIn.value);
         if (!isNaN(rate)) { try { localStorage.setItem(TTS_RATE_KEY, String(rate)); } catch(e2) {} }
@@ -2445,12 +2366,6 @@
           var dec = parseInt(decimalsEl.value, 10);
           if (!isNaN(dec) && dec >= 0 && dec <= 8) {
             try { localStorage.setItem(DECIMALS_KEY, String(dec)); } catch(e2) {}
-          }
-        }
-        if (labelFmtEl) {
-          var lf = labelFmtEl.value;
-          if (LABEL_FORMAT_VALUES.indexOf(lf) >= 0) {
-            try { localStorage.setItem(LABEL_FORMAT_KEY, lf); } catch(e2) {}
           }
         }
         if (showCmdsEl) {
@@ -7006,18 +6921,6 @@ for _wl in json.loads(${JSON.stringify(JSON.stringify(loads))}):
 `;
     }
 
-    // DC-innstillinger (label_format + dc_*-terskler) presset inn i
-    // _m2py_mod.M2PY_DEFAULTS. Ekstrahert (fase B1, plan 2026-07-14) fra
-    // getInterpreterCorePython() sin boot-mal slik at reapplySettings() kan
-    // kjøre AKKURAT samme snutt mot en allerede levende sesjon uten reboot.
-    function buildM2pyDefaultsSnippet() {
-      return `try:
-    if isinstance(getattr(_m2py_mod, 'M2PY_DEFAULTS', None), dict):
-        _m2py_mod.M2PY_DEFAULTS['label_format'] = ${JSON.stringify(getLabelFormat())}
-except Exception:
-    pass`;
-    }
-
     function getInterpreterCorePython(pageBase, segmentsStrForInit) {
       const segAssign = segmentsStrForInit != null
         ? `_segments = json.loads(${JSON.stringify(segmentsStrForInit)})\n`
@@ -8267,39 +8170,6 @@ json.dumps(out)
         ? !!runOpts.displayAll
         : String(((typeof extractScriptOptions === 'function') ? extractScriptOptions(src) : {}).display || '').toLowerCase() === 'all';
 
-      // ── Phase 1: run all microdata segments with a shared interpreter ────
-      // Runs silently (setup). Datasets exported to WebR as typed tibbles via
-      // Arrow IPC with label metadata applied as factors.
-      if (microdataSegs.length > 0) {
-        try {
-          setStatus(rightStatus, t('Setter opp data…'));
-          // R-modus kjører uten Pyodide siden fase 1 (btnRun sender py=null) —
-          // microdata-segmenter er unntaket som lazy-laster den her.
-          if (!py) py = await loadPyodideAndM2py();
-          try { await ensureMicrodataAssets(py); }
-          catch (e) { console.warn('microdata-assets (r-hybrid):', e); }
-          // Build catalog JSON to pass to Python for label application
-          var _catJson = (microdataCatalog && microdataCatalog.variables)
-            ? JSON.stringify(microdataCatalog.variables) : '{}';
-
-          var mdSetupCode =
-            'import json as _j, base64 as _b64, pandas as _pd3\n' +
-            'from m2py import MicroInterpreter as _MI\n' +
-            '_e_r = _MI()\n';
-
-          for (var ms = 0; ms < microdataSegs.length; ms++) {
-            mdSetupCode += '_e_r.run_script(' + JSON.stringify(microdataSegs[ms].text.trim()) + ')\n';
-          }
-          // Implisitt kopier-alt-eksport til R er FJERNET (2026-07-11):
-          // openstat/safestat krever eksplisitt «# use <navn>» i R-blokken —
-          // microdata-repoen beholder den implisitte kopieringen.
-          await py.runPythonAsync(mdSetupCode);
-          setStatus(rightStatus, t('Kjører R…'));
-        } catch(e) {
-          outputParts.push({ type: 'error', text: 'Microdata-feil: ' + (e.message || e) });
-        }
-      }
-
       // ── Eksplisitte use-kopier inn i R (etter micro-fasen: «# use folk» i
       // en R-blokk henter fra dette scriptets #micro-tilstand først, så fra
       // hoved-python-økten; «from duckdb» fra wasm-katalogen) ──
@@ -9046,61 +8916,9 @@ await micropip.install('plotly')
       } catch (e) {
         console.warn('plotly install:', e);
       }
-      setStatus(leftStatus, 'Fetching m2py and functions...');
       const base = window.location.href.replace(/[^/]+$/, '');
       const _cb = '?v=' + (window.M2PY_VERSION || '1');
-      const [m2pyResp, funcResp, coreResp, protectResp, notebookProseResp] = await Promise.all([
-        fetch(base + 'm2py.py' + _cb),
-        fetch(base + 'functions.py' + _cb),
-        fetch(base + 'mockdata_core.py' + _cb),
-        fetch(base + 'protect.py' + _cb).catch(function() { return { ok: false }; }),
-        fetch(base + 'notebook_prose.py' + _cb).catch(function() { return { ok: false }; })
-      ]);
-      if (!m2pyResp.ok || !funcResp.ok || !coreResp.ok) {
-        throw new Error('Could not load m2py.py, functions.py or mockdata_core.py. Run from a local server (e.g. python -m http.server) from the microdata folder.');
-      }
-      // Katalog + de TUNGE microdata-assetene er lazy (plan 2026-07-23-lazy-
-      // microdata-assets): se ensureMicrodataAssets() — kjørestedene awaiter
-      // den når microdata faktisk er involvert. mockdata_core (185 linjer,
-      // delte konstanter) er unntaket: m2py.py importerer den på toppnivå
-      // (m2py.py:1668) og den MÅ registreres før m2py under.
-      const m2pyCode = await m2pyResp.text();
-      const funcCode = await funcResp.text();
-      const funcRe = /def\s+(\w+)\s*\(/g;
-      const skip = new Set(['_elementwise', '_safe', '_days_to_dt', 'get_microdata_functions', 'wrapped']);
-      let fm;
-      microdataFunctions = [];
-      while ((fm = funcRe.exec(funcCode)) !== null)
-        if (!skip.has(fm[1])) microdataFunctions.push(fm[1]);
-      microdataFunctions = [...new Set(microdataFunctions)];
-      setStatus(leftStatus, 'Registering functions module...');
-      await pyodide.runPythonAsync(`
-import sys
-import importlib.util
-
-# Opprett functions-modul
-func_code = ${JSON.stringify(funcCode)}
-spec = importlib.util.spec_from_loader("functions", loader=None)
-func_mod = importlib.util.module_from_spec(spec)
-sys.modules["functions"] = func_mod
-exec(compile(func_code, "functions.py", "exec"), func_mod.__dict__)
-`);
-      // Register protect (dataminimering-verktøy) — valgfri, ikke-fatal hvis filen mangler.
-      // Tilgjengelig som modulen `protect` i Pyodide; eksponeres som `beskytt` ved kjøring.
-      if (protectResp && protectResp.ok) {
-        try {
-          const protectCode = await protectResp.text();
-          setStatus(leftStatus, 'Registering protect...');
-          await pyodide.runPythonAsync(`
-import sys, importlib.util
-protect_code = ${JSON.stringify(protectCode)}
-spec_p = importlib.util.spec_from_loader("protect", loader=None)
-sys.modules["protect"] = importlib.util.module_from_spec(spec_p)
-exec(compile(protect_code, "protect.py", "exec"), sys.modules["protect"].__dict__)
-`);
-          window.__protectLoaded = true;
-        } catch (e) { console.warn('protect register:', e); }
-      }
+      const notebookProseResp = await fetch(base + 'notebook_prose.py' + _cb).catch(function() { return { ok: false }; });
       // Register notebook_prose (prose->markdown transform for notebook links) — optional.
       if (notebookProseResp && notebookProseResp.ok) {
         try {
@@ -9116,110 +8934,8 @@ exec(compile(np_code, "notebook_prose.py", "exec"), sys.modules["notebook_prose"
           window.__notebookProseLoaded = true;
         } catch (e) { console.warn('notebook_prose register:', e); }
       }
-      // mockdata_core FØR m2py: toppnivå `from mockdata_core import …` i m2py.py.
-      const coreCode = await coreResp.text();
-      setStatus(leftStatus, 'Registering mockdata_core...');
-      await pyodide.runPythonAsync(`
-core_code = ${JSON.stringify(coreCode)}
-spec_c = importlib.util.spec_from_loader("mockdata_core", loader=None)
-sys.modules["mockdata_core"] = importlib.util.module_from_spec(spec_c)
-exec(compile(core_code, "mockdata_core.py", "exec"), sys.modules["mockdata_core"].__dict__)
-`);
-      setStatus(leftStatus, 'Registering m2py...');
-      await pyodide.runPythonAsync(`
-m2py_code = ${JSON.stringify(m2pyCode)}
-spec2 = importlib.util.spec_from_loader("m2py", loader=None)
-sys.modules["m2py"] = importlib.util.module_from_spec(spec2)
-exec(compile(m2py_code, "m2py.py", "exec"), sys.modules["m2py"].__dict__)
-`);
-      // Speile UI-språket til m2py.M2PY_LANG (styrer motorens meldingsspråk).
-      // (Avsløringskontroll-speilingen er fjernet med DC-innstillingen
-      // 2026-07-24 — motoren defaulter til AV når flagget mangler.)
-      window.__applyLangToPython = async function () {
-        if (!pyodide) return;
-        const uiLang = window.M2PY_LANG === 'en' ? 'en' : 'no';
-        try {
-          await pyodide.runPythonAsync(
-            `import sys\n` +
-            `if 'm2py' in sys.modules:\n` +
-            `    sys.modules['m2py'].M2PY_LANG = '${uiLang}'\n`
-          );
-        } catch (e) { console.warn('apply lang:', e); }
-      };
-      await window.__applyLangToPython();
-      let functionsLoaded = false;
-      try {
-        functionsLoaded = await pyodide.runPythonAsync(`
-m = __import__("functions")
-has = hasattr(m, "get_microdata_functions")
-has and "int" in (m.get_microdata_functions() or {})
-`);
-      } catch (e) { /* ignore */ }
-      // Write the m2py_runtime package to the Pyodide FS so the emulator's lazy
-      // `from m2py_runtime import keys` (merge handler) resolves without needing
-      // the offline-translation menu first. Non-fatal (only merges need it).
-      try { await ensureM2pyRuntime(pyodide); } catch (e) { console.warn('m2py_runtime load:', e); }
-      setStatus(leftStatus, functionsLoaded ? t('Ready. (functions.py lastet.)') : 'Ready.');
+      setStatus(leftStatus, 'Ready.');
       return pyodide;
-    }
-
-    // ── Lazy microdata-assets (plan 2026-07-23-lazy-microdata-assets) ──────
-    // mockdata_realism og static_source trengs bare når microdata-språket
-    // kjører (statx-modus, microdata-modus/-segmenter): m2py importerer
-    // mockdata_realism lazy (realism-dispatch faller pent tilbake uten den),
-    // og getInterpreterCorePython sjekker selv `'static_source' in
-    // _sys.modules` — så rene python/duckdb-kjøringer er upåvirket av at
-    // modulene mangler. (mockdata_core er derimot en toppnivå-import i
-    // m2py.py og bor i kjernebooten.) Registreringskoden er flyttet uendret
-    // fra _loadPyodideAndM2pyImpl (pluss egne sys/importlib-imports: snuttene
-    // kjører nå frittstående, ikke etter functions-registreringens imports).
-    let __mockdataModulesPromise = null;
-    function ensureMockdataModules(py) {
-      if (!__mockdataModulesPromise) {
-        __mockdataModulesPromise = _ensureMockdataModulesImpl(py).catch(function (e) {
-          __mockdataModulesPromise = null;  // tillat retry etter feil
-          throw e;
-        });
-      }
-      return __mockdataModulesPromise;
-    }
-    async function _ensureMockdataModulesImpl(py) {
-      const base = window.location.href.replace(/[^/]+$/, '');
-      const _cb = '?v=' + (window.M2PY_VERSION || '1');
-      const [realismResp, staticSrcResp] = await Promise.all([
-        fetch(base + 'mockdata_realism.py' + _cb).catch(function () { return { ok: false }; }),
-        fetch(base + 'static_source.py' + _cb).catch(function () { return { ok: false }; })
-      ]);
-      // mockdata_realism depends on mockdata_core, which core boot registered.
-      if (realismResp.ok) {
-        const realismCode = await realismResp.text();
-        await py.runPythonAsync(`
-import sys, importlib.util
-realism_code = ${JSON.stringify(realismCode)}
-spec_r = importlib.util.spec_from_loader("mockdata_realism", loader=None)
-sys.modules["mockdata_realism"] = importlib.util.module_from_spec(spec_r)
-exec(compile(realism_code, "mockdata_realism.py", "exec"), sys.modules["mockdata_realism"].__dict__)
-`);
-      } else {
-        console.warn('mockdata_realism.py not available; realism dispatch in m2py will fall back.');
-      }
-      // static_source (statisk datakilde via DuckDB-WASM). Valgfri.
-      if (staticSrcResp && staticSrcResp.ok) {
-        try {
-          const staticCode = await staticSrcResp.text();
-          await py.runPythonAsync(`
-import sys, importlib.util
-static_code = ${JSON.stringify(staticCode)}
-spec_s = importlib.util.spec_from_loader("static_source", loader=None)
-sys.modules["static_source"] = importlib.util.module_from_spec(spec_s)
-exec(compile(static_code, "static_source.py", "exec"), sys.modules["static_source"].__dict__)
-`);
-          window.__staticSourceLoaded = true;
-        } catch (e) { console.warn('static_source register:', e); }
-      }
-    }
-    function ensureMicrodataAssets(py) {
-      return Promise.all([ensureMicrodataCatalog(), ensureMockdataModules(py)]);
     }
 
     async function loadPdexplorer(py) {
@@ -9258,33 +8974,6 @@ exec(compile(static_code, "static_source.py", "exec"), sys.modules["static_sourc
         pdexplorerLoading = false;
       }
     }
-
-    // Write the m2py_runtime package to the Pyodide FS so it imports normally.
-    // Used by BOTH the main bootstrap (emulator merge -> `from m2py_runtime import
-    // keys`) and the offline translator. Keep the file list in sync with
-    // m2py_runtime/*.py (pandas_ops imports .sources, sources imports .manifest).
-    let m2pyRuntimeReady = false;
-    async function ensureM2pyRuntime(py) {
-      if (m2pyRuntimeReady) return;
-      const base = window.location.href.replace(/[^/]+$/, '');
-      const rtMods = ['__init__', 'keys', 'manifest', 'sources', 'profile', 'exprcompile', 'pandas_ops', 'polars_ops'];
-      const rtSrcs = await Promise.all(rtMods.map(function(m) {
-        return fetch(base + 'm2py_runtime/' + m + '.py?v=' + window.M2PY_VERSION).then(function(r) {
-          if (!r.ok) throw new Error('m2py_runtime/' + m + '.py'); return r.text();
-        });
-      }));
-      await py.runPythonAsync('import os, sys\nos.makedirs("/home/pyodide/m2py_runtime", exist_ok=True)\nif "/home/pyodide" not in sys.path: sys.path.insert(0, "/home/pyodide")');
-      for (let i = 0; i < rtMods.length; i++) {
-        py.globals.set('_rt_src', rtSrcs[i]);
-        await py.runPythonAsync('open("/home/pyodide/m2py_runtime/' + rtMods[i] + '.py", "w", encoding="utf-8").write(_rt_src)');
-      }
-      py.globals.set('_rt_src', null);
-      m2pyRuntimeReady = true;
-    }
-
-    // Offline translator (microdata -> standalone pandas/polars): the runtime
-    // package (above) plus m2py_translate. m2py itself is already registered.
-    let translatorReady = false;
 
     // Memoisert etter mønster av __pyodidePromise: FØR denne wrapperen
     // returnerte et nr. 2-kall umiddelbart mens lastingen fortsatt pågikk
@@ -9447,10 +9136,8 @@ options(width = 200)
         // uten dette betaler den FØRSTE data-kjøringen nedlastingen. Rører ikke
         // kald-boot (kjøres etter Ready), og hoppes over i dynamisk modus der
         // DuckDB ikke trengs. Feil svelges — første kjøring prøver på nytt.
-        if (isStaticDataSource()) {
-          var _pf = function () { __ensureDuckDB().catch(function () {}); };
-          if (window.requestIdleCallback) window.requestIdleCallback(_pf); else setTimeout(_pf, 0);
-        }
+        var _pf = function () { __ensureDuckDB().catch(function () {}); };
+        if (window.requestIdleCallback) window.requestIdleCallback(_pf); else setTimeout(_pf, 0);
       }).catch(function (e) {
         setStatus(leftStatus, 'Load failed: ' + (e && e.message ? e.message : String(e)), true);
       });
@@ -9633,31 +9320,6 @@ options(width = 200)
         const _dataPreamble = buildWebDataLoaderPreamble(_pyLoads);
         const setupCode = getInterpreterCorePython(pageBase, segmentsStr) + _dataPreamble + `
 import asyncio as _asyncio
-# ── Statisk datakilde: pre-fetch alle importer via DuckDB-WASM (JS) før kjøring ──
-if getattr(_m2py_mod, 'M2PY_DATA_SOURCE', 'dynamic') == 'static' and getattr(e, 'static_source', None) is not None:
-    import js as _js
-    try:
-        _schemas = (await _js.runStaticSchemas(${JSON.stringify(pageBase)})).to_py()
-        e.static_source.table_columns = {k: set(v) for k, v in _schemas.items()}
-        # Manifest gir limit-planen levende/døde-fordelingen (unit_id-splitten);
-        # uten den faller planen tilbake til kun-levende-grensen.
-        try:
-            _mresp = await _js.fetch(${JSON.stringify(pageBase)} + 'static_data/manifest.json?v=' + ${JSON.stringify(String(window.M2PY_VERSION || '1'))})
-            if _mresp.ok:
-                e.static_source.manifest = json.loads(await _mresp.text())
-        except Exception:
-            pass
-        _plan = e.static_source.plan_sql(${JSON.stringify(effectiveScript)}, ${JSON.stringify(pageBase)}, ${getImportLimit()}, version=${JSON.stringify(String(window.M2PY_VERSION || '1'))})
-        _cache = {}
-        for _q in _plan:
-            try:
-                _cache[_q['key']] = (await _js.runStaticQuery(_q['sql'])).to_py()
-            except Exception:
-                pass
-        e.static_source.set_cache(_cache)
-    except Exception as _pe:
-        print('(static pre-fetch feilet, faller tilbake til generering:', _pe, ')')
-        _m2py_mod.M2PY_DATA_SOURCE = 'dynamic'
 result = None
 async def _m2py_run_segment(_seg_json):
     # Ett hybrid-segment; "stop" avbryter kjøringen (DuckDB-feil, som før).
@@ -9750,10 +9412,8 @@ async def _m2py_run_segment(_seg_json):
     }
 
     async function nbReapplySettings() {
-      if (!nbSessionLive) return;
-      var py = await loadPyodideAndM2py();
-      try { await py.runPythonAsync(buildM2pyDefaultsSnippet()); }
-      catch (_e) { console.warn('mdNotebookSession.reapplySettings:', _e); }
+      // Motor-innstillingene (label-format/DC-terskler) forsvant med m2py
+      // (scope B, 2026-07-24) — ingenting å reapplye i en levende sesjon.
     }
 
     // Eksponert for senere oppgaver (per-celle-kjøring, sesjonschips, Restart
