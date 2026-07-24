@@ -3271,10 +3271,6 @@
     const modeRegistry = {
       // (translate-feltene + Oversett-knappen er fjernet 2026-07-10:
       // oversettelse mellom språkene er microdata-repoens funksjon.)
-      microdata: { id: 'microdata', label: 'Microdata', handleTab: microdataHandleTab,
-        // Modusen er ute av menyen i openstat, men nåbar via #options.mode-
-        // direktiv/eksempellasting — prefetch katalogen ved aktivering.
-        onActivate: function () { ensureMicrodataCatalog(); } },
       python:    { id: 'python',    label: 'Python', hlConfig: PY_HL_CFG, handleTab: handlePythonTab,
         runDefault: 'pyodide',
         preRun: async function (script, ctx) {
@@ -3569,7 +3565,7 @@
     // moduser (f.eks. brython) er én ny rad + en loader — guardene i
     // btnRun/bootstrap/modusbytte ruter alle gjennom runtimeForMode()
     // (plan 2026-07-09: R uten Pyodide, fremtidig brython/subdomene-boot).
-    var RUNTIME_FOR_MODE = { python: 'pyodide', microdata: 'pyodide', duckdb: 'duckdb',
+    var RUNTIME_FOR_MODE = { python: 'pyodide', duckdb: 'duckdb',
                              jamovi: 'pyodide', statx: 'pyodide',
                              safestat: 'pyodide', brython: 'brython', micropython: 'micropython',
                              javascript: 'javascript', r: 'webr' };
@@ -3841,32 +3837,6 @@
     // not here — referencing activeEditorMode this early would hit the TDZ
     // (ReferenceError) and abort this whole inline script. This block only
     // builds the per-mode example map (pure data, no such dependency).
-    const _PLACEHOLDER_MICRODATA = [
-      t('// Velkommen!'),
-      t('// Dette er en side der du kan øve på å kjøre analyser i microdata.no.'),
-      '',
-      t('//- Denne siden inneholder ikke ekte tall, det er et hobbyprosjekt og er ikke laget av microdata.no selv. Den kommer også uten garantier for at analysene er korrekt implementert.'),
-      '',
-      t('// La oss starte med et eksempel'),
-      t('//- Du kan endre det fritt eller hente et nytt under eksempler i menyen.'),
-      '',
-      t('// Først må vi koble oss opp mot basen med data'),
-      t('require no.ssb.fdb:51 as db  // Her lager vi koblingen og gir den et navn (db).'),
-      '',
-      t('create-dataset df  // Vi starter så med å opprette et nytt datasett kalt df'),
-      '',
-      t('// Vi kan så importere ulike variabler'),
-      'import db/BEFOLKNING_KJOENN as kjonn',
-      t('import db/INNTEKT_LONN 2022-01-01 as inntekt  // Akkumulerte variabler krever en importdato (YYYY-MM-DD)'),
-      t('// Nå har vi hentet data fra databasen (db) og gitt variablene nye navn.'),
-      t('// Husk at du kan trykke TAB for å få hjelp med kommandoer og variabler'),
-      '',
-      t('// Da er vi klare til å analysere.'),
-      t('summarize inntekt // Kommandoen vises gjennomsnitt, standardavvik og mer'),
-      t('tabulate kjonn    // Tabellen viser fordelingen mellom kjønnene i datasettet'),
-      t('barchart kjonn    // Til slutt lager vi et stolpediagram over kjønnsfordelingen'),
-    ].join('\n');
-
     // Repo raw base for committed sample data (OpenStat).
     const _DATA_RAW = 'https://raw.githubusercontent.com/hmelberg/openstat/main/data/';
 
@@ -3923,7 +3893,7 @@
       'stats',
     ].join('\n');
 
-    const STARTUP_EXAMPLES = { python: _STARTUP_PY, r: _STARTUP_R, microdata: _PLACEHOLDER_MICRODATA, brython: _STARTUP_BRYTHON, javascript: _STARTUP_JS };
+    const STARTUP_EXAMPLES = { python: _STARTUP_PY, r: _STARTUP_R, brython: _STARTUP_BRYTHON, javascript: _STARTUP_JS };
 
     // ── Hurtigspør-boks i toppen: Enter åpner AI-panelet og sender spørsmålet ──
     (function initTopbarAsk() {
@@ -4036,7 +4006,7 @@
     }
     // ── Editor mode (always-on, controlled by bottom-bar dropdown) ──────
     let activeEditorMode  = 'microdata'; // 'microdata' | 'python' | 'r'
-    const editorContent   = { microdata: '', python: '', r: '', statx: '', jamovi: '', duckdb: '', brython: '', micropython: '', javascript: '' };
+    const editorContent   = { python: '', r: '', statx: '', jamovi: '', duckdb: '', brython: '', micropython: '', javascript: '' };
     const editorBP        = { microdata: new Set(), python: new Set(), r: new Set(), statx: new Set(), jamovi: new Set(), duckdb: new Set(), brython: new Set(), micropython: new Set(), javascript: new Set() };
     // B4/B5 (docs/REVIEW_2026-07-07.md §3): switchEditorMode() persists
     // md_editor_mode but nothing ever read it back, so a reload always
@@ -4064,9 +4034,8 @@
     (function restoreEditorMode() {
       var saved = null;
       try { saved = localStorage.getItem('md_editor_mode'); } catch (e) {}
-      // Microdata-modus er gated av i openstat (fase 0, 2026-07-11): emulatoren
-      // bor i microdata-repoen og safestat beholder modusen for beskyttede
-      // data. Lagret microdata-modus faller tilbake til hostname-default.
+      // Microdata-modus er FJERNET fra openstat (2026-07-24) — et gammelt
+      // lagret valg faller tilbake til hostname-default.
       if (saved === 'microdata') saved = null;
       var mode = (saved && Object.prototype.hasOwnProperty.call(modeRegistry, saved))
         ? saved
@@ -10680,7 +10649,7 @@ async def _m2py_run_segment(_seg_json):
       // fremfor å lekke en vilkårlig streng videre til UI-en.
       runtime: function () {
         var m = activeEditorMode;
-        return (m === 'python' || m === 'r' || m === 'duckdb' || m === 'microdata'
+        return (m === 'python' || m === 'r' || m === 'duckdb'
                 || m === 'brython' || m === 'micropython' || m === 'javascript') ? m : null;
       },
       onStateChange: function (cb) {
