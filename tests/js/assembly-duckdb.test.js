@@ -88,6 +88,40 @@ test('parseAssembly: format(data.table) fanges, default null', () => {
   assert.equal(byName.b.format, null);
 });
 
+// ── composite keys (spec 2026-07-24-pxweb-sources-design §1) ────────────────
+test('parseAssembly: key(region aar) og key(pid) blir arrays', () => {
+  const r = DD.parseAssembly([
+    '# create-dataset a, key(region aar)',
+    '# create-dataset b, key(pid)',
+    '# create-dataset c, key(region, aar), format(pandas)',
+  ].join('\n'));
+  assert.equal(r.errors.length, 0);
+  const byName = {};
+  r.spec.datasets.forEach(d => { byName[d.name] = d; });
+  assert.deepEqual(byName.a.key, ['region', 'aar']);
+  assert.deepEqual(byName.b.key, ['pid']);
+  assert.deepEqual(byName.c.key, ['region', 'aar']);
+  assert.equal(byName.c.format, 'pandas');
+});
+
+test('parseAssembly: join on region, aar inner — komma-liste + how', () => {
+  const r = DD.parseAssembly([
+    '# create-dataset a, key(pid)',
+    '# import p/x into a',
+    '# create-dataset b, key(pid)',
+    '# import p/y into b',
+    '# join a into b on region, aar inner',
+    '# join a into b on k left',
+  ].join('\n'));
+  assert.equal(r.errors.length, 0);
+  const b = r.spec.datasets.find(d => d.name === 'b');
+  const joins = b.steps.filter(s => s.op === 'join');
+  assert.deepEqual(joins[0].on, ['region', 'aar']);
+  assert.equal(joins[0].how, 'inner');
+  assert.deepEqual(joins[1].on, ['k']);
+  assert.equal(joins[1].how, 'left');
+});
+
 test('compile: attaches er strukturerte {alias, sql} (én per unik fil-URL)', () => {
   const desc = {
     a: { url: 'https://x/f.duckdb', format: 'duckdb', table: 'pasienter' },

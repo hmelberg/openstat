@@ -125,10 +125,10 @@ Deno.test("parseAssembly: create-dataset + import + join + load", () => {
   assertEquals(errors, []);
   assertEquals(spec.sources.sort(), ["p", "s"]);
   const panel = spec.datasets.find((d: {name: string}) => d.name === "panel");
-  assertEquals(panel.key, "pid");
+  assertEquals(panel.key, ["pid"]);
   assertEquals(panel.steps.length, 3);
   assertEquals(panel.steps[0], {op: "import", source: "p", columns: ["income", "edu"], how: "left"});
-  assertEquals(panel.steps[2], {op: "join", from: "sales", on: "pid", how: "left"});
+  assertEquals(panel.steps[2], {op: "join", from: "sales", on: ["pid"], how: "left"});
   const sales = spec.datasets.find((d: {name: string}) => d.name === "sales");
   assertEquals(sales.load, "s");
 });

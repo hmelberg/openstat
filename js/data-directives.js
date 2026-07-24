@@ -21,9 +21,13 @@
   // format(<navn>) (2026-07-24): lever datasettet direkte i valgt frameformat
   // uten konverteringslinje — data.table/tibble i R, pandas i python (polars
   // når wasm-bygget finnes). Ustøttede kombinasjoner feiler høyt ved binding.
-  var CREATE_RE = /^[ \t]*(?:#|--|\/\/)[ \t]*create-dataset[ \t]+([A-Za-z_]\w*)[ \t]*,[ \t]*key\(\s*([A-Za-z_]\w*)\s*\)(?:[ \t]*,[ \t]*format\(\s*([A-Za-z_.]+)\s*\))?[ \t]*$/gim;
+  // Composite keys (spec 2026-07-24-pxweb-sources-design §1): key(region aar)
+  // tar 1+ kolonner (mellomrom/komma — parentesene avgrenser), join-on tar
+  // komma-liste («on region, aar» — mellomrom alene ville vært tvetydig mot
+  // left|inner|outer-halen). d.key og step.on er ALLTID arrays.
+  var CREATE_RE = /^[ \t]*(?:#|--|\/\/)[ \t]*create-dataset[ \t]+([A-Za-z_]\w*)[ \t]*,[ \t]*key\(\s*([A-Za-z_]\w*(?:[ \t,]+[A-Za-z_]\w*)*)\s*\)(?:[ \t]*,[ \t]*format\(\s*([A-Za-z_.]+)\s*\))?[ \t]*$/gim;
   var IMPORT_RE = /^[ \t]*(?:#|--|\/\/)[ \t]*import[ \t]+(\S+(?:[ \t]*,[ \t]*\S+)*)[ \t]+into[ \t]+([A-Za-z_]\w*)(?:[ \t]+(left|inner|outer))?[ \t]*$/gim;
-  var JOIN_RE = /^[ \t]*(?:#|--|\/\/)[ \t]*join[ \t]+([A-Za-z_]\w*)[ \t]+into[ \t]+([A-Za-z_]\w*)[ \t]+on[ \t]+([A-Za-z_]\w*)(?:[ \t]+(left|inner|outer))?[ \t]*$/gim;
+  var JOIN_RE = /^[ \t]*(?:#|--|\/\/)[ \t]*join[ \t]+([A-Za-z_]\w*)[ \t]+into[ \t]+([A-Za-z_]\w*)[ \t]+on[ \t]+([A-Za-z_]\w*(?:[ \t]*,[ \t]*[A-Za-z_]\w*)*)(?:[ \t]+(left|inner|outer))?[ \t]*$/gim;
   var LOADAS_RE = /^[ \t]*(?:#|--|\/\/)[ \t]*load[ \t]+([A-Za-z_]\w*(?:\/[A-Za-z_]\w*)?)[ \t]+as[ \t]+([A-Za-z_]\w*)[ \t]*$/gim;
 
   function isUrlish(target) {
@@ -128,7 +132,7 @@
     CREATE_RE.lastIndex = 0;
     while ((m = CREATE_RE.exec(script)) !== null) {
       if (byName[m[1]]) { errors.push('datasettet «' + m[1] + '» er allerede opprettet'); continue; }
-      var d = { name: m[1], key: m[2], format: (m[3] || '').toLowerCase() || null, steps: [] };
+      var d = { name: m[1], key: m[2].split(/[\s,]+/).filter(Boolean), format: (m[3] || '').toLowerCase() || null, steps: [] };
       datasets.push(d); byName[m[1]] = d;
     }
     LOADAS_RE.lastIndex = 0;
@@ -170,7 +174,7 @@
       var tgt = m[2], d3 = byName[tgt];
       if (!d3 || d3.load) { errors.push('ukjent datasett «' + tgt + '» (mangler create-dataset?)'); continue; }
       if (!byName[m[1]]) { errors.push('ukjent datasett «' + m[1] + '» i join'); continue; }
-      d3.steps.push({ op: 'join', from: m[1], on: m[3], how: (m[4] || 'left') });
+      d3.steps.push({ op: 'join', from: m[1], on: m[3].split(/[\s,]+/).filter(Boolean), how: (m[4] || 'left') });
     }
     return { spec: { sources: Object.keys(sources), datasets: datasets, sourceTables: sourceTables }, errors: errors };
   }
