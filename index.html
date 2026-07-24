@@ -434,25 +434,6 @@
           <p class="settings-hint" data-i18n-html>Standardvisning i <code>tabulate</code>. Kan overstyres per kommando med opsjonene <code>nolabels</code> / <code>novalues</code>, eller per script med <code>// m2py: label-format=both|label|code</code>.</p>
         </div>
         <div class="settings-field">
-          <label data-i18n>Avsl&#248;ringskontroll</label>
-          <button type="button" class="btn btn-secondary" id="menuDisclosureControl" data-i18n-title title="Når PÅ: matcher microdata.no — pseudonym-validering, type-sjekk, min populasjon 1000, små celler skjules, winsorisering, persentiler avrundes. Når AV: alle regler er slått av og du ser rå tall.">Avsl&#248;ringskontroll: AV</button>
-          <p class="settings-hint" data-i18n>N&#229;r P&#197;: matcher microdata.no &mdash; pseudonym-validering, type-sjekk, min populasjon 1000, sm&#229; celler skjules, winsorisering, persentiler avrundes. N&#229;r AV: alle regler er sl&#229;tt av og du ser r&#229; tall.</p>
-        </div>
-        <div class="settings-field">
-          <label data-i18n>Avsl&#248;ringsterskler</label>
-          <div class="range-row" style="gap:6px;flex-wrap:wrap;">
-            <label for="settingDcMinPop" style="font-size:12px;flex:1 1 46%;"><span data-i18n>Min. populasjon (T1)</span>
-              <input type="number" id="settingDcMinPop" min="1" step="1" value="1000" style="width:100%;"></label>
-            <label for="settingDcLowCell" style="font-size:12px;flex:1 1 46%;"><span data-i18n>Min. cellefrekvens (T5)</span>
-              <input type="number" id="settingDcLowCell" min="1" step="1" value="5" style="width:100%;"></label>
-            <label for="settingDcMinAffected" style="font-size:12px;flex:1 1 46%;"><span data-i18n>Min. p&#229;virkede rader (T6)</span>
-              <input type="number" id="settingDcMinAffected" min="1" step="1" value="10" style="width:100%;"></label>
-            <label for="settingDcMinSummarize" style="font-size:12px;flex:1 1 46%;"><span data-i18n>Min. populasjon, statistikk (T7)</span>
-              <input type="number" id="settingDcMinSummarize" min="1" step="1" value="10" style="width:100%;"></label>
-          </div>
-          <p class="settings-hint" data-i18n>Tersklene microdata.no bruker. Mock-populasjonen er mindre enn ekte data, s&#229; standardene (1000/5/10/10) stopper ofte mer enn de ville p&#229; ekte register &mdash; senk dem her ved behov. Skaleres ikke automatisk. Gjelder bare n&#229;r avsl&#248;ringskontroll er P&#197;.</p>
-        </div>
-        <div class="settings-field">
           <label data-i18n>Datakilde</label>
           <button type="button" class="btn btn-secondary" id="menuDataSource" data-i18n-title title="Statisk: import laster fra ferdige, konsistente datafiler (static_data/*.parquet) via DuckDB-WASM (standard). Variabler/datoer som ikke finnes statisk faller tilbake til generering. Dynamisk: variabler genereres på nytt ved hver kjøring. Kan også settes per script med // m2py: data-source=dynamic.">Datakilde: Statisk</button>
           <p class="settings-hint" data-i18n-html>Statisk = last fra <code>static_data/*.parquet</code> (standard). Dynamisk = generer ved kjøring. Per script: <code>// m2py: data-source=dynamic</code>.</p>
@@ -1116,9 +1097,6 @@
         "Plot-typer: `histogram`, `barchart`, `scatter`, `lineplot`.",
         "`regress y x1 x2` kjører en lineær regresjon (statsmodels).",
         "Bruk `## python` eller `## r` for å bytte språk i en kodeblokk.",
-        "Kommentarer i microdata-kode begynner med `//`.",
-        "Avsløringskontroll (i menyen) emulerer microdata.no — min 1000 enheter, sensurerte tabeller, winsorisering. Slå av for rå tall mens du lærer.",
-        "Sett `// m2py: dc=off` øverst i scriptet for å slå av avsløringskontroll bare for det scriptet.",
         "Variabler som slutter på `_FNR` er pseudonymer — kan kun brukes som nøkkel i collapse(by) eller merge(on)."
       ];
 
@@ -1886,35 +1864,6 @@
         });
       }
 
-      // Avsløringskontroll: default AV; også AV når flagget mangler. Slås på
-      // via menybryteren her eller direktivet `// m2py: disclosure-control=on`.
-      // Speiles til Pyodide via globals()['M2PY_DISCLOSURE_CONTROL'].
-      const DC_KEY = 'microdata_disclosure_control';
-      function getDisclosureControl() {
-        try {
-          return localStorage.getItem(DC_KEY) === '1';
-        } catch (e) { return false; }
-      }
-      function setDisclosureControl(on) {
-        try { localStorage.setItem(DC_KEY, on ? '1' : '0'); } catch (e) {}
-        window.__applyDisclosureControlToPython && window.__applyDisclosureControlToPython();
-      }
-      window.__getDisclosureControl = getDisclosureControl;
-      function updateDCLabel() {
-        const btn = document.getElementById('menuDisclosureControl');
-        if (!btn) return;
-        btn.textContent = getDisclosureControl() ? t('Avsløringskontroll: PÅ') : t('Avsløringskontroll: AV');
-      }
-      updateDCLabel();
-      const menuDCBtn = document.getElementById('menuDisclosureControl');
-      if (menuDCBtn) {
-        menuDCBtn.addEventListener('click', function() {
-          setDisclosureControl(!getDisclosureControl());
-          updateDCLabel();
-          dropdown.classList.remove('open');
-        });
-      }
-
       document.getElementById('menuToggleOutputMode').addEventListener('click', function() {
         const current = Array.from(outputModeRadios).find(r => r.checked);
         const nextValue = current && current.value === 'string' ? 'html' : 'string';
@@ -2671,22 +2620,6 @@
 
     // Konfigurerbare avsløringsterskler (Innstillinger). Standardene matcher
     // microdata.no og skaleres IKKE automatisk til mock-populasjonen.
-    const DC_THRESHOLDS = {
-      dc_min_population: { key: 'microdata_dc_min_population', def: 1000 },
-      dc_tabulate_low_cell: { key: 'microdata_dc_low_cell', def: 5 },
-      dc_min_affected: { key: 'microdata_dc_min_affected', def: 10 },
-      dc_min_summarize: { key: 'microdata_dc_min_summarize', def: 10 },
-    };
-    function getDcThreshold(name) {
-      var spec = DC_THRESHOLDS[name];
-      try { var v = parseInt(localStorage.getItem(spec.key), 10); if (!isNaN(v) && v >= 1) return v; } catch (e) {}
-      return spec.def;
-    }
-    function setDcThreshold(name, val) {
-      var spec = DC_THRESHOLDS[name];
-      var v = parseInt(val, 10);
-      if (!isNaN(v) && v >= 1) { try { localStorage.setItem(spec.key, String(v)); } catch (e) {} }
-    }
 
     function getImportLimit() {
       try { var v = parseInt(localStorage.getItem(IMPORT_LIMIT_KEY), 10); if (v >= 10) return v; } catch(e) {}
@@ -3018,10 +2951,6 @@
       var decimalsEl = document.getElementById('settingDecimals');
       var labelFmtEl = document.getElementById('settingLabelFormat');
       var showCmdsEl = document.getElementById('settingShowCommands');
-      var dcPopEl    = document.getElementById('settingDcMinPop');
-      var dcCellEl   = document.getElementById('settingDcLowCell');
-      var dcAffEl    = document.getElementById('settingDcMinAffected');
-      var dcSumEl    = document.getElementById('settingDcMinSummarize');
       var saveBtn   = document.getElementById('settingsSaveBtn');
       var cancelBtn = document.getElementById('settingsCancelBtn');
       var langSel   = document.getElementById('settingLanguage');
@@ -3041,10 +2970,6 @@
         if (decimalsEl) decimalsEl.value = getDecimals();
         if (labelFmtEl) labelFmtEl.value = getLabelFormat();
         if (showCmdsEl) showCmdsEl.value = getShowCommandsDefault() ? 'on' : 'off';
-        if (dcPopEl)  dcPopEl.value  = getDcThreshold('dc_min_population');
-        if (dcCellEl) dcCellEl.value = getDcThreshold('dc_tabulate_low_cell');
-        if (dcAffEl)  dcAffEl.value  = getDcThreshold('dc_min_affected');
-        if (dcSumEl)  dcSumEl.value  = getDcThreshold('dc_min_summarize');
         overlay.classList.add('open');
       }
       function closeSettings() { overlay.classList.remove('open'); }
@@ -3084,10 +3009,6 @@
           var sc = showCmdsEl.value === 'off' ? 'off' : 'on';
           try { localStorage.setItem(SHOW_COMMANDS_KEY, sc); } catch(e2) {}
         }
-        if (dcPopEl)  setDcThreshold('dc_min_population', dcPopEl.value);
-        if (dcCellEl) setDcThreshold('dc_tabulate_low_cell', dcCellEl.value);
-        if (dcAffEl)  setDcThreshold('dc_min_affected', dcAffEl.value);
-        if (dcSumEl)  setDcThreshold('dc_min_summarize', dcSumEl.value);
         closeSettings();
         // Språkbytte til slutt: laster siden på nytt (kun hvis endret).
         if (langSel && window.m2pySetLang && langSel.value !== window.M2PY_LANG) {
@@ -7658,10 +7579,6 @@ for _wl in json.loads(${JSON.stringify(JSON.stringify(loads))}):
       return `try:
     if isinstance(getattr(_m2py_mod, 'M2PY_DEFAULTS', None), dict):
         _m2py_mod.M2PY_DEFAULTS['label_format'] = ${JSON.stringify(getLabelFormat())}
-        _m2py_mod.M2PY_DEFAULTS['dc_min_population'] = ${getDcThreshold('dc_min_population')}
-        _m2py_mod.M2PY_DEFAULTS['dc_tabulate_low_cell'] = ${getDcThreshold('dc_tabulate_low_cell')}
-        _m2py_mod.M2PY_DEFAULTS['dc_min_affected'] = ${getDcThreshold('dc_min_affected')}
-        _m2py_mod.M2PY_DEFAULTS['dc_min_summarize'] = ${getDcThreshold('dc_min_summarize')}
 except Exception:
     pass`;
     }
@@ -9818,22 +9735,21 @@ spec2 = importlib.util.spec_from_loader("m2py", loader=None)
 sys.modules["m2py"] = importlib.util.module_from_spec(spec2)
 exec(compile(m2py_code, "m2py.py", "exec"), sys.modules["m2py"].__dict__)
 `);
-      // Speile avsløringskontroll-flagget fra localStorage til m2py.M2PY_DISCLOSURE_CONTROL,
-      // og UI-språket til m2py.M2PY_LANG (styrer motorens meldingsspråk).
-      window.__applyDisclosureControlToPython = async function () {
+      // Speile UI-språket til m2py.M2PY_LANG (styrer motorens meldingsspråk).
+      // (Avsløringskontroll-speilingen er fjernet med DC-innstillingen
+      // 2026-07-24 — motoren defaulter til AV når flagget mangler.)
+      window.__applyLangToPython = async function () {
         if (!pyodide) return;
-        const on = window.__getDisclosureControl ? window.__getDisclosureControl() : false;
         const uiLang = window.M2PY_LANG === 'en' ? 'en' : 'no';
         try {
           await pyodide.runPythonAsync(
             `import sys\n` +
             `if 'm2py' in sys.modules:\n` +
-            `    sys.modules['m2py'].M2PY_DISCLOSURE_CONTROL = ${on ? "'1'" : "'0'"}\n` +
             `    sys.modules['m2py'].M2PY_LANG = '${uiLang}'\n`
           );
-        } catch (e) { console.warn('apply disclosure control:', e); }
+        } catch (e) { console.warn('apply lang:', e); }
       };
-      await window.__applyDisclosureControlToPython();
+      await window.__applyLangToPython();
       let functionsLoaded = false;
       try {
         functionsLoaded = await pyodide.runPythonAsync(`
