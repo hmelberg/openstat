@@ -555,7 +555,7 @@
     window.t = window.t || function (s) { return s; };
     window.i18nField = window.i18nField || function (obj, field) { return obj && obj[field]; };
 
-    window.M2PY_VERSION = '2026-07-24q';
+    window.M2PY_VERSION = '2026-07-24r';
 
     // One-time migration: remove obsolete localStorage keys from previous milestones
     // Safe to delete this snippet after a few months when most users have re-loaded
@@ -7375,6 +7375,40 @@ async def _run_duck_sql(_sql, _fresh=True):
 `;
     }
 
+    // Variabel-montering (# connect/create-dataset/import/join, re-wiret
+    // 2026-07-24): binder monterte datasett i Pyodide. To former fra JS-siden:
+    // 'cols' (DuckDB-pushdown har allerede plukket kolonner server-/query-side)
+    // eller 'spec'+'files' (pandas-fallback: hele kildene på FS, montering her).
+    function buildAssemblyPreamble(payload) {
+      if (!payload) return '';
+      return `
+# ── Variabel-montering (# connect/create-dataset/import/join) ──
+_asm = json.loads(${JSON.stringify(JSON.stringify(payload))})
+for _an in (_asm.get('cols') or {}):
+    to_microdata(pd.DataFrame(_asm['cols'][_an]), name=_an, make_active=False)
+if _asm.get('spec'):
+    _asrc = {}
+    for _f in _asm['files']:
+        _asrc[_f['alias']] = pd.read_parquet(_f['path']) if _f['format'] == 'parquet' else pd.read_csv(_f['path'])
+    for _ds in _asm['spec']['datasets']:
+        if _ds.get('load'):
+            to_microdata(_asrc[_ds['load']].copy(), name=_ds['name'], make_active=False)
+            continue
+        _key = _ds.get('key')
+        _acc = None
+        for _st in _ds.get('steps') or []:
+            if _st['op'] == 'import':
+                _cols = [_key] + [c for c in _st['columns'] if c != _key]
+                _piece = _asrc[_st['source']][_cols]
+                _acc = _piece.copy() if _acc is None else _acc.merge(_piece, on=_key, how=_st['how'])
+            else:
+                if _acc is None:
+                    raise ValueError('join krever minst én import først i «' + _ds['name'] + '»')
+                _acc = _acc.merge(e.datasets[_st['from']], on=_st['on'], how=_st['how'])
+        to_microdata(_acc, name=_ds['name'], make_active=False)
+`;
+    }
+
     // DuckDB-motstykket: katalogen (tabeller/visninger fra siste duckdb-
     // kjøring — begin() rydder ved neste) er sannheten for duckdb-modus.
     // Kjøringens egen sidebar-oppdatering kom fra en per-kjøring-dict som
@@ -9360,8 +9394,52 @@ options(width = 200)
             }
           } catch (e) { console.warn('pyarrow ensure:', e); }
         }
+        // ── Variabel-montering (# connect/create-dataset/import/join),
+        // re-wiret 2026-07-24 (Project A-spec 2026-07-05): DuckDB-pushdown for
+        // parquet/csv/duckdb/sqlite-kilder (bare valgte kolonner materialiseres;
+        // parquet hentes med range requests), pandas-fallback ellers.
+        var _asmPayload = null;
+        var _asmParsed = (window.DataDirectives && window.DataDirectives.parseAssembly)
+          ? window.DataDirectives.parseAssembly(effectiveScript)
+          : { spec: { datasets: [] }, errors: [] };
+        if (_asmParsed.errors.length) throw new Error('Monteringsfeil: ' + _asmParsed.errors.join('; '));
+        if ((_asmParsed.spec.datasets || []).length) {
+          var _asmDeps = { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey };
+          var _so = await window.DataLoader.resolveSourcesOnly(effectiveScript, _asmDeps);
+          if (window.AssemblyDuckdb.canPushdown(_so.spec, _so.descriptors)) {
+            setStatus(rightStatus, t('Monterer datasett (DuckDB)…'));
+            var _cmp = window.AssemblyDuckdb.compile(_so.spec, _so.descriptors);
+            var _adb = await __ensureDuckDB();
+            var _aconn = await _adb.connect();
+            try {
+              for (var _ai = 0; _ai < _cmp.attachStatements.length; _ai++) {
+                await _aconn.query(_cmp.attachStatements[_ai]);
+              }
+              var _colsByName = {};
+              for (var _di = 0; _di < _cmp.datasetStatements.length; _di++) {
+                var _dst = _cmp.datasetStatements[_di];
+                _colsByName[_dst.name] = __arrowToColumns(await _aconn.query(_dst.sql));
+              }
+              _asmPayload = { cols: _colsByName };
+            } finally { await _aconn.close(); }
+          } else {
+            setStatus(rightStatus, t('Monterer datasett…'));
+            var _ra = await window.DataLoader.resolveAndAssemble(effectiveScript, _asmDeps);
+            if (_ra.remote && _ra.remote.length) {
+              throw new Error(t('Montering støtter ikke beskyttede kilder i OpenStat.'));
+            }
+            if (_ra.sources.some(function (l) { return l.bytes; })) py.FS.mkdirTree('/home/pyodide/_webasm');
+            var _afiles = _ra.sources.map(function (l) {
+              var _ap = '/home/pyodide/_webasm/' + l.alias + '.' + l.format;
+              py.FS.writeFile(_ap, l.bytes);
+              return { alias: l.alias, format: l.format, path: _ap };
+            });
+            _asmPayload = { spec: { datasets: window.AssemblyDuckdb._topoSort(_asmParsed.spec.datasets || []) },
+                            files: _afiles };
+          }
+        }
         const segmentsStr = JSON.stringify(segments);
-        const _dataPreamble = buildWebDataLoaderPreamble(_pyLoads);
+        const _dataPreamble = buildWebDataLoaderPreamble(_pyLoads) + buildAssemblyPreamble(_asmPayload);
         const setupCode = getInterpreterCorePython(pageBase, segmentsStr) + _dataPreamble + `
 import asyncio as _asyncio
 result = None
@@ -11031,6 +11109,7 @@ async def _m2py_run_segment(_seg_json):
   <script src="js/data-directives.js"></script>
   <script src="js/enc-crypto.js"></script>
   <script src="js/data-loader.js"></script>
+  <script src="js/assembly-duckdb.js"></script>
   <script src="js/duckdb-native.js"></script>
   <script src="js/ai-chat.js"></script>
   <script src="js/portable-export.js"></script>

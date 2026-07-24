@@ -1,0 +1,12 @@
+# label: Assembly — import single variables
+#options.mode = python
+# Variable-level assembly: pick COLUMNS from external sources declaratively.
+# With parquet sources the selection is pushed down to DuckDB-WASM, so only
+# the chosen columns travel over the network (HTTP range requests) — here
+# 3 of 11 columns from the source file.
+# connect https://raw.githubusercontent.com/hmelberg/openstat/main/static_data/person_year.parquet as py
+
+# create-dataset demo, key(unit_id)
+# import py/alder, py/INNTEKT_WLONN into demo
+
+demo.groupby(demo["alder"] // 10 * 10)["INNTEKT_WLONN"].mean().round(0)

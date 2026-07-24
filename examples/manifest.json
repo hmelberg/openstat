@@ -417,6 +417,11 @@
       "file": "python/py_widgets_ui.txt",
       "label": "Widgets — ui.slider/dropdown (notebook)",
       "group": null
+    },
+    {
+      "file": "python/py31_assembly.txt",
+      "label": "Assembly — import single variables",
+      "group": null
     }
   ],
   "r": [
