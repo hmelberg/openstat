@@ -1,0 +1,26 @@
+# label: lifelines — overlevelsesanalyse
+# Kaplan-Meier per gruppe + logrank + Cox-regresjon (MicroPython-modus).
+from lifelines import KaplanMeierFitter, CoxPHFitter
+from lifelines.statistics import logrank_test
+
+# Tid til hendelse (måneder) for to behandlingsgrupper
+tid_a =    [5, 6, 6, 2, 4, 4, 6, 7, 3, 9, 8, 10]
+status_a = [1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 0]
+tid_b =    [1, 4, 4, 5, 8, 9, 2, 3, 3, 6]
+status_b = [1, 1, 0, 1, 1, 1, 1, 1, 0, 1]
+
+kmf_a = KaplanMeierFitter().fit(tid_a, status_a, label="Behandling A")
+kmf_b = KaplanMeierFitter().fit(tid_b, status_b, label="Behandling B")
+
+r = logrank_test(tid_a, tid_b, status_a, status_b)
+print("Logrank: chi2 = %.3f, p = %.3f" % (r.test_statistic, r.p_value))
+
+cph = CoxPHFitter().fit({
+    "tid": tid_a + tid_b,
+    "status": status_a + status_b,
+    "gruppe": [0] * len(tid_a) + [1] * len(tid_b),
+}, "tid", "status")
+cph.print_summary()
+
+fig = kmf_a.plot_survival_function()
+kmf_b.plot_survival_function(fig=fig)

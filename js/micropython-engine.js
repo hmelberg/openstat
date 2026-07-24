@@ -56,7 +56,14 @@
       { url: 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.min.js', global: 'L' }
                           ] },
     folium_core:        { aliases: [], deps: [], js: [],
-                          path: 'shared/folium_core.py' }
+                          path: 'shared/folium_core.py' },
+    // lifelines (spec 2026-07-24): ren beregning — ingen js-deps; plott
+    // gjenbruker plotly-shimet (deps sørger for rekkefølgen).
+    lifelines_mpy:      { aliases: ['lifelines', 'lifelines.statistics'],
+                          deps: ['lifelines_core', 'plotly_express_mpy',
+                                 'pandas_mpy'], js: [] },
+    lifelines_core:     { aliases: [], deps: [], js: [],
+                          path: 'shared/lifelines_core.py' }
   };
 
   function scanImports(code) {
