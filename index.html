@@ -1549,7 +1549,7 @@
           if (!r.ok) throw new Error(r.status);
           return r.text();
         }).then(function(text) {
-          if (mode && (mode === 'microdata' || mode === 'python' || mode === 'r' || mode === 'statx' || mode === 'duckdb' || mode === 'brython' || mode === 'micropython' || mode === 'javascript')
+          if (mode && (mode === 'python' || mode === 'r' || mode === 'statx' || mode === 'duckdb' || mode === 'brython' || mode === 'micropython' || mode === 'javascript')
               && typeof switchEditorMode === 'function'
               && typeof activeEditorMode !== 'undefined') {
             if (typeof editorContent !== 'undefined') editorContent[mode] = text;
@@ -2047,7 +2047,7 @@
         if (window.mdSetInputHidden) window.mdSetInputHidden(true);   // output-only
         if (window.mdShowCodeAffordance) window.mdShowCodeAffordance();
         if (scriptRunInProgress) return;
-        // "#options.mode = python|r|duckdb|microdata" i scriptet overstyrer
+        // "#options.mode = python|r|duckdb|…" i scriptet overstyrer
         // filendelsen — .txt-scripts kan dermed si hvor de skal kjøre.
         var _si = document.getElementById('scriptInput');
         var _mm = _si && _si.value.match(/^\s*(?:#|\/\/|--)\s*options\.mode\s*=\s*["']?([a-z]+)["']?\s*$/mi);
@@ -2055,8 +2055,13 @@
           var _wanted = _mm[1].toLowerCase();
           if (_wanted === 'py') _wanted = 'python';
           if (_wanted === 'js') _wanted = 'javascript';
+          // Hard feil (2026-07-24): microdata-modus finnes ikke i openstat.
+          if (_wanted === 'microdata' || _wanted === 'micro') {
+            renderOutput('FEIL: ' + microdataBlocksRemovedError().message, false, false);
+            return;
+          }
           var _cur = window.M2PY && window.M2PY.currentMode && window.M2PY.currentMode();
-          if (['python', 'r', 'duckdb', 'microdata', 'jamovi', 'brython', 'micropython', 'javascript'].indexOf(_wanted) < 0) _wanted = _cur && _cur.id;
+          if (['python', 'r', 'duckdb', 'jamovi', 'brython', 'micropython', 'javascript'].indexOf(_wanted) < 0) _wanted = _cur && _cur.id;
           if (_wanted && (!_cur || _cur.id !== _wanted)) {
             var _txt = _si.value;
             window.switchEditorMode(_wanted);
@@ -7059,6 +7064,13 @@ json.dumps(out)
       });
     }
 
+    // Microdata-blokker/-modus er fjernet fra openstat (PLAN_remove_microdata_mode,
+    // 2026-07-24): markøren gjenkjennes fortsatt, men konsumentene hard-feiler med
+    // denne meldingen i stedet for å stille-kjøre microdata-kode eller gi en
+    // kryptisk syntaksfeil. Øving på microdata.no-syntaks hører til microdata-appen.
+    function microdataBlocksRemovedError() {
+      return new Error(t('Microdata-blokker støttes ikke i OpenStat. Bruk microdata-appen (https://hmelberg.github.io/microdata/) for å øve på microdata.no-syntaks.'));
+    }
     function matchHybridMarker(trimmed) {
       if (!trimmed) return null;
       // Konvensjon: # i Python/R-filer, // i microdata-filer, ## for bakoverkompatibilitet
@@ -7071,7 +7083,7 @@ json.dumps(out)
     }
     function parseHybridScript(text, defaultMode) {
       var lines = text.split(/\r?\n/);
-      var mode = defaultMode === 'pyodide' ? 'pyodide' : defaultMode === 'r' ? 'r' : defaultMode === 'stata' ? 'stata' : defaultMode === 'duckdb' ? 'duckdb' : 'microdata';
+      var mode = defaultMode === 'r' ? 'r' : defaultMode === 'stata' ? 'stata' : defaultMode === 'duckdb' ? 'duckdb' : 'pyodide';
       var buf = [];
       var segments = [];
       function flush() {
@@ -8583,11 +8595,9 @@ json.dumps(out)
     }
 
     function getRunnerDefaultMode() {
-      try {
-        return localStorage.getItem('microdata_runner_mode') === 'pyodide' ? 'pyodide' : 'microdata';
-      } catch (e) {
-        return 'microdata';
-      }
+      // Umerket kode kjører alltid som python — microdata-startspråket utgikk
+      // med microdata-blokkene (2026-07-24); kjøremodus-toggelen er fjernet.
+      return 'pyodide';
     }
 
     // Normalize block markers before segmenting hybrid scripts. Users
@@ -8907,7 +8917,9 @@ json.dumps(out)
       // docMode-default som pyodide-familien) — legacy ##-hybridskript uten
       // Cells.active() beholder microdata-heuristikken uendret.
       var _rNbActiveForDefault = !!(window.Cells && window.Cells.active());
-      const segments = parseHybridScript(normalized, _rNbActiveForDefault ? 'r' : (hasMarkers ? 'microdata' : 'r'));
+      // Umerket kode i R-modus er R — den gamle heuristikken «markør-script ⇒
+      // umerket preamble er microdata» utgikk med microdata-blokkene (2026-07-24).
+      const segments = parseHybridScript(normalized, 'r');
 
       // Segmentnivå-use (plan 2026-07-11 i safestat): parse/strip use-linjene
       // per blokk. I R-modus er kjøringen faseinndelt (alle #micro først, så
@@ -8917,6 +8929,9 @@ json.dumps(out)
         : { segments: segments, errors: [] };
       if (_suR.errors.length) throw new Error(_suR.errors.join('; '));
       var _rSegsAll = _suR.segments;
+      if (_rSegsAll.some(function (s) { return s.kind === 'microdata' && (s.text || '').trim(); })) {
+        throw microdataBlocksRemovedError();
+      }
       var _badSeg = _rSegsAll.find(function (s) {
         return s.kind !== 'r' && s.kind !== 'microdata' && (s.text || '').trim();
       });
@@ -9611,46 +9626,51 @@ json.dumps(out)
       return __ipwP;
     }
 
+    // Statx-datavei (PLAN_remove_microdata_mode Task 5, 2026-07-24): data inn
+    // via «# load»-direktiver — filene materialiseres som pandas-frames i
+    // e.datasets (buildWebDataLoaderPreamble/to_microdata, samme mekanisme som
+    // python-veien), og pdexplorer analyserer derfra med `use ALIAS`. Første
+    // load-alias blir aktivt datasett, så én-datasett-script slipper `use`.
+    // #micro-blokker hard-feiler — de hører til microdata-appen/safestat.
     async function runStatxScript(script, ctx) {
       var rightStatus = ctx && ctx.rightStatus ? ctx.rightStatus : window.rightStatus;
       try {
         const py = await loadPyodideAndM2py();
-        // statx kjører alltid mot m2py-emulatoren (use/katalogvariabler) —
-        // hent microdata-assets ubetinget.
-        try { await ensureMicrodataAssets(py); }
-        catch (e) { console.warn('microdata-assets (statx):', e); }
+        // Katalogen brukes kun til labels/autocomplete; mockdata-modulene
+        // trengs ikke lenger (micro-segmenter kjører ikke i statx).
+        try { await ensureMicrodataCatalog(); }
+        catch (e) { console.warn('katalog (statx):', e); }
         await loadPdexplorer(py);
         setStatus(rightStatus, t('Kjører statx…'));
         const segments = parseHybridScript(script, 'stata');
-        const microCode = segments.filter(function(s) { return s.kind === 'microdata'; }).map(function(s) { return s.text; }).join('\n');
-        const statxCode = segments.filter(function(s) { return s.kind === 'stata' || s.kind === 'statx'; }).map(function(s) { return s.text; }).join('\n');
-        // Establish the engine (e) and _run_microdata_chunk helper
+        if (segments.some(function (s) { return s.kind === 'microdata'; })) {
+          throw microdataBlocksRemovedError();
+        }
+        // «# load»/«# connect» → Pyodide-FS (samme vei som python/duckdb).
+        var _dl = await window.DataLoader.resolveAndFetchLoads(script,
+          { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey });
+        if (_dl.loads.some(function (l) { return l.bytes; })) py.FS.mkdirTree('/home/pyodide/_webdata');
+        var _pyLoads = _dl.loads.map(function (l) {
+          var _path = '/home/pyodide/_webdata/' + l.alias + '.' + l.format;
+          py.FS.writeFile(_path, l.bytes);
+          return { alias: l.alias, format: l.format, path: _path };
+        });
+        // pdexplorer parser ikke #-linjer: strip direktiver/kommentarer med #
+        // (Stata-kommentarer er * og //, de håndteres av statx_runner).
+        const statxCode = segments
+          .filter(function (s) { return s.kind === 'stata' || s.kind === 'statx'; })
+          .map(function (s) { return s.text; }).join('\n')
+          .replace(/^[ \t]*#[^\n]*$/gm, '');
         const catalogJson = microdataCatalog && microdataCatalog.variables
           ? JSON.stringify(microdataCatalog.variables)
           : null;
         const catalogArg = catalogJson !== null ? JSON.stringify(catalogJson) : 'None';
         const pageBase = window.location.href.replace(/[^/]+$/, '');
-        await py.runPythonAsync(getInterpreterCorePython(catalogArg, pageBase, '[]') + `
-_forklar_last_chunk_out = ""
-def _run_microdata_chunk(_code):
-    global result, _forklar_last_chunk_out
-    e.output_log.clear()
-    _code = (_code or "").strip()
-    if not _code:
-        _forklar_last_chunk_out = ""
-        return
-    result = e.run_script(_code)
-    _forklar_last_chunk_out = str(result)
-    print(result)
-    e.sync_datasets_to_globals(_g)
-    _apply_labels_to_globals(_g, catalog)
-    _g["show"] = show
-    _g["to_microdata"] = to_microdata
-`);
-        // Run microdata segments to populate e.datasets
-        if (microCode.trim()) {
-          await py.runPythonAsync('import json\n_run_microdata_chunk(json.loads(' + JSON.stringify(JSON.stringify(microCode)) + '))');
-        }
+        const activateFirst = _pyLoads.length
+          ? '\ne.active_name = ' + JSON.stringify(String(_pyLoads[0].alias)) + '\n'
+          : '';
+        await py.runPythonAsync(getInterpreterCorePython(catalogArg, pageBase, '[]')
+          + buildWebDataLoaderPreamble(_pyLoads) + activateFirst);
         // Run statx commands via statx_runner
         py.globals.set('_statx_src', statxCode);
         const out = await py.runPythonAsync('import statx_runner\nstatx_runner.run_statx(e, _statx_src)');
@@ -10391,12 +10411,10 @@ options(width = 200)
         // at mdRunNotebookCell (per-celle-kjøring) bruker AKKURAT samme vei —
         // "# use" utledes alltid over HELE dokumentets segmenter (forskningsfaktum).
         let segments = await buildDocumentSegments(py, effectiveScript);
-        // Lazy microdata-assets: hent katalog + mockdata-moduler kun når
-        // dokumentet faktisk kjører microdata-språket (modusen selv, eller
-        // #%% microdata-/#micro-segmenter i andre moduser).
-        if (activeEditorMode === 'microdata' || segments.some(function (s) { return s.kind === 'microdata'; })) {
-          try { await ensureMicrodataAssets(py); }
-          catch (e) { console.warn('microdata-assets:', e); }
+        // Microdata-blokker er fjernet fra openstat (2026-07-24) — fail fast
+        // med presis melding i stedet for å kjøre microdata-kode.
+        if (segments.some(function (s) { return s.kind === 'microdata'; })) {
+          throw microdataBlocksRemovedError();
         }
         const catalogJson = microdataCatalog && microdataCatalog.variables
           ? JSON.stringify(microdataCatalog.variables)
@@ -11721,72 +11739,6 @@ async def _m2py_run_segment(_seg_json):
           updateForklarNavButtons();
           updateForklarDockUi();
         }
-        async function forklarRunOneMicrodataBlock(block, myAbort, flatIdx) {
-          if (forklarGotoBlockIdx !== null) return;
-          const codeTrim = (block.code || '').trim();
-          prepareForklarOutputPane();
-          if (!codeTrim) {
-            clearForklarHighlightBand();
-            await speakForklarCommentItems(block.commentItems, myAbort, null);
-            if (forklarGotoBlockIdx !== null) return;
-            await forklarEndBlockOptionalPause(true);
-            return;
-          }
-          // Pre-comments spoken BEFORE execution
-          if (block.commentItems && block.commentItems.length) {
-            await speakForklarCommentItems(block.commentItems, myAbort, null);
-            await forklarCheckpoint(myAbort);
-            if (forklarGotoBlockIdx !== null || myAbort.aborted) return;
-          }
-          let skipRest = false;
-          if (forklarJumpToNextBlock) {
-            forklarJumpToNextBlock = false;
-            skipRest = true;
-          }
-          const hl = appendExplainEditorBlock(block.code);
-          forklarBlockRanges.push({ start: hl.start, end: hl.end });
-          if (forklarFlatMetaArr) {
-            if (!forklarFlatMetaArr[flatIdx]) forklarFlatMetaArr[flatIdx] = {};
-            forklarFlatMetaArr[flatIdx].range = { start: hl.start, end: hl.end };
-          }
-          highlightScriptRange(hl.start, hl.end);
-          await forklarCheckpoint(myAbort);
-          if (forklarGotoBlockIdx !== null || myAbort.aborted) return;
-          if (forklarJumpToNextBlock) {
-            forklarJumpToNextBlock = false;
-            skipRest = true;
-          }
-          if (!block.skipCodeSpeech && !skipRest) {
-            await speakForklarFirstWord(block.code, myAbort);
-          }
-          if (forklarGotoBlockIdx !== null || myAbort.aborted) return;
-          if (forklarJumpToNextBlock) {
-            forklarJumpToNextBlock = false;
-            skipRest = true;
-          }
-          await forklarCheckpoint(myAbort);
-          if (forklarGotoBlockIdx !== null || myAbort.aborted) return;
-          await py.runPythonAsync(
-            'import json\n_run_microdata_chunk(json.loads(' + JSON.stringify(JSON.stringify(block.code)) + '))'
-          );
-          if (forklarGotoBlockIdx !== null || myAbort.aborted) return;
-          lastOutput = (await forklarReadLastChunkOut(py) || '').trim();
-          renderOutput(lastOutput, asHtml, suppress);
-          forklarRevealOutputAnim();
-          scrollOutputToTop();
-          await forklarCheckpoint(myAbort);
-          if (forklarGotoBlockIdx !== null || myAbort.aborted) return;
-          await refreshDatasetSidebarFromPy(py);
-          await forklarCheckpoint(myAbort);
-          if (forklarGotoBlockIdx !== null || myAbort.aborted) return;
-          // Post-comments spoken AFTER output
-          if (!skipRest && block.postCommentItems && block.postCommentItems.length) {
-            await speakForklarCommentItems(block.postCommentItems, myAbort, { start: hl.start, end: hl.end });
-          }
-          if (forklarGotoBlockIdx !== null) return;
-          if (forklarJumpToNextBlock) forklarJumpToNextBlock = false;
-          await forklarEndBlockOptionalPause(!!(block.commentItems && block.commentItems.length || block.postCommentItems && block.postCommentItems.length));
-        }
         async function forklarRunOnePyodideBlock(block, myAbort, flatIdx) {
           if (forklarGotoBlockIdx !== null) return;
           const codeTrim = (block.code || '').trim();
@@ -11990,10 +11942,6 @@ async def _m2py_run_segment(_seg_json):
           } catch (e) { console.warn('forklar # load:', e); }
         }
         if (activeEditorMode !== 'r') {
-          if (activeEditorMode === 'microdata' || activeEditorMode === 'statx') {
-            try { await ensureMicrodataAssets(py); }
-            catch (e) { console.warn('microdata-assets (forklar):', e); }
-          }
           const catalogJson = microdataCatalog && microdataCatalog.variables
             ? JSON.stringify(microdataCatalog.variables)
             : null;
@@ -12137,7 +12085,10 @@ def _run_microdata_chunk(_code):
           } else if (activeEditorMode === 'python') {
             await forklarRunOnePyodideBlock(block, myAbort, idx);
           } else {
-            await forklarRunOneMicrodataBlock(block, myAbort, idx);
+            // Fallback-grenen kjørte blokker gjennom m2py-emulatoren — den
+            // veien utgikk med microdata-modusen (2026-07-24). Ærlig feil i
+            // stedet for å mate f.eks. Stata-kode til feil tolk.
+            throw new Error(t('Kjør skrittvis støttes ikke i denne modusen — bruk Kjør.'));
           }
           if (forklarGotoBlockIdx !== null) {
             var g2 = forklarGotoBlockIdx;

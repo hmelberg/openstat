@@ -763,4 +763,6 @@ window.M2PY_I18N.en = {
   "Kunne ikke eksportere: {msg}": "Could not export: {msg}",
   "Eksportert med {n} merknader — se kommentarene i scriptet": "Exported with {n} notes — see the comments in the script",
   "Portabelt script kopiert til utklippstavlen": "Portable script copied to the clipboard",
+  "Microdata-blokker støttes ikke i OpenStat. Bruk microdata-appen (https://hmelberg.github.io/microdata/) for å øve på microdata.no-syntaks.": "Microdata blocks are not supported in OpenStat. Use the microdata app (https://hmelberg.github.io/microdata/) to practice microdata.no syntax.",
+  "Kjør skrittvis støttes ikke i denne modusen — bruk Kjør.": "Step-by-step run is not supported in this mode — use Run.",
 };
