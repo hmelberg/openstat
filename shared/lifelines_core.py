@@ -479,3 +479,237 @@ def logrank_test(durations_A, durations_B, event_observed_A=None,
                                   ['A'] * len(TA) + ['B'] * len(TB),
                                   list(EA) + list(EB))
     return StatisticalResult(r.test_statistic, r.p_value, 1, 'logrank_test')
+
+
+# ---- Cox proporsjonal hasard (Efron) ------------------------------------
+
+def _df_to_columns(df):
+    """DataFrame-shim (.columns + .to_dict()) ELLER dict av lister ->
+    (kolonnenavn i rekkefølge, {navn: liste})."""
+    if hasattr(df, 'columns') and hasattr(df, 'to_dict'):
+        cols = list(df.columns)
+        raw = df.to_dict()
+        return cols, {c: list(raw[c]) for c in cols}
+    if isinstance(df, dict):
+        cols = list(df.keys())
+        return cols, {c: list(df[c]) for c in cols}
+    raise ValueError('CoxPHFitter.fit: forventer DataFrame eller dict av lister')
+
+
+def _concordance(T, E, risk):
+    """Parvis c-indeks: par (i, j) er sammenlignbare når i har hendelse og
+    T_i < T_j, eller T_i == T_j og j er sensurert. Høyere risk-skår skal
+    predikere kortere tid."""
+    num = 0.0
+    den = 0.0
+    n = len(T)
+    for i in range(n):
+        if not E[i]:
+            continue
+        for j in range(n):
+            if i == j:
+                continue
+            if T[i] < T[j] or (T[i] == T[j] and not E[j]):
+                den += 1.0
+                if risk[i] > risk[j]:
+                    num += 1.0
+                elif risk[i] == risk[j]:
+                    num += 0.5
+    return num / den if den else 0.5
+
+
+class CoxPHFitter:
+    def __init__(self, alpha=0.05):
+        self.alpha = alpha
+
+    def fit(self, df, duration_col=None, event_col=None, **kwargs):
+        for kw in kwargs:
+            raise NotImplementedError('CoxPHFitter.fit(' + kw + '=...) er '
+                                      'utenfor v1 (formula/strata/vekter støttes ikke)')
+        if duration_col is None or event_col is None:
+            raise ValueError('duration_col og event_col må oppgis')
+        cols, data = _df_to_columns(df)
+        covs = [c for c in cols if c != duration_col and c != event_col]
+        T = [float(t) for t in data[duration_col]]
+        E = [1 if e else 0 for e in data[event_col]]
+        n = len(T)
+        p = len(covs)
+        X = []
+        for i in range(n):
+            row = []
+            for c in covs:
+                v = data[c][i]
+                if isinstance(v, bool):
+                    v = 1 if v else 0
+                if not isinstance(v, (int, float)):
+                    raise ValueError('Kovariaten «' + str(c) + '» er ikke '
+                                     'numerisk — dummy-kod kategoriske '
+                                     'kolonner først (f.eks. 0/1)')
+                row.append(float(v))
+            X.append(row)
+        # mean-sentrering for numerisk stabilitet (Cox er lokasjonsinvariant)
+        means = [sum(X[i][k] for i in range(n)) / n for k in range(p)]
+        Xc = [[X[i][k] - means[k] for k in range(p)] for i in range(n)]
+        beta = [0.0] * p
+        ll_old = self._loglik(Xc, T, E, beta)
+        converged = False
+        for _ in range(50):
+            grad, info = self._grad_info(Xc, T, E, beta)
+            try:
+                step = _solve(info, grad)
+            except ValueError:
+                raise RuntimeError('Cox-modellen konvergerer ikke '
+                                   '(singulær informasjonsmatrise) — sjekk '
+                                   'kollinearitet/separasjon i kovariatene')
+            # step-halving til log-likelihood ikke faller
+            factor = 1.0
+            cand = beta
+            ll_new = ll_old
+            for _h in range(30):
+                cand = [beta[k] + factor * step[k] for k in range(p)]
+                ll_new = self._loglik(Xc, T, E, cand)
+                if ll_new >= ll_old - 1e-12:
+                    break
+                factor *= 0.5
+            beta = cand
+            # stramt kriterium på det UFAKTORERTE Newton-steget: nær
+            # optimum er likelihooden flat, og 1e-7 på steget ga ~1e-5-avvik
+            # i beta mot lifelines-fasiten (funn under implementering)
+            moved = max([abs(step[k]) for k in range(p)]) if p else 0.0
+            ll_old = ll_new
+            if moved < 1e-10:
+                converged = True
+                break
+        if not converged:
+            raise RuntimeError('Cox-modellen konvergerte ikke på 50 '
+                               'iterasjoner — sjekk data/skala')
+        _, info = self._grad_info(Xc, T, E, beta)
+        covm = _inv(info)
+        z = _norm_ppf(1.0 - self.alpha / 2.0)
+        self._covs = covs
+        self.params_ = {}
+        self.standard_errors_ = {}
+        self.hazard_ratios_ = {}
+        self.confidence_intervals_ = {}
+        self._zvals = {}
+        self._pvals = {}
+        for k in range(p):
+            c = covs[k]
+            b = beta[k]
+            se = math.sqrt(covm[k][k])
+            self.params_[c] = b
+            self.standard_errors_[c] = se
+            self.hazard_ratios_[c] = math.exp(b)
+            self.confidence_intervals_[c] = [b - z * se, b + z * se]
+            zv = b / se if se > 0 else 0.0
+            self._zvals[c] = zv
+            self._pvals[c] = _chi2_sf(zv * zv, 1)
+        self.log_likelihood_ = ll_old
+        eta = [sum(Xc[i][k] * beta[k] for k in range(p)) for i in range(n)]
+        self.concordance_index_ = _concordance(T, E, eta)
+        self._n = n
+        self._nevents = sum(E)
+        return self
+
+    def _event_blocks(self, T, E):
+        """Distinkte tider synkende med indekser; brukes av loglik/grad."""
+        order = sorted(range(len(T)), key=lambda i: -T[i])
+        blocks = []
+        i = 0
+        while i < len(order):
+            t = T[order[i]]
+            grp = []
+            while i < len(order) and T[order[i]] == t:
+                grp.append(order[i])
+                i += 1
+            blocks.append((t, grp))
+        return blocks
+
+    def _loglik(self, X, T, E, beta):
+        n = len(T)
+        p = len(beta)
+        eta = [sum(X[i][k] * beta[k] for k in range(p)) for i in range(n)]
+        w = [math.exp(min(e, 700.0)) for e in eta]
+        S0 = 0.0
+        ll = 0.0
+        for t, grp in self._event_blocks(T, E):
+            for i in grp:
+                S0 += w[i]
+            D = [i for i in grp if E[i]]
+            m = len(D)
+            if m == 0:
+                continue
+            S0D = sum(w[i] for i in D)
+            for i in D:
+                ll += eta[i]
+            for l in range(m):
+                ll -= math.log(S0 - (l / float(m)) * S0D)
+        return ll
+
+    def _grad_info(self, X, T, E, beta):
+        n = len(T)
+        p = len(beta)
+        eta = [sum(X[i][k] * beta[k] for k in range(p)) for i in range(n)]
+        w = [math.exp(min(e, 700.0)) for e in eta]
+        S0 = 0.0
+        S1 = [0.0] * p
+        S2 = [[0.0] * p for _ in range(p)]
+        grad = [0.0] * p
+        info = [[0.0] * p for _ in range(p)]
+        for t, grp in self._event_blocks(T, E):
+            for i in grp:
+                S0 += w[i]
+                for a in range(p):
+                    S1[a] += w[i] * X[i][a]
+                    for b in range(p):
+                        S2[a][b] += w[i] * X[i][a] * X[i][b]
+            D = [i for i in grp if E[i]]
+            m = len(D)
+            if m == 0:
+                continue
+            S0D = sum(w[i] for i in D)
+            S1D = [sum(w[i] * X[i][a] for i in D) for a in range(p)]
+            S2D = [[sum(w[i] * X[i][a] * X[i][b] for i in D)
+                    for b in range(p)] for a in range(p)]
+            for i in D:
+                for a in range(p):
+                    grad[a] += X[i][a]
+            for l in range(m):
+                f = l / float(m)
+                phi = S0 - f * S0D
+                s1l = [S1[a] - f * S1D[a] for a in range(p)]
+                for a in range(p):
+                    grad[a] -= s1l[a] / phi
+                    for b in range(p):
+                        s2ab = S2[a][b] - f * S2D[a][b]
+                        info[a][b] += s2ab / phi - (s1l[a] / phi) * (s1l[b] / phi)
+        return grad, info
+
+    @property
+    def summary(self):
+        cols = {'covariate': list(self._covs)}
+        cols['coef'] = [self.params_[c] for c in self._covs]
+        cols['exp(coef)'] = [self.hazard_ratios_[c] for c in self._covs]
+        cols['se(coef)'] = [self.standard_errors_[c] for c in self._covs]
+        cols['coef lower 95%'] = [self.confidence_intervals_[c][0] for c in self._covs]
+        cols['coef upper 95%'] = [self.confidence_intervals_[c][1] for c in self._covs]
+        cols['z'] = [self._zvals[c] for c in self._covs]
+        cols['p'] = [self._pvals[c] for c in self._covs]
+        return _frame(cols, ['covariate', 'coef', 'exp(coef)', 'se(coef)',
+                             'coef lower 95%', 'coef upper 95%', 'z', 'p'])
+
+    def print_summary(self):
+        print('CoxPHFitter (Efron), n=%d, antall hendelser=%d' % (self._n, self._nevents))
+        print('log-likelihood = %.4f, concordance = %.4f' % (self.log_likelihood_, self.concordance_index_))
+        hdr = '%-12s %9s %10s %9s %8s %9s' % ('kovariat', 'coef', 'exp(coef)', 'se', 'z', 'p')
+        print(hdr)
+        for c in self._covs:
+            print('%-12s %9.4f %10.4f %9.4f %8.3f %9.4g' % (
+                str(c), self.params_[c], self.hazard_ratios_[c],
+                self.standard_errors_[c], self._zvals[c], self._pvals[c]))
+
+    def predict_survival_function(self, *a, **kw):
+        raise NotImplementedError('predict_* er utenfor v1')
+
+    def predict_partial_hazard(self, *a, **kw):
+        raise NotImplementedError('predict_* er utenfor v1')

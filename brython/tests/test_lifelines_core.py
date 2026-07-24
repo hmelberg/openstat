@@ -156,6 +156,67 @@ def test_multivariate_logrank_three_groups():
     assert 0.0 <= mr.p_value <= 1.0 and mr.test_statistic >= 0.0
 
 
+COX_T = TA + TB
+COX_E = EA + EB
+COX_ALDER = [50, 61, 58, 45, 52, 66, 71, 49, 55, 63, 42, 60, 58, 67, 53, 70]
+COX_GRUPPE = [0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1]
+
+
+def test_cox_matches_probe():
+    # Toleranse 1e-4 (som diff-testene): begge optimerere stopper i et
+    # flatt område — vår ll er t.o.m. marginalt HØYERE enn lifelines' på
+    # dette datasettet (avvik i beta ~6e-6, statistisk neglisjerbart).
+    cph = ll.CoxPHFitter().fit({'T': COX_T, 'E': COX_E,
+                                'alder': COX_ALDER, 'gruppe': COX_GRUPPE},
+                               'T', 'E')
+    assert abs(cph.params_['alder'] - (-0.038762591012489175)) < 1e-4, cph.params_
+    assert abs(cph.params_['gruppe'] - (-0.9536282188095797)) < 1e-4
+    assert abs(cph.standard_errors_['alder'] - 0.06316212139335002) < 1e-4
+    assert abs(cph.standard_errors_['gruppe'] - 1.0009401196742758) < 1e-4
+    assert abs(cph.log_likelihood_ - (-21.72683500060126)) < 1e-6
+    assert abs(cph.concordance_index_ - 0.7553191489361702) < 1e-9
+    hr = cph.hazard_ratios_
+    assert abs(hr['gruppe'] - math.exp(-0.9536282188095797)) < 1e-4
+    ci = cph.confidence_intervals_
+    lo, hi = ci['alder']
+    z = 1.959963984540054
+    assert abs(lo - (-0.038762591012489175 - z * 0.06316212139335002)) < 1e-4
+    assert abs(hi - (-0.038762591012489175 + z * 0.06316212139335002)) < 1e-4
+
+
+def test_cox_summary_and_print():
+    cph = ll.CoxPHFitter().fit({'T': COX_T, 'E': COX_E, 'alder': COX_ALDER},
+                               'T', 'E')
+    s = cph.summary
+    assert 'coef' in s and 'exp(coef)' in s and 'p' in s
+    import io, sys as _s
+    buf = io.StringIO()
+    old = _s.stdout
+    _s.stdout = buf
+    try:
+        cph.print_summary()
+    finally:
+        _s.stdout = old
+    out = buf.getvalue()
+    assert 'alder' in out and 'concordance' in out
+
+
+def test_cox_nonnumeric_raises():
+    try:
+        ll.CoxPHFitter().fit({'T': [1, 2], 'E': [1, 1], 'g': ['a', 'b']}, 'T', 'E')
+        assert False
+    except ValueError as e:
+        assert 'dummy' in str(e) or 'numerisk' in str(e)
+
+
+def test_cox_out_of_scope():
+    try:
+        ll.CoxPHFitter().fit({'T': [1], 'E': [1]}, 'T', 'E', formula='x')
+        assert False
+    except (NotImplementedError, TypeError):
+        pass
+
+
 if __name__ == '__main__':
     for name, fn in sorted(globals().items()):
         if name.startswith('test_'):
