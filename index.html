@@ -7449,7 +7449,7 @@ async def _run_duck_sql(_sql, _fresh=True):
       var db = await __ensureDuckDB();
       var conn = await db.connect();
       try {
-        for (var i = 0; i < cmp.attachStatements.length; i++) await conn.query(cmp.attachStatements[i]);
+        for (var i = 0; i < cmp.attaches.length; i++) await conn.query(cmp.attaches[i].sql);
         var cols = {};
         for (var j = 0; j < cmp.datasetStatements.length; j++) {
           var d = cmp.datasetStatements[j];

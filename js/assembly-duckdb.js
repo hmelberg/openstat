@@ -47,7 +47,7 @@
     var statements = order.map(function (url) {
       var alias = byUrl[url];
       var typeClause = descriptorFormatForUrl(descriptors, url) === 'sqlite' ? ' (TYPE sqlite)' : '';
-      return 'ATTACH ' + quoteLit(url) + ' AS ' + alias + typeClause;
+      return { alias: alias, sql: 'ATTACH ' + quoteLit(url) + ' AS ' + alias + typeClause };
     });
     return { statements: statements, aliasByUrl: byUrl };
   }
@@ -133,7 +133,7 @@
       datasetStatements.push({ name: ds.name, sql: 'SELECT * FROM ' + sql });
     });
 
-    return { attachStatements: att.statements, datasetStatements: datasetStatements };
+    return { attaches: att.statements, datasetStatements: datasetStatements };
   }
 
   global.AssemblyDuckdb = { canPushdown: canPushdown, compile: compile, _topoSort: topoSort };

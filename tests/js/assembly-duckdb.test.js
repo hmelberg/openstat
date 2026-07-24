@@ -87,3 +87,20 @@ test('parseAssembly: format(data.table) fanges, default null', () => {
   assert.equal(byName.a.format, 'data.table');
   assert.equal(byName.b.format, null);
 });
+
+test('compile: attaches er strukturerte {alias, sql} (én per unik fil-URL)', () => {
+  const desc = {
+    a: { url: 'https://x/f.duckdb', format: 'duckdb', table: 'pasienter' },
+    b: { url: 'https://x/f.duckdb', format: 'duckdb', table: 'besok' },
+    c: { url: 'https://x/g.sqlite', format: 'sqlite', table: 'takster' },
+  };
+  const spec = { sources: ['a', 'b', 'c'], datasets: [
+    { name: 'p', load: 'a' }, { name: 'v', load: 'b' }, { name: 't', load: 'c' },
+  ] };
+  const out = AD.compile(spec, desc);
+  assert.deepEqual(out.attaches, [
+    { alias: 'att_0', sql: "ATTACH 'https://x/f.duckdb' AS att_0" },
+    { alias: 'att_1', sql: "ATTACH 'https://x/g.sqlite' AS att_1 (TYPE sqlite)" },
+  ]);
+  assert.equal(out.attachStatements, undefined);
+});
