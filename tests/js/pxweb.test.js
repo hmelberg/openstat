@@ -52,3 +52,45 @@ test('columnsToCsv: header + rader, null → tom celle, quoting ved behov', () =
   const csv = PX.columnsToCsv({ a: ['x', 'y,z'], value: [1, null] });
   assert.equal(csv, 'a,value\nx,1\n"y,z",');
 });
+
+// ── resolve + lastelag for kind(pxweb) (samme eval-mønster som deno-testene:
+// data-loader.js er et rent browser-script som setter globalThis) ───────────
+require('../../js/data-directives.js');
+const fs = require('node:fs');
+const path = require('node:path');
+(0, eval)(fs.readFileSync(path.join(__dirname, '../../js/data-loader.js'), 'utf8'));
+const DD = globalThis.DataDirectives;
+const DL = globalThis.DataLoader;
+
+test('resolve: kind(pxweb) krever tabell-id og setter table', () => {
+  const p = DD.parse([
+    '# connect https://data.ssb.no/api/pxwebapi/v2/tables as ssb, kind(pxweb)',
+    '# load ssb/05839?valueCodes[Tid]=2020 as bef',
+    '# load ssb as feil',
+  ].join('\n'));
+  const r = DD.resolve(p, []);
+  const bef = r.find(x => x.alias === 'bef');
+  assert.equal(bef.kind, 'pxweb');
+  assert.equal(bef.table, '05839');
+  assert.equal(bef.url, 'https://data.ssb.no/api/pxwebapi/v2/tables/05839?valueCodes[Tid]=2020');
+  const feil = r.find(x => x.alias === 'feil');
+  assert.match(feil.error, /tabell-id/);
+});
+
+test('fetchResolvedItems: pxweb henter json-stat2 fra /data og leverer csv-bytes', async () => {
+  DL._resetCacheForTests();
+  let seenUrl = null;
+  const fetchImpl = (input) => {
+    seenUrl = String(input);
+    const body = JSON.stringify(FIX);
+    return Promise.resolve(new Response(body, { status: 200, headers: { 'content-type': 'application/json' } }));
+  };
+  const out = await DL.fetchResolvedItems(
+    [{ alias: 'bef', url: 'https://x/tables/05839', kind: 'pxweb', table: '05839' }],
+    { fetchImpl, registry: [] });
+  assert.equal(seenUrl, 'https://x/tables/05839/data?lang=no&outputFormat=json-stat2');
+  assert.equal(out[0].format, 'csv');
+  assert.equal(out[0].table, '05839');
+  const csv = new TextDecoder().decode(out[0].bytes);
+  assert.match(csv, /^Kjonn,Tid,ContentsCode,value\n1,2020,Personer,10\n/);
+});

@@ -193,6 +193,21 @@
       return _bufCache[k];
     }
     return Promise.all(localItems.map(async function (item) {
+      // pxweb (spec 2026-07-24-pxweb-sources-design §2): hent json-stat2
+      // (alltid lang-format, UTF-8 — default-CSV-en er pivotert og
+      // iso-8859-1) og lever uttrekket som CSV-bytes med format 'csv' —
+      // alle eksisterende csv-konsumenter virker uendret. Delt
+      // _bufCache/proxy-fallback via fetchBytes på data-URL-en.
+      // Offentlige API-data: maybeDecrypt/konvolutter er ikke aktuelle her.
+      if (item.kind === 'pxweb') {
+        var PX = global.PxWeb;
+        if (!PX) throw new Error('PxWeb-modulen mangler (js/pxweb.js må lastes før data-loader.js)');
+        var fetchedPx = await fetchBytes(Object.assign({}, item, { url: PX.dataUrl(item.url) }));
+        var dsPx = JSON.parse(new TextDecoder().decode(fetchedPx.buf));
+        var csvPx = PX.columnsToCsv(PX.columnsFromJsonStat(dsPx));
+        return { alias: item.alias, bytes: new TextEncoder().encode(csvPx),
+                 format: 'csv', table: item.table, kind: 'pxweb' };
+      }
       var fetched = await fetchBytes(item);
       var format = sniffFormat(fetched.resp, item.url, item.kind);
       var dec = await maybeDecrypt(item, fetched.buf, format, deps);
