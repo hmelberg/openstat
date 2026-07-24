@@ -346,6 +346,10 @@
     try {
       var mod = await load();
       var spec = await buildDatasetSpec(opts && opts.loads);
+      // Variabel-montering (2026-07-24): ferdig-monterte kolonnesett fra
+      // DuckDB-pushdownen i index.html bindes som vanlige columns-datasett.
+      var _extra = (opts && opts.extraDatasets) || null;
+      if (_extra) for (var _ek in _extra) spec[_ek] = { kind: 'columns', payload: _extra[_ek] };
       __lastSpec = spec;
       var needed = scanImports(script);
       if (Object.keys(spec).length && needed.indexOf('pandas_brython') === -1) {

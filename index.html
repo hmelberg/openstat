@@ -147,6 +147,7 @@
     <div class="sidebar-content" id="sidebarContent">
       <div class="sidebar-empty" id="sidebarEmpty" data-i18n>Kjør et script for å se datasett.</div>
       <div id="sidebarDatasets"></div>
+      <div id="sidebarSources"></div>
     </div>
   </aside>
   <div class="sidebar-open-tab" id="sidebarOpenTab" data-i18n-title data-i18n-aria title="Åpne sidemeny (datasett og variabler)" aria-label="Åpne sidemeny">
@@ -555,7 +556,7 @@
     window.t = window.t || function (s) { return s; };
     window.i18nField = window.i18nField || function (obj, field) { return obj && obj[field]; };
 
-    window.M2PY_VERSION = '2026-07-24r';
+    window.M2PY_VERSION = '2026-07-24s';
 
     // One-time migration: remove obsolete localStorage keys from previous milestones
     // Safe to delete this snippet after a few months when most users have re-loaded
@@ -2704,7 +2705,12 @@
           if (window.Ui && window.Ui.beginCellRun) window.Ui.beginCellRun(null);
           var res;
           try {
-            res = await window.BrythonEngine.run(script, { loads: _dl.loads });
+            refreshConnectedSources(script);   // fire-and-forget: kildekatalog + tab
+            var _asmX = await resolveAssemblyColumns(script, ctx.rightStatus);
+            if (_asmX && !_asmX.pushdown) {
+              throw new Error(t('Montering i denne modusen krever parquet/csv-kilder — bruk python-modus for andre formater.'));
+            }
+            res = await window.BrythonEngine.run(script, { loads: _dl.loads, extraDatasets: _asmX && _asmX.datasets });
             if (!refreshDatasetSidebarFromEngineInfo(window.BrythonEngine.datasetInfo(), 'brython', 'Brython')) {
               refreshDatasetSidebarFromLoads(_dl.loads, 'brython', 'Brython');
             }
@@ -2766,7 +2772,12 @@
           if (window.Ui && window.Ui.beginCellRun) window.Ui.beginCellRun(null);
           var res;
           try {
-            res = await window.MicroPythonEngine.run(script, { loads: _dl.loads });
+            refreshConnectedSources(script);   // fire-and-forget: kildekatalog + tab
+            var _asmX = await resolveAssemblyColumns(script, ctx.rightStatus);
+            if (_asmX && !_asmX.pushdown) {
+              throw new Error(t('Montering i denne modusen krever parquet/csv-kilder — bruk python-modus for andre formater.'));
+            }
+            res = await window.MicroPythonEngine.run(script, { loads: _dl.loads, extraDatasets: _asmX && _asmX.datasets });
             if (!refreshDatasetSidebarFromEngineInfo(window.MicroPythonEngine.datasetInfo(), 'micropython', 'MicroPython')) {
               refreshDatasetSidebarFromLoads(_dl.loads, 'micropython', 'MicroPython');
             }
@@ -2814,8 +2825,26 @@
           if (window.Ui && window.Ui.beginCellRun) window.Ui.beginCellRun(null);
           var res;
           try {
-            res = await window.JsEngine.run(script, { loads: _dl.loads });
+            refreshConnectedSources(script);   // fire-and-forget: kildekatalog + tab
+            var _asmX = await resolveAssemblyColumns(script, ctx.rightStatus);
+            if (_asmX && !_asmX.pushdown) {
+              throw new Error(t('Montering i denne modusen krever parquet/csv-kilder — bruk python-modus for andre formater.'));
+            }
+            res = await window.JsEngine.run(script, { loads: _dl.loads, extraDatasets: _asmX && _asmX.datasets });
+            if (_asmX && _asmX.datasets) {
+            var _jsInfo = {};
+            Object.keys(_asmX.datasets).forEach(function (n) {
+              var c = _asmX.datasets[n], ks = Object.keys(c);
+              _jsInfo[n] = { columns: ks, dtypes: {}, nrows: ks.length ? c[ks[0]].length : 0 };
+            });
             refreshDatasetSidebarFromLoads(_dl.loads, 'javascript', 'JS');
+            var merged = Object.assign({}, window.lastDatasetInfo || {});
+            Object.keys(_jsInfo).forEach(function (n) { _jsInfo[n].runtime = 'javascript'; merged[n] = _jsInfo[n]; });
+            window.lastDatasetInfo = merged;
+            updateSidebarDatasets(merged, 'JS');
+          } else {
+            refreshDatasetSidebarFromLoads(_dl.loads, 'javascript', 'JS');
+          }
           } finally {
             nbUiRunCtx = null;
             if (window.Ui && window.Ui.endCellRun) window.Ui.endCellRun(null);
@@ -4607,6 +4636,16 @@ json.dumps(out)
     // live mens man skriver (requireWord=true krever tegn før slashen, så vi ikke
     // popper på enhver «/», f.eks. divisjon med tall).
     function microdataSlashSuggest(lineSoFar, pos, requireWord) {
+      // Tilkoblede kilder (# connect) vinner: tab etter alias/ foreslår
+      // kildens kolonner (ikke nedlastet — skjema via DuckDB DESCRIBE).
+      const mc = lineSoFar.match(/([A-Za-z_]\w*)\/([A-Za-z0-9_]*)$/);
+      if (mc && window.__connectedSources && window.__connectedSources[mc[1]]) {
+        const srcCols = window.__connectedSources[mc[1]].columns || [];
+        const cpfx = (mc[2] || '').toLowerCase();
+        const csuggs = srcCols.filter(function (c) { return c.toLowerCase().startsWith(cpfx); }).sort()
+          .map(function (c) { return { label: c, kind: 'variable', detail: t('kilde: {a} (ikke nedlastet)', { a: mc[1] }) }; });
+        if (csuggs.length) { showAutocomplete(csuggs, pos - (mc[2] || '').length, pos); return true; }
+      }
       const m = lineSoFar.match(requireWord ? /[A-Za-z][A-Za-z0-9_.]+\/([A-Za-z0-9_]*)$/ : /\/([A-Za-z0-9_]*)$/);
       if (!m) return false;
       const captured = m[1] || '';
@@ -7375,6 +7414,112 @@ async def _run_duck_sql(_sql, _fresh=True):
 `;
     }
 
+    // Felles montering for ALLE språk (2026-07-24): DuckDB-wasm gjør jobben
+    // (pushdown: bare valgte kolonner materialiseres; parquet via range
+    // requests), og resultatet synkes til språkets eget dataframe-format
+    // (pandas/pandas_brython/pandas_mpy/arquero/data.frame). Returnerer null
+    // når scriptet ikke har monterings-direktiver; {pushdown:false} når en
+    // kilde ikke er pushdown-egnet (python-modus har pandas-fallback, de
+    // andre gir ærlig feil).
+    async function resolveAssemblyColumns(script, statusEl) {
+      var DD = window.DataDirectives;
+      if (!DD || !DD.parseAssembly) return null;
+      var parsed = DD.parseAssembly(script);
+      if (parsed.errors.length) throw new Error('Monteringsfeil: ' + parsed.errors.join('; '));
+      if (!(parsed.spec.datasets || []).length) return null;
+      var deps = { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey };
+      var so = await window.DataLoader.resolveSourcesOnly(script, deps);
+      if (!window.AssemblyDuckdb.canPushdown(so.spec, so.descriptors)) {
+        return { pushdown: false, parsed: parsed, deps: deps };
+      }
+      if (statusEl) setStatus(statusEl, t('Monterer datasett (DuckDB)…'));
+      var cmp = window.AssemblyDuckdb.compile(so.spec, so.descriptors);
+      var db = await __ensureDuckDB();
+      var conn = await db.connect();
+      try {
+        for (var i = 0; i < cmp.attachStatements.length; i++) await conn.query(cmp.attachStatements[i]);
+        var cols = {};
+        for (var j = 0; j < cmp.datasetStatements.length; j++) {
+          var d = cmp.datasetStatements[j];
+          cols[d.name] = __arrowToColumns(await conn.query(d.sql));
+        }
+        return { pushdown: true, datasets: cols };
+      } finally { await conn.close(); }
+    }
+
+    // Kolonnesett -> CSV-tekst (for R: webR.FS + read.csv — enkleste
+    // tapsfrie transport uten pakkeavhengigheter). null/undefined/NaN -> NA.
+    function __colsToCsv(cols) {
+      var names = Object.keys(cols);
+      var n = names.length ? (cols[names[0]] || []).length : 0;
+      function cell(v) {
+        if (v === null || v === undefined || (typeof v === 'number' && isNaN(v))) return 'NA';
+        var st = String(v);
+        return /[",\n]/.test(st) ? '"' + st.replace(/"/g, '""') + '"' : st;
+      }
+      var lines = [names.map(cell).join(',')];
+      for (var r = 0; r < n; r++) lines.push(names.map(function (c) { return cell(cols[c][r]); }).join(','));
+      return lines.join('\n');
+    }
+
+    // ── Tilkoblede kilder (# connect): kolonneoversikt UTEN nedlasting ──
+    // Fylles ved kjøring (alle moduser); parquet-skjema leses via DuckDBs
+    // DESCRIBE (footer via range request), csv via sniffing. Brukes av
+    // sidebar-seksjonen «Tilkoblede kilder» og tab-fullføring etter alias/.
+    window.__connectedSources = {};
+    async function refreshConnectedSources(script) {
+      try {
+        var DD = window.DataDirectives;
+        if (!DD) return;
+        var connects = DD.parse(script).connects || [];
+        if (!connects.length) return;
+        var connectLines = script.split(/\r?\n/).filter(function (ln) { return /^[ \t]*(?:#|--|\/\/)[ \t]*connect\b/i.test(ln); }).join('\n');
+        var descLines = connectLines + '\n' + connects.map(function (c) { return '# load ' + c.alias + ' as ' + c.alias; }).join('\n');
+        var registry = await (window.DataLoader && fetch ? Promise.resolve(null) : null);
+        var parsedLoads = DD.parse(descLines);
+        var resolved = DD.resolve(parsedLoads, []);
+        var db = null;
+        for (var i = 0; i < resolved.length; i++) {
+          var r = resolved[i];
+          if (r.error || r.anvil || !r.url) continue;
+          var fmt = r.kind || (/\.parquet(\?|$)/.test(r.url) ? 'parquet' : /\.csv(\?|$)/.test(r.url) ? 'csv' : null);
+          if (!fmt) continue;
+          try {
+            db = db || await __ensureDuckDB();
+            var conn = await db.connect();
+            try {
+              var rel = fmt === 'parquet'
+                ? "read_parquet('" + r.url.replace(/'/g, "''") + "')"
+                : "read_csv('" + r.url.replace(/'/g, "''") + "', header = true)";
+              var described = __arrowToColumns(await conn.query('DESCRIBE SELECT * FROM ' + rel));
+              window.__connectedSources[r.alias] = {
+                url: r.url, format: fmt,
+                columns: described.column_name || [],
+                types: described.column_type || []
+              };
+            } finally { await conn.close(); }
+          } catch (e) { console.warn('kildeskjema (' + r.alias + '):', e); }
+        }
+        updateSidebarSources();
+      } catch (e) { console.warn('refreshConnectedSources:', e); }
+    }
+    function updateSidebarSources() {
+      var host = document.getElementById('sidebarSources');
+      if (!host) return;
+      var names = Object.keys(window.__connectedSources);
+      if (!names.length) { host.innerHTML = ''; return; }
+      host.innerHTML = '<div class="sidebar-dataset"><div class="sidebar-dataset-name">'
+        + escapeHtml(t('Tilkoblede kilder')) + '</div>'
+        + names.map(function (a) {
+            var srcInfo = window.__connectedSources[a];
+            return '<div class="sidebar-dataset-meta">' + escapeHtml(a) + ' — '
+              + escapeHtml(String(srcInfo.columns.length)) + ' ' + escapeHtml(t('variabler (ikke nedlastet)')) + '</div>'
+              + '<div class="sidebar-vars">' + srcInfo.columns.map(function (c) {
+                  return '<div class="sidebar-var-row" style="opacity:.65">' + escapeHtml(a + '/' + c) + '</div>';
+                }).join('') + '</div>';
+          }).join('') + '</div>';
+    }
+
     // Variabel-montering (# connect/create-dataset/import/join, re-wiret
     // 2026-07-24): binder monterte datasett i Pyodide. To former fra JS-siden:
     // 'cols' (DuckDB-pushdown har allerede plukket kolonner server-/query-side)
@@ -8238,6 +8383,22 @@ json.dumps(out)
           ? _lr.alias + ' <- paste(readLines(' + JSON.stringify(_rp) + ', warn = FALSE), collapse = "\\n")'
           : _lr.alias + ' <- read.csv(' + JSON.stringify(_rp) + ', check.names = FALSE)';
         await webR.evalRVoid(_rcode);
+      }
+
+      // Variabel-montering i R (2026-07-24): DuckDB gjør jobben, resultatet
+      // synkes som data.frame via webR-FS + read.csv (tapsfri nok transport
+      // uten pakkeavhengigheter; FromR-refleksjonen viser dem i sidebaren).
+      refreshConnectedSources(src);   // fire-and-forget: kildekatalog + tab
+      var _asmR = await resolveAssemblyColumns(src, rightStatus);
+      if (_asmR && !_asmR.pushdown) {
+        throw new Error(t('Montering i denne modusen krever parquet/csv-kilder — bruk python-modus for andre formater.'));
+      }
+      if (_asmR) {
+        for (var _arn in _asmR.datasets) {
+          var _arp = '/home/web_user/_asm_' + _arn + '.csv';
+          await webR.FS.writeFile(_arp, new TextEncoder().encode(__colsToCsv(_asmR.datasets[_arn])));
+          await webR.evalRVoid(_arn + ' <- read.csv(' + JSON.stringify(_arp) + ', check.names = FALSE)');
+        }
       }
 
       const normalized = normalizeBlockMarkers(src, 'r');
@@ -9399,30 +9560,13 @@ options(width = 200)
         // parquet/csv/duckdb/sqlite-kilder (bare valgte kolonner materialiseres;
         // parquet hentes med range requests), pandas-fallback ellers.
         var _asmPayload = null;
-        var _asmParsed = (window.DataDirectives && window.DataDirectives.parseAssembly)
-          ? window.DataDirectives.parseAssembly(effectiveScript)
-          : { spec: { datasets: [] }, errors: [] };
-        if (_asmParsed.errors.length) throw new Error('Monteringsfeil: ' + _asmParsed.errors.join('; '));
-        if ((_asmParsed.spec.datasets || []).length) {
-          var _asmDeps = { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey };
-          var _so = await window.DataLoader.resolveSourcesOnly(effectiveScript, _asmDeps);
-          if (window.AssemblyDuckdb.canPushdown(_so.spec, _so.descriptors)) {
-            setStatus(rightStatus, t('Monterer datasett (DuckDB)…'));
-            var _cmp = window.AssemblyDuckdb.compile(_so.spec, _so.descriptors);
-            var _adb = await __ensureDuckDB();
-            var _aconn = await _adb.connect();
-            try {
-              for (var _ai = 0; _ai < _cmp.attachStatements.length; _ai++) {
-                await _aconn.query(_cmp.attachStatements[_ai]);
-              }
-              var _colsByName = {};
-              for (var _di = 0; _di < _cmp.datasetStatements.length; _di++) {
-                var _dst = _cmp.datasetStatements[_di];
-                _colsByName[_dst.name] = __arrowToColumns(await _aconn.query(_dst.sql));
-              }
-              _asmPayload = { cols: _colsByName };
-            } finally { await _aconn.close(); }
-          } else {
+        refreshConnectedSources(effectiveScript);   // fire-and-forget: kildekatalog + tab
+        var _asmRes = await resolveAssemblyColumns(effectiveScript, rightStatus);
+        if (_asmRes && _asmRes.pushdown) {
+          _asmPayload = { cols: _asmRes.datasets };
+        } else if (_asmRes) {
+          var _asmParsed = _asmRes.parsed, _asmDeps = _asmRes.deps;
+          {
             setStatus(rightStatus, t('Monterer datasett…'));
             var _ra = await window.DataLoader.resolveAndAssemble(effectiveScript, _asmDeps);
             if (_ra.remote && _ra.remote.length) {

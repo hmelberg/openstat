@@ -362,7 +362,15 @@
   function load() { return Promise.resolve(); }
 
   async function run(script, opts) {
-    return runIn(makeScope(), script, (opts && opts.loads) || []);
+    var scope = makeScope();
+    // Variabel-montering (2026-07-24): ferdig-monterte kolonnesett fra
+    // DuckDB-pushdownen bindes som arquero-tabeller, samme vei som # load.
+    var _extra = (opts && opts.extraDatasets) || null;
+    if (_extra && Object.keys(_extra).length) {
+      await ensureLibs(['aq']);
+      for (var _ek in _extra) scope.vars[_ek] = tableFromSpec({ kind: 'columns', payload: _extra[_ek] });
+    }
+    return runIn(scope, script, (opts && opts.loads) || []);
   }
 
   // ── Notatbok-sesjon (Fase C-kontrakten, som Brython/MicroPython) ───────

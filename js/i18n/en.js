@@ -9,6 +9,10 @@ window.M2PY_I18N = window.M2PY_I18N || {  "OpenStat er en motor for å stille sp
   "Monterer datasett (DuckDB)…": "Assembling datasets (DuckDB)…",
   "Monterer datasett…": "Assembling datasets…",
   "Montering støtter ikke beskyttede kilder i OpenStat.": "Assembly does not support protected sources in OpenStat.",
+  "Montering i denne modusen krever parquet/csv-kilder — bruk python-modus for andre formater.": "Assembly in this mode requires parquet/csv sources — use python mode for other formats.",
+  "Tilkoblede kilder": "Connected sources",
+  "variabler (ikke nedlastet)": "variables (not downloaded)",
+  "kilde: {a} (ikke nedlastet)": "source: {a} (not downloaded)",
 };
 window.M2PY_I18N.en = {
   "Venter på Python-motoren (første gang kan ta opptil ett minutt)…": "Waiting for the Python engine (the first time can take up to a minute)…",
