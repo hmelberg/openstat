@@ -555,7 +555,7 @@
     window.t = window.t || function (s) { return s; };
     window.i18nField = window.i18nField || function (obj, field) { return obj && obj[field]; };
 
-    window.M2PY_VERSION = '2026-07-24n';
+    window.M2PY_VERSION = '2026-07-24o';
 
     // One-time migration: remove obsolete localStorage keys from previous milestones
     // Safe to delete this snippet after a few months when most users have re-loaded
@@ -2689,6 +2689,7 @@
           var res;
           try {
             res = await window.BrythonEngine.run(script, { loads: _dl.loads });
+            refreshDatasetSidebarFromLoads(_dl.loads, 'brython', 'Brython');
           } finally {
             nbUiRunCtx = null;
             if (window.Ui && window.Ui.endCellRun) window.Ui.endCellRun(null);
@@ -2748,6 +2749,7 @@
           var res;
           try {
             res = await window.MicroPythonEngine.run(script, { loads: _dl.loads });
+            refreshDatasetSidebarFromLoads(_dl.loads, 'micropython', 'MicroPython');
           } finally {
             nbUiRunCtx = null;
             if (window.Ui && window.Ui.endCellRun) window.Ui.endCellRun(null);
@@ -2793,6 +2795,7 @@
           var res;
           try {
             res = await window.JsEngine.run(script, { loads: _dl.loads });
+            refreshDatasetSidebarFromLoads(_dl.loads, 'javascript', 'JS');
           } finally {
             nbUiRunCtx = null;
             if (window.Ui && window.Ui.endCellRun) window.Ui.endCellRun(null);
@@ -4289,12 +4292,14 @@
       // et datasett som bare finnes i webR — vis en ærlig status i stedet.
       function nonPyRuntime(ds) {
         var m = window.lastDatasetInfo && window.lastDatasetInfo[ds];
-        return (m && (m.runtime === 'r' || m.runtime === 'duckdb')) ? m.runtime : null;
+        return (m && ['r', 'duckdb', 'brython', 'micropython', 'javascript'].indexOf(m.runtime) >= 0) ? m.runtime : null;
       }
       function rDatasetNotice(rt) {
         setStatus(rightStatus, rt === 'duckdb'
           ? t('Distribusjonsvisning for duckdb-tabeller støttes ikke ennå — bruk SELECT/SUMMARIZE.')
-          : t('Detaljvisning for R-datasett støttes ikke ennå — bruk str()/summary() i R.'), true);
+          : rt === 'r'
+            ? t('Detaljvisning for R-datasett støttes ikke ennå — bruk str()/summary() i R.')
+            : t('Detaljvisning støttes ikke for datasett i denne modusen ennå.'), true);
       }
       datasetsEl.querySelectorAll('.sidebar-var-row').forEach(function(el) {
         el.addEventListener('click', function() {
@@ -7580,6 +7585,45 @@ async def _run_duck_sql(_sql, _fresh=True):
     // globalenv via evalR/toJs — ingen jsonlite-avhengighet. dtypes mappes
     // til pandas-navn så eksisterende art-inferens (inferKindFromDtype)
     // virker. runtime:'r' gater de py-bundne klikkene i sidepanelet.
+    // Generisk sidebar-registrering for # load-datasett (prinsipp 2026-07-24:
+    // alt # load laster skal synes i sidebaren, uansett motor). Bygger info
+    // fra de resolverte loads-ene (bytes) — motor-agnostisk, og brukes av
+    // brython-, micropython- og javascript-modusene, der datasettene bindes
+    // inne i egne VM-er som Py/R/duck-refleksjonene ikke når. csv/json gir
+    // kolonner + radtall; parquet vises med navn (skjema krever DuckDB).
+    function refreshDatasetSidebarFromLoads(loads, runtime, badge) {
+      try {
+        var info = {};
+        (loads || []).forEach(function (l) {
+          if (!l || !l.alias || !l.bytes) return;
+          var entry = { columns: [], dtypes: {}, nrows: null, runtime: runtime };
+          try {
+            if (l.format === 'csv') {
+              var text = new TextDecoder().decode(l.bytes);
+              var nl = text.indexOf('\n');
+              var header = (nl >= 0 ? text.slice(0, nl) : text).replace(/\r$/, '');
+              var sep = header.indexOf(';') >= 0 && header.indexOf(',') < 0 ? ';' : ',';
+              entry.columns = header.split(sep).map(function (c) { return c.replace(/^"|"$/g, '').trim(); });
+              var rows = 0;
+              for (var i = 0; i < text.length; i++) if (text.charCodeAt(i) === 10) rows++;
+              if (text.length && text.charCodeAt(text.length - 1) !== 10) rows++;
+              entry.nrows = Math.max(0, rows - 1);
+            } else if (l.format === 'json') {
+              var arr = JSON.parse(new TextDecoder().decode(l.bytes));
+              if (Array.isArray(arr) && arr.length && typeof arr[0] === 'object') {
+                entry.columns = Object.keys(arr[0]);
+                entry.nrows = arr.length;
+              }
+            }
+          } catch (e) { /* uleselig — vis navnet likevel */ }
+          info[l.alias] = entry;
+        });
+        if (!Object.keys(info).length) return;
+        window.lastDatasetInfo = info;
+        updateSidebarDatasets(info, badge);
+      } catch (e) { console.warn('sidebar fra # load:', e); }
+    }
+
     async function refreshDatasetSidebarFromR() {
       if (!webRReady || !webR) return;
       var robj = null;
