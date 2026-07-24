@@ -3,7 +3,7 @@
 > **For agentiske arbeidere:** ANBEFALT SUB-SKILL: superpowers:subagent-driven-development eller
 > superpowers:executing-plans; kryss av task-for-task, verifiser i nettleser etter hver kjøresti-endring.
 
-**Status:** UNDER UTFØRELSE 2026-07-24. Alle fire beslutningspunkter avgjort av Hans (anbefalt
+**Status:** UTFØRT 2026-07-24 (alle 6 tasks; nettleserverifisert: boot + startup-eksempel, # load→pandas→to_microdata→#duckdb-hybrid, statx summarize+regress, #micro-hardfeil; pytest 327 + node 807 grønne; sync_check uten openstat-ben grønn mot microdata). Alle fire beslutningspunkter avgjort av Hans (anbefalt
 alternativ på alle): (1) scrub/protect fjernes helt, (2) verdietiketter droppes, (3) lite generert
 navne-JSON erstatter variable_metadata.json, (4) sync_check dropper openstat-benet. Forutsetter at
 `PLAN_remove_microdata_mode.md` (scope A) er utført — all microdata-*kjøring* hard-feiler allerede;
@@ -54,41 +54,41 @@ motor-synken — fikser drift-problemet fra Fable-reviewen for openstats del ved
 
 ### Task 1 — `DatasetStore`: slank erstatning for `e`
 **Filer:** `index.html` (getInterpreterCorePython-malen)
-- [ ] Ny ~30-linjers Python-klasse i core-malen: `datasets` (dict), `active_name`,
+- [x] Ny ~30-linjers Python-klasse i core-malen: `datasets` (dict), `active_name`,
       `sync_datasets_to_globals(g)` (samme oppførsel som i dag: hvert datasett som global
       variabel under sitt navn). `e = DatasetStore()`; behold globalnavnene `e`/`micro_interpreter`
       i `_g` (Cells/# use-koden refererer `e.datasets` fra JS-siden 10+ steder — uendret API).
-- [ ] `to_microdata()`: uendret signatur/oppførsel, men uten `label_manager`-kallet (beslutning 2).
+- [x] `to_microdata()`: uendret signatur/oppførsel, men uten `label_manager`-kallet (beslutning 2).
       Vurder alias `register_dataset()` som nytt primærnavn (behold `to_microdata` som alias —
       navnet er innarbeidet i eksempler/safestat-paritet).
-- [ ] `show()`/`_show_one`/`_exec_pyodide_block`: uendret, minus `_m2py_mod`-referansene.
-- [ ] `_m2py_run_segment`: fjern død microdata-gren + `_apply_labels_to_globals`-kall (eller
+- [x] `show()`/`_show_one`/`_exec_pyodide_block`: uendret, minus `_m2py_mod`-referansene.
+- [x] `_m2py_run_segment`: fjern død microdata-gren + `_apply_labels_to_globals`-kall (eller
       no-op-stub ved beslutning 2b); python/duckdb/prose-grenene uendret.
-- [ ] Statx (`runStatxScript` + `statx_runner.py`): virker uendret mot DatasetStore
+- [x] Statx (`runStatxScript` + `statx_runner.py`): virker uendret mot DatasetStore
       (bruker kun datasets/active_name — bevist av test_statx_runner's _FakeEngine).
       `statx_runner.py` beholdes i openstat (blir openstat-egen fil, ute av implisitt sync).
-- [ ] Forklar/replay: fjern `_run_microdata_chunk`-def + replay-kallene (uoppnåelige).
+- [x] Forklar/replay: fjern `_run_microdata_chunk`-def + replay-kallene (uoppnåelige).
 
 ### Task 2 — Fjern motor-booten
 **Filer:** `index.html`
-- [ ] `_loadPyodideAndM2pyImpl`: slutt å hente/registrere `m2py.py`, `functions.py`,
+- [x] `_loadPyodideAndM2pyImpl`: slutt å hente/registrere `m2py.py`, `functions.py`,
       `mockdata_core.py`, `mockdata_realism.py`, `protect.py` (beslutning 1), `static_source.py`;
       behold `notebook_prose.py` (ren ast, brukes av prose-celler) og pyodide-pakkelasting
       (numpy/pandas/scipy — python-modus trenger dem uansett). Rename funksjonen
       (`loadPyodideCore`?) — behold gammelt navn som alias hvis mange kallsteder.
-- [ ] Fjern `__applyLangToPython`s m2py-gren (M2PY_LANG-speilingen — motoren er borte; behold
+- [x] Fjern `__applyLangToPython`s m2py-gren (M2PY_LANG-speilingen — motoren er borte; behold
       funksjonen som no-op eller fjern + kallsteder).
-- [ ] Fjern `M2PY_DATA_SOURCE`-plumbing, `runStaticSchemas`, static-source-preamblen i core-malen,
+- [x] Fjern `M2PY_DATA_SOURCE`-plumbing, `runStaticSchemas`, static-source-preamblen i core-malen,
       `buildM2pyDefaultsSnippet` (label_format-linjen dør med motoren) + `getLabelFormat`/
       `getImportLimit`/datakilde-getterne (localStorage-rester).
-- [ ] `ensureM2pyRuntime`/`m2py_runtime`-fetchen (~9960): kun konsument var offline-oversetteren
+- [x] `ensureM2pyRuntime`/`m2py_runtime`-fetchen (~9960): kun konsument var offline-oversetteren
       (fjernet i scope A) + emulator-merge — verifiser med grep, fjern.
-- [ ] `ensureMicrodataAssets`/`ensureMicrodataCatalog`: reduser til autocomplete-kilden
+- [x] `ensureMicrodataAssets`/`ensureMicrodataCatalog`: reduser til autocomplete-kilden
       (beslutning 3); fjern mockdata-modul-delen.
 
 ### Task 3 — Slett filene
 **Filer:** repo-rot
-- [ ] Slett: `m2py.py`, `m2py_translate.py`, `functions.py`, `mockdata_core.py`,
+- [x] Slett: `m2py.py`, `m2py_translate.py`, `functions.py`, `mockdata_core.py`,
       `mockdata_realism.py`, `mockdata_export.py`, `m2py_runtime/`, `static_source.py`,
       `build_static_data.py`?†, `build_kommune_eras.py`, `kommune_eras_output.json` (død alt),
       `codelists/`, `variable_metadata.json` (beslutning 3), `protect.py` (beslutning 1),
@@ -96,40 +96,40 @@ motor-synken — fikser drift-problemet fra Fable-reviewen for openstats del ved
       † `build_static_data.py` genererer static_data/*.parquet fra mockdata — demodataene BEHOLDES
       som committede parquet; regenerering skjer i microdata/safestat-repoene. Slett scriptet her,
       noter i README hvor demodataene bygges.
-- [ ] BEHOLD: `static_data/` (DuckDB/statx-demo + Norge-geojson), `duckdb_bridge.py`,
+- [x] BEHOLD: `static_data/` (DuckDB/statx-demo + Norge-geojson), `duckdb_bridge.py`,
       `notebook_prose.py`, `statx_runner.py`, `names.json`, `examples/`, `data/`.
-- [ ] `sw.js`: suffiks-regelen for .py står (dekker de gjenværende .py-filene); CACHE-bump.
+- [x] `sw.js`: suffiks-regelen for .py står (dekker de gjenværende .py-filene); CACHE-bump.
 
 ### Task 4 — Testflytting
 **Filer:** `tests/`, `.github/workflows/`
-- [ ] Slett motor-testene (finnes i safestat/microdata): test_regressions, test_silent_errors,
+- [x] Slett motor-testene (finnes i safestat/microdata): test_regressions, test_silent_errors,
       test_polars_backend, test_translate, test_if_condition, test_merge_into, test_key_resolution,
       test_mockdata, test_protect_tail, test_profile, test_performance, test_sources,
       test_safestat_sources, test_safestat_print_flag, test_manifest*. Verifiser FØRST med diff at
       safestat/microdata har samme eller nyere versjon av hver slettet fil.
-- [ ] Behold + juster: test_display_policy (fjern m2py-avhengighet i uttrekket om noen),
+- [x] Behold + juster: test_display_policy (fjern m2py-avhengighet i uttrekket om noen),
       test_duckdb_bridge, test_examples_manifest, test_example_datasets, test_gen_jmv_specs,
       test_notebook_prose, test_statx_runner, test_ui_*, test_ipw_setup, conftest (fjern
       m2py-preimport).
-- [ ] `m2py-tests.yml`: pek på gjenværende suite; rename workflow (`app-tests.yml`);
+- [x] `m2py-tests.yml`: pek på gjenværende suite; rename workflow (`app-tests.yml`);
       path-filtre oppdatert. Node/brython/micropython-suitene: uberørt (brython/micropython-
       shimene er IKKE motoren — de er egne språkmoduser og beholdes).
 
 ### Task 5 — Safestat-siden: sync-kontrakten (beslutning 4)
 **Filer:** `safestat/scripts/sync_check.sh` (+ README-avsnittet den peker på)
-- [ ] Fjern openstat-benet fra kjernefil-loopen (eller reduser til valgt minimal liste);
+- [x] Fjern openstat-benet fra kjernefil-loopen (eller reduser til valgt minimal liste);
       microdata-benet uendret. Kommenter HVORFOR (scope B, dato, peker til denne planen).
-- [ ] Oppdater safestats README/ROADMAP-notat om tri-repo-strukturen.
+- [x] Oppdater safestats README/ROADMAP-notat om tri-repo-strukturen.
 
 ### Task 6 — Verifisering + opprydding
-- [ ] Nettleser: python-kjøring m/ `# load` + `show()` + `to_microdata()`/`# use` på tvers av
+- [x] Nettleser: python-kjøring m/ `# load` + `show()` + `to_microdata()`/`# use` på tvers av
       celler; statx-eksempel; duckdb-native + hybrid py→sql; jamovi-datasynk; brython/micropython;
       Norge-kart; forklar i python; publiser dokument. `#micro` gir fortsatt hard feil
       (feilen bor i JS-laget, uavhengig av motoren).
-- [ ] Suiter grønne (node + gjenværende pytest); grep-sanity: `import m2py|from m2py` = 0 treff
+- [x] Suiter grønne (node + gjenværende pytest); grep-sanity: `import m2py|from m2py` = 0 treff
       i openstat; `M2PY_VERSION` beholdes som navn på cache-bust-konstanten (kosmetisk rename
       til APP_VERSION er valgfritt — 20+ forekomster, egen liten task).
-- [ ] Bump versjon + CACHE; push. Oppdater `docs/ROADMAP.md` og minne.
+- [x] Bump versjon + CACHE; push. Oppdater `docs/ROADMAP.md` og minne.
 
 ## Rekkefølge
 
