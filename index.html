@@ -3294,6 +3294,24 @@
             try { await __ensureIpywidgets(ctx.py, ctx.rightStatus); }
             catch (e) { console.warn('ipywidgets-bro:', e); }
           }
+          // lifelines (spec 2026-07-24): lifelines 0.30.x pinner pandas<3.0,
+          // men pyodide v314 shipper pandas 3.x — den generiske micropip-
+          // løkka under feiler derfor med versjonskonflikt. Installer de
+          // rene depsene manuelt + selve pakken med deps=False
+          // (pdexplorer-presedensen lenger nede i fila).
+          if (/^\s*(?:import|from)\s+lifelines\b/m.test(script)) {
+            try {
+              var _hasLl = await ctx.py.runPythonAsync(
+                'import importlib.util as _iu\n_iu.find_spec("lifelines") is not None');
+              if (!_hasLl) {
+                setStatus(ctx.rightStatus, t('Installerer {pkg}…', { pkg: 'lifelines' }));
+                await ctx.py.runPythonAsync(
+                  'import micropip as _mp\n' +
+                  'await _mp.install(["autograd", "autograd-gamma", "formulaic"])\n' +
+                  'await _mp.install("lifelines", deps=False)');
+              }
+            } catch (e) { console.warn('lifelines-install:', e); }
+          }
           try {
             setStatus(ctx.rightStatus, t('Sjekker pakker…'));
             await ctx.py.loadPackagesFromImports(script, {
