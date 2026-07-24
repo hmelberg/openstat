@@ -1,12 +1,8 @@
 import sys
 from pathlib import Path
 
-# Gjør m2py.py, functions.py og protect.py i repo-roten importerbare fra tests/
+# Gjør repo-rotens moduler (duckdb_bridge, notebook_prose, statx_runner)
+# importerbare fra tests/. Motoren (m2py m.fl.) er fjernet fra openstat
+# (scope B, 2026-07-24) — motor-testene bor i safestat/microdata.
 _root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_root))
-
-# Pre-importer m2py. Både repo-roten og tidligere py2m/ hadde en
-# functions.py; m2py må binde repo-rotens (ellers mangler ln/rowmax m.m. i
-# generate-eval). Når den er importert, er den cachet i sys.modules.
-import functions  # noqa: F401,E402
-import m2py       # noqa: F401,E402

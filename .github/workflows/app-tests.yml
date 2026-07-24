@@ -1,0 +1,49 @@
+name: app tests (python + node)
+
+# Scope B (2026-07-24): motoren (m2py m.fl.) er fjernet fra openstat —
+# motor-/ekvivalens-testene bor i safestat/microdata. Denne kjører appens
+# gjenværende pytest-suite + node-testene for js-laget.
+
+on:
+  push:
+    paths:
+      - '*.py'
+      - 'js/**'
+      - 'index.html'
+      - 'examples/**'
+      - 'data/**'
+      - 'tests/**'
+      - 'tools/**'
+      - '.github/workflows/app-tests.yml'
+  pull_request:
+    paths:
+      - '*.py'
+      - 'js/**'
+      - 'index.html'
+      - 'examples/**'
+      - 'data/**'
+      - 'tests/**'
+      - 'tools/**'
+      - '.github/workflows/app-tests.yml'
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install pytest pandas numpy pyarrow
+      - name: Run app suite
+        run: python -m pytest tests/ -q
+  node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run js tests
+        run: node --test 'tests/js/*.test.js'
