@@ -70,25 +70,51 @@ def dp_ring(ring, tol):
     return dp(ring, tol)
 
 
-def simplify_ring(ring, tol):
+def signed_area(ring):
+    """Shoelace i (lon, lat)-planet: positiv = mot klokka (CCW)."""
+    a = 0.0
+    for i in range(len(ring) - 1):
+        x1, y1 = ring[i]
+        x2, y2 = ring[i + 1]
+        a += x1 * y2 - x2 * y1
+    return a / 2.0
+
+
+def enforce_winding(ring, exterior):
+    """d3-geo (plotly.js' geo-traces) tolker ringretning sfærisk: en
+    feil-vunnet ytterring rendres som «hele kloden minus polygonet»
+    (browser-funn 2026-07-24 — lilla verdensrektangel). Leaflet/folium
+    bryr seg ikke, så filene kan trygt normaliseres: ytterringer MED
+    klokka (negativ shoelace), hull MOT klokka."""
+    a = signed_area(ring)
+    if exterior and a > 0:
+        return ring[::-1]
+    if not exterior and a < 0:
+        return ring[::-1]
+    return ring
+
+
+def simplify_ring(ring, tol, exterior):
     out = dp_ring(ring, tol)
     out = [[round(x, 4), round(y, 4)] for x, y in out]
     if len(out) >= 4:
         if out[0] != out[-1]:
             out.append(list(out[0]))
-        return out
+        return enforce_winding(out, exterior)
     return None
 
 
 def simplify_geom(geom, tol):
     t = geom['type']
     if t == 'Polygon':
-        rings = [r for r in (simplify_ring(r, tol) for r in geom['coordinates']) if r]
+        rings = [r for r in (simplify_ring(r, tol, i == 0)
+                             for i, r in enumerate(geom['coordinates'])) if r]
         return {'type': 'Polygon', 'coordinates': rings} if rings else None
     if t == 'MultiPolygon':
         polys = []
         for poly in geom['coordinates']:
-            rings = [r for r in (simplify_ring(r, tol) for r in poly) if r]
+            rings = [r for r in (simplify_ring(r, tol, i == 0)
+                                 for i, r in enumerate(poly)) if r]
             if rings:
                 polys.append(rings)
         return {'type': 'MultiPolygon', 'coordinates': polys} if polys else None
