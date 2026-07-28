@@ -50,3 +50,16 @@ test('rSource: attr settes fra ost_convert_dtypes sin URL-vei (py-paritet)', () 
 test('rSource: shape-sjekk gir domenemelding for malformet meta-liste', () => {
   assert.match(src, /meta m\\u00e5 v\\u00e6re en register-URL eller en typemeta-liste \(list\(did=, time=, codes=\) per dimensjon\)/);
 });
+
+test('index.html-boot: pxweb-lasting og rSource-eval i ATSKILTE try/catch (r-factor-knippet §1)', () => {
+  // Regresjonsvern for rundens viktigste fiks: slås de sammen igjen, blir
+  // ost_read_csv udefinert når pxweb-lastingen kaster (i stedet for å
+  // degradere til utypet). Kildetekst-assert etter husets index.html-mønster.
+  const fs = require('fs');
+  const path = require('path');
+  const html = fs.readFileSync(path.join(__dirname, '..', '..', 'index.html'), 'utf8');
+  assert.ok(html.includes("console.warn('ost-r: pxweb-lasting:', e)"), 'pxweb-warn finnes');
+  assert.ok(html.includes("console.warn('ost-r: rSource-eval:', e)"), 'rSource-warn finnes');
+  const seg = html.slice(html.indexOf("ost-r: pxweb-lasting"), html.indexOf("ost-r: rSource-eval"));
+  assert.ok(seg.includes('try {'), 'rSource-evalen har EGEN try etter pxweb-catch-en');
+});
