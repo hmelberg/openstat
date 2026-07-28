@@ -10330,8 +10330,12 @@ library <- function(pkg, ...) {
         }
         // r-factor §5: pxweb.js inn i worker-scope (globalThis.PxWeb) +
         // ost_read_csv/ost_convert_dtypes. Kildene bor i js/pxweb.js og
-        // js/ost-r.js; feiler lastingen degraderes ost_read_csv til utypet
-        // (aldri-kast-regelen) og naken vei er upåvirket.
+        // js/ost-r.js. r-factor-knippet §1: TO separate try/catch — pxweb-
+        // lastingen degraderer KUN typing (ost_read_csv faller da til
+        // !NOPX-veien, se js/ost-r.js) hvis den feiler; rSource-evalen
+        // kjører ALLTID (egen try), ellers finnes ikke ost_read_csv i det
+        // hele tatt og naken vei ryker med den — aldri-kast-regelen gjelder
+        // boot-en selv, ikke bare R-funksjonene.
         if (window.OstR && window.OstR.rSource) {
           try {
             const pxResp = await fetch('js/pxweb.js?v=' + (window.M2PY_VERSION || '1')).catch(function () { return { ok: false }; });
@@ -10341,8 +10345,10 @@ library <- function(pkg, ...) {
                 'as.character(webr::eval_js(\'(function(){ try { var t = new TextDecoder("utf-8").decode(Module.FS.readFile("/ost_pxweb.js")); (0,eval)(t); return typeof globalThis.PxWeb !== "undefined" ? "OK" : "ERR:PxWeb mangler"; } catch (e) { return "ERR:" + String(e).slice(0,200); } })()\'))');
               if (pxOk !== 'OK') console.warn('ost-r: pxweb i worker:', pxOk);
             }
+          } catch (e) { console.warn('ost-r: pxweb-lasting:', e); }
+          try {
             await webR.evalRVoid(window.OstR.rSource());
-          } catch (e) { console.warn('ost-r:', e); }
+          } catch (e) { console.warn('ost-r: rSource-eval:', e); }
         }
         // m2py R-runtime helpers:
         //  - .m2py_split_statements: deler R-kildekode i top-level statements
