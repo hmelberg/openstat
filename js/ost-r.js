@@ -18,7 +18,7 @@
       '  tryCatch({',
       '    r <- as.character(webr::eval_js(paste0(',
       "      '(function(){ try { var px = globalThis.PxWeb;',",
-      "      ' if (!px || !px.metaUrlFor) return \"\";',",
+      "      ' if (!px || !px.metaUrlFor) return \"!NOPX\";',",
       "      ' return px.metaUrlFor(', .ost_json_str(url), '); } catch (e) { return \"\"; } })()')))",
       '    if (length(r) == 1L && nzchar(r)) r else ""',
       '  }, error = function(e) "")',
@@ -79,7 +79,14 @@
       '  if (!.ost_is_bridge_url(url)) stop("ost_read_csv krever en URL (https://\\u2026 eller /api/hent?\\u2026)")',
       '  path <- .ost_fetch(url)',
       '  murl <- .ost_meta_url(url)',
-      '  if (!nzchar(murl)) return(utils::read.csv(path, ...))',   // ukjent: ren passthrough
+      // r-factor-knippet §2: PxWeb-mangel (!NOPX) er IKKE "ukjent kilde" —
+      // melding foerst, deretter samme utypede passthrough (px-borte
+      // behandles som ikke-gjenkjent, aldri kast).
+      '  if (identical(murl, "!NOPX")) {',
+      '    message("ost: PxWeb utilgjengelig i workeren \\u2014 laster utypet.")',
+      '    murl <- ""',
+      '  }',
+      '  if (!nzchar(murl)) return(utils::read.csv(path, ...))',   // ukjent/PxWeb-borte: ren passthrough uten attr
       '  tm <- NULL',
       '  if (isTRUE(convert)) tm <- .ost_typemeta_fetch(murl)',
       '  cc <- if (!is.null(tm)) .ost_col_guard(path, tm, list(...)) else NULL',
@@ -88,17 +95,37 @@
       '  attr(df, "ost_url") <- url',                              // panelet — uansett convert
       '  df',
       '}',
+      // r-factor-knippet §4: shape-sjekk foer anvendelse — tom liste er
+      // no-op (lov), brudd faar en domenemelding istedenfor en kryptisk
+      // R-feil naar loopen i .ost_apply_typemeta_r treffer feil form.
+      '.ost_valid_typemeta_shape <- function(meta) {',
+      '  if (!is.list(meta)) return(FALSE)',
+      '  if (!length(meta)) return(TRUE)',
+      '  all(vapply(meta, function(e) {',
+      '    is.list(e) && all(c("did", "time", "codes") %in% names(e)) &&',
+      '      is.character(e$did) && length(e$did) == 1L',
+      '  }, logical(1)))',
+      '}',
       'ost_convert_dtypes <- function(df, meta) {',
       '  if (missing(meta) || is.null(meta)) stop("ost_convert_dtypes krever meta=", " (register-URL eller typemeta-liste) \\u2014 heuristikk uten meta er ikke st\\u00f8ttet i R")',
-      '  tm <- if (is.character(meta) && length(meta) == 1L) {',
+      '  if (is.character(meta) && length(meta) == 1L) {',
       '    murl <- .ost_meta_url(meta)',
+      // r-factor-knippet §2: PxWeb-mangel er en ANNEN feil enn ukjent kilde
+      // — egen aerlig stop istedenfor misvisende "gjenkjente ikke kilden".
+      '    if (identical(murl, "!NOPX")) stop("PxWeb utilgjengelig i workeren \\u2014 kan ikke sl\\u00e5 opp metadata n\\u00e5")',
       '    if (!nzchar(murl)) stop("gjenkjente ikke kilden: ", meta)',
-      '    t2 <- .ost_typemeta_fetch(murl)',
-      '    if (is.null(t2)) stop("kunne ikke hente metadata for ", meta)',
-      '    t2',
-      '  } else if (is.list(meta)) meta',
-      '  else stop("meta m\\u00e5 v\\u00e6re en register-URL eller en typemeta-liste")',
-      '  .ost_apply_typemeta_r(df, tm)',
+      '    tm <- .ost_typemeta_fetch(murl)',
+      '    if (is.null(tm)) stop("kunne ikke hente metadata for ", meta)',
+      '    out <- .ost_apply_typemeta_r(df, tm)',
+      // r-factor-knippet §3: py-paritet — URL-formen gir panelberikelse via
+      // ost_url-attr, akkurat som ost_read_csv (listeformen har ingen URL).
+      '    attr(out, "ost_url") <- meta',
+      '    return(out)',
+      '  }',
+      '  if (!.ost_valid_typemeta_shape(meta)) {',
+      '    stop("meta m\\u00e5 v\\u00e6re en register-URL eller en typemeta-liste (list(did=, time=, codes=) per dimensjon)")',
+      '  }',
+      '  .ost_apply_typemeta_r(df, meta)',
       '}',
       ''
     ].join('\n');

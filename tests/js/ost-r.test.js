@@ -28,3 +28,25 @@ test('rSource: aldri-kast for metadata + hoylytt melding + colClasses-vern', () 
 test('rSource: attr settes for gjenkjent kilde uansett convert', () => {
   assert.match(src, /attr\(df, "ost_url"\) <- url/);
 });
+
+// r-factor-knippet §2-4 (docs/superpowers/specs/2026-07-29-r-factor-knippet-design.md)
+
+test('rSource: !NOPX-markøren skiller PxWeb-mangler fra ukjent kilde', () => {
+  assert.match(src, /!NOPX/);
+});
+
+test('rSource: ost_read_csv melder PxWeb-mangel og laster utypet uten kast', () => {
+  assert.match(src, /message\("ost: PxWeb utilgjengelig i workeren/);
+});
+
+test('rSource: ost_convert_dtypes stopper høylytt med domenemelding når PxWeb mangler', () => {
+  assert.match(src, /PxWeb utilgjengelig i workeren \\u2014 kan ikke sl\\u00e5 opp metadata n\\u00e5/);
+});
+
+test('rSource: attr settes fra ost_convert_dtypes sin URL-vei (py-paritet)', () => {
+  assert.match(src, /attr\(out, "ost_url"\) <- meta/);
+});
+
+test('rSource: shape-sjekk gir domenemelding for malformet meta-liste', () => {
+  assert.match(src, /meta m\\u00e5 v\\u00e6re en register-URL eller en typemeta-liste \(list\(did=, time=, codes=\) per dimensjon\)/);
+});
