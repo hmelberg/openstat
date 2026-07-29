@@ -475,7 +475,7 @@
     },
     {
       "file": "python/smoke02_montering.txt",
-      "label": "Smoke 2 — montering (create + add + join)",
+      "label": "Smoke 2 — montering (create + add + join + where/filter)",
       "group": "Smoke-test"
     },
     {
@@ -598,6 +598,11 @@
     {
       "file": "r/smoke04_panel_typemeta.txt",
       "label": "Smoke R4 — panelberikelse + ost_read_csv",
+      "group": "Smoke-test"
+    },
+    {
+      "file": "r/smoke05_montering.txt",
+      "label": "Smoke R5 — montering (create + add + join + where/filter)",
       "group": "Smoke-test"
     }
   ]
