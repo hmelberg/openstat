@@ -35,7 +35,7 @@ args        := literal ("," literal)* ("," IDENT "=" literal)*
 literal     := string | number | True | False | None
              | "[" literal* "]" | "{" pairs "}" | SOURCE-NAME
 VERB        := connect | read | create | use
-METHOD      := read | add | join
+METHOD      := read | add | join | filter
 
 target      := registry-id | url | anvil-name    (first argument to connect/read)
 ```
@@ -45,7 +45,7 @@ removed with the Python-style syntax on 2026-07-27; writing them produces an
 error message that suggests the new form. Common named arguments:
 `kind=`, `secret_key=`, `exec="local"|"remote"`, `cache=`, the canonical query
 vocabulary (`years=`, `countries=`, `regions=`, `indicators=`, `filters={…}`,
-`all=True`), and `how="left"|"inner"|"outer"` on `add`/`join`.
+`all=True`), `how="left"|"inner"|"outer"` on `add`/`join`, and `where="<expr>"` on `add`.
 
 > **Directive lines are not Python.** The grammar is closed: no variables in
 > arguments (except source names), no expressions, no f-strings, no arithmetic,
@@ -222,6 +222,29 @@ This declares a dataset called `panel`, keyed on `pid`; pulls the `income` and `
 # panel.add(p, ["x"], how="inner")
 # panel.join(sales, on="pid", how="outer")
 ```
+
+Row filtering comes in two distinct forms:
+
+```text
+# panel.add(p, ["income"], where="income > 5000")   # filters the SOURCE, before the join
+# panel.filter("income != 99999")                    # filters the ASSEMBLED dataset, after all add/join
+```
+
+`where=` runs before the join — with a left join, rows that fail the
+condition in a secondary source stay in the panel with NA. `filter(...)`
+runs after all `add`/`join` lines (wherever it appears in the script) and
+drops rows. The expression grammar is closed: `column op value`, combined
+with `and`; `op` is `== != < <= > >= in`; values are numbers, `'strings'`
+or `[lists]` (for `in`); column names may be backtick-quoted. Anything
+else — `or`, parentheses, arithmetic, column-vs-column — is a loud error.
+NA semantics are SQL-canonical in every mode: rows with NA in a filter
+column are dropped by every condition, including `!=`. `where=` may
+reference source columns that are not imported. For API sources
+(pxweb/eurostat/sdmx/dbnomics/worldbank) the extract is materialized
+first, so `where`/`filter` reduce rows locally — they do not shrink the
+API download itself (use `filters=`/`years()`/`countries()` on the source
+for that). For remote parquet/sqlite/duckdb, `where` is pushed into the
+source query.
 
 ## 11. Comment-marker flexibility (same directive, three syntaxes)
 

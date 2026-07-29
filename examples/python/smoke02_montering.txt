@@ -1,12 +1,15 @@
-# label: Smoke 2 — montering (create + add + join)
+# label: Smoke 2 — montering (create + add + join + where/filter)
 # group: Smoke-test
-# Forvent: panel med kommune_navn/fylke_nr/befolkning/fylke_navn; ⊞ åpner
-# datatabellen. Prøv også portabel eksport: monteringsblokken skal stå FØR panel.head.
+# Forvent: panel med kommune_navn/fylke_nr/befolkning/fylke_navn, KUN rader
+# med 5000 < befolkning < 500000 (Oslo faller ut i filter-steget); ⊞ åpner
+# datatabellen. Prøv også portabel eksport (python og r): monteringsblokken
+# skal stå FØR panel.head og inneholde både kilde-filteret og filter-linjen.
 # kom = ost.connect("https://raw.githubusercontent.com/hmelberg/openstat/main/static_data/kommune.parquet")
 # fyl = ost.connect("https://raw.githubusercontent.com/hmelberg/openstat/main/static_data/fylke.parquet")
 # panel = ost.create(key="kommune_nr")
-# panel.add(kom, ["kommune_navn", "fylke_nr", "befolkning"])
+# panel.add(kom, ["kommune_navn", "fylke_nr", "befolkning"], where="befolkning > 5000")
 # fylke = fyl.read()
 # panel.join(fylke, on="fylke_nr")
+# panel.filter("befolkning < 500000")
 
 panel.head(10)
