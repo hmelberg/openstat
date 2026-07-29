@@ -542,3 +542,9 @@ test('parseWhereExpr: parenteser, tomme uttrykk og rester avvises', () => {
   assert.ok(DD._parseWhereExpr('a in 5').error);
   assert.ok(DD._parseWhereExpr('a == b').error);   // kolonne-mot-kolonne: verdi må være literal
 });
+
+test('parseWhereExpr: and/or-prefiksede unicode-kolonner misparses ikke', () => {
+  // «andøy» er et reelt norsk navn — ASCII-\b ville stille lest and + «øy»
+  assert.match(DD._parseWhereExpr('aar > 1 andøy == 2').error, /uventet tekst/);
+  assert.ok(DD._parseWhereExpr('orø == 2').conds);   // gyldig kolonne, IKKE or-feil
+});

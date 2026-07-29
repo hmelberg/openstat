@@ -584,6 +584,14 @@
   function parseWhereExpr(src) {
     var s = String(src == null ? '' : src), i = 0, conds = [];
     function ws() { while (i < s.length && (s.charAt(i) === ' ' || s.charAt(i) === '\t')) i++; }
+    // \b er ASCII-only og ser en grense mellom «d» og «ø» — «andøy» ville
+    // stille blitt lest som and + kolonnen «øy». Grensen må være unicode-
+    // bevisst, som identifikator-regexen.
+    function keyword(w) {
+      if (s.slice(i, i + w.length) !== w) return false;
+      var next = s.charAt(i + w.length);
+      return !next || !/[\p{L}\p{N}_]/u.test(next);
+    }
     function ident() {
       if (s.charAt(i) === '`') {
         var j = s.indexOf('`', i + 1);
@@ -617,7 +625,7 @@
       if (two === '==' || two === '!=' || two === '<=' || two === '>=') { op = two; i += 2; }
       else if (s.charAt(i) === '<' || s.charAt(i) === '>') { op = s.charAt(i); i += 1; }
       else if (s.charAt(i) === '=') return { error: '«=» er ikke en sammenligning — mente du «==»?' };
-      else if (/^in\b/.test(s.slice(i))) { op = 'in'; i += 2; }
+      else if (keyword('in')) { op = 'in'; i += 2; }
       else return { error: 'ukjent operator ved «' + s.slice(i, i + 10) + '» — gyldige: == != < <= > >= in' };
       ws();
       var val;
@@ -646,8 +654,8 @@
       conds.push({ col: col, op: op, value: val });
       ws();
       if (i >= s.length) break;
-      if (/^and\b/.test(s.slice(i))) { i += 3; continue; }
-      if (/^or\b/.test(s.slice(i))) return { error: 'or støttes ikke (v1) — for flere verdier av samme kolonne, bruk in [..]' };
+      if (keyword('and')) { i += 3; continue; }
+      if (keyword('or')) return { error: 'or støttes ikke (v1) — for flere verdier av samme kolonne, bruk in [..]' };
       return { error: 'uventet tekst: «' + s.slice(i) + '»' };
     }
     return { conds: conds };
