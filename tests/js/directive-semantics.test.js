@@ -496,3 +496,49 @@ test('meta: første = varsler ikke, og ulike mål varsler ikke', () => {
   const r = DD.parse('# meta.iris.note = "A"\n# meta.pen.note = "B"\n# meta.iris.link = "https://a"');
   assert.deepEqual(r.warnings, []);
 });
+
+// ── where-uttrykk (spec 2026-07-29-row-filter-montering §3) ──
+
+test('parseWhereExpr: tall, streng, and', () => {
+  const r = DD._parseWhereExpr("folketall > 5000 and fylke == 'Oslo'");
+  assert.deepEqual(r, { conds: [
+    { col: 'folketall', op: '>', value: 5000 },
+    { col: 'fylke', op: '==', value: 'Oslo' },
+  ] });
+});
+
+test('parseWhereExpr: in-liste med tall og strenger', () => {
+  assert.deepEqual(DD._parseWhereExpr('aar in [2020, 2021]'),
+    { conds: [{ col: 'aar', op: 'in', value: [2020, 2021] }] });
+  assert.deepEqual(DD._parseWhereExpr('fylke in ["Oslo", "Viken"]'),
+    { conds: [{ col: 'fylke', op: 'in', value: ['Oslo', 'Viken'] }] });
+});
+
+test('parseWhereExpr: unicode-kolonner og backticks', () => {
+  assert.deepEqual(DD._parseWhereExpr('år >= 2020'),
+    { conds: [{ col: 'år', op: '>=', value: 2020 }] });
+  assert.deepEqual(DD._parseWhereExpr('`hele landet` != 0'),
+    { conds: [{ col: 'hele landet', op: '!=', value: 0 }] });
+});
+
+test('parseWhereExpr: negative tall og desimaltall', () => {
+  assert.deepEqual(DD._parseWhereExpr('endring < -0.5'),
+    { conds: [{ col: 'endring', op: '<', value: -0.5 }] });
+});
+
+test('parseWhereExpr: = gir hint om ==', () => {
+  assert.match(DD._parseWhereExpr("fylke = 'Oslo'").error, /mente du «==»/);
+});
+
+test('parseWhereExpr: or avvises med in-hint', () => {
+  assert.match(DD._parseWhereExpr('a > 1 or b > 2').error, /or støttes ikke/);
+});
+
+test('parseWhereExpr: parenteser, tomme uttrykk og rester avvises', () => {
+  assert.ok(DD._parseWhereExpr('(a > 1)').error);
+  assert.ok(DD._parseWhereExpr('').error);
+  assert.ok(DD._parseWhereExpr('a > 1 b').error);
+  assert.ok(DD._parseWhereExpr('a in []').error);
+  assert.ok(DD._parseWhereExpr('a in 5').error);
+  assert.ok(DD._parseWhereExpr('a == b').error);   // kolonne-mot-kolonne: verdi må være literal
+});

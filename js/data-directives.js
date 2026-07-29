@@ -575,6 +575,84 @@
     });
   }
 
+  // where/filter-uttrykk (spec 2026-07-29-row-filter-montering §3):
+  // «kolonne op verdi (and …)*». Lukket grammatikk — or, parenteser,
+  // aritmetikk og kolonne-mot-kolonne er høylytte feil, ikke stille
+  // passthrough: uttrykket skal oversettes IDENTISK til SQL, pandas og R,
+  // og alt de tre emitterne ikke kan garantere likt, avvises her.
+  // Returnerer {conds:[{col,op,value}]} eller {error}.
+  function parseWhereExpr(src) {
+    var s = String(src == null ? '' : src), i = 0, conds = [];
+    function ws() { while (i < s.length && (s.charAt(i) === ' ' || s.charAt(i) === '\t')) i++; }
+    function ident() {
+      if (s.charAt(i) === '`') {
+        var j = s.indexOf('`', i + 1);
+        if (j < 0 || j === i + 1) return null;
+        var name = s.slice(i + 1, j); i = j + 1;
+        return name;
+      }
+      var m = /^[\p{L}_][\p{L}\p{N}_]*/u.exec(s.slice(i));
+      if (!m) return null;
+      i += m[0].length;
+      return m[0];
+    }
+    function literal() {
+      var c = s.charAt(i);
+      if (c === "'" || c === '"') {
+        var j = s.indexOf(c, i + 1);
+        if (j < 0) return { error: 'streng mangler avsluttende ' + c };
+        var v = s.slice(i + 1, j); i = j + 1;
+        return { value: v };
+      }
+      var m = /^-?\d+(?:\.\d+)?/.exec(s.slice(i));
+      if (m) { i += m[0].length; return { value: parseFloat(m[0]) }; }
+      return { error: 'forventet tall eller \'streng\' (kolonne-mot-kolonne støttes ikke)' };
+    }
+    for (;;) {
+      ws();
+      var col = ident();
+      if (!col) return { error: 'forventet kolonnenavn (identifikator eller `backticks`), fikk «' + s.slice(i, i + 20) + '»' };
+      ws();
+      var op = null, two = s.slice(i, i + 2);
+      if (two === '==' || two === '!=' || two === '<=' || two === '>=') { op = two; i += 2; }
+      else if (s.charAt(i) === '<' || s.charAt(i) === '>') { op = s.charAt(i); i += 1; }
+      else if (s.charAt(i) === '=') return { error: '«=» er ikke en sammenligning — mente du «==»?' };
+      else if (/^in\b/.test(s.slice(i))) { op = 'in'; i += 2; }
+      else return { error: 'ukjent operator ved «' + s.slice(i, i + 10) + '» — gyldige: == != < <= > >= in' };
+      ws();
+      var val;
+      if (op === 'in') {
+        if (s.charAt(i) !== '[') return { error: 'in krever en liste — in [verdi, verdi]' };
+        i++;
+        var list = [];
+        for (;;) {
+          ws();
+          if (s.charAt(i) === ']') { i++; break; }
+          var e = literal();
+          if (e.error) return { error: e.error };
+          list.push(e.value);
+          ws();
+          if (s.charAt(i) === ',') { i++; continue; }
+          if (s.charAt(i) === ']') { i++; break; }
+          return { error: 'forventet «,» eller «]» i in-listen' };
+        }
+        if (!list.length) return { error: 'in-listen er tom' };
+        val = list;
+      } else {
+        var lit = literal();
+        if (lit.error) return { error: lit.error };
+        val = lit.value;
+      }
+      conds.push({ col: col, op: op, value: val });
+      ws();
+      if (i >= s.length) break;
+      if (/^and\b/.test(s.slice(i))) { i += 3; continue; }
+      if (/^or\b/.test(s.slice(i))) return { error: 'or støttes ikke (v1) — for flere verdier av samme kolonne, bruk in [..]' };
+      return { error: 'uventet tekst: «' + s.slice(i) + '»' };
+    }
+    return { conds: conds };
+  }
+
   // Montering: create/add/join + read-med-alias → mode-nøytral spec.
   function parseAssembly(script) {
     var errors = [], datasets = [];
@@ -892,5 +970,5 @@
   // pythonsk. Én kilde til sannhet: parsetreet.
   function isDirectiveLine(line) { return global.DirectiveParser.isDirectiveLine(line); }
 
-  global.DataDirectives = { parse: parse, makeLoad: makeLoad, metaByTarget: metaByTarget, resolve: resolve, scrubKeys: scrubKeys, parseAssembly: parseAssembly, translateCanonical: translateCanonical, parseUse: parseUse, parseSegmentUses: parseSegmentUses, runtimeFamily: runtimeFamily, isDirectiveLine: isDirectiveLine };
+  global.DataDirectives = { parse: parse, makeLoad: makeLoad, metaByTarget: metaByTarget, resolve: resolve, scrubKeys: scrubKeys, parseAssembly: parseAssembly, translateCanonical: translateCanonical, parseUse: parseUse, parseSegmentUses: parseSegmentUses, runtimeFamily: runtimeFamily, isDirectiveLine: isDirectiveLine, _parseWhereExpr: parseWhereExpr };
 })(typeof window !== 'undefined' ? window : globalThis);
