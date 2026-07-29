@@ -576,7 +576,7 @@
   function isAssemblyLine(ln) {
     var p = global.DirectiveParser.parseLine(ln);
     return !!(p && p.form === 'call' &&
-              ((p.recv === 'ost' && p.verb === 'create') || p.verb === 'add' || p.verb === 'join'));
+              ((p.recv === 'ost' && p.verb === 'create') || p.verb === 'add' || p.verb === 'join' || p.verb === 'filter'));
   }
 
   function mergeLine(name, rightExpr, keys, how, mode) {
@@ -585,6 +585,27 @@
     }
     var tail = how === 'left' ? ', all.x = TRUE' : how === 'outer' ? ', all = TRUE' : '';
     return name + ' <- merge(' + name + ', ' + rightExpr + ', by = c(' + keys.map(rStr).join(', ') + ')' + tail + ')';
+  }
+
+  // where/filter-emisjon (spec 2026-07-29-row-filter-montering §5).
+  // NA-regler er SQL-kanoniske (spec §4): pandas trenger .notna()-vern ved
+  // != (NaN != v er ellers True); R-siden bruker which(), som dropper NA.
+  function pyLit(v) { return typeof v === 'number' ? String(v) : pyStr(v); }
+  function rLit(v) { return typeof v === 'number' ? String(v) : rStr(v); }
+  function pyMask(varName, conds) {
+    return conds.map(function (c) {
+      var s = varName + '[' + pyStr(c.col) + ']';
+      if (c.op === 'in') return s + '.isin([' + c.value.map(pyLit).join(', ') + '])';
+      if (c.op === '!=') return '(' + s + ' != ' + pyLit(c.value) + ') & ' + s + '.notna()';
+      return '(' + s + ' ' + c.op + ' ' + pyLit(c.value) + ')';
+    }).join(' & ');
+  }
+  function rWhich(varName, conds) {
+    return 'which(' + conds.map(function (c) {
+      var s = varName + '[[' + rStr(c.col) + ']]';
+      if (c.op === 'in') return s + ' %in% c(' + c.value.map(rLit).join(', ') + ')';
+      return s + ' ' + c.op + ' ' + rLit(c.value);
+    }).join(' & ') + ')';
   }
 
   function emitAssembly(script, mode, registry, warnings, needs, DD) {
@@ -647,13 +668,23 @@
       d.steps.forEach(function (st, si) {
         if (st.op === 'import') {
           var cols = keys.concat(st.columns.filter(function (c) { return keys.indexOf(c) < 0; }));
-          var subset = mode === 'python'
-            ? 'src_' + st.source + '[[' + cols.map(pyStr).join(', ') + ']]'
-            : 'src_' + st.source + '[, c(' + cols.map(rStr).join(', ') + ')]';
+          var srcVar = 'src_' + st.source;
+          var subset;
+          if (mode === 'python') {
+            var base = st.where ? srcVar + '[' + pyMask(srcVar, st.where) + ']' : srcVar;
+            subset = base + '[[' + cols.map(pyStr).join(', ') + ']]';
+          } else {
+            var rows = st.where ? rWhich(srcVar, st.where) : '';
+            subset = srcVar + '[' + rows + ', c(' + cols.map(rStr).join(', ') + ')]';
+          }
           if (si === 0) lines.push(mode === 'python' ? (d.name + ' = ' + subset) : (d.name + ' <- ' + subset));
           else lines.push(mergeLine(d.name, subset, keys, st.how, mode));
-        } else {
+        } else if (st.op === 'join') {
           lines.push(mergeLine(d.name, st.from, st.on, st.how, mode));
+        } else {   // filter (spec 2026-07-29 §2: alltid etter add/join)
+          lines.push(mode === 'python'
+            ? d.name + ' = ' + d.name + '[' + pyMask(d.name, st.where) + ']'
+            : d.name + ' <- ' + d.name + '[' + rWhich(d.name, st.where) + ', ]');
         }
       });
       if (mode === 'r' && d.format === 'data.table') lines.push(d.name + ' <- data.table::as.data.table(' + d.name + ')  # krever data.table');
