@@ -799,7 +799,7 @@ window.M2PY_I18N.en = {
 
   // ── Variabelpanel: «Kommentarer»-ramme (giscus-tråd) ──
   "Kommentarer": "Comments",
-  "Vis/skjul kommentarer": "Show/hide comments",
+  "Vis / legg inn kommentar": "Show / add comment",
   "Åpne på GitHub": "Open on GitHub",
 
   // ── Stale datasett i sidebaren (spec 2026-07-25-metadata-ui-datasett-flate-design, Task 5) ──
