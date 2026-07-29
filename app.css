@@ -744,9 +744,9 @@
     .meta-info-container .meta-info-prov a { color: var(--accent); }
     .meta-info-container .meta-info-prov-fmt { opacity: 0.85; }
     .meta-info-warn { color: var(--danger); font-size: 11px; margin: 6px 0 0 2px; line-height: 1.35; }
-    /* «Fra fellesskapet»-ramme (giscus-tråd): tydelig adskilt fra kildens
-       metadata — stiplet ramme + eget merke, aldri forvekselbar (tillitsregel). */
-    .meta-info-community { margin: 12px 0 4px 0; padding: 8px 10px; border: 1px dashed var(--border); border-left: 3px dashed var(--accent); border-radius: 8px; background: var(--bg-code); }
+    /* «Kommentarer»-ramme (giscus-tråd): adskilt fra kildens metadata via
+       KOMMENTARER-merket (tillitsregel) — rammen selv er en vanlig stille boks. */
+    .meta-info-community { margin: 12px 0 4px 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-code); }
     .meta-info-community-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 0 0 6px 0; }
     .meta-info-community-title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); font-weight: 600; }
     .meta-info-community-link { font-size: 11px; color: var(--accent); text-decoration: none; white-space: nowrap; }
