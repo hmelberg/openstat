@@ -548,3 +548,82 @@ test('parseWhereExpr: and/or-prefiksede unicode-kolonner misparses ikke', () => 
   assert.match(DD._parseWhereExpr('aar > 1 andøy == 2').error, /uventet tekst/);
   assert.ok(DD._parseWhereExpr('orø == 2').conds);   // gyldig kolonne, IKKE or-feil
 });
+
+// ── where= på add + filter()-verb (spec 2026-07-29 §2) ──
+
+test('parseAssembly: where= på add gir AST på import-steget', () => {
+  const a = DD.parseAssembly([
+    '# panel = ost.create(key="kommune")',
+    '# panel.add(bef, ["folketall"], where="folketall > 5000")',
+  ].join('\n'));
+  assert.deepEqual(a.errors, []);
+  const st = a.spec.datasets[0].steps[0];
+  assert.equal(st.op, 'import');
+  assert.deepEqual(st.where, [{ col: 'folketall', op: '>', value: 5000 }]);
+});
+
+test('parseAssembly: add uten where har IKKE where-felt', () => {
+  const a = DD.parseAssembly([
+    '# panel = ost.create(key="kommune")',
+    '# panel.add(bef, ["folketall"])',
+  ].join('\n'));
+  assert.equal('where' in a.spec.datasets[0].steps[0], false);
+});
+
+test('parseAssembly: ugyldig where-uttrykk gir linjenummer-feil', () => {
+  const a = DD.parseAssembly([
+    '# panel = ost.create(key="kommune")',
+    '# panel.add(bef, ["folketall"], where="folketall or 5")',
+  ].join('\n'));
+  assert.equal(a.errors.length, 1);
+  assert.match(a.errors[0], /linje 2: ugyldig where-uttrykk/);
+});
+
+test('parseAssembly: filter etter add+join uansett linjeplassering', () => {
+  const a = DD.parseAssembly([
+    '# ekstra = fyl.read()',
+    '# panel = ost.create(key="kommune")',
+    '# panel.filter("folketall < 99999")',
+    '# panel.add(bef, ["folketall"])',
+    '# panel.join(ekstra, on="kommune")',
+  ].join('\n'));
+  assert.deepEqual(a.errors, []);
+  const ops = a.spec.datasets.find(d => d.name === 'panel').steps.map(s => s.op);
+  assert.deepEqual(ops, ['import', 'join', 'filter']);
+});
+
+test('parseAssembly: flere filter-linjer AND-es som separate steg i rekkefølge', () => {
+  const a = DD.parseAssembly([
+    '# panel = ost.create(key="kommune")',
+    '# panel.add(bef, ["folketall", "areal"])',
+    '# panel.filter("folketall > 100")',
+    '# panel.filter("areal > 5")',
+  ].join('\n'));
+  assert.deepEqual(a.errors, []);
+  const steps = a.spec.datasets[0].steps;
+  assert.deepEqual(steps.map(s => s.op), ['import', 'filter', 'filter']);
+  assert.equal(steps[1].where[0].col, 'folketall');
+  assert.equal(steps[2].where[0].col, 'areal');
+});
+
+test('parseAssembly: filter avviser tilordning, kwargs og manglende uttrykk', () => {
+  const t1 = DD.parseAssembly('# panel = ost.create(key="k")\n# x = panel.filter("a > 1")');
+  assert.match(t1.errors[0], /filter returnerer ingenting/);
+  const t2 = DD.parseAssembly('# panel = ost.create(key="k")\n# panel.filter("a > 1", how="inner")');
+  assert.match(t2.errors[0], /ukjent argument «how» for filter/);
+  const t3 = DD.parseAssembly('# panel = ost.create(key="k")\n# panel.filter()');
+  assert.match(t3.errors[0], /filter krever et uttrykk/);
+});
+
+test('parseAssembly: filter på ukjent datasett gir feil, ikke stillhet', () => {
+  const a = DD.parseAssembly('# ukjent.filter("a > 1")');
+  assert.match(a.errors[0], /ukjent datasett «ukjent»/);
+});
+
+test('parseAssembly: where må være streng', () => {
+  const a = DD.parseAssembly([
+    '# panel = ost.create(key="k")',
+    '# panel.add(bef, ["a"], where=5)',
+  ].join('\n'));
+  assert.match(a.errors[0], /where må være en streng/);
+});

@@ -101,7 +101,7 @@
   var MARKER_RE = /^[ \t]*(?:#|--|\/\/)[ \t]*/;
   var NS = { meta: 1 };
   var OST_VERBS = { connect: 1, read: 1, create: 1, use: 1 };
-  var METHODS = { read: 1, add: 1, join: 1 };
+  var METHODS = { read: 1, add: 1, join: 1, filter: 1 };
 
   // Gammel syntaks -> migrasjonshint. Hvert mønster krever et KJENNETEGN som
   // prosa ikke har: " as " sammen med en sti/URL eller opsjonshale, " into "

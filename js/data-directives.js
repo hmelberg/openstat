@@ -678,7 +678,7 @@
     // gyldig ost.create). Da mistet create/add/join den tilfeldige dekningen de
     // hadde. Uten denne vakten er «add(py, ["a"], hwo="inner")» stille: steget
     // bygges med how="left", brukeren ba om inner, ingen sier fra.
-    var ASM_KWARGS = { create: ['key', 'format'], add: ['table', 'how'], join: ['on', 'how'] };
+    var ASM_KWARGS = { create: ['key', 'format'], add: ['table', 'how', 'where'], join: ['on', 'how'], filter: [] };
     function checkKwargs(it) {
       var ok = ASM_KWARGS[it.verb], bad = Object.keys(it.kwargs).filter(function (k) {
         return ok.indexOf(k) < 0;
@@ -742,18 +742,14 @@
       }
     });
 
-    // Pass 2 og 3: alle add FØR alle join, uavhengig av rekkefølgen i
-    // scriptet. De gamle regex-passene (IMPORT_RE helt ut, så JOIN_RE) gjorde
-    // det implisitt, og to konsumenter er avhengige av det:
-    // assembly-duckdb.js:129 kaster «join krever minst én import først», og
-    // portable-export.js:597 dropper datasettet STILLE fra eksporten.
-    // Et script som setter opp joinen først og pynter med flere add-linjer
-    // etterpå — en naturlig skrivemåte — ville ellers regrert fra «virker»
-    // til «hard feil eller taus utelatelse».
-    ['add', 'join'].forEach(function (pass) {
+    // Pass 2-4: alle add FØR alle join FØR alle filter, uavhengig av
+    // rekkefølgen i scriptet. (add/join-begrunnelsen står over; filter sist
+    // er kontrakten fra spec 2026-07-29 §2 — filter gjelder det FERDIG
+    // monterte datasettet.)
+    ['add', 'join', 'filter'].forEach(function (pass) {
     res.items.forEach(function (it) {
       if (it.form !== 'call') return;
-      if (it.verb !== 'add' && it.verb !== 'join') return;
+      if (it.verb !== 'add' && it.verb !== 'join' && it.verb !== 'filter') return;
       if (it.verb !== pass) return;
       // Stille dropp er forbudt: «# x = panel.add(...)» parser fint, men ville
       // ellers blitt kastet uten feilmelding.
@@ -765,6 +761,18 @@
       var d = byName[it.recv];
       if (!d || d.load) { errors.push('ukjent datasett «' + it.recv + '» (mangler ost.create?)'); return; }
       if (!checkKwargs(it)) return;
+
+      if (it.verb === 'filter') {
+        if (it.args.length !== 1 || typeof it.args[0] !== 'string' || !it.args[0].length) {
+          errors.push('linje ' + it.lineNo + ': filter krever et uttrykk — filter("kolonne > verdi")');
+          return;
+        }
+        var pf = parseWhereExpr(it.args[0]);
+        if (pf.error) { errors.push('linje ' + it.lineNo + ': ugyldig filter-uttrykk — ' + pf.error); return; }
+        d.steps.push({ op: 'filter', where: pf.conds });
+        return;
+      }
+
       var how = checkHow(it);
       if (how === null) return;
 
@@ -784,7 +792,17 @@
         var cols = names(it.args[1]);
         if (!cols.length) { errors.push('linje ' + it.lineNo + ': add krever minst én kolonne'); return; }
         var tbl = it.kwargs.table ? String(it.kwargs.table) : null;
-        d.steps.push({ op: 'import', source: noteSource(ref.__ref, tbl), columns: cols, how: how });
+        var step = { op: 'import', source: noteSource(ref.__ref, tbl), columns: cols, how: how };
+        if (Object.prototype.hasOwnProperty.call(it.kwargs, 'where')) {
+          if (typeof it.kwargs.where !== 'string') {
+            errors.push('linje ' + it.lineNo + ': where må være en streng — where="kolonne > verdi"');
+            return;
+          }
+          var pw = parseWhereExpr(it.kwargs.where);
+          if (pw.error) { errors.push('linje ' + it.lineNo + ': ugyldig where-uttrykk — ' + pw.error); return; }
+          step.where = pw.conds;
+        }
+        d.steps.push(step);
         return;
       }
       var from = it.args[0];
