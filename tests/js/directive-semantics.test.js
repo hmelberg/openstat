@@ -610,7 +610,7 @@ test('parseAssembly: filter avviser tilordning, kwargs og manglende uttrykk', ()
   const t1 = DD.parseAssembly('# panel = ost.create(key="k")\n# x = panel.filter("a > 1")');
   assert.match(t1.errors[0], /filter returnerer ingenting/);
   const t2 = DD.parseAssembly('# panel = ost.create(key="k")\n# panel.filter("a > 1", how="inner")');
-  assert.match(t2.errors[0], /ukjent argument «how» for filter/);
+  assert.match(t2.errors[0], /filter tar ingen navngitte argumenter — fikk «how»/);
   const t3 = DD.parseAssembly('# panel = ost.create(key="k")\n# panel.filter()');
   assert.match(t3.errors[0], /filter krever et uttrykk/);
 });

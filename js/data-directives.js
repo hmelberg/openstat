@@ -684,8 +684,10 @@
         return ok.indexOf(k) < 0;
       });
       if (!bad.length) return true;
-      errors.push('linje ' + it.lineNo + ': ukjent argument «' + bad[0] + '» for ' + it.verb +
-                  ' — gyldige: ' + ok.join(', '));
+      errors.push(ok.length
+        ? 'linje ' + it.lineNo + ': ukjent argument «' + bad[0] + '» for ' + it.verb +
+          ' — gyldige: ' + ok.join(', ')
+        : 'linje ' + it.lineNo + ': ' + it.verb + ' tar ingen navngitte argumenter — fikk «' + bad[0] + '»');
       return false;
     }
 

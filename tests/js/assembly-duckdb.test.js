@@ -247,3 +247,16 @@ test('compile: filter som første steg er ærlig feil', () => {
   ] };
   assert.throws(() => AD.compile(spec, DESC), /filter krever minst én import først i «d»/);
 });
+
+test('compile: where på import og filter i samme montering', () => {
+  const spec = { sources: ['p'], datasets: [
+    { name: 'd', key: ['pid'], steps: [
+      { op: 'import', source: 'p', columns: ['inntekt'], how: 'left',
+        where: [{ col: 'inntekt', op: '>', value: 0 }] },
+      { op: 'filter', where: [{ col: 'inntekt', op: '<', value: 400000 }] },
+    ] },
+  ] };
+  const sql = AD.compile(spec, DESC).datasetStatements[0].sql;
+  assert.match(sql, /WHERE "inntekt" > 0\)/);          // inne i kildebrikken
+  assert.match(sql, /\) WHERE "inntekt" < 400000\)$/); // ytterst
+});

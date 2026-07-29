@@ -246,6 +246,8 @@ API download itself (use `filters=`/`years()`/`countries()` on the source
 for that). For remote parquet/sqlite/duckdb, `where` is pushed into the
 source query.
 
+One honest edge: comparing a quoted string against a numeric column (e.g. where="aar == '2020'" on a numeric aar) matches in the DuckDB path (which casts) but selects zero rows in the pandas fallback — quote strings only for string columns.
+
 ## 11. Comment-marker flexibility (same directive, three syntaxes)
 
 These three lines are parsed identically — only the comment marker differs, matching whichever language mode the script segment is in:
