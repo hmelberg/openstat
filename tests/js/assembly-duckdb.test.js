@@ -192,3 +192,58 @@ test('compile: attaches er strukturerte {alias, sql} (én per unik fil-URL)', ()
   ]);
   assert.equal(out.attachStatements, undefined);
 });
+
+// ── where/filter (spec 2026-07-29-row-filter-montering §5) ──
+
+test('compile: where på import gir WHERE inne i kildebrikken', () => {
+  const spec = { sources: ['p'], datasets: [
+    { name: 'd', key: ['pid'], steps: [
+      { op: 'import', source: 'p', columns: ['inntekt'], how: 'left',
+        where: [{ col: 'inntekt', op: '>', value: 5000 }, { col: 'fylke', op: '==', value: 'Oslo' }] },
+    ] },
+  ] };
+  const sql = AD.compile(spec, DESC).datasetStatements[0].sql;
+  assert.match(sql, /FROM read_parquet\('https:\/\/x\/person\.parquet'\) WHERE "inntekt" > 5000 AND "fylke" = 'Oslo'\)/);
+});
+
+test('compile: where-strenger escapes (O\'Brien) og != blir <>', () => {
+  const spec = { sources: ['p'], datasets: [
+    { name: 'd', key: ['pid'], steps: [
+      { op: 'import', source: 'p', columns: ['navn'], how: 'left',
+        where: [{ col: 'navn', op: '!=', value: "O'Brien" }] },
+    ] },
+  ] };
+  const sql = AD.compile(spec, DESC).datasetStatements[0].sql;
+  assert.match(sql, /WHERE "navn" <> 'O''Brien'/);
+});
+
+test('compile: in-liste blir IN (…)', () => {
+  const spec = { sources: ['p'], datasets: [
+    { name: 'd', key: ['pid'], steps: [
+      { op: 'import', source: 'p', columns: ['aar'], how: 'left',
+        where: [{ col: 'aar', op: 'in', value: [2020, 2021] }] },
+    ] },
+  ] };
+  assert.match(AD.compile(spec, DESC).datasetStatements[0].sql, /WHERE "aar" IN \(2020, 2021\)/);
+});
+
+test('compile: filter-steg wrapper ytterst, etter join', () => {
+  const spec = { sources: ['p', 's'], datasets: [
+    { name: 'a', load: 's' },
+    { name: 'b', key: ['pid'], steps: [
+      { op: 'import', source: 'p', columns: ['inntekt'], how: 'left' },
+      { op: 'join', from: 'a', on: ['pid'], how: 'inner' },
+      { op: 'filter', where: [{ col: 'inntekt', op: '<', value: 400000 }] },
+    ] },
+  ] };
+  const sql = AD.compile(spec, DESC).datasetStatements.find(d => d.name === 'b').sql;
+  // filter-wrappen skal ligge UTENFOR join-uttrykket
+  assert.match(sql, /^SELECT \* FROM \(SELECT \* FROM \(.*INNER JOIN.*\) WHERE "inntekt" < 400000\)$/);
+});
+
+test('compile: filter som første steg er ærlig feil', () => {
+  const spec = { sources: ['p'], datasets: [
+    { name: 'd', key: ['pid'], steps: [{ op: 'filter', where: [{ col: 'x', op: '>', value: 1 }] }] },
+  ] };
+  assert.throws(() => AD.compile(spec, DESC), /filter krever minst én import først i «d»/);
+});

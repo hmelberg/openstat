@@ -33,6 +33,20 @@
   function quoteIdent(id) { return '"' + String(id).replace(/"/g, '""') + '"'; }
   function quoteLit(s) { return "'" + String(s).replace(/'/g, "''") + "'"; }
 
+  // where/filter-emisjon (spec 2026-07-29-row-filter-montering §5): AST fra
+  // parseWhereExpr → SQL-predikat. NA-semantikken er SQL-native (NULL faller
+  // ut av alle betingelser, også <>) — pandas-/R-emitterne speiler den, se
+  // buildAssemblyPreamble og portable-export.js.
+  function sqlLit(v) { return typeof v === 'number' ? String(v) : quoteLit(v); }
+  function whereClause(conds) {
+    return conds.map(function (c) {
+      var col = quoteIdent(c.col);
+      if (c.op === 'in') return col + ' IN (' + c.value.map(sqlLit).join(', ') + ')';
+      var op = c.op === '==' ? '=' : c.op === '!=' ? '<>' : c.op;
+      return col + ' ' + op + ' ' + sqlLit(c.value);
+    }).join(' AND ');
+  }
+
   // One ATTACH per unique duckdb/sqlite FILE URL (not per table) — several
   // tables from the same file share a single catalog attach (design doc §1).
   function buildAttaches(spec, descriptors) {
@@ -116,7 +130,8 @@
           var ref = relationRef(step.source, descriptors, att.aliasByUrl);
           var cols = step.columns.filter(function (c) { return keys.indexOf(c) < 0; });
           var selectCols = keys.map(quoteIdent).concat(cols.map(quoteIdent)).join(', ');
-          var piece = '(SELECT ' + selectCols + ' FROM ' + ref + ')';
+          var piece = '(SELECT ' + selectCols + ' FROM ' + ref +
+            (step.where ? ' WHERE ' + whereClause(step.where) : '') + ')';
           if (sql === null) {
             sql = piece;
           } else {
@@ -132,6 +147,9 @@
           var onList = step.on.map(quoteIdent).join(', ');
           sql = '(SELECT acc.*, other.* EXCLUDE (' + onList + ') FROM (' + sql + ') acc ' +
             step.how.toUpperCase() + ' JOIN (' + otherSql.sql + ') other USING (' + onList + '))';
+        } else if (step.op === 'filter') {
+          if (sql === null) throw new Error('filter krever minst én import først i «' + ds.name + '»');
+          sql = '(SELECT * FROM ' + sql + ' WHERE ' + whereClause(step.where) + ')';
         }
       });
       datasetStatements.push({ name: ds.name, sql: 'SELECT * FROM ' + sql });
