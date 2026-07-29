@@ -4704,13 +4704,19 @@
     }
 
     // Proveniens-linjen (§1 punkt 2): kilde-URL som lenke + format, ELLER
-    // register-form (registerId/tabell + kind).
+    // register-form (registerId/tabell + kind). Register-formen lenkes til
+    // kildens menneskeside når MetaInfo.sourcePageUrl har en deterministisk
+    // mal for kilden — ellers ren tekst.
     function renderDatasetProvLine(prov) {
       if (!prov) return '';
       var label = escapeHtml(t('Kilde')) + ': ';
       if (prov.table) {
         var form = prov.registerId + '/' + prov.table;
-        return '<div class="meta-info-prov">' + label + escapeHtml(form)
+        var pageUrl = window.MetaInfo.sourcePageUrl(prov.registerId, prov.table);
+        var formHtml = pageUrl
+          ? '<a href="' + escapeHtml(pageUrl) + '" target="_blank" rel="noopener">' + escapeHtml(form) + '</a>'
+          : escapeHtml(form);
+        return '<div class="meta-info-prov">' + label + formHtml
           + (prov.kind ? ' <span class="meta-info-prov-fmt">(' + escapeHtml(prov.kind) + ')</span>' : '') + '</div>';
       }
       if (prov.url) {

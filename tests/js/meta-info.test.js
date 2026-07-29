@@ -211,3 +211,49 @@ test('render: brukerinnhold escapes', () => {
   const html = MI.render(MI.merge(null, metas, 'bef'), 'bef');
   assert.doesNotMatch(html, /<script>/);
 });
+
+// sourcePageUrl(registerId, table): deterministisk menneskeside for register-
+// kilder i proveniens-linjen — null når ingen sikker mal finnes (lenken skal
+// heller mangle enn å gjette feil).
+test('sourcePageUrl: ssb-tabell -> statbank-siden', () => {
+  assert.equal(MI.sourcePageUrl('ssb', '07459'), 'https://www.ssb.no/statbank/table/07459');
+});
+
+test('sourcePageUrl: dst-tabell -> statistikbanken.dk', () => {
+  assert.equal(MI.sourcePageUrl('dst', 'FOLK1A'), 'https://www.statistikbanken.dk/FOLK1A');
+});
+
+test('sourcePageUrl: eurostat-kode -> databrowser-siden', () => {
+  assert.equal(MI.sourcePageUrl('eurostat', 'nama_10_gdp'),
+    'https://ec.europa.eu/eurostat/databrowser/view/nama_10_gdp/default/table');
+});
+
+test('sourcePageUrl: worldbank-sti -> indikatorsiden (første ved flere)', () => {
+  assert.equal(MI.sourcePageUrl('worldbank', 'country/NOR/indicator/SP.POP.TOTL'),
+    'https://data.worldbank.org/indicator/SP.POP.TOTL');
+  assert.equal(MI.sourcePageUrl('worldbank', 'country/all/indicator/SP.POP.TOTL;NY.GDP.MKTP.CD'),
+    'https://data.worldbank.org/indicator/SP.POP.TOTL');
+});
+
+test('sourcePageUrl: dbnomics -> provider/datasett (versjon og seriemaske strippes)', () => {
+  assert.equal(MI.sourcePageUrl('dbnomics', 'IMF/WEO:latest/NOR+SWE.NGDP_RPCH'),
+    'https://db.nomics.world/IMF/WEO');
+  assert.equal(MI.sourcePageUrl('dbnomics', 'AMECO/ZUTN'),
+    'https://db.nomics.world/AMECO/ZUTN');
+});
+
+test('sourcePageUrl: kilder uten sikker mal -> null', () => {
+  assert.equal(MI.sourcePageUrl('statfin', 'statfin_tyti_pxt_137h'), null);
+  assert.equal(MI.sourcePageUrl('fhi', 'nokkel/tabell'), null);
+  assert.equal(MI.sourcePageUrl('oecd', 'QNA'), null);
+  assert.equal(MI.sourcePageUrl('scb', 'TAB1234'), null);
+});
+
+test('sourcePageUrl: tabellform som ikke passer malen -> null (aldri gjett)', () => {
+  assert.equal(MI.sourcePageUrl('ssb', '07459/ekstra'), null);
+  assert.equal(MI.sourcePageUrl('dst', 'FOLK1A/mer'), null);
+  assert.equal(MI.sourcePageUrl('worldbank', 'country/NOR'), null);
+  assert.equal(MI.sourcePageUrl('dbnomics', 'bareprovider'), null);
+  assert.equal(MI.sourcePageUrl('', ''), null);
+  assert.equal(MI.sourcePageUrl(null, null), null);
+});

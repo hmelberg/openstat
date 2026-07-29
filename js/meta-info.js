@@ -35,6 +35,32 @@
     return COMMENT_BASE + encodeURIComponent(String(target || ''));
   }
 
+  // sourcePageUrl(registerId, table) -> menneskesiden for tabellen hos kilden,
+  // eller null. Kun kilder med DETERMINISTISK mal er med — en lenke som kan
+  // treffe feil side skal heller mangle (statfin/fhi/scb/sdmx trenger
+  // databasesti eller dimensjonskontekst som ikke ligger i tabell-id-en).
+  function sourcePageUrl(registerId, table) {
+    var id = String(registerId || '').toLowerCase();
+    var tbl = String(table || '');
+    var m;
+    if (id === 'ssb' && /^\d+$/.test(tbl)) return 'https://www.ssb.no/statbank/table/' + tbl;
+    if (id === 'dst' && /^[A-Za-z0-9]+$/.test(tbl)) return 'https://www.statistikbanken.dk/' + tbl;
+    if (id === 'eurostat' && /^[A-Za-z0-9_]+$/.test(tbl)) {
+      return 'https://ec.europa.eu/eurostat/databrowser/view/' + tbl + '/default/table';
+    }
+    if (id === 'worldbank') {
+      // Stien er country/…/indicator/<kode>[;<kode>…] — lenk første indikator.
+      m = tbl.match(/(?:^|\/)indicator\/([A-Za-z0-9._]+)/);
+      return m ? 'https://data.worldbank.org/indicator/' + m[1] : null;
+    }
+    if (id === 'dbnomics') {
+      // <provider>/<datasett>[:versjon][/<seriemaske>] -> provider/datasett.
+      m = tbl.match(/^([^/:]+)\/([^/:]+)/);
+      return m ? 'https://db.nomics.world/' + m[1] + '/' + m[2] : null;
+    }
+    return null;
+  }
+
   // Direktiver mot ETT mål (datasett eller variabel): lenker, tittel,
   // variabeletiketter, felter og beskrivelsestekst i angitt rekkefølge
   // (§3: "gjentatte direktiver ... legges til, aldri overskriving").
@@ -201,6 +227,7 @@
     forVariable: forVariable,
     render: render,
     renderVariable: renderVariable,
-    commentUrl: commentUrl
+    commentUrl: commentUrl,
+    sourcePageUrl: sourcePageUrl
   };
 })(typeof window !== 'undefined' ? window : globalThis);
