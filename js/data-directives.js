@@ -759,7 +759,7 @@
         return;
       }
       var d = byName[it.recv];
-      if (!d || d.load) { errors.push('ukjent datasett «' + it.recv + '» (mangler ost.create?)'); return; }
+      if (!d || d.load) { errors.push('linje ' + it.lineNo + ': ukjent datasett «' + it.recv + '» (mangler ost.create?)'); return; }
       if (!checkKwargs(it)) return;
 
       if (it.verb === 'filter') {
@@ -807,7 +807,7 @@
       }
       var from = it.args[0];
       if (!from || !from.__ref) { errors.push('linje ' + it.lineNo + ': join krever et datasettnavn — join(<navn>, on="<kolonne>")'); return; }
-      if (!byName[from.__ref]) { errors.push('ukjent datasett «' + from.__ref + '» i join'); return; }
+      if (!byName[from.__ref]) { errors.push('linje ' + it.lineNo + ': ukjent datasett «' + from.__ref + '» i join'); return; }
       var on = names(it.kwargs.on);
       if (!on.length) { errors.push('linje ' + it.lineNo + ': join krever on="<kolonne>" eller on=[…]'); return; }
       d.steps.push({ op: 'join', from: from.__ref, on: on, how: how });

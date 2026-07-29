@@ -617,7 +617,7 @@ test('parseAssembly: filter avviser tilordning, kwargs og manglende uttrykk', ()
 
 test('parseAssembly: filter på ukjent datasett gir feil, ikke stillhet', () => {
   const a = DD.parseAssembly('# ukjent.filter("a > 1")');
-  assert.match(a.errors[0], /ukjent datasett «ukjent»/);
+  assert.match(a.errors[0], /linje 1: ukjent datasett «ukjent»/);
 });
 
 test('parseAssembly: where må være streng', () => {
