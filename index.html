@@ -3864,9 +3864,6 @@
     // Basis-URL-er for detaljert dokumentasjon
     const MICRODATA_COMMAND_DOC_BASE = 'https://microdata.no/manual/kommandoer_og_funksjoner/kommandoer';
     const MICRODATA_FUNCTION_DOC_BASE = 'https://microdata.no/manual/kommandoer_og_funksjoner/funksjoner';
-    // For variabler bruker vi fast prefix + selve variabelnavnet (siste del).
-    // Eksempel: https://microdata.no/discovery/variable/no.ssb.fdb/51/ARBEIDSSOKER_ALDER
-    const MICRODATA_VARIABLE_DOC_BASE = 'https://microdata.no/discovery/variable/no.ssb.fdb/51/';
 
     // Ved ORD/NAVN-struktur: bruk kun NAVN for katalogoppslag (metadata er på variabelnavn uten prefiks).
     function variableCatalogKey(nameOrPath) {
@@ -3992,13 +3989,11 @@
       const btnOk = document.getElementById('helpModalOk');
       const btnMore = document.getElementById('helpModalMore');
       if (!overlay || !contentEl || !btnMore || !btnOk || !headerEl || !kickerEl || !titleEl) return;
-      const docUrl = MICRODATA_VARIABLE_DOC_BASE + key;
       headerEl.style.display = '';
       kickerEl.textContent = 'Variabel';
       titleEl.textContent = varName;
       contentEl.innerHTML = renderCatalogOnlyVariableHtml(varName, key);
-      btnMore.style.display = '';
-      btnMore.dataset.docUrl = docUrl;
+      btnMore.style.display = 'none';
       overlay.classList.add('open');
       function closeModal() {
         overlay.classList.remove('open');
@@ -4111,8 +4106,6 @@
       if (!overlay || !closeBtn) return;
       if (bodyEl) {
         bodyEl.addEventListener('click', function(e) {
-          var btn = e.target.closest('.var-detail-doc-btn');
-          if (btn && btn.dataset.docUrl) { window.open(btn.dataset.docUrl, '_blank', 'noopener,noreferrer'); return; }
           // 💬 toggler «Fra fellesskapet»-tråden (giscus) inn/ut i sitt eget
           // mount, slik at rammens overskrift + fallback-lenke består.
           var cbtn = e.target.closest('.meta-info-comment-btn');
@@ -4397,7 +4390,7 @@
       var parts = [];
       // # meta-direktiver for denne variabelen (target === dsName, variable
       // === varName) — tekst rendres øverst i panelet, lenker føyes til
-      // lenkeseksjonen sammen med «Mer informasjon»-knappen lenger ned.
+      // lenkeseksjonen lenger ned.
       var varMetas = metaFreshMetas().filter(function (m) { return m.target === dsName && m.variable === varName; });
       var directiveTexts = [], directiveLinks = [];
       varMetas.forEach(function (m) {
@@ -4437,10 +4430,6 @@
         parts.push('<p class="var-detail-prose">' + escapeHtml(cat.description) + '</p>');
       } else if (!cat) {
         parts.push('<p class="var-detail-prose" style="color:var(--text-muted)">Ingen ekstra forklaring i variable_metadata for denne kolonnen.</p>');
-      }
-      if (docKey) {
-        var docUrl = MICRODATA_VARIABLE_DOC_BASE + docKey;
-        parts.push('<div class="var-detail-doc-actions"><button type="button" class="btn btn-primary var-detail-doc-btn" data-doc-url="' + escapeHtml(docUrl) + '">Mer informasjon</button></div>');
       }
       // Lenkeseksjon: direktiv-lenker (# meta ... <url>) — vises kun når de
       // finnes. Kommentarlenken er erstattet av «Fra fellesskapet»-rammen

@@ -874,8 +874,6 @@
     .help-modal-body .help-modal-prose { margin: 0; color: var(--text); font-size: 13px; white-space: pre-wrap; word-break: break-word; }
     .help-modal-buttons { flex-shrink: 0; display: flex; gap: 8px; justify-content: flex-end; align-items: center; padding: 10px 16px 13px; border-top: 1px solid var(--border); background: var(--bg-panel); }
     .help-modal-buttons .btn { padding: 6px 14px; font-size: 13px; border-radius: 6px; }
-    .var-detail-doc-actions { margin-top: 12px; padding-top: 4px; }
-    .var-detail-doc-actions .btn { padding: 6px 14px; font-size: 13px; border-radius: 6px; }
     /* ── Settings modal ─────────────────────────────────────────────── */
     .settings-overlay { display:none; position:fixed; inset:0; z-index:1100; background:rgba(0,0,0,0.35); align-items:center; justify-content:center; padding:16px; }
     .settings-overlay.open { display:flex; }
