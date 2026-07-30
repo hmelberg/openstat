@@ -7624,6 +7624,34 @@ try:
     _plt_mod.show = _m2py_plt_show
 except Exception:
     pass
+_PRETTY = [True]
+def _emit_df_html(df):
+    try:
+        _html = df.to_html(max_rows=200, classes="output-table", border=0)
+    except TypeError:
+        _html = df.to_html()
+        if '<table class=' not in _html:
+            _html = _html.replace('<table', '<table class="output-table"', 1)
+    print(_EMBED_S + "tablehtml__" + chr(10) + _html + chr(10) + _EMBED_E)
+def _emit_df_tabulator(df, opts):
+    import tabulator as _tab
+    _kw = {}
+    for _k in ("pagination", "height", "filters", "sortable", "title"):
+        if _k in opts and opts[_k] is not None:
+            _kw[_k] = opts[_k]
+    _t = _tab.table(df, **_kw)
+    print(_EMBED_S + "tabulator__" + chr(10) + _t.to_tabulator_json_str() + chr(10) + _EMBED_E)
+def _df_kind_how(obj, fmtv):
+    # 'dataframe'/'series' -> renderer-navn fra show.defaults; eksplisitt
+    # format= vinner. Ukjent defaults-verdi faller stille til 'html';
+    # ukjent EKSPLISITT format skal derimot si fra.
+    _kind = "series" if isinstance(obj, pd.Series) else "dataframe"
+    _how = fmtv if fmtv is not None else show.defaults.get(_kind, "html")
+    if _how not in ("html", "tabulator", "text"):
+        if fmtv is not None:
+            raise ValueError("show(format=...): gyldige verdier er 'tabulator', 'html' og 'text'")
+        _how = "html"
+    return _how
 def _show_one(obj):
     import base64
     import io
@@ -7701,7 +7729,20 @@ def _show_one(obj):
         pass
     try:
         if isinstance(obj, (pd.DataFrame, pd.Series)):
-            print(obj)
+            # pretty (spec 2026-07-30): registry-oppslag i show.defaults;
+            # av (dagens oppførsel) -> ren print som før.
+            if not _PRETTY[0]:
+                print(obj)
+                return
+            _how = _df_kind_how(obj, None)
+            if _how == "text":
+                print(obj)
+                return
+            _df = obj.to_frame() if isinstance(obj, pd.Series) else obj
+            if _how == "tabulator":
+                _emit_df_tabulator(_df, {})
+            else:
+                _emit_df_html(_df)
             return
     except Exception:
         pass
@@ -7727,10 +7768,45 @@ def _show_one(obj):
     if hasattr(obj, "_openstat_el_id"):
         obj.show()
         return
+    if _PRETTY[0] and show.defaults.get("default", "auto") == "auto":
+        # Generisk fallback (spec §4 pkt 3): Jupyter-protokollen _repr_html_
+        # fanger "andre objekter" (Styler, statsmodels-summary, sklearn ...)
+        # uten at vi enumererer dem. Ligger ETTER _openstat_el_id-grenen —
+        # ui-elementer skal monteres levende, aldri bli en statisk kopi.
+        try:
+            _rh = getattr(obj, "_repr_html_", None)
+            if callable(_rh):
+                _h = _rh()
+                if isinstance(_h, str) and _h.strip():
+                    print(_EMBED_S + "html__" + chr(10) + _h + chr(10) + _EMBED_E)
+                    return
+        except Exception:
+            pass
     print(obj)
-def show(*args):
+def show(*args, **kwargs):
+    # Naken df == show(df) == oppslag i show.defaults (spec 2026-07-30);
+    # format=/pagination=/height=/filters=/sortable=/title= per kall vinner.
+    # Eksplisitt format= virker også med pretty av (ny kapabilitet — gammel
+    # show tok ingen kwargs, så ingen regresjon).
+    _fmtv = kwargs.pop("format", None)
     for _a in args:
+        try:
+            _is_df = isinstance(_a, (pd.DataFrame, pd.Series))
+        except Exception:
+            _is_df = False
+        if _is_df and (_fmtv is not None or _PRETTY[0]):
+            _how = _df_kind_how(_a, _fmtv)
+            if _how == "text":
+                print(_a)
+                continue
+            _df = _a.to_frame() if isinstance(_a, pd.Series) else _a
+            if _how == "tabulator":
+                _emit_df_tabulator(_df, kwargs)
+            else:
+                _emit_df_html(_df)
+            continue
         _show_one(_a)
+show.defaults = {"dataframe": "html", "series": "html", "default": "auto"}
 def to_microdata(df, name=None, make_active=True):
     """Legg DataFrame inn i e.datasets slik at påfølgende microdata ser den. name=None bruker aktivt datasett."""
     if not isinstance(df, pd.DataFrame):
