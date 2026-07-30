@@ -384,6 +384,14 @@
           <p class="settings-hint" data-i18n-html>Om hver setning gjentas med <code>&gt;&gt;&gt;</code> rett over outputen den lager. Kan overstyres per script med <code>#options.show_commands=False</code>.</p>
         </div>
         <div class="settings-field">
+          <label for="settingPrettyOutput" data-i18n>Pen output (HTML-tabeller)</label>
+          <select id="settingPrettyOutput">
+            <option value="on" selected data-i18n>P&#229; (standard)</option>
+            <option value="off" data-i18n>Av</option>
+          </select>
+          <p class="settings-hint" data-i18n-html>Tabeller (DataFrames o.l.) vises som HTML i output i stedet for ren tekst. Kan overstyres per script med <code>#options.pretty_output=False</code>.</p>
+        </div>
+        <div class="settings-field">
           <label for="settingFontSize" data-i18n>Skriftstørrelse</label>
           <select id="settingFontSize">
             <option value="small" data-i18n>Liten</option>
@@ -2371,6 +2379,14 @@
         finally { this.conn = null; }
       }
     };
+    // Innstillings-nøkler. Bugfiks 2026-07-30: de fire første var referert
+    // men aldri deklarert — ReferenceError ble svelget av try/catch-ene, så
+    // Save kastet stille bort Decimals/Show-commands/TTS/pause-verdiene.
+    var TTS_RATE_KEY = 'microdata_tts_rate';
+    var BLOCK_PAUSE_KEY = 'microdata_block_pause';
+    var DECIMALS_KEY = 'microdata_decimals';
+    var SHOW_COMMANDS_KEY = 'microdata_show_commands';
+    var PRETTY_OUTPUT_KEY = 'microdata_pretty_output';
     function getTtsRate() {
       try { var v = parseFloat(localStorage.getItem(TTS_RATE_KEY)); if (!isNaN(v)) return v; } catch(e) {}
       return 1.0;
@@ -2399,6 +2415,20 @@
       if (window.mdIsInputHidden && window.mdIsInputHidden()) return false;
       return getShowCommandsDefault();
     }
+    function getPrettyOutputDefault() {
+      try {
+        var v = localStorage.getItem(PRETTY_OUTPUT_KEY);
+        if (v === 'off') return false;
+        if (v === 'on') return true;
+      } catch(e) {}
+      return true;
+    }
+    // Presedens: script-direktiv > Innstillinger > true (samme mønster som
+    // show_commands-lesingen ved btnRun, se «Presedens:»-kommentaren der).
+    function getPrettyEffective(scriptOpts) {
+      if (scriptOpts && typeof scriptOpts.pretty_output === 'boolean') return scriptOpts.pretty_output;
+      return getPrettyOutputDefault();
+    }
 
     (function initSettings() {
       var overlay   = document.getElementById('settingsOverlay');
@@ -2408,6 +2438,7 @@
       var pauseIn    = document.getElementById('settingBlockPause');
       var decimalsEl = document.getElementById('settingDecimals');
       var showCmdsEl = document.getElementById('settingShowCommands');
+      var prettyEl = document.getElementById('settingPrettyOutput');
       var saveBtn   = document.getElementById('settingsSaveBtn');
       var cancelBtn = document.getElementById('settingsCancelBtn');
       var langSel   = document.getElementById('settingLanguage');
@@ -2425,6 +2456,7 @@
         pauseIn.value = getBlockPauseSec();
         if (decimalsEl) decimalsEl.value = getDecimals();
         if (showCmdsEl) showCmdsEl.value = getShowCommandsDefault() ? 'on' : 'off';
+        if (prettyEl) prettyEl.value = getPrettyOutputDefault() ? 'on' : 'off';
         overlay.classList.add('open');
       }
       function closeSettings() { overlay.classList.remove('open'); }
@@ -2453,6 +2485,10 @@
         if (showCmdsEl) {
           var sc = showCmdsEl.value === 'off' ? 'off' : 'on';
           try { localStorage.setItem(SHOW_COMMANDS_KEY, sc); } catch(e2) {}
+        }
+        if (prettyEl) {
+          var po = prettyEl.value === 'off' ? 'off' : 'on';
+          try { localStorage.setItem(PRETTY_OUTPUT_KEY, po); } catch(e2) {}
         }
         closeSettings();
         // Språkbytte til slutt: laster siden på nytt (kun hvis endret).
