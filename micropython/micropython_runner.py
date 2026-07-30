@@ -243,48 +243,63 @@ def _df_tabulator_spec(df, opts):
     return spec
 
 
-def _show(*objs, **kwargs):
+class _Show:
     """User-facing show(). DataFrames følger show.defaults['dataframe']
     (pretty-modus, spec 2026-07-30) — 'html' er standard; format= per kall
     vinner. Med pretty AV gjelder dagens hardkodede tabulator-default
     (spec 2026-07-24). Øvrige kwargs (pagination/height/filters/sortable/
-    title) går til tabellbyggingen."""
-    fmtv = kwargs.pop('format', None)
-    for o in objs:
-        if (hasattr(o, 'to_html') and hasattr(o, 'columns')
-                and not hasattr(o, 'to_tabulator_json_str')):
-            how = fmtv
-            if how is None:
-                how = _show.defaults.get('dataframe', 'html') if _pretty[0] else 'tabulator'
-            if how not in ('tabulator', 'html', 'text'):
-                if fmtv is not None:
-                    raise ValueError("show(format=...): gyldige verdier er "
-                                     "'tabulator', 'html' og 'text'")
-                how = 'html'
-            if how == 'tabulator':
-                spec = _df_tabulator_spec(o, kwargs)
-                print(_EMBED_S + 'tabulator__' + '\n' + json.dumps(spec)
-                      + '\n' + _EMBED_E)
-                continue
-            if how == 'text':
-                print(str(o))
-                continue
-            print(_df_html_embed(o))
-            continue
-        # Speiler `if shown: print(shown)`-vakten i _execute_code (~linje
-        # 150-152): et ui.html.*-Element formaterer til '' (_fmt monterer det
-        # i stedet for å repr-printe, se _fmt sin _openstat_el_id-gren over)
-        # — print('') ville uansett skrevet en tom linje. Reviewer-funn (samme
-        # gjennomgang som data-ui-shown-for-kjøringsrensken i js/cells.js,
-        # commit 15ce63c) — port av Brython-tvillingens fiks.
-        shown = _fmt(o)
-        if shown:
-            print(shown)
+    title) går til tabellbyggingen.
 
+    Hvorfor klasse og ikke funksjon: MicroPython tillater IKKE attributter på
+    funksjoner, så `_show.defaults = {...}` kaster
+    `AttributeError: 'function' object has no attribute 'defaults'` og tar
+    hele motoren med seg ved boot. Brython-tvillingen slipper unna fordi
+    Brython er full Python. `show.defaults` er brukervendt API — brukere kan
+    skrive `show.defaults['dataframe'] = 'tabulator'` — så en modulnivå-dict
+    ville ikke holdt; det må ligge på selve `show`-objektet.
+    """
+
+    def __init__(self):
+        self.defaults = {'dataframe': 'html', 'series': 'html', 'default': 'auto'}
+
+    def __call__(self, *objs, **kwargs):
+        fmtv = kwargs.pop('format', None)
+        for o in objs:
+            if (hasattr(o, 'to_html') and hasattr(o, 'columns')
+                    and not hasattr(o, 'to_tabulator_json_str')):
+                how = fmtv
+                if how is None:
+                    how = self.defaults.get('dataframe', 'html') if _pretty[0] else 'tabulator'
+                if how not in ('tabulator', 'html', 'text'):
+                    if fmtv is not None:
+                        raise ValueError("show(format=...): gyldige verdier er "
+                                         "'tabulator', 'html' og 'text'")
+                    how = 'html'
+                if how == 'tabulator':
+                    spec = _df_tabulator_spec(o, kwargs)
+                    print(_EMBED_S + 'tabulator__' + '\n' + json.dumps(spec)
+                          + '\n' + _EMBED_E)
+                    continue
+                if how == 'text':
+                    print(str(o))
+                    continue
+                print(_df_html_embed(o))
+                continue
+            # Speiler `if shown: print(shown)`-vakten i _execute_code (~linje
+            # 150-152): et ui.html.*-Element formaterer til '' (_fmt monterer
+            # det i stedet for å repr-printe, se _fmt sin _openstat_el_id-gren
+            # over) — print('') ville uansett skrevet en tom linje.
+            # Reviewer-funn (samme gjennomgang som
+            # data-ui-shown-for-kjøringsrensken i js/cells.js, commit 15ce63c)
+            # — port av Brython-tvillingens fiks.
+            shown = _fmt(o)
+            if shown:
+                print(shown)
+
+
+_show = _Show()
 
 _shared_vars['show'] = _show
-
-_show.defaults = {'dataframe': 'html', 'series': 'html', 'default': 'auto'}
 
 
 def _execute_code(code):
