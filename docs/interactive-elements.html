@@ -125,6 +125,59 @@ control <em>without</em> echoing the returned number under it.</p>
 <code>#options.display = last</code> at the top of the document.
 <code>#options.display = all</code> keeps the legacy echo mode.</div>
 
+<h3 id="pretty">Pretty output (<code>pretty_output</code>) <span class="pill">python · brython · micropython</span></h3>
+
+<p>Pretty output is <strong>on by default</strong>: a bare DataFrame (or
+<code>Series</code>) renders as an HTML table instead of a monospace text
+dump. Turn it off for one document with a directive:</p>
+
+<pre><code>#options.pretty_output = False</code></pre>
+
+<p>There's also a menu toggle — <strong>Innstillinger → «Pen output
+(HTML-tabeller)»</strong> — that sets the site-wide default. Precedence is
+always <strong>directive &gt; menu &gt; on</strong>: the per-script
+<code>#options.pretty_output</code> line wins over whatever the menu is set
+to, and the menu only matters when a document doesn't say.</p>
+
+<p>What renders, and how, is controlled by <code>show.defaults</code> — a
+plain dict hanging off the <code>show</code> function:</p>
+
+<pre><code>show.defaults = {"dataframe": "html", "series": "html", "default": "auto"}</code></pre>
+
+<table>
+<tr><th>Key</th><th>Valid values</th><th>Meaning</th></tr>
+<tr><td><code>dataframe</code></td><td><code>"html"</code> / <code>"tabulator"</code> / <code>"text"</code></td>
+    <td>how a bare (or <code>show()</code>-ed) <code>DataFrame</code> renders</td></tr>
+<tr><td><code>series</code></td><td><code>"html"</code> / <code>"tabulator"</code> / <code>"text"</code></td>
+    <td>same, for a bare <code>Series</code></td></tr>
+<tr><td><code>default</code></td><td><code>"auto"</code> / anything else</td>
+    <td><code>"auto"</code> turns on a generic <code>_repr_html_</code>
+    fallback for other rich objects (Styler, statsmodels summaries, …) that
+    don't have a dedicated renderer</td></tr>
+</table>
+
+<p><code>show(df, ...)</code> takes the same keyword arguments in every mode
+now, including python:</p>
+
+<pre><code>show(df, format="tabulator", pagination=10, height=400,
+     filters=True, sortable=True, title="My table")</code></pre>
+
+<p>An explicit <code>format=</code> always wins over <code>show.defaults</code>
+and works even when <code>pretty_output</code> is off for the document; an
+unrecognised <code>format=</code> raises <code>ValueError</code> rather than
+failing silently. <code>print(df)</code> is unaffected by any of this — it
+always gives the raw text representation, a guaranteed escape hatch.</p>
+
+<div class="note"><strong>Known limits:</strong> <code>show.defaults["series"]</code>
+only takes effect in python mode — the brython/micropython <code>Series</code>
+shims don't carry a <code>.columns</code> attribute, so their series still
+fall back to plain text. <em>Forklar</em> and «Kjør skrittvis» inherit the
+pretty flag from whatever the previous run used, not necessarily the
+document's current directive. <strong>Changed contract:</strong> <code>show(df)</code>
+called with no <code>format=</code> now follows <code>show.defaults</code>
+(HTML by default) instead of always opening the interactive view — pass
+<code>format="tabulator"</code> to get the old behaviour back.</div>
+
 <h2 id="params">Level 1 — <code>#@param</code> forms <span class="pill">all modes</span></h2>
 
 <p>Annotate an assignment with a <code>#@param</code> comment and OpenStat
