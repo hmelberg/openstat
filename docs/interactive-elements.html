@@ -153,7 +153,8 @@ plain dict hanging off the <code>show</code> function:</p>
 <tr><td><code>default</code></td><td><code>"auto"</code> / anything else</td>
     <td><code>"auto"</code> turns on a generic <code>_repr_html_</code>
     fallback for other rich objects (Styler, statsmodels summaries, …) that
-    don't have a dedicated renderer</td></tr>
+    don't have a dedicated renderer — <strong>python mode only</strong>, see
+    Known limits below</td></tr>
 </table>
 
 <p><code>show(df, ...)</code> takes the same keyword arguments in every mode
@@ -171,12 +172,16 @@ always gives the raw text representation, a guaranteed escape hatch.</p>
 <div class="note"><strong>Known limits:</strong> <code>show.defaults["series"]</code>
 only takes effect in python mode — the brython/micropython <code>Series</code>
 shims don't carry a <code>.columns</code> attribute, so their series still
-fall back to plain text. <em>Forklar</em> and «Kjør skrittvis» inherit the
-pretty flag from whatever the previous run used, not necessarily the
-document's current directive. <strong>Changed contract:</strong> <code>show(df)</code>
-called with no <code>format=</code> now follows <code>show.defaults</code>
-(HTML by default) instead of always opening the interactive view — pass
-<code>format="tabulator"</code> to get the old behaviour back.</div>
+fall back to plain text. <code>show.defaults["default"]</code> (the
+<code>_repr_html_</code> fallback) is likewise python-mode only — the
+brython/micropython runners define the key but never consult it.
+<em>Forklar</em> and «Kjør skrittvis» inherit the pretty flag from whatever
+the previous run used, not necessarily the document's current directive.
+<strong>Changed contract:</strong> <code>show(df)</code> called with no
+<code>format=</code> now follows <code>show.defaults</code> (HTML by
+default) instead of always opening the interactive view (brython/
+micropython) or printing raw text (python) — pass <code>format="tabulator"</code>
+to get the old interactive behaviour back.</div>
 
 <h2 id="params">Level 1 — <code>#@param</code> forms <span class="pill">all modes</span></h2>
 
