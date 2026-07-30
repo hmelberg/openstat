@@ -28,10 +28,10 @@ def test_dataframe_tablehtml_marker():
     assert (ES + 'tablehtml__') in out and '<table' in out
 
 def test_show_multiple():
-    # show(df) emitterer tabulator-markøren siden tabulator-byttet (stale
-    # assertion fanget i Fable-reviewen 2026-07-24; bare df-repr gir tablehtml).
+    # show(df) emitterer tablehtml-markøren (spec 2026-07-30): pretty er ON
+    # (default), og show.defaults['dataframe'] er 'html' (default).
     out = br._execute_code('show(df, "tekst")')
-    assert (ES + 'tabulator__') in out and 'tekst' in out
+    assert (ES + 'tablehtml__') in out and 'tekst' in out
 
 def test_error_returns_traceback():
     out = br._execute_code('1/0')

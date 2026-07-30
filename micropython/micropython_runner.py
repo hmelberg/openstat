@@ -17,6 +17,21 @@ _PENDING = '__BRYTHON_PENDING__'   # delt protokollmarkør (samme som Brython)
 _shared_vars = {}
 _last_error = ''
 
+_pretty = [True]
+
+def _set_pretty(flag):
+    """Motoren (js/brython-engine.js) kaller denne før hver kjøring med
+    effektiv pretty_output (direktiv > meny > True). Modul-global —
+    _snapshot/_rollback rører kun _shared_vars, så replay-pass bevarer den."""
+    _pretty[0] = bool(flag)
+
+
+def _df_html_embed(obj):
+    html = obj.to_html()
+    if '<table class=' not in html:
+        html = html.replace('<table', '<table class="output-table"', 1)
+    return _EMBED_S + 'tablehtml__' + '\n' + html + '\n' + _EMBED_E
+
 
 def _format_exc(e):
     """Traceback-tekst på begge dialekter."""
@@ -60,10 +75,18 @@ def _fmt(obj):
     if hasattr(obj, 'to_plotly_json_str'):
         return _EMBED_S + 'figure__' + '\n' + obj.to_plotly_json_str() + '\n' + _EMBED_E
     if hasattr(obj, 'to_html'):
-        html = obj.to_html()
-        if '<table class=' not in html:
-            html = html.replace('<table', '<table class="output-table"', 1)
-        return _EMBED_S + 'tablehtml__' + '\n' + html + '\n' + _EMBED_E
+        # pretty (spec 2026-07-30): df-aktige (har .columns) følger
+        # show.defaults['dataframe']; html er default og identisk med dagens
+        # oppførsel. Ukjent verdi faller stille til html. Ikke-df-to_html
+        # (statsmodels-summary o.l.) er alltid html.
+        if _pretty[0] and hasattr(obj, 'columns'):
+            how = _show.defaults.get('dataframe', 'html')
+            if how == 'tabulator':
+                spec = _df_tabulator_spec(obj, {})
+                return _EMBED_S + 'tabulator__' + '\n' + json.dumps(spec) + '\n' + _EMBED_E
+            if how == 'text':
+                return str(obj)
+        return _df_html_embed(obj)
     if isinstance(obj, str):
         return obj
     return repr(obj)
@@ -221,32 +244,44 @@ def _df_tabulator_spec(df, opts):
 
 
 def _show(*objs, **kwargs):
-    # DataFrames vises som interaktiv Tabulator-tabell som DEFAULT
-    # (spec 2026-07-24); format='html' gir den gamle statiske tabellen.
+    """User-facing show(). DataFrames følger show.defaults['dataframe']
+    (pretty-modus, spec 2026-07-30) — 'html' er standard; format= per kall
+    vinner. Med pretty AV gjelder dagens hardkodede tabulator-default
+    (spec 2026-07-24). Øvrige kwargs (pagination/height/filters/sortable/
+    title) går til tabellbyggingen."""
     fmtv = kwargs.pop('format', None)
     for o in objs:
         if (hasattr(o, 'to_html') and hasattr(o, 'columns')
                 and not hasattr(o, 'to_tabulator_json_str')):
-            if fmtv is None or fmtv == 'tabulator':
+            how = fmtv
+            if how is None:
+                how = _show.defaults.get('dataframe', 'html') if _pretty[0] else 'tabulator'
+            if how not in ('tabulator', 'html', 'text'):
+                if fmtv is not None:
+                    raise ValueError("show(format=...): gyldige verdier er "
+                                     "'tabulator', 'html' og 'text'")
+                how = 'html'
+            if how == 'tabulator':
                 spec = _df_tabulator_spec(o, kwargs)
                 print(_EMBED_S + 'tabulator__' + '\n' + json.dumps(spec)
                       + '\n' + _EMBED_E)
                 continue
-            if fmtv != 'html':
-                raise ValueError("show(format=...): gyldige verdier er "
-                                 "'tabulator' og 'html'")
-        # Speiler `if shown: print(shown)`-vakten i _execute_code (~linje
-        # 150-152): et ui.html.*-Element formaterer til '' (_fmt monterer det
-        # i stedet for å repr-printe, se _fmt sin _openstat_el_id-gren over)
-        # — print('') ville uansett skrevet en tom linje. Reviewer-funn (samme
-        # gjennomgang som data-ui-shown-for-kjøringsrensken i js/cells.js,
-        # commit 15ce63c) — port av Brython-tvillingens fiks.
+            if how == 'text':
+                print(str(o))
+                continue
+            print(_df_html_embed(o))
+            continue
+        # Speiler `if shown:`-vakten ved _execute_code sitt sist-uttrykk-kall:
+        # en ui.html.*-Element formaterer til '' (_fmt monterer den) —
+        # print('') ville skrevet en tom linje.
         shown = _fmt(o)
         if shown:
             print(shown)
 
 
 _shared_vars['show'] = _show
+
+_show.defaults = {'dataframe': 'html', 'series': 'html', 'default': 'auto'}
 
 
 def _execute_code(code):

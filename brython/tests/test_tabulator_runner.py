@@ -28,12 +28,14 @@ def test_fmt_table_object():
     assert out2.startswith('__micro_transform_start_tabulator__')
 
 
-def test_show_df_defaults_to_tabulator():
+def test_show_df_default_follows_pretty_defaults_html():
+    # Endret kontrakt (spec 2026-07-30): show(df) uten format følger
+    # show.defaults['dataframe'] (html) når pretty er på (default).
     df = bpd.DataFrame({'aar': [2020, 2021], 'antall': [1, 2]})
     for runner in (brython_runner, micropython_runner):
         out = _capture_show(runner, df)
-        assert 'tabulator__' in out, out[:120]
-        assert 'tablehtml__' not in out
+        assert 'tablehtml__' in out, out[:120]
+        assert 'tabulator__' not in out
 
 
 def test_show_df_format_html_is_old_path():
@@ -54,7 +56,7 @@ def test_show_unknown_format_raises():
 
 def test_show_opts_forwarded():
     df = bpd.DataFrame({'v': [1]})
-    out = _capture_show(brython_runner, df, filters=True, title='T')
+    out = _capture_show(brython_runner, df, format='tabulator', filters=True, title='T')
     payload = out.split('tabulator__\n', 1)[1].rsplit('\n__micro_transform_end__', 1)[0]
     spec = json.loads(payload)
     assert spec['title'] == 'T' and spec['columns'][0]['headerFilter'] == 'input'
