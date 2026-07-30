@@ -20,7 +20,7 @@ _last_error = ''
 _pretty = [True]
 
 def _set_pretty(flag):
-    """Motoren (js/brython-engine.js) kaller denne før hver kjøring med
+    """Motoren (js/micropython-engine.js) kaller denne før hver kjøring med
     effektiv pretty_output (direktiv > meny > True). Modul-global —
     _snapshot/_rollback rører kun _shared_vars, så replay-pass bevarer den."""
     _pretty[0] = bool(flag)
@@ -271,9 +271,12 @@ def _show(*objs, **kwargs):
                 continue
             print(_df_html_embed(o))
             continue
-        # Speiler `if shown:`-vakten ved _execute_code sitt sist-uttrykk-kall:
-        # en ui.html.*-Element formaterer til '' (_fmt monterer den) —
-        # print('') ville skrevet en tom linje.
+        # Speiler `if shown: print(shown)`-vakten i _execute_code (~linje
+        # 150-152): et ui.html.*-Element formaterer til '' (_fmt monterer det
+        # i stedet for å repr-printe, se _fmt sin _openstat_el_id-gren over)
+        # — print('') ville uansett skrevet en tom linje. Reviewer-funn (samme
+        # gjennomgang som data-ui-shown-for-kjøringsrensken i js/cells.js,
+        # commit 15ce63c) — port av Brython-tvillingens fiks.
         shown = _fmt(o)
         if shown:
             print(shown)
