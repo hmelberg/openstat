@@ -122,9 +122,12 @@ Ui-elementer trenger ingen nøkkel i `show.defaults` — de har egen kanal.
   lazy via `__ensureTabulatorPy`, `index.html:9924-9944`); i v1 seedes
   tabulator_core inn i sesjonspreludiet (165 linjer, avhengighetsfri) slik at
   `show.defaults["dataframe"]="tabulator"` virker uten import.
-- Flagget inn via eksisterende per-segment-kanal (`_seg._nb`, konsumert
-  `index.html:10754-10756`) — ny nøkkel `_nb.pretty`, videre som parameter til
-  `_exec_pyodide_block`.
+- Flagget lever som sesjonsglobal `_PRETTY` (én-elements liste) i preludiet,
+  satt per kjøring fra JS via `runPythonAsync('_PRETTY[0] = ...')` — i
+  `bootNotebookSession` (etter setupCode) og i per-celle-stien. Enklere enn en
+  `_nb`-nøkkel: rører verken `_m2py_run_segment`, `_exec_pyodide_block` eller
+  de fire `_nb`-stemplingsstedene. Kjent avgrensning: Forklar/«Kjør skrittvis»
+  setter ikke flagget selv og arver forrige kjørings verdi.
 
 ### brython / micropython
 - `_fmt` sin `to_html`-gren konsulterer `show.defaults` (html er dagens
@@ -134,10 +137,10 @@ Ui-elementer trenger ingen nøkkel i `show.defaults` — de har egen kanal.
 - Runnerne er bevisst duplisert; mønsteret følges: dupliser + paritetstest
   (som `test_spec_parity_with_core`).
 - Kanal: `Engine.run(script, opts)` og `notebookSession.runCell(source, opts)`
-  får `{pretty}`; runneren mottar det som nytt argument til `_execute_code`
-  (tilstandsløst, samme mønster i begge runnere — de eksisterende
-  `_execute_code`-kallpunktene i `js/brython-engine.js` og
-  `js/micropython-engine.js:185-198` oppdateres). Denne kanalen er samme gap som gjør at
+  får `{pretty}`; motoren kaller en ny modul-setter `_set_pretty(flag)` i
+  runneren før kjøring (modulflagget overlever replay-pass — `_rollback` rører
+  kun `_shared_vars`; for mpy legges `_set_pretty` i handles-mappen,
+  `js/micropython-engine.js:185-198`). Denne kanalen er samme gap som gjør at
   `#options.display`/`show_commands` er døde i disse modusene i dag — bygges
   slik at den kan bære flere opts senere.
 
@@ -168,13 +171,16 @@ opts.
 
 ## 7. Tester
 
-- `tests/test_display_policy.py` (harnesset ekstraherer den ekte
-  pyodide-kjernen fra index.html): pretty på/av, df → tablehtml-embed,
-  `show.defaults`-oppslag, `_repr_html_`-fallback, ui-element-rekkefølgen
-  (element monteres, blir aldri html-embed), `print(df)` forblir tekst.
-- `brython/tests/` og `micropython/tests/`: registry-oppslag i `_fmt`/`_show`,
-  paritetstest brython↔mpy.
-- `tests/js/cells-dom.test.js`: opts-kanalen (`runCell(source, {pretty})`).
+- Ny `tests/test_pretty_output.py` (samme ekstraksjons-harness-idé som
+  `test_display_policy.py`, mot `_show_one`/`show`-kjeden): pretty på/av,
+  df → tablehtml-embed, `show.defaults`-oppslag, kwargs, `_repr_html_`-
+  fallback, ui-element-rekkefølgen (element monteres, blir aldri html-embed).
+  `tests/test_display_policy.py` forblir urørt grønn (`_exec_pyodide_block`
+  endres ikke).
+- Ny `brython/tests/test_pretty_defaults.py` (dekker begge runnere,
+  paritetsstil): registry-oppslag i `_fmt`/`_show`, `_set_pretty`,
+  pretty-av-oppførsel; to kontraktstester i `test_tabulator_runner.py`
+  oppdateres (show-default → html).
 - Innstillinger: test/verifisering av at nøklene er deklarert og at Save
   persisterer.
 
