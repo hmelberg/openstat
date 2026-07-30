@@ -216,7 +216,7 @@ window.M2PY_I18N.en = {
   "Av": "Off",
   "Om hver setning gjentas med >>> rett over outputen den lager. Kan overstyres per script med #options.show_commands=False.": "Whether each statement is repeated with <code>&gt;&gt;&gt;</code> right above the output it produces. Can be overridden per script with <code>#options.show_commands=False</code>.",
   "Pen output (HTML-tabeller)": "Pretty output (HTML tables)",
-  "Tabeller (DataFrames o.l.) vises som HTML i output i stedet for ren tekst. Kan overstyres per script med <code>#options.pretty_output=False</code>.": "Tables (DataFrames etc.) are rendered as HTML in the output instead of plain text. Can be overridden per script with <code>#options.pretty_output=False</code>.",
+  "Tabeller (DataFrames o.l.) vises som HTML i output i stedet for ren tekst. Kan overstyres per script med #options.pretty_output=False.": "Tables (DataFrames etc.) are rendered as HTML in the output instead of plain text. Can be overridden per script with <code>#options.pretty_output=False</code>.",
   "Skriftstørrelse": "Font size",
   "Liten": "Small",
   "Normal": "Normal",

@@ -171,12 +171,16 @@ always gives the raw text representation, a guaranteed escape hatch.</p>
 
 <div class="note"><strong>Known limits:</strong> <code>show.defaults["series"]</code>
 only takes effect in python mode — the brython/micropython <code>Series</code>
-shims don't carry a <code>.columns</code> attribute, so their series still
-fall back to plain text. <code>show.defaults["default"]</code> (the
+shims don't carry a <code>.columns</code> attribute, so
+<code>show.defaults["series"]</code> can't steer them; a bare
+<code>Series</code> still renders as a static HTML table there (the shims
+have <code>to_html</code>). <code>show.defaults["default"]</code> (the
 <code>_repr_html_</code> fallback) is likewise python-mode only — the
 brython/micropython runners define the key but never consult it.
-<em>Forklar</em> and «Kjør skrittvis» inherit the pretty flag from whatever
-the previous run used, not necessarily the document's current directive.
+<em>Forklar</em> («Kjør skrittvis») re-executes the interpreter prelude on
+every run, which resets the pretty flag to on — so it always runs with
+pretty output ON, ignoring both the document's <code>#options.pretty_output</code>
+directive and the menu toggle.
 <strong>Changed contract:</strong> <code>show(df)</code> called with no
 <code>format=</code> now follows <code>show.defaults</code> (HTML by
 default) instead of always opening the interactive view (brython/
