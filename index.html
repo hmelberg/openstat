@@ -2813,7 +2813,7 @@
               throw new Error(t('Montering i denne modusen krever parquet/csv-kilder — bruk python-modus for andre formater.'));
             }
             assertAssemblyFormats(_asmX, ['pandas', 'data.frame', 'duckdb'], 'Brython');
-            res = await window.BrythonEngine.run(script, { loads: _dl.loads, extraDatasets: _asmX && _asmX.datasets });
+            res = await window.BrythonEngine.run(script, { loads: _dl.loads, extraDatasets: _asmX && _asmX.datasets, pretty: ctx.pretty !== false });
             if (!refreshDatasetSidebarFromEngineInfo(window.BrythonEngine.datasetInfo(), 'brython', 'Brython')) {
               refreshDatasetSidebarFromLoads(_dl.loads, 'brython', 'Brython');
             }
@@ -2881,7 +2881,7 @@
               throw new Error(t('Montering i denne modusen krever parquet/csv-kilder — bruk python-modus for andre formater.'));
             }
             assertAssemblyFormats(_asmX, ['pandas', 'data.frame', 'duckdb'], 'MicroPython');
-            res = await window.MicroPythonEngine.run(script, { loads: _dl.loads, extraDatasets: _asmX && _asmX.datasets });
+            res = await window.MicroPythonEngine.run(script, { loads: _dl.loads, extraDatasets: _asmX && _asmX.datasets, pretty: ctx.pretty !== false });
             if (!refreshDatasetSidebarFromEngineInfo(window.MicroPythonEngine.datasetInfo(), 'micropython', 'MicroPython')) {
               refreshDatasetSidebarFromLoads(_dl.loads, 'micropython', 'MicroPython');
             }
@@ -11253,6 +11253,7 @@ async def _m2py_run_segment(_seg_json):
         return { error: t('Motoren er ikke lastet ennå. Vent og prøv igjen.') };
       }
       var sess = engine.notebookSession;
+      var _engPretty = getPrettyEffective(extractScriptOptions(scriptInput.value));
       scriptRunInProgress = true;
       setRunButtonsUi('running');
       try {
@@ -11277,7 +11278,7 @@ async def _m2py_run_segment(_seg_json):
           var _pre = _parsed.cells[0];
           if (_pre && _pre.headerRaw === null && payload.cellIdx !== 0) {
             // preambelens tag-linjer blankes (spec 2026-07-16-tag-directives) — samme kontrakt som executableSource.
-            var _preRes = await sess.runCell(window.Cells.execCellSource(_pre) || '');
+            var _preRes = await sess.runCell(window.Cells.execCellSource(_pre) || '', { pretty: _engPretty });
             if (_preRes.error) console.warn('preambel (fase C):', _preRes.error);
           }
         }
@@ -11286,7 +11287,7 @@ async def _m2py_run_segment(_seg_json):
         if (window.Ui && window.Ui.beginCellRun) window.Ui.beginCellRun(payload.cellIdx);
         // selText-threading (plan 4b Task 2): verify-first-funn — samme som
         // R-grenen (runNotebookRCell over), bruker payload.text DIREKTE.
-        var res = await sess.runCell((payload && payload.selText) || payload.text || '');
+        var res = await sess.runCell((payload && payload.selText) || payload.text || '', { pretty: _engPretty });
         setStatus(rightStatus, res.error ? t('Feil') : t('Ferdig'));
         if (res.error) return { error: res.error };
         return { text: (res.text || '').trim() };

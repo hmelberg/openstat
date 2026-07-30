@@ -194,7 +194,8 @@
         _dataset_info: mp.globals.get('_dataset_info'),
         _dataset_rows: mp.globals.get('_dataset_rows'),
         _reset: mp.globals.get('_reset'),
-        _sync_var: mp.globals.get('_sync_var')
+        _sync_var: mp.globals.get('_sync_var'),
+        _set_pretty: mp.globals.get('_set_pretty')
       };
       __loadedHandles = handles;   // ui sync_to (fase 3): synkron syncVar()-tilgang
       return handles;
@@ -374,6 +375,9 @@
     // begrunnelse som i brython-engine.js run()).
     try {
       var mod = await load();
+      // pretty (spec 2026-07-30): modulflagg, satt per kjøring — replay-
+      // passene under arver det (rollback rører kun _shared_vars).
+      if (mod._set_pretty) mod._set_pretty(!(opts && opts.pretty === false));
       var spec = await buildDatasetSpec(opts && opts.loads, script);
       // Variabel-montering (2026-07-24): ferdig-monterte kolonnesett fra
       // DuckDB-pushdownen i index.html bindes som vanlige columns-datasett.
@@ -443,12 +447,15 @@
     __nb.live = true;
   }
 
-  async function nbRunCell(source) {
+  async function nbRunCell(source, opts) {
     try {
       if (!__nb.live) {
         return { text: '', error: 'notebookSession.ensure() må kalles før runCell()' };
       }
       var mod = await load();
+      // pretty (spec 2026-07-30): modulflagg, satt per kjøring — replay-
+      // passene under arver det (rollback rører kun _shared_vars).
+      if (mod._set_pretty) mod._set_pretty(!(opts && opts.pretty === false));
       await ensureLibs(mod, scanImports(source));
       // Fersk bro (og dermed ferskt hook+cache) per celle — samme
       // per-kjøring-cachesemantikk som run(); kun view-registreringen deles
