@@ -10884,8 +10884,16 @@ async def _m2py_run_segment(_seg_json):
         _g["to_microdata"] = to_microdata
     return "ok"
 `;
+        // pretty (spec 2026-07-30): registrer tabulator-modulen ubetinget så
+        // show.defaults["dataframe"]="tabulator" virker uten eksplisitt import.
+        try { await __ensureTabulatorPy(py); }
+        catch (e) { console.warn('tabulator-prelude (pretty):', e); }
         setStatus(rightStatus, 'Running...');
         await py.runPythonAsync(setupCode);
+        if (typeof ctx.pretty === 'boolean') {
+          try { await py.runPythonAsync('_PRETTY[0] = ' + (ctx.pretty ? 'True' : 'False')); }
+          catch (e) { console.warn('pretty-flagg (boot):', e); }
+        }
       nbSetSessionLive(true);
       return { py: py, segments: segments };
     }
@@ -10928,12 +10936,14 @@ async def _m2py_run_segment(_seg_json):
       var _showCmds = (typeof _scriptOpts.show_commands === 'boolean')
         ? _scriptOpts.show_commands
         : getShowCommandsEffectiveDefault();
+      var _prettyOut = getPrettyEffective(_scriptOpts);
       var _result = await bootNotebookSession({
         py: py,
         activeEditorMode: _mode,
         effectiveScript: effectiveScript,
         duckPreResolved: null,
-        showCommands: _showCmds
+        showCommands: _showCmds,
+        pretty: _prettyOut
       });
       return { py: _result.py };
     }
@@ -11384,6 +11394,11 @@ async def _m2py_run_segment(_seg_json):
         // Display policy v2: '#options.display = last' gjenoppretter
         // siste-uttrykk-visningen (opt-out fra vis-alle-defaulten).
         var _displayLast = String(_scriptOpts.display || '').toLowerCase() === 'last';
+        // pretty (spec 2026-07-30): sesjonen kan være LIVE fra en tidligere
+        // kjøring med annet direktiv, derfor settes flagget per kjøring.
+        var _prettyCell = getPrettyEffective(_scriptOpts);
+        try { await py.runPythonAsync('_PRETTY[0] = ' + (_prettyCell ? 'True' : 'False')); }
+        catch (e) { console.warn('pretty-flagg (celle):', e); }
         // Segmentoppløsning: samme vei som "Kjør alle" (bootNotebookSession),
         // så cellens "# use" og #options.* leses fra HELE dokumentet, aldri
         // fra cellens egen (potensielt ufullstendige) tekst.
@@ -11819,6 +11834,7 @@ async def _m2py_run_segment(_seg_json):
         var _showCmds = (typeof _scriptOpts.show_commands === 'boolean')
           ? _scriptOpts.show_commands
           : getShowCommandsEffectiveDefault();
+        var _prettyOut = getPrettyEffective(_scriptOpts);
         // Eskapeluke (spec §4): '#options.display = all' slår av notatbok-
         // visningspolicyen igjen (vis alt, echo følger _showCmds som vanlig).
         var _displayAll = String(_scriptOpts.display || '').toLowerCase() === 'all';
@@ -11833,7 +11849,7 @@ async def _m2py_run_segment(_seg_json):
         // displayAll må TRÅDES hit: #options.*-linjene er strippet fra
         // effectiveScript over, så runHybridR kan ikke re-parse dem selv
         // (display=all-escapen var ellers død for R — smoke-funn 2026-07-18).
-        var _ctx = { py: py, rightStatus: rightStatus, showCommands: _showCmds, profile: _scriptOpts.profile, displayAll: _displayAll };
+        var _ctx = { py: py, rightStatus: rightStatus, showCommands: _showCmds, profile: _scriptOpts.profile, displayAll: _displayAll, pretty: _prettyOut };
         if (_mr.runSelf) { await _mr.runSelf(effectiveScript, _ctx); return; }
         if (_mr.preRun)  await _mr.preRun(effectiveScript, _ctx);
         // Fase 1 (plan 2026-07-11-phase1-duckdb-native.md i safestat): ren SQL
@@ -11854,7 +11870,7 @@ async def _m2py_run_segment(_seg_json):
         // Pyodide-FS her; selve bindingen inn i e.datasets/_g skjer i
         // buildWebDataLoaderPreamble() (kjøres som del av runCode under).
         // Ingen-op når scriptet ikke har load-direktiver (tom liste).
-        var _bootCtx = { py: py, activeEditorMode: activeEditorMode, effectiveScript: effectiveScript, duckPreResolved: _duckPreResolved, showCommands: _showCmds };
+        var _bootCtx = { py: py, activeEditorMode: activeEditorMode, effectiveScript: effectiveScript, duckPreResolved: _duckPreResolved, showCommands: _showCmds, pretty: _prettyOut };
         var _bootResult = await bootNotebookSession(_bootCtx);
         py = _bootResult.py;
         var segments = _bootResult.segments;
