@@ -31,7 +31,7 @@ bakoverkompatibilitet (ingen brukere).
 | # | Beslutning | Begrunnelse |
 |---|---|---|
 | 1 | **Erstatt, ikke tillegg**: `data-svar.ts` + `_lib/data-svar-prompt.ts` + `prompts/data-svar.md` slettes; `/api/svar` overtar | Ingen brukere; parallell drift gir dobbelt promptvedlikehold (515 + 669 linjer); `kode-svar.ts` viser hvor «beholde det gamle» ender |
-| 2 | **adminGate beholdes** på `/api/svar` i openstat | Gating er produktvalg per repo; askstats løsere gate (BYOK forbi adminGate) følger ikke med på kjøpet |
+| 2 | **adminGate beholdes** på `/api/svar` i openstat | Gating er produktvalg per repo. (Verifisert i planleggingen: askstats svar.ts bruker allerede adminGate, så kravet er oppfylt ved ren kopi) |
 | 3 | `ask-ruter` porteres IKKE (v1) | Askstats eget panel hardkoder `route:'data'`; openstats kontekst er editoren. Kan revurderes hvis hurtigspør-boksen skal bli smartere |
 | 4 | `ask-view.js`/`ask.css` porteres IKKE (unntatt split-knapp-CSS og ren kjerne, se arkitektur) | Ask-som-default er askstats identitet; openstat viser output i `#outputArea` |
 | 5 | Referanser i panelet strippes til `[fig 1]`-tekst (som askstats panel); klikkbare referanser er fase 2-kandidat | Levende slots i chat-bobler er mye jobb for liten gevinst når outputen står synlig ved siden av |
@@ -58,9 +58,11 @@ Oppdaterte filer (askstats versjon overtas): `_lib/anthropic.ts`
 ssb), `js/pxweb.js` + `js/data-loader.js` (mandatory-feilmeldingen på
 400-veien).
 
-**Avvikelsen:** openstats `svar.ts` bruker `runAdminGate` (som dagens
-`data-svar.ts`), ikke askstats `gate`. Alt annet i fila holdes likt så
-fremtidige diffs mot askstat er lesbare.
+**Gating (verifisert under planlegging):** ingen avvikelse trengs — askstats
+`svar.ts` bruker allerede `adminGate`, og askstats `auth.ts`-diff siden
+forkpunktet er kun `skipRateLimit`-opsjonen (for continuation-hops) pluss
+kommentarer. Begge filene kopieres uendret; gating-semantikken er identisk
+med dagens `data-svar`.
 
 Slettes: `data-svar.ts`, `_lib/data-svar-prompt.ts`, `prompts/data-svar.md`,
 `kode-svar.ts`, `kode-svar-v2.ts`, `dm-vurder.ts`, tilhørende
