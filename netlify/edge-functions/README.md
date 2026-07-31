@@ -10,15 +10,26 @@ AI-endepunkter (se `netlify.toml` for path-mapping):
   klienten kjører én auto-rettingsrunde mot lokal Pyodide-validering. v1
   (`kode-svar`) er urørt, og v2 degraderer til v1-lik oppførsel hvis velgeren feiler.
 - `tolk-resultat` → `/api/tolk-resultat` — tolker output fra en kjøring
-- `data-svar` → `/api/data-svar` — Web-modus (kun admin): agentisk tool-loop
-  (search_catalog/table_metadata/probe + web_search) som finner åpne data og
-  genererer python/r/duckdb-script med connect/load-direktiver. SSE-events:
-  progress/text/sources/continue/done/error. Fortsettelsesprotokoll: Netlify
-  har CPU-tak per invokasjon, så serveren kjører én API-tur per POST og
-  avslutter med `{type:"continue", state, probed}` når den ikke er ferdig;
-  klienten re-POSTer samme body pluss `resume:{state, probed}` til svaret
-  kommer. Prompt-kilde: `prompts/data-svar.md`;
-  register: `data/data-sources.json`; evalsett: `docs/eval/data-svar-evalsett.md`.
+- `svar` → `/api/svar` — samlet ask-pipeline (kun admin/BYOK): ETT agentisk
+  løp for rutene fra `/api/ask-ruter` (beregning/data/oppslag), med
+  `run_code` som klientutført verktøy (Pyodide/WebR/duckdb-wasm) i tillegg
+  til search_catalog/table_metadata/probe/search_literature + web_search/
+  web_fetch (kun data-ruten bruker katalogverktøyene/registeret). Body:
+  `{question, route, mode, depth, script?, resume?, run_result?, provider?}`
+  — `route` ∈ beregning/data/oppslag, `mode` ∈ python/r/duckdb, `depth` ∈
+  standard/deep. SSE-events: progress/delta/turn_discard/sources/run_code/
+  continue/done/error. Fortsettelsesprotokoll: serveren kjører turer til den
+  enten trenger `run_code` (event `{type:"run_code", script}`; klienten
+  kjører scriptet og re-POSTer med `run_result` + `resume:{state, probed}`)
+  eller har et ferdig svar; ved CPU-tak avslutter den i stedet med
+  `{type:"continue", state, probed}`, og klienten re-POSTer samme body.
+  Alle continuation-POSTer (både run_code- og CPU-tak-hopp) SKAL sette
+  headeren `X-Svar-Resume: 1` — den er unntatt rate-limiten (samme spørsmål
+  telles kun én gang, ikke per hop); uten den spiser hvert hopp av samme
+  per-IP-kvote som et nytt spørsmål.
+  Erstatter de gamle `data-svar`- og `tolk-ask`-endepunktene (ett kall,
+  ingen eget tolke-steg). Prompt-kilde: `prompts/svar.md`; register:
+  `data/data-sources.json`; evalsett: `docs/eval/ask-evalsett.md`.
 - `hent` → `/api/hent?url=…[&body=…]` — SSRF-herdet GET-proxy (kun admin).
   Injiserer API-nøkler server-side for register-kilder (host-matchet);
   `body` GET-innpakker POST-json (PxWeb v1 o.l.).
@@ -31,9 +42,9 @@ AI-endepunkter (se `netlify.toml` for path-mapping):
 2. Sett env-vars: `cp .env.example .env`, fyll inn `ANTHROPIC_API_KEY` og
    `M2PY_ACCESS_TOKEN` (delt token for lokal/admin-tilgang). Samme variabler må
    settes i Netlify-konsollen før prod-deploy.
-   - `FRED_API_KEY` (valgfri) — server-side nøkkel `hent`/`data-svar` injiserer
+   - `FRED_API_KEY` (valgfri) — server-side nøkkel `hent`/`svar` injiserer
      for FRED-kilder i registeret (host-matchet, aldri sendt til klienten).
-   - `DATA_SVAR_MODEL` (valgfri) — override av modellen `data-svar` bruker
+   - `DATA_SVAR_MODEL` (valgfri) — override av modellen `svar` bruker
      (standard: samme som `ANTHROPIC_MODEL`/`claude-sonnet-4-6`).
 
 ## Start lokal dev-server
@@ -75,7 +86,7 @@ Innholdet er norsk markdown (Klassifisering, Samlet vurdering, Observasjoner).
 
 ## Struktur
 
-- `dm-vurder.ts`, `kode-svar.ts`, `tolk-resultat.ts` — endepunktene
+- `dm-vurder.ts`, `kode-svar.ts`, `tolk-resultat.ts`, `svar.ts` — endepunktene
 - `_lib/auth.ts` — felles request-gate (auth + rate-limit + body-guard)
 - `_lib/rate-limit.ts` — per-IP token-bucket (Netlify Blobs; failer åpent)
 - `_lib/anthropic.ts` — Anthropic streaming-klient (timeout + 429/529-retry)

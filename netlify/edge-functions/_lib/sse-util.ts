@@ -15,7 +15,7 @@ export function singleTextStream(
 }
 
 // SSE pass-through that injects one synthetic event immediately before the
-// `done` event (used for the deterministic source manifest in data-svar).
+// `done` event (used for the deterministic source manifest in svar).
 export function injectBeforeDone(
   stream: ReadableStream<Uint8Array>,
   makeEvent: () => Record<string, unknown> | null,

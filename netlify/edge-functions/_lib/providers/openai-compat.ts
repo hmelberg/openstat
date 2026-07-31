@@ -65,7 +65,7 @@ function safeParseJson(raw: unknown): Record<string, unknown> {
 function throwClassified(status: number, detail: string, cfg: ProviderConfig, hadTools: boolean): never {
   console.error(`LLM provider error ${status}: ${scrubKey(detail, cfg.key)}`);
   if (status === 400 && hadTools && /tool/i.test(detail)) {
-    throw new Error("data-svar krever en modell med verktøystøtte (tool-calling) — leverandøren avviste tools-parameteren");
+    throw new Error("svar krever en modell med verktøystøtte (tool-calling) — leverandøren avviste tools-parameteren");
   }
   throw new Error(`Leverandørfeil ${status}`);
 }

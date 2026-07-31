@@ -86,6 +86,24 @@ Deno.test("runGate: rate-limited -> 429 and Anvil NOT called (no amplification)"
   assertEquals(deps.calls.validate, 0); // rate-limit ran before validation
 });
 
+Deno.test("runGate: skipRateLimit hopper over ratelimit-sjekken", async () => {
+  let called = false;
+  const deps = makeDeps({
+    sharedToken: "tok",
+    checkRateLimit: () => {
+      called = true;
+      return Promise.resolve({ allowed: false, retryAfterSeconds: 9 });
+    },
+  });
+  const resp = await runGate(
+    req({ token: "tok", contentLength: 10 }),
+    { endpoint: "svar", maxBodyBytes: 1000, skipRateLimit: true },
+    deps,
+  );
+  assertEquals(resp, null);
+  assertEquals(called, false);
+});
+
 Deno.test("runGate: valid shared token proceeds without calling Anvil", async () => {
   const deps = makeDeps({ sharedToken: "shared-secret" });
   const resp = await runGate(req({ token: "shared-secret" }), { endpoint: "t", maxBodyBytes: 100 }, deps);
@@ -149,7 +167,7 @@ function adminDeps(over: Partial<AdminGateDeps> = {}): AdminGateDeps & { calls: 
 }
 
 Deno.test("runAdminGate: admin user passes, non-admin gets 403, invalid 401", async () => {
-  const opts = { endpoint: "data-svar", maxBodyBytes: 1000 };
+  const opts = { endpoint: "svar", maxBodyBytes: 1000 };
   assertEquals(await runAdminGate(req({ token: "t1" }), opts, adminDeps()), null);
   const r403 = await runAdminGate(req({ token: "t2" }), opts,
     adminDeps({ fetchUser: () => Promise.resolve({ ok: true, isAdmin: false }) }));
@@ -161,7 +179,7 @@ Deno.test("runAdminGate: admin user passes, non-admin gets 403, invalid 401", as
 
 Deno.test("runAdminGate: shared token is admin; result cached", async () => {
   const deps = adminDeps({ sharedToken: "hemmelig" });
-  const opts = { endpoint: "data-svar", maxBodyBytes: 1000 };
+  const opts = { endpoint: "svar", maxBodyBytes: 1000 };
   assertEquals(await runAdminGate(req({ token: "hemmelig" }), opts, deps), null);
   assertEquals(deps.calls.fetchUser, 0);
   assertEquals(await runAdminGate(req({ token: "bruker" }), opts, deps), null);

@@ -1,6 +1,6 @@
 // GET /api/metadata?source=<registry-id>[&table=<tabell-id>] — offentlig,
 // rate-limited MetaInfo-oppslag for sidebaren. Wrapper table_metadata (samme
-// TS-adaptere data-svar/hent bruker) uten AI-en/admin-låsen i veien: input er
+// TS-adaptere svar/hent bruker) uten AI-en/admin-låsen i veien: input er
 // KUN (kilde-id, tabell-id) mot det kuraterte registeret, ALDRI rå URL-er —
 // ingen SSRF-flate utover de allerede registrerte kildene selv.
 // Spec: docs/superpowers/specs/2026-07-25-metadata-sidebar-design.md §4.

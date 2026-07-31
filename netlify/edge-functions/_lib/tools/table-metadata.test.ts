@@ -1,6 +1,7 @@
-import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { tableMetadata } from "./table-metadata.ts";
+import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { pickValues, tableMetadata } from "./table-metadata.ts";
 import { parseRegistry } from "../registry.ts";
+import type { DataSource } from "../registry.ts";
 
 const REG = parseRegistry([
   { id: "ssb", navn: "SSB", utgiver: "SSB", tillit: "offisiell", tilgang: "pxweb",
@@ -185,4 +186,127 @@ Deno.test("ecb metadata: kodeliste koblet via Ref.id (ingen URN-parsing), tidsdi
   assertEquals(time.time, true);
   assertEquals(time.values, []);
   assertEquals(calls[0], "https://data-api.ecb.europa.eu/service/dataflow/ECB/EXR/latest?references=all");
+});
+
+Deno.test("ecb metadata: find via pickValues — kort liste (<=MAX_VALUES) tømmes ikke (sluttreview, bundlet med pxweb-regelen)", async () => {
+  const meta = await tableMetadata("ecb", "ECB/EXR", {
+    registry: REG,
+    fetchImpl: fakeEcbXmlMetaFetch(ECB_EXR_DSD_XML),
+    find: "usd",
+  });
+  const currency = meta.variables.find((v) => v.code === "CURRENCY")!;
+  // CURRENCY har bare 2 koder — find skal IKKE filtrere en så kort liste,
+  // samme regel som pxwebMetadata nå bruker.
+  assertEquals(currency.values, [{ code: "NOK", label: "Norwegian krone" }, { code: "USD", label: "US dollar" }]);
+});
+
+// --- worldbank/dbnomics adapters (Task 5, delegerer til catalogs/*.ts) ---
+
+Deno.test("tableMetadata: kind worldbank delegerer til worldbankMetadata", async () => {
+  const f = (() => Promise.resolve(new Response(JSON.stringify([
+    { page: 1 },
+    [{ id: "SP.POP.TOTL", name: "Population, total", source: { value: "WDI" }, sourceNote: "…" }],
+  ]), { status: 200 }))) as unknown as typeof fetch;
+  const reg = parseRegistry([{ id: "worldbank", navn: "Verdensbanken", utgiver: "WB",
+    tillit: "etablert", tilgang: "rest", kind: "worldbank",
+    base_url: "https://api.worldbank.org/v2/", cors: true }]);
+  const m = await tableMetadata("worldbank", "SP.POP.TOTL", { registry: reg, fetchImpl: f }) as Record<string, unknown>;
+  assertEquals(m.navn, "Population, total");
+});
+
+Deno.test("tableMetadata: kind dbnomics delegerer til dbnomicsMetadata", async () => {
+  const f = (() => Promise.resolve(new Response(JSON.stringify({
+    datasets: { docs: [{
+      code: "CPI", name: "Consumer Price Index", provider_code: "IMF",
+      dimensions_codes_order: ["freq"],
+      dimensions_labels: { freq: "Frequency" },
+      dimensions_values_labels: { freq: { M: "Monthly", A: "Annual" } },
+    }] },
+  }), { status: 200 }))) as unknown as typeof fetch;
+  const reg = parseRegistry([{ id: "dbnomics", navn: "DBnomics", utgiver: "Cepremap",
+    tillit: "etablert", tilgang: "rest", kind: "dbnomics",
+    base_url: "https://api.db.nomics.world/v22/series/", cors: true }]);
+  const m = await tableMetadata("dbnomics", "IMF/CPI", { registry: reg, fetchImpl: f }) as Record<string, unknown>;
+  assertEquals(m.navn, "Consumer Price Index");
+});
+
+// --- mandatory-flagg + find-param (Task 1, ssb-mandatory) ---
+
+Deno.test("pickValues: find-filter treffer kode OG etikett, case-insensitivt, FØR kuttet", () => {
+  const all = Array.from({ length: 100 }, (_, i) => ({ code: `K${i}`, label: `Sted ${i}` }));
+  all.push({ code: "0301", label: "Oslo" });
+  const r = pickValues(all, "oslo");
+  assertEquals(r.values, [{ code: "0301", label: "Oslo" }]);
+  assertEquals(r.valuesTruncated, false);
+  const rKode = pickValues(all, "030");
+  assertEquals(rKode.values.length, 1);
+});
+
+Deno.test("pickValues: uten find — første 40 + truncated-flagg", () => {
+  const all = Array.from({ length: 50 }, (_, i) => ({ code: `${i}`, label: `${i}` }));
+  const r = pickValues(all);
+  assertEquals(r.values.length, 40);
+  assertEquals(r.valuesTruncated, true);
+});
+
+// Fake pxweb-metadata: ContentsCode/Tid elimination=false, Region=true.
+// Region har >40 koder (som ekte kommune-lister) slik at find fortsatt
+// filtrerer DER — mens ContentsCode (kort, obligatorisk liste, som SSBs
+// egen 4-koders variant) skal beholde ALLE koder selv når find er satt
+// (sluttreview 2026-07-31: find skal aldri tømme en mandatory-dimensjon).
+const REGION_ENTRIES = Array.from({ length: 45 }, (_, i) => ({ code: `K${i}`, label: `Sted ${i}` }));
+REGION_ENTRIES.push({ code: "0301", label: "Oslo" });
+const REGION_INDEX: Record<string, number> = {};
+const REGION_LABEL: Record<string, string> = {};
+REGION_ENTRIES.forEach((c, i) => { REGION_INDEX[c.code] = i; REGION_LABEL[c.code] = c.label; });
+
+const PXMETA = {
+  label: "11342: Areal og befolkning",
+  role: { time: ["Tid"] },
+  dimension: {
+    Region: {
+      label: "region",
+      category: { index: REGION_INDEX, label: REGION_LABEL },
+      extension: { elimination: true },
+    },
+    ContentsCode: {
+      label: "statistikkvariabel",
+      category: {
+        index: { Folkemengde: 0, Fodte: 1, Dode: 2, Innflytting: 3 },
+        label: { Folkemengde: "Personer", Fodte: "Fødte", Dode: "Døde", Innflytting: "Innflytting" },
+      },
+      extension: { elimination: false },
+    },
+    Tid: {
+      label: "år",
+      category: { index: { "2024": 0 }, label: { "2024": "2024" } },
+      extension: { elimination: false },
+    },
+  },
+};
+const SSB_SRC: DataSource[] = [{
+  id: "ssb", navn: "SSB", utgiver: "SSB", tillit: "offisiell",
+  tilgang: "pxweb", base_url: "https://data.ssb.no/api/pxwebapi/v2/",
+} as unknown as DataSource];
+const fakeMandatoryFetch = ((_url: string) =>
+  Promise.resolve(new Response(JSON.stringify(PXMETA), { status: 200 }))) as typeof fetch;
+
+Deno.test("pxwebMetadata: mandatory fra elimination; find når fram (lang liste filtreres)", async () => {
+  const m = await tableMetadata("ssb", "11342", { registry: SSB_SRC, fetchImpl: fakeMandatoryFetch, find: "oslo" });
+  const region = m.variables.find((v) => v.code === "Region")!;
+  const contents = m.variables.find((v) => v.code === "ContentsCode")!;
+  assertEquals(region.mandatory, false);
+  assertEquals(contents.mandatory, true);
+  assertEquals(region.values, [{ code: "0301", label: "Oslo" }]);
+  assert(m.variables.find((v) => v.code === "Tid")!.mandatory);
+});
+
+Deno.test("pxwebMetadata: find tømmer IKKE en kort mandatory-dimensjon (ContentsCode)", async () => {
+  const m = await tableMetadata("ssb", "11342", { registry: SSB_SRC, fetchImpl: fakeMandatoryFetch, find: "oslo" });
+  const contents = m.variables.find((v) => v.code === "ContentsCode")!;
+  // Ingen av ContentsCode-kodene matcher "oslo" — hadde find filtrert denne
+  // korte, obligatoriske listen ville values vært tom (og modellen ville
+  // trodd tabellen ikke hadde noe å måle). Den skal stå urørt.
+  assertEquals(contents.values.length, 4);
+  assertEquals(contents.valuesTruncated, false);
 });

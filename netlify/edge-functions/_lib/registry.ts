@@ -1,4 +1,5 @@
-// Curated data-source registry for the Web mode (spec 2026-07-03-web-data-svar).
+// Curated data-source registry for the data route in /api/svar
+// (design: docs/superpowers/specs/2026-07-29-samlet-ask-pipeline-design.md).
 // The JSON file is served statically (like variable_metadata.json); this module
 // loads, validates and caches it, and renders the compact prompt block.
 
@@ -26,6 +27,7 @@ export interface DataSource {
   auth?: SourceAuth;
   nokkel_hint?: string;
   quirks?: string;
+  guide?: boolean;  // true = data/source-guides/<id>.md finnes; se source-guides.ts
 }
 
 const TILLIT = new Set(["offisiell", "etablert", "funnet"]);
@@ -126,6 +128,7 @@ export function renderRegistryBlock(reg: DataSource[], userKeys: string[] = []):
   const lines = reg.map((s) => {
     const bits = [`${s.tilgang}, base ${s.base_url}`];
     if (isSearchableSource(s)) bits.push("søkbar via search_catalog");
+    if (s.guide) bits.push("kildeguide følger med første search_catalog/table_metadata-svar");
     if (s.auth?.user && s.auth.valgfri) {
       bits.push(userKeys.includes(s.id)
         ? "brukernøkkel valgfri (registrert) → hentes alltid via /api/hent"

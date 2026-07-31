@@ -313,11 +313,13 @@ function transformAnthropicStream(
   });
 }
 
-// ── Agentic tool loop (Web mode / data-svar) ─────────────────────────────
-// Non-streaming turns while the model calls tools; the final answer is
-// emitted as one SSE text event (accepted trade-off: no token streaming on
-// the final turn — the loop stays simple and correct). Hosted tools
-// (web_search) run inside the API; stop_reason "pause_turn" is resumed.
+// ── Agentic tool loop (Web mode / svar) ───────────────────────────────────
+// Each turn is streamed; text deltas forward live as {type:"delta", text}.
+// A turn that ends in tool_use had its text as scratch work only — it is
+// followed by {type:"turn_discard"} so the client can drop it. The final
+// turn's deltas ARE the answer; there is no separate {type:"text"} emission.
+// Hosted tools (web_search) run inside the API; stop_reason "pause_turn" is
+// resumed.
 
 export interface AgenticOptions {
   apiKey: string;
@@ -340,6 +342,13 @@ export interface AgenticOptions {
   resume?: AgenticResumeState;
   turnsPerCall?: number;
   continueExtra?: () => Record<string, unknown>;
+  // Klientutførte verktøy (run_code): verktøykall med disse navnene utføres
+  // IKKE av executeTool — de emitteres som {type:"run_code", script} fulgt av
+  // {type:"continue", state} (state.pending husker hva vi venter på), og
+  // klienten re-POST-er med resume + run_result (verktøyresultat-strengen).
+  clientTools?: string[];
+  runResult?: string;
+  maxRunCode?: number;
   deps?: RetryDeps;
 }
 
@@ -353,6 +362,8 @@ export interface AgenticResumeState {
   // openai-responses (spec A6): server-side samtaletilstand — bare id-en
   // rundtures via klienten; meldingsarrayet bærer da kun siste tool-results.
   prevResponseId?: string;
+  runCalls?: number;
+  pending?: { results: { tool_use_id: string; content: string }[]; awaitingId: string };
   usage: {
     inputTokens: number;
     outputTokens: number;
@@ -372,6 +383,131 @@ const AGENTIC_TIMEOUT_MS = 180_000;
 // in flight we emit a progress event every 10s. `replace: true` tells the
 // client to update the previous progress line in place instead of appending.
 const HEARTBEAT_MS = 10_000;
+
+// En strømmet tur som stallerer (ingen chunks) lenger enn dette avbrytes —
+// fetchWithRetry-timeouten dekker bare tiden fram til response-headerne.
+const STREAM_IDLE_MS = 120_000;
+
+interface TurnResult {
+  content: Record<string, unknown>[];
+  stopReason: string;
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheCreationTokens: number;
+  };
+}
+
+// Strømmer ÉN API-tur. Text-deltaer forwardes live via onDelta; alle
+// innholdsblokker (text, tool_use, server_tool_use, web_search_tool_result …)
+// rekonstrueres for state.messages etter SDK-mønsteret: blokken fra
+// content_block_start + kjente deltatyper akkumulert (text_delta,
+// input_json_delta — parses ved content_block_stop, citations_delta).
+async function streamOneTurn(
+  target: { url: string; init: Pick<RequestInit, "redirect"> },
+  headers: Record<string, string>,
+  requestBody: Record<string, unknown>,
+  deps: RetryDeps,
+  apiKey: string,
+  onDelta: (text: string) => void,
+): Promise<TurnResult> {
+  const resp = await fetchWithRetry(target.url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ ...requestBody, stream: true }),
+    ...target.init,
+  }, deps);
+  if (!resp.ok || !resp.body) {
+    const detail = await resp.text().catch(() => "");
+    console.error(`Anthropic API error ${resp.status}: ${scrubDetail(detail, apiKey)}`);
+    throw new Error(`Anthropic API error ${resp.status}`);
+  }
+
+  const blocks: Record<string, unknown>[] = [];
+  const partialJson = new Map<number, string>();
+  let stopReason = "";
+  const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 };
+
+  const handle = (obj: Record<string, unknown>) => {
+    const t = obj.type;
+    if (t === "message_start") {
+      const u = (obj.message as Record<string, unknown> | undefined)?.usage as Record<string, number> | undefined;
+      usage.inputTokens = u?.input_tokens ?? 0;
+      usage.cacheReadTokens = u?.cache_read_input_tokens ?? 0;
+      usage.cacheCreationTokens = u?.cache_creation_input_tokens ?? 0;
+    } else if (t === "content_block_start") {
+      const idx = obj.index as number;
+      blocks[idx] = { ...(obj.content_block as Record<string, unknown> ?? {}) };
+      const bt = blocks[idx].type;
+      if (bt === "tool_use" || bt === "server_tool_use") partialJson.set(idx, "");
+    } else if (t === "content_block_delta") {
+      const idx = obj.index as number;
+      const blk = blocks[idx];
+      const d = obj.delta as Record<string, unknown> | undefined;
+      if (!blk || !d) return;
+      if (d.type === "text_delta") {
+        blk.text = String(blk.text ?? "") + String(d.text ?? "");
+        onDelta(String(d.text ?? ""));
+      } else if (d.type === "input_json_delta") {
+        partialJson.set(idx, (partialJson.get(idx) ?? "") + String(d.partial_json ?? ""));
+      } else if (d.type === "citations_delta" && d.citation) {
+        blk.citations = [...(blk.citations as unknown[] ?? []), d.citation];
+      }
+    } else if (t === "content_block_stop") {
+      const idx = obj.index as number;
+      const blk = blocks[idx];
+      if (blk && partialJson.has(idx)) {
+        const raw = partialJson.get(idx) ?? "";
+        try { blk.input = raw ? JSON.parse(raw) : (blk.input ?? {}); }
+        catch { blk.input = blk.input ?? {}; }
+        partialJson.delete(idx);
+      }
+    } else if (t === "message_delta") {
+      const d = obj.delta as Record<string, unknown> | undefined;
+      if (d?.stop_reason) stopReason = String(d.stop_reason);
+      const u = obj.usage as Record<string, number> | undefined;
+      if (u?.output_tokens !== undefined) usage.outputTokens = u.output_tokens;
+    } else if (t === "error") {
+      const e = obj.error as Record<string, unknown> | undefined;
+      throw new Error(`Anthropic stream error: ${e?.message ?? "ukjent"}`);
+    }
+  };
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (true) {
+      let timer: number | undefined;
+      const r = await Promise.race([
+        reader.read(),
+        new Promise<never>((_, rej) => {
+          timer = setTimeout(() => rej(new Error("Anthropic-strømmen stallet (> 120 s uten data)")), STREAM_IDLE_MS);
+        }),
+      ]).finally(() => clearTimeout(timer));
+      if (r.done) break;
+      buffer += decoder.decode(r.value, { stream: true });
+      let nl;
+      while ((nl = buffer.indexOf("\n\n")) >= 0) {
+        const event = buffer.slice(0, nl);
+        buffer = buffer.slice(nl + 2);
+        const dataLine = event.split("\n").find((l) => l.startsWith("data:"));
+        if (!dataLine) continue;
+        const payload = dataLine.slice(5).trim();
+        if (!payload || payload === "[DONE]") continue;
+        try { handle(JSON.parse(payload)); }
+        catch (e) {
+          if (e instanceof Error && e.message.startsWith("Anthropic stream error")) throw e;
+          /* ignorér uparsbare keep-alives */
+        }
+      }
+    }
+  } finally {
+    try { reader.releaseLock(); } catch { /* allerede lukket */ }
+  }
+  return { content: blocks.filter(Boolean), stopReason, usage };
+}
 
 export function runAgenticStream(opts: AgenticOptions): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
@@ -404,8 +540,32 @@ export function runAgenticStream(opts: AgenticOptions): ReadableStream<Uint8Arra
         usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
       };
       const turnsPerCall = opts.turnsPerCall ?? 1;
+      const clientToolNames = new Set(opts.clientTools ?? []);
+      const maxRunCode = opts.maxRunCode ?? 2;
+      // A pause_turn segment's text is scratch work just like a tool_use
+      // segment's — but turnHadText is scoped per for-iteration, so text
+      // streamed before a pause_turn would otherwise be forgotten by the time
+      // the continued segment (often tool_use with no new text of its own) is
+      // handled, silently skipping the turn_discard that should drop it from
+      // the client's answer buffer. carryHadText remembers it across
+      // pause_turn continuations within this run.
+      let carryHadText = false;
 
       try {
+        // Resume etter run_code: flett klientens kjøreresultat inn som
+        // tool_result sammen med eventuelle server-verktøyresultater fra samme tur.
+        if (state.pending) {
+          if (typeof opts.runResult !== "string") {
+            throw new Error("resume med ventende run_code mangler run_result");
+          }
+          const merged = [...state.pending.results,
+            { tool_use_id: state.pending.awaitingId, content: opts.runResult }];
+          state.messages.push({
+            role: "user",
+            content: merged.map((r) => ({ type: "tool_result", tool_use_id: r.tool_use_id, content: r.content })),
+          });
+          delete state.pending;
+        }
         for (let i = 0; i < turnsPerCall; i++) {
           if (state.turn >= maxTurns) throw new Error("tool-loopen nådde maks antall turer");
           const turnLabel = state.turn === 0
@@ -413,43 +573,39 @@ export function runAgenticStream(opts: AgenticOptions): ReadableStream<Uint8Arra
             : `🤔 Arbeider med svaret (tur ${state.turn + 1})`;
           emit({ type: "progress", text: `${turnLabel} …`, replace: true });
           const turnStart = Date.now();
+          // Heartbeat trengs bare til første delta — deretter holder deltaene
+          // SSE-strømmen i live.
+          let sawDelta = false;
+          let turnHadText = false;
           const beat = setInterval(() => {
+            if (sawDelta) return;
             const s = Math.round((Date.now() - turnStart) / 1000);
             try {
               emit({ type: "progress", text: `${turnLabel} … (${s} s)`, replace: true });
             } catch (_) { /* stream already closed */ }
           }, HEARTBEAT_MS);
-          let resp: Response;
+          let turn: TurnResult;
           try {
-            resp = await fetchWithRetry(target.url, {
-              method: "POST",
-              headers,
-              body: JSON.stringify({
-                model: opts.model,
-                max_tokens: opts.maxTokens ?? 8192,
-                stream: false,
-                system,
-                tools: opts.tools,
-                messages: state.messages,
-              }),
-              ...target.init,
-            }, deps);
+            turn = await streamOneTurn(target, headers, {
+              model: opts.model,
+              max_tokens: opts.maxTokens ?? 8192,
+              system,
+              tools: opts.tools,
+              messages: state.messages,
+            }, deps, opts.apiKey, (text) => {
+              sawDelta = true;
+              turnHadText = true;
+              emit({ type: "delta", text });
+            });
           } finally {
             clearInterval(beat);
           }
-          if (!resp.ok) {
-            const detail = await resp.text().catch(() => "");
-            console.error(`Anthropic API error ${resp.status}: ${scrubDetail(detail, opts.apiKey)}`);
-            throw new Error(`Anthropic API error ${resp.status}`);
-          }
-          const json = await resp.json();
           state.turn++;
-          const u = json?.usage ?? {};
-          state.usage.inputTokens += u.input_tokens ?? 0;
-          state.usage.outputTokens += u.output_tokens ?? 0;
-          state.usage.cacheReadTokens += u.cache_read_input_tokens ?? 0;
-          state.usage.cacheCreationTokens += u.cache_creation_input_tokens ?? 0;
-          const content = Array.isArray(json?.content) ? json.content : [];
+          state.usage.inputTokens += turn.usage.inputTokens;
+          state.usage.outputTokens += turn.usage.outputTokens;
+          state.usage.cacheReadTokens += turn.usage.cacheReadTokens;
+          state.usage.cacheCreationTokens += turn.usage.cacheCreationTokens;
+          const content = turn.content;
 
           // Hosted tools (web_search/web_fetch) run inside the API and are
           // otherwise invisible to the user — surface what was searched/read.
@@ -463,15 +619,34 @@ export function runAgenticStream(opts: AgenticOptions): ReadableStream<Uint8Arra
             });
           }
 
-          if (json.stop_reason === "pause_turn") {
+          if (turn.stopReason === "pause_turn") {
             state.messages.push({ role: "assistant", content });
+            carryHadText = carryHadText || turnHadText;
             continue;
           }
-          const toolUses = content.filter((b: { type?: string }) => b.type === "tool_use");
-          if (json.stop_reason === "tool_use" && toolUses.length) {
+          const toolUses = content.filter(
+            (b: { type?: string }): b is { type: string; id: string; name: string; input?: Record<string, unknown> } =>
+              b.type === "tool_use",
+          );
+          if (turn.stopReason === "tool_use" && toolUses.length) {
             state.messages.push({ role: "assistant", content });
-            const results: Record<string, unknown>[] = [];
+            if (turnHadText || carryHadText) emit({ type: "turn_discard" });
+            carryHadText = false;
+            const results: { tool_use_id: string; content: string }[] = [];
+            let clientCall: { id: string; input: Record<string, unknown> } | null = null;
             for (const tu of toolUses) {
+              if (clientToolNames.has(tu.name)) {
+                state.runCalls = (state.runCalls ?? 0) + 1;
+                if (state.runCalls > maxRunCode) {
+                  results.push({ tool_use_id: tu.id, content:
+                    "Kjøre-budsjettet er brukt opp — skriv sluttsvaret NÅ basert på det du allerede vet. Vær ærlig om hva som ikke ble verifisert." });
+                } else if (clientCall) {
+                  results.push({ tool_use_id: tu.id, content: "Kall run_code én gang per tur." });
+                } else {
+                  clientCall = { id: tu.id, input: (tu.input ?? {}) as Record<string, unknown> };
+                }
+                continue;
+              }
               state.clientCalls++;
               const label = opts.progressLabel?.(tu.name, tu.input ?? {}) ?? `Kjører ${tu.name} …`;
               emit({ type: "progress", text: label });
@@ -485,15 +660,23 @@ export function runAgenticStream(opts: AgenticOptions): ReadableStream<Uint8Arra
                   out = `Verktøyfeil: ${String(e).slice(0, 300)}`;
                 }
               }
-              results.push({ type: "tool_result", tool_use_id: tu.id, content: out });
+              results.push({ tool_use_id: tu.id, content: out });
             }
-            state.messages.push({ role: "user", content: results });
+            if (clientCall) {
+              state.pending = { results, awaitingId: clientCall.id };
+              emit({ type: "run_code", script: String(clientCall.input.script ?? "") });
+              emit({ type: "continue", state, ...(opts.continueExtra?.() ?? {}) });
+              controller.close();
+              return;
+            }
+            state.messages.push({
+              role: "user",
+              content: results.map((r) => ({ type: "tool_result", tool_use_id: r.tool_use_id, content: r.content })),
+            });
             continue;
           }
-          // Final answer
-          for (const b of content) {
-            if (b.type === "text" && b.text) emit({ type: "text", text: b.text });
-          }
+          // Final answer — its deltas were already forwarded live above.
+          carryHadText = false;
           emit({ type: "done", ...state.usage });
           controller.close();
           return;

@@ -86,3 +86,23 @@ Deno.test("løkka: runTurn-feil → error-event, aldri exception", async () => {
     throw new Error("mangler error-event: " + JSON.stringify(events));
   }
 });
+
+Deno.test("provider-løkka: run_code → run_code+continue m/ pending; resume m/ runResult fullfører", async () => {
+  const turns = [
+    { text: "", toolUses: [{ id: "p1", name: "run_code", input: { script: "1+1" } }], searchNotes: [], stop: "tool_use" as const, usage: { inputTokens: 1, outputTokens: 1 } },
+    { text: "Ferdig", toolUses: [], searchNotes: [], stop: "end" as const, usage: { inputTokens: 1, outputTokens: 1 } },
+  ];
+  let call = 0;
+  const runTurn = () => Promise.resolve(turns[call++]);
+  const base = {
+    runTurn, system: "s", userContent: "q", tools: [],
+    executeTool: () => Promise.reject(new Error("skal ikke kalles")),
+    clientTools: ["run_code"], turnsPerCall: 8,
+  };
+  const ev1 = await collect(runProviderAgenticStream(base));
+  assertEquals(ev1.find((e) => e.type === "run_code")?.script, "1+1");
+  const st = ev1.find((e) => e.type === "continue")?.state as never;
+  const ev2 = await collect(runProviderAgenticStream({ ...base, resume: st, runResult: "OK:\n2" }));
+  assertEquals(ev2.find((e) => e.type === "text")?.text, "Ferdig");
+  assertEquals(ev2.at(-1)?.type, "done");
+});

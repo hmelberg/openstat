@@ -37,6 +37,13 @@ export interface ProviderAgenticOptions {
   resume?: AgenticResumeState;
   turnsPerCall?: number;
   continueExtra?: () => Record<string, unknown>;
+  // Klientutførte verktøy (run_code): verktøykall med disse navnene utføres
+  // IKKE av executeTool — de emitteres som {type:"run_code", script} fulgt av
+  // {type:"continue", state} (state.pending husker hva vi venter på), og
+  // klienten re-POST-er med resume + run_result (verktøyresultat-strengen).
+  clientTools?: string[];
+  runResult?: string;
+  maxRunCode?: number;
   deps?: RetryDeps;
 }
 
@@ -59,8 +66,24 @@ export function runProviderAgenticStream(opts: ProviderAgenticOptions): Readable
         clientCalls: 0,
         usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
       };
+      const clientToolNames = new Set(opts.clientTools ?? []);
+      const maxRunCode = opts.maxRunCode ?? 2;
 
       try {
+        // Resume etter run_code: flett klientens kjøreresultat inn som
+        // tool_result sammen med eventuelle server-verktøyresultater fra samme tur.
+        if (state.pending) {
+          if (typeof opts.runResult !== "string") {
+            throw new Error("resume med ventende run_code mangler run_result");
+          }
+          const merged = [...state.pending.results,
+            { tool_use_id: state.pending.awaitingId, content: opts.runResult }];
+          state.messages.push({
+            role: "user",
+            content: merged.map((r) => ({ type: "tool_result", tool_use_id: r.tool_use_id, content: r.content })),
+          });
+          delete state.pending;
+        }
         for (let i = 0; i < turnsPerCall; i++) {
           if (state.turn >= maxTurns) throw new Error("tool-loopen nådde maks antall turer");
           const turnLabel = state.turn === 0
@@ -98,8 +121,21 @@ export function runProviderAgenticStream(opts: ProviderAgenticOptions): Readable
               content.push({ type: "tool_use", id: tu.id, name: tu.name, input: tu.input });
             }
             state.messages.push({ role: "assistant", content });
-            const results: Record<string, unknown>[] = [];
+            const results: { tool_use_id: string; content: string }[] = [];
+            let clientCall: { id: string; input: Record<string, unknown> } | null = null;
             for (const tu of turn.toolUses) {
+              if (clientToolNames.has(tu.name)) {
+                state.runCalls = (state.runCalls ?? 0) + 1;
+                if (state.runCalls > maxRunCode) {
+                  results.push({ tool_use_id: tu.id, content:
+                    "Kjøre-budsjettet er brukt opp — skriv sluttsvaret NÅ basert på det du allerede vet. Vær ærlig om hva som ikke ble verifisert." });
+                } else if (clientCall) {
+                  results.push({ tool_use_id: tu.id, content: "Kall run_code én gang per tur." });
+                } else {
+                  clientCall = { id: tu.id, input: tu.input };
+                }
+                continue;
+              }
               state.clientCalls++;
               const label = opts.progressLabel?.(tu.name, tu.input) ?? `Kjører ${tu.name} …`;
               emit({ type: "progress", text: label });
@@ -113,9 +149,19 @@ export function runProviderAgenticStream(opts: ProviderAgenticOptions): Readable
                   out = `Verktøyfeil: ${String(e).slice(0, 300)}`;
                 }
               }
-              results.push({ type: "tool_result", tool_use_id: tu.id, content: out });
+              results.push({ tool_use_id: tu.id, content: out });
             }
-            state.messages.push({ role: "user", content: results });
+            if (clientCall) {
+              state.pending = { results, awaitingId: clientCall.id };
+              emit({ type: "run_code", script: String(clientCall.input.script ?? "") });
+              emit({ type: "continue", state, ...(opts.continueExtra?.() ?? {}) });
+              controller.close();
+              return;
+            }
+            state.messages.push({
+              role: "user",
+              content: results.map((r) => ({ type: "tool_result", tool_use_id: r.tool_use_id, content: r.content })),
+            });
             continue;
           }
 

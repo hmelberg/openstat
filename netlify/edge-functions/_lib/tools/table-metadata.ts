@@ -2,6 +2,8 @@
 // can build a MINIMAL query URL (spec: build datasets from variables).
 import { findSource, SDMX_STRUCTURE_ACCEPT, SDMX_XML_SOURCES, type DataSource } from "../registry.ts";
 import { XMLParser } from "https://esm.sh/fast-xml-parser@4";
+import { worldbankMetadata } from "./catalogs/worldbank.ts";
+import { dbnomicsMetadata } from "./catalogs/dbnomics.ts";
 
 export interface TableVariable {
   code: string;
@@ -9,6 +11,10 @@ export interface TableVariable {
   time: boolean;
   values: { code: string; label: string }[];
   valuesTruncated: boolean;
+  // pxweb: fra extension.elimination === false (obligatorisk valg ved
+  // filtrert spørring — SSB 400-er ellers, målt 2026-07-31). Utelates for
+  // adaptere der metadataene ikke bærer informasjonen — aldri gjett.
+  mandatory?: boolean;
 }
 
 export interface TableMeta {
@@ -17,26 +23,58 @@ export interface TableMeta {
   title: string;
   variables: TableVariable[];
   queryUrlTemplate?: string;
+  // worldbank/dbnomics-adapterne (Task 5) returnerer en frittstående
+  // Record<string, unknown> — ikke det variabel/kode-formede TableMeta-skjemaet
+  // (de har ingen dimensjons-katalog å hente). Indekssignaturen gjør TableMeta
+  // strukturelt kompatibel med Record<string, unknown> UTEN å svekke typingen
+  // av de faste feltene over for de registerbaserte adapterne.
+  [key: string]: unknown;
 }
 
 const MAX_VALUES = 40;
 
+// find-filter (delstreng i kode ELLER etikett, case-insensitivt) — men KUN
+// når hele listen er lengre enn MAX_VALUES. Korte lister (typisk
+// obligatoriske dimensjoner som ContentsCode, som gjerne bare har noen få
+// koder) returneres derfor KOMPLETTE selv når find er satt: ett
+// table_metadata(find="Oslo")-kall gir dermed BÅDE regiontreffet OG de
+// fullstendige kodelistene for korte, obligatoriske dimensjoner — uten et
+// eget oppfølgingskall (spec 2026-07-31-ssb-mandatory-variabler task 5,
+// sluttreview: find skal aldri tømme en mandatory-dimensjon appen uansett
+// må ha et valg for). Trunkeringen skjer hos oss, hele listen er i minnet;
+// valuesTruncated reflekterer listen ETTER (evt.) filtrering.
+export function pickValues(
+  all: { code: string; label: string }[],
+  find?: string,
+): { values: { code: string; label: string }[]; valuesTruncated: boolean } {
+  const needle = (find ?? "").trim().toLowerCase();
+  const filtered = needle && all.length > MAX_VALUES
+    ? all.filter((v) =>
+      v.code.toLowerCase().includes(needle) || v.label.toLowerCase().includes(needle))
+    : all;
+  return { values: filtered.slice(0, MAX_VALUES), valuesTruncated: filtered.length > MAX_VALUES };
+}
+
 export async function tableMetadata(
   sourceId: string,
   tableId: string,
-  deps: { registry: DataSource[]; fetchImpl?: typeof fetch },
+  deps: { registry: DataSource[]; fetchImpl?: typeof fetch; find?: string },
 ): Promise<TableMeta> {
   const src = findSource(deps.registry, sourceId);
   if (!src) throw new Error(`ukjent kilde '${sourceId}'`);
   const f = deps.fetchImpl ?? fetch;
   switch (src.tilgang) {
-    case "pxweb": return pxwebMetadata(src, tableId, f);
-    case "sdmx": return sdmxMetadata(src, tableId, f);
+    case "pxweb": return pxwebMetadata(src, tableId, f, deps.find);
+    case "sdmx": return sdmxMetadata(src, tableId, f, deps.find);
     default:
       switch (src.kind) {
-        case "fhi": return fhiMetadata(src, tableId, f);
-        case "dst": return dstMetadata(src, tableId, f);
-        case "statfin": return statfinMetadata(src, tableId, f);
+        case "fhi": return fhiMetadata(src, tableId, f, deps.find);
+        case "dst": return dstMetadata(src, tableId, f, deps.find);
+        case "statfin": return statfinMetadata(src, tableId, f, deps.find);
+        // worldbank/dbnomics har et annet metadata-skjema (ingen
+        // dimensjonsliste) — TableMetas indekssignatur gjør castet trygt.
+        case "worldbank": return worldbankMetadata(tableId, f) as unknown as Promise<TableMeta>;
+        case "dbnomics": return dbnomicsMetadata(tableId, f) as unknown as Promise<TableMeta>;
         default:
           throw new Error(
             `table_metadata støtter ikke '${sourceId}' ennå — bruk probe på data-URL-en for å se kolonner`,
@@ -45,7 +83,7 @@ export async function tableMetadata(
   }
 }
 
-async function pxwebMetadata(src: DataSource, tableId: string, f: typeof fetch): Promise<TableMeta> {
+async function pxwebMetadata(src: DataSource, tableId: string, f: typeof fetch, find?: string): Promise<TableMeta> {
   const url = new URL(`tables/${tableId}/metadata?lang=no`, src.base_url).toString();
   const res = await f(url);
   if (!res.ok) throw new Error(`metadata for ${src.id}/${tableId} feilet: HTTP ${res.status}`);
@@ -54,18 +92,27 @@ async function pxwebMetadata(src: DataSource, tableId: string, f: typeof fetch):
   const dims = (json?.dimension ?? {}) as Record<string, {
     label?: string;
     category?: { index?: Record<string, number>; label?: Record<string, string> };
+    extension?: { elimination?: boolean };
   }>;
   const timeDims = new Set<string>((json?.role?.time ?? []) as string[]);
   const variables: TableVariable[] = Object.entries(dims).map(([code, d]) => {
     const labels = d.category?.label ?? {};
     const codes = Object.keys(d.category?.index ?? labels);
-    const values = codes.slice(0, MAX_VALUES).map((c) => ({ code: c, label: labels[c] ?? c }));
+    const allValues = codes.map((c) => ({ code: c, label: labels[c] ?? c }));
+    const { values, valuesTruncated } = pickValues(allValues, find);
+    const elim = d.extension?.elimination;
+    // fallback når feltet mangler: ContentsCode + tidsdimensjonen er
+    // aldri eliminerbare (janbrus: «never eliminable»)
+    const mandatory = elim !== undefined
+      ? elim === false
+      : (code === "ContentsCode" || timeDims.has(code));
     return {
       code,
       label: d.label ?? code,
       time: timeDims.has(code),
       values,
-      valuesTruncated: codes.length > MAX_VALUES,
+      valuesTruncated,
+      mandatory,
     };
   });
 
@@ -81,7 +128,7 @@ async function pxwebMetadata(src: DataSource, tableId: string, f: typeof fetch):
 interface FhiDimensionCategory { label: string; value: string; }
 interface FhiDimension { code: string; label: string; categories: FhiDimensionCategory[]; }
 
-async function fhiMetadata(src: DataSource, tableId: string, f: typeof fetch): Promise<TableMeta> {
+async function fhiMetadata(src: DataSource, tableId: string, f: typeof fetch, find?: string): Promise<TableMeta> {
   // tableId kommer som "<register>/<tallId>" fra fhiSearch (search-catalog.ts)
   const [register, id] = tableId.split("/");
   if (!register || !id) throw new Error(`fhi table_id må være '<register>/<tallId>', fikk '${tableId}'`);
@@ -90,37 +137,45 @@ async function fhiMetadata(src: DataSource, tableId: string, f: typeof fetch): P
   if (!res.ok) throw new Error(`fhi metadata for ${tableId} feilet: HTTP ${res.status}`);
   const json = await res.json() as { dimensions?: FhiDimension[] };
   const dims = json.dimensions ?? [];
-  const variables: TableVariable[] = dims.map((d) => ({
-    code: d.code,
-    label: d.label,
-    time: false, // FHI gir ikke et pålitelig tids-signal (se spec §3) — ærlig forenkling
-    values: d.categories.slice(0, MAX_VALUES).map((c) => ({ code: c.value, label: c.label })),
-    valuesTruncated: d.categories.length > MAX_VALUES,
-  }));
+  const variables: TableVariable[] = dims.map((d) => {
+    const allValues = d.categories.map((c) => ({ code: c.value, label: c.label }));
+    const { values, valuesTruncated } = pickValues(allValues, find);
+    return {
+      code: d.code,
+      label: d.label,
+      time: false, // FHI gir ikke et pålitelig tids-signal (se spec §3) — ærlig forenkling
+      values,
+      valuesTruncated,
+    };
+  });
   return { source: src.id, id: tableId, title: tableId, variables };
 }
 
 interface DstVariableValue { id: string; text: string; }
 interface DstVariable { id: string; text: string; time?: boolean; values: DstVariableValue[]; }
 
-async function dstMetadata(src: DataSource, tableId: string, f: typeof fetch): Promise<TableMeta> {
+async function dstMetadata(src: DataSource, tableId: string, f: typeof fetch, find?: string): Promise<TableMeta> {
   const url = new URL(`tableinfo/${tableId}?format=JSON`, src.base_url).toString();
   const res = await f(url);
   if (!res.ok) throw new Error(`dst metadata for ${tableId} feilet: HTTP ${res.status}`);
   const json = await res.json() as { text?: string; variables?: DstVariable[] };
-  const variables: TableVariable[] = (json.variables ?? []).map((v) => ({
-    code: v.id,
-    label: v.text,
-    time: !!v.time,
-    values: v.values.slice(0, MAX_VALUES).map((c) => ({ code: c.id, label: c.text })),
-    valuesTruncated: v.values.length > MAX_VALUES,
-  }));
+  const variables: TableVariable[] = (json.variables ?? []).map((v) => {
+    const allValues = v.values.map((c) => ({ code: c.id, label: c.text }));
+    const { values, valuesTruncated } = pickValues(allValues, find);
+    return {
+      code: v.id,
+      label: v.text,
+      time: !!v.time,
+      values,
+      valuesTruncated,
+    };
+  });
   return { source: src.id, id: tableId, title: json.text ?? tableId, variables };
 }
 
 interface StatfinVariable { code: string; text: string; values: string[]; valueTexts?: string[]; time?: boolean; }
 
-async function statfinMetadata(src: DataSource, tableId: string, f: typeof fetch): Promise<TableMeta> {
+async function statfinMetadata(src: DataSource, tableId: string, f: typeof fetch, find?: string): Promise<TableMeta> {
   const url = new URL(tableId, src.base_url).toString();
   const res = await f(url);
   if (!res.ok) throw new Error(`statfin metadata for ${tableId} feilet: HTTP ${res.status}`);
@@ -128,12 +183,14 @@ async function statfinMetadata(src: DataSource, tableId: string, f: typeof fetch
   const variables: TableVariable[] = (json.variables ?? []).map((v) => {
     const codes = v.values ?? [];
     const labels = v.valueTexts ?? codes;
+    const allValues = codes.map((c, i) => ({ code: c, label: labels[i] ?? c }));
+    const { values, valuesTruncated } = pickValues(allValues, find);
     return {
       code: v.code,
       label: v.text,
       time: !!v.time,
-      values: codes.slice(0, MAX_VALUES).map((c, i) => ({ code: c, label: labels[i] ?? c })),
-      valuesTruncated: codes.length > MAX_VALUES,
+      values,
+      valuesTruncated,
     };
   });
   return { source: src.id, id: tableId, title: json.title ?? tableId, variables };
@@ -159,10 +216,10 @@ function asArray<T>(v: T | T[] | undefined): T[] {
   return Array.isArray(v) ? v : [v];
 }
 
-async function sdmxMetadata(src: DataSource, dataflowKey: string, f: typeof fetch): Promise<TableMeta> {
+async function sdmxMetadata(src: DataSource, dataflowKey: string, f: typeof fetch, find?: string): Promise<TableMeta> {
   const accept = SDMX_STRUCTURE_ACCEPT[src.id];
   if (!accept) {
-    if (SDMX_XML_SOURCES.has(src.id)) return ecbMetadata(src, dataflowKey, f);
+    if (SDMX_XML_SOURCES.has(src.id)) return ecbMetadata(src, dataflowKey, f, find);
     throw new Error(`sdmx-strukturspørringer er ikke støttet for '${src.id}' ennå (kun XML) — bruk web_search + probe`);
   }
   const [agencyID, dataflowId] = dataflowKey.split("/");
@@ -192,12 +249,14 @@ async function sdmxMetadata(src: DataSource, dataflowKey: string, f: typeof fetc
   const variables: TableVariable[] = [
     ...plainDims.map((d) => {
       const codes = codesFor(d);
+      const allValues = codes.map((c) => ({ code: String(c.id ?? ""), label: String(c.name ?? c.id ?? "") }));
+      const { values, valuesTruncated } = pickValues(allValues, find);
       return {
         code: String(d.id ?? ""),
         label: String(d.id ?? ""), // ingen egen "name" utover concept-referansen — koden ER labelen
         time: false,
-        values: codes.slice(0, MAX_VALUES).map((c) => ({ code: String(c.id ?? ""), label: String(c.name ?? c.id ?? "") })),
-        valuesTruncated: codes.length > MAX_VALUES,
+        values,
+        valuesTruncated,
       };
     }),
     ...timeDims.map((d) => ({
@@ -211,7 +270,7 @@ async function sdmxMetadata(src: DataSource, dataflowKey: string, f: typeof fetc
   return { source: src.id, id: dataflowKey, title: String(dsd.name ?? dataflowKey), variables };
 }
 
-async function ecbMetadata(src: DataSource, dataflowKey: string, f: typeof fetch): Promise<TableMeta> {
+async function ecbMetadata(src: DataSource, dataflowKey: string, f: typeof fetch, find?: string): Promise<TableMeta> {
   const [agencyID, dataflowId] = dataflowKey.split("/");
   if (!agencyID || !dataflowId) throw new Error(`sdmx table_id må være '<agencyID>/<dataflowId>', fikk '${dataflowKey}'`);
   const url = `${src.base_url.replace(/data\/$/, "")}dataflow/${agencyID}/${dataflowId}/latest?references=all`;
@@ -240,12 +299,14 @@ async function ecbMetadata(src: DataSource, dataflowKey: string, f: typeof fetch
   const variables: TableVariable[] = [
     ...plainDims.map((d) => {
       const codes = codesFor(d);
+      const allValues = codes.map((c) => ({ code: String(c.id ?? ""), label: xmlText(c["com:Name"]) || String(c.id ?? "") }));
+      const { values, valuesTruncated } = pickValues(allValues, find);
       return {
         code: String(d.id ?? ""),
         label: String(d.id ?? ""),
         time: false,
-        values: codes.slice(0, MAX_VALUES).map((c) => ({ code: String(c.id ?? ""), label: xmlText(c["com:Name"]) || String(c.id ?? "") })),
-        valuesTruncated: codes.length > MAX_VALUES,
+        values,
+        valuesTruncated,
       };
     }),
     ...timeDims.map((d) => ({
