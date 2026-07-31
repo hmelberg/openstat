@@ -2312,6 +2312,46 @@
         return bytes;
       } finally { await conn.close(); }
     }
+
+    // Federert pull (spec 2026-07-31-federert-pull-design §4): den ENE
+    // virkelige unionExec — medlemsbytes inn, én parquet ut, med __member-
+    // kolonne og skjemasjekk. Ren plan fra js/federate.js; kjøres her mot
+    // duckdb-wasm-singletonen. Injiseres som deps.unionExec ved alle
+    // resolveAndFetchLoads/fetchResolvedItems-kall.
+    async function __federatedUnion(alias, members, meta) {
+      var db = await __ensureDuckDB();
+      var conn = await db.connect();
+      var files = members.map(function (m, i) {
+        return { id: m.id, format: m.format, fileName: 'fed_' + alias + '_' + i + '.' + m.format };
+      });
+      try {
+        for (var i = 0; i < members.length; i++) {
+          await db.registerFileBuffer(files[i].fileName, members[i].bytes);
+        }
+        var plan = window.Federate.planUnion(files);
+        var schemas = [];
+        for (var j = 0; j < plan.describes.length; j++) {
+          var dres = await conn.query(plan.describes[j].sql);
+          schemas.push({ id: plan.describes[j].id,
+            columns: dres.toArray().map(function (row) { return row.column_name; }) });
+        }
+        window.Federate.checkSchemas(schemas);
+        if (meta && meta.overlap === 'possible') {
+          console.info('federert «' + alias + '»: medlemmer kan overlappe — tellinger er episodenivå');
+        }
+        var outName = 'fed_' + alias + '_union.parquet';
+        await conn.query("COPY (" + plan.unionSql + ") TO '" + outName + "' (FORMAT PARQUET)");
+        var bytes = await db.copyFileToBuffer(outName);
+        try { await db.dropFile(outName); } catch (e) { /* best-effort */ }
+        return { bytes: bytes, format: 'parquet' };
+      } finally {
+        for (var k = 0; k < files.length; k++) {
+          try { await db.dropFile(files[k].fileName); } catch (e) { /* best-effort */ }
+        }
+        await conn.close();
+      }
+    }
+
     window.__duckUseBytes = __duckUseBytes;   // JavaScript-motorens use-from-duckdb
 
     window.__duck = {
@@ -2777,7 +2817,7 @@
         runSelf: async function (script, ctx) {
           setStatus(ctx.rightStatus, t('Laster Brython…'));
           var _dl = await window.DataLoader.resolveAndFetchLoads(script,
-            { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey });
+            { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey, unionExec: __federatedUnion });
           // '#tag.import' (ui-html-fasen, Task 4, spec §4) — no-op for et
           // umerket/rent script (Cells.active()-notatbøker for brython går
           // ALDRI hit, se kommentaren under — men wiret uansett for
@@ -2852,7 +2892,7 @@
         runSelf: async function (script, ctx) {
           setStatus(ctx.rightStatus, t('Laster MicroPython…'));
           var _dl = await window.DataLoader.resolveAndFetchLoads(script,
-            { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey });
+            { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey, unionExec: __federatedUnion });
           // '#tag.import' (ui-html-fasen, Task 4, spec §4) — se Brython-
           // raden over for begrunnelsen (samme no-op-for-notatbøker-note).
           try { await window.mdEnsureTagImports(ctx.rightStatus); }
@@ -2917,7 +2957,7 @@
         onActivate: function () { if (window.JsEngine) window.JsEngine.load().catch(function () {}); },
         runSelf: async function (script, ctx) {
           var _dl = await window.DataLoader.resolveAndFetchLoads(script,
-            { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey });
+            { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey, unionExec: __federatedUnion });
           // '#tag.import' — samme wiring som Brython-/MicroPython-radene over.
           try { await window.mdEnsureTagImports(ctx.rightStatus); }
           catch (e) { console.warn('#tag.import (javascript runSelf):', e); }
@@ -8094,7 +8134,7 @@ async def _run_duck_sql(_sql, _fresh=True):
       var parsed = DD.parseAssembly(script);
       if (parsed.errors.length) throw new Error('Monteringsfeil: ' + parsed.errors.join('; '));
       if (!(parsed.spec.datasets || []).length) return null;
-      var deps = { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey };
+      var deps = { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey, unionExec: __federatedUnion };
       // format(duckdb)-montering (økt 2026-07-24): datasett med format duckdb
       // materialiseres IKKE — den kompilerte SQL-en blir CREATE OR REPLACE
       // VIEW i den delte katalogen, og view-registeret (js/duckdb-views.js)
@@ -8674,7 +8714,7 @@ if _asm.get('spec'):
         if (_up.uses.length) return { handled: false, res: null };
       }
       var _res = await window.DataLoader.resolveAndFetchLoads(script,
-        { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey });
+        { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey, unionExec: __federatedUnion });
       if ((_res.remote || []).length) return { handled: false, res: _res };
       var _loads = _res.loads;
       // Konvolutt-kilder (kryptert) må gjennom Pyodide-veiens dekryptering.
@@ -9574,7 +9614,7 @@ json.dumps(out)
 
       // Web-modus: connect/load-direktiver — hent kilder og bind dem inn i R
       // FØR koden kjører (ingen-op når scriptet ikke har direktiver).
-      var _rDeps = { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey };
+      var _rDeps = { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey, unionExec: __federatedUnion };
       var _dlR = await window.DataLoader.resolveAndFetchLoads(src, _rDeps);
       var _loadsR = _dlR.loads;
       // "# <navn> = ost.use(…)" håndteres nå på segmentnivå (plan 2026-07-11): use-
@@ -10794,7 +10834,7 @@ options(width = 200)
       var _showCmds = ctx.showCommands;
         var _pyLoads = [];
         if (activeEditorMode === 'python' || activeEditorMode === 'duckdb') {
-          var _dlDeps = { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey };
+          var _dlDeps = { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey, unionExec: __federatedUnion };
           // pandas-URL-broen (plan 2026-07-27): fyller ReadBridge-cachen mens
           // resolveAndFetchLoads/py-boot pågår — ren hint, aldri autoritativ.
           if (window.ReadBridge) window.ReadBridge.prefetchScript(effectiveScript);
@@ -11315,7 +11355,7 @@ async def _m2py_run_segment(_seg_json):
           // effectiveScript-stedet over — samme hint-prefetch her.
           if (window.ReadBridge) window.ReadBridge.prefetchScript(scriptInput.value);
           var _dl = await window.DataLoader.resolveAndFetchLoads(scriptInput.value,
-            { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey });
+            { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey, unionExec: __federatedUnion });
           await sess.ensure(_dl.loads);
           // Preambel (celle 0, headerRaw === null) inn i den ferske økten —
           // med mindre målcellen ER preambelen (da kjøres den under, med
@@ -12381,7 +12421,7 @@ async def _m2py_run_segment(_seg_json):
             // andre Pyodide-inngangene (effectiveScript/scriptInput.value).
             if (window.ReadBridge) window.ReadBridge.prefetchScript(snapshotScript);
             const _fdl = await window.DataLoader.resolveAndFetchLoads(snapshotScript,
-              { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey });
+              { anthropicKey: getAnthropicKey(), promptKey: mdPromptKey, unionExec: __federatedUnion });
             const _fRawLoads = _fdl.loads || [];
             if (_fRawLoads.some(function (l) { return l.bytes; })) py.FS.mkdirTree('/home/pyodide/_webdata');
             _forklarPyLoads = _fRawLoads.map(function (l) {
@@ -12616,6 +12656,7 @@ async def _m2py_run_segment(_seg_json):
   <script src="js/sidebar-typemeta.js"></script>
   <script src="js/duckdb-views.js"></script>
   <script src="js/assembly-duckdb.js"></script>
+  <script src="js/federate.js"></script>
   <script src="js/duckdb-native.js"></script>
   <script src="js/svar-refs.js"></script>
   <script src="js/ai-chat.js"></script>
