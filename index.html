@@ -189,13 +189,17 @@
         <textarea id="aiInput" class="ai-input" rows="1" data-i18n-placeholder
           placeholder="Spør om noe... (Enter = send, Shift+Enter = ny linje)"></textarea>
         <button type="button" class="ai-abort-btn" id="aiAbortBtn" style="display:none;" data-i18n data-i18n-title data-i18n-aria title="Avbryt pågående svar" aria-label="Avbryt">⏹ Avbryt</button>
-        <button type="button" class="ai-send-fast-btn" id="aiSendFastBtn" data-i18n-title
-          title="Send spørsmål til AI (AI-modus velges i menyen)"
-          aria-label="Send">Send</button>
-        <button type="button" class="ai-send-fast-btn ai-send-v2-btn" id="aiSendV2Btn" data-i18n-title
-          title="Eksperimentell: 2-stegs variabelvalg + auto-retting (kan være tregere)"
-          aria-label="Send (eksperimentell)">Send⚗︎</button>
-        <button type="button" class="ai-send-fast-btn ai-send-web-btn" id="aiSendWebBtn" style="display:none;" data-i18n-title title="Web: finn åpne data og generer script (krever admin eller egen Anthropic-nøkkel; python/r/duckdb-modus)" aria-label="Send (web)">Web</button>
+        <div class="ai-send-wrap">
+          <button type="button" class="ai-send-fast-btn" id="aiSendFastBtn" data-i18n-title
+            title="Send spørsmål til AI"
+            aria-label="Send">Send</button>
+          <button type="button" class="ai-send-fast-btn ai-send-caret-btn" id="aiDepthBtn"
+            data-i18n-title data-i18n-aria title="Velg svardybde" aria-label="Velg svardybde"><span class="chevron">▾</span></button>
+          <div class="mode-dropdown-menu ai-depth-menu" id="aiDepthMenu" hidden>
+            <button type="button" data-depth="standard" data-i18n>Standard — rask, få kilder</button>
+            <button type="button" data-depth="deep" data-i18n>Grundig — flere kilder og tålmodighet</button>
+          </div>
+        </div>
       </div>
     </div>
   </aside>
@@ -231,15 +235,6 @@
           <input type="password" id="aiCfgLlmKey" autocomplete="off" style="margin-top:4px;">
           <div class="ai-modal-help" data-i18n>Base-URL er alt før endepunktnavnet (typisk t.o.m. /v1). Nøkkelen lagres kun i denne nettleseren; forespørsler går via appens server til leverandøren du velger, og forbruk (inkludert eventuelt websøk hos OpenAI) belastes din konto der. Web-modus med OpenAI-typene krever en modell med verktøystøtte.</div>
         </div>
-      </div>
-
-      <div style="margin-bottom:18px;">
-        <label for="aiCfgDepth" data-i18n>Dybde (Web-modus)</label>
-        <select id="aiCfgDepth">
-          <option value="deep" data-i18n>Grundig (standard)</option>
-          <option value="fast" data-i18n>Hurtig</option>
-        </select>
-        <div class="ai-modal-help" data-i18n>Hurtig bruker færre søk og kilder og gir kortere svar; kravene til verifiserte kilder gjelder uansett.</div>
       </div>
 
       <div class="ai-modal-actions" style="margin-top:14px;">
@@ -3056,9 +3051,6 @@
       // Refresh the GitHub save indicator: hide the floppy when the bound file's
       // extension no longer matches the active mode (cross-IIFE via window).
       if (window.mdGithubRefreshIndicator) window.mdGithubRefreshIndicator();
-      // Web send button is only shown in python/r/duckdb modes (admin-gated);
-      // re-check eligibility now that the mode changed (cross-IIFE via window).
-      if (window.mdSyncWebBtnVisibility) window.mdSyncWebBtnVisibility();
       // Fase C sweep-fiks (Task 7): motor-notatbøkenes sesjons-liv eies av
       // motorøkta (BrythonEngine/MicroPythonEngine.notebookSession.isLive),
       // IKKE av `nbSessionLive`. nbSetSessionLive(false) øverst er derfor et

@@ -1145,10 +1145,16 @@
     body[data-theme="dark"] .ai-send-fast-btn { color: #1a1b26; }
     .ai-send-fast-btn:disabled { opacity: 0.4; cursor: not-allowed; }
     .ai-send-fast-btn:hover:not(:disabled) { filter: brightness(1.1); }
-    .ai-send-v2-btn { opacity: 0.85; }
-    .ai-send-v2-btn:hover { opacity: 1; }
-    .ai-send-web-btn { border-color: #2b6cb0; background: #2b6cb0; }
-    .ai-send-web-btn:hover:not(:disabled) { filter: brightness(1.1); }
+    /* Split-knappen Send ▾ (gjenbruker .mode-dropdown-menu for menyen) */
+    .ai-send-wrap { position: relative; display: flex; }
+    .ai-send-wrap #aiSendFastBtn { border-top-right-radius: 0; border-bottom-right-radius: 0; white-space: nowrap; }
+    .ai-send-caret-btn { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: 1px; padding: 6px 8px; }
+    .ai-depth-menu { position: absolute; left: auto; right: 0; bottom: 100%; margin-bottom: 6px; min-width: 240px; }
+    /* Basen .mode-dropdown-menu er display:none og vises kun med .open-klassen
+       (over) — depth-menyen styrer med hidden-attributtet, så synlig-regelen må
+       slå basens display:none eksplisitt (samme felle som ask-depth-menu i askstat). */
+    .ai-depth-menu:not([hidden]) { display: block; }
+    .ai-depth-menu[hidden] { display: none; }
     .ai-abort-btn {
       height: 32px; padding: 0 9px; border: 1px solid #c0392b; background: transparent;
       color: #c0392b; border-radius: 8px; cursor: pointer; display: inline-flex;

@@ -24,7 +24,7 @@
       const dom = {};
       function cacheDom() {
         ['aiToggleBtn','aiSidebar','aiCloseBtn','aiSettingsBtn','aiClearBtn',
-         'aiThread','aiInput','aiSendFastBtn','aiSendV2Btn','aiSendWebBtn','aiAbortBtn',
+         'aiThread','aiInput','aiSendFastBtn','aiAbortBtn',
          'aiIncludeScript',
          'aiSettingsBackdrop','aiCfgAnthropicKey','aiCfgSave','aiCfgCancel',
          'aiCfgByokStored','aiCfgByokRemove','aiCfgSourceKeys',
@@ -963,7 +963,6 @@
         }
         state.sending = true;
         if (dom.aiSendFastBtn) dom.aiSendFastBtn.disabled = true;
-        if (dom.aiSendWebBtn) dom.aiSendWebBtn.disabled = true;
         if (state.history.length === 0) dom.aiThread.innerHTML = '';
         appendUserMessage(text);
         state.history.push({ role: 'user', text });
@@ -988,7 +987,6 @@
           if (dom.aiAbortBtn) dom.aiAbortBtn.style.display = 'none';
           state.sending = false;
           if (dom.aiSendFastBtn) dom.aiSendFastBtn.disabled = false;
-          if (dom.aiSendWebBtn) dom.aiSendWebBtn.disabled = false;
           dom.aiInput.focus();
         }
       }
@@ -1008,7 +1006,6 @@
 
       function refreshUserPanel() {
         if (dom.aiCfgByokStored) dom.aiCfgByokStored.style.display = state.anthropicKey ? '' : 'none';
-        if (window.mdSyncWebBtnVisibility) window.mdSyncWebBtnVisibility();
       }
 
       // Datakilde-nøkler (spec 2026-07-23): radene genereres fra registeret —
@@ -1112,7 +1109,6 @@
         const akey = dom.aiCfgAnthropicKey ? dom.aiCfgAnthropicKey.value.trim() : '';
         if (akey) window.Keys.set('anthropic', akey);
         else window.Keys.remove('anthropic');
-        if (window.mdSyncWebBtnVisibility) window.mdSyncWebBtnVisibility();
         if (dom.aiCfgSourceKeys && window.Keys) {
           dom.aiCfgSourceKeys.querySelectorAll('input[data-source-key-id]').forEach(function (inp) {
             var v = inp.value.trim();
@@ -1162,7 +1158,6 @@
             window.Keys.remove('anthropic');
             if (dom.aiCfgAnthropicKey) dom.aiCfgAnthropicKey.value = '';
             if (dom.aiCfgByokStored) dom.aiCfgByokStored.style.display = 'none';
-            if (window.mdSyncWebBtnVisibility) window.mdSyncWebBtnVisibility();
           });
         }
 
@@ -1183,6 +1178,29 @@
             sendCurrent();   // Enter = send (modus fra menyen); Shift+Enter = ny linje
           }
         });
+
+        // Dybdemeny på delt Send-knapp: valget lagres og vises i knappeteksten.
+        const depthBtn = document.getElementById('aiDepthBtn');
+        const depthMenu = document.getElementById('aiDepthMenu');
+        function syncDepthUi() {
+          const d = askDepth();
+          dom.aiSendFastBtn.textContent = d === 'deep' ? T('Send (grundig)') : T('Send');
+        }
+        if (depthBtn && depthMenu) {
+          depthBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            depthMenu.hidden = !depthMenu.hidden;
+          });
+          depthMenu.addEventListener('click', (e) => {
+            const b = e.target.closest('[data-depth]');
+            if (!b) return;
+            try { localStorage.setItem('md_ask_depth', b.getAttribute('data-depth')); } catch (err) {}
+            depthMenu.hidden = true;
+            syncDepthUi();
+          });
+          document.addEventListener('click', () => { depthMenu.hidden = true; });
+          syncDepthUi();
+        }
 
         // Keyboard shortcut Ctrl+I
         document.addEventListener('keydown', (e) => {
@@ -1230,7 +1248,6 @@
           const thinkingNode = appendThinking();
           state.sending = true;
           if (dom.aiSendFastBtn) dom.aiSendFastBtn.disabled = true;
-          if (dom.aiSendWebBtn) dom.aiSendWebBtn.disabled = true;
           const ctrl = new AbortController();
           state.abortCtrl = ctrl;
           if (dom.aiAbortBtn) dom.aiAbortBtn.style.display = '';
@@ -1241,7 +1258,6 @@
               if (dom.aiAbortBtn) dom.aiAbortBtn.style.display = 'none';
               state.sending = false;
               if (dom.aiSendFastBtn) dom.aiSendFastBtn.disabled = false;
-              if (dom.aiSendWebBtn) dom.aiSendWebBtn.disabled = false;
               if (dom.aiInput) dom.aiInput.focus();
             });
         };
