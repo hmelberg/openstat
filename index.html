@@ -4344,11 +4344,30 @@
           }
         } else {
         pyodide.globals.set('_individata_name', datasetName);
+        // Samme trippel-oppslag som use-henteren (_g → datasett-register →
+        // __main__): python-web-kjøringer legger dataframes i _g, ikke i
+        // micro_interpreter.datasets — KeyError 'df' målt i ask 2026-07-29.
         var raw = await pyodide.runPythonAsync(
           'import json, math\n' +
           'import pandas as _pd_id\n' +
           'import __main__ as _m_id\n' +
-          '_df_id = _m_id.micro_interpreter.datasets[_individata_name]\n' +
+          '_df_id = None\n' +
+          '_g_id = getattr(_m_id, "_g", None)\n' +
+          'if isinstance(_g_id, dict) and isinstance(_g_id.get(_individata_name), _pd_id.DataFrame):\n' +
+          '    _df_id = _g_id[_individata_name]\n' +
+          'if _df_id is None:\n' +
+          '    try:\n' +
+          '        _cand_id = _m_id.micro_interpreter.datasets.get(_individata_name)\n' +
+          '        if isinstance(_cand_id, _pd_id.DataFrame):\n' +
+          '            _df_id = _cand_id\n' +
+          '    except Exception:\n' +
+          '        pass\n' +
+          'if _df_id is None:\n' +
+          '    _cand_id = getattr(_m_id, _individata_name, None)\n' +
+          '    if isinstance(_cand_id, _pd_id.DataFrame):\n' +
+          '        _df_id = _cand_id\n' +
+          'if _df_id is None:\n' +
+          '    raise KeyError(f"fant ikke dataframe {_individata_name!r} i økten — kjør scriptet på nytt")\n' +
           '_N_id = 5000\n' +
           '_df_show_id = _df_id.head(_N_id) if len(_df_id) > _N_id else _df_id\n' +
           '_rows_id = _df_show_id.to_json(orient="records", date_format="iso", default_handler=str)\n' +
@@ -7620,6 +7639,32 @@ try:
     _plt_mod.show = _m2py_plt_show
 except Exception:
     pass
+def _m2py_patch_plotly_show():
+    # fig.show()/pio.show() krasjer i pyodide ("ValueError: Mime type
+    # rendering requires ipython but it is not installed") fordi plotly sin
+    # innebygde show-sti prøver en IPython-mime-rendering som ikke finnes
+    # her. _show_one (under) rendrer OBJEKTET fint via pio.to_json — .show()
+    # var det upatchede hullet (plt.show() er patchet over; symmetrien
+    # manglet for plotly). plotly er ofte lat-installert (micropip lenger
+    # nede i index.html, ETTER at denne preamble-koden alt har kjørt), så
+    # denne funksjonen kalles BÅDE her (dekker eager import) OG fra toppen
+    # av _exec_pyodide_block (dekker installasjon midt i en økt) —
+    # markørattributtet _m2py_patched gjør gjentatte kall billige/no-op.
+    try:
+        import plotly.graph_objects as go
+        import plotly.io as pio
+    except Exception:
+        return
+    if getattr(getattr(go.Figure, "show", None), "_m2py_patched", False):
+        return
+    def _m2py_fig_show(self, *args, **kwargs):
+        print(_EMBED_S + "figure__" + chr(10) + pio.to_json(self) + chr(10) + _EMBED_E)
+    _m2py_fig_show._m2py_patched = True
+    go.Figure.show = _m2py_fig_show
+    def _m2py_pio_show(fig_or_data, *args, **kwargs):
+        print(_EMBED_S + "figure__" + chr(10) + pio.to_json(fig_or_data) + chr(10) + _EMBED_E)
+    pio.show = _m2py_pio_show
+_m2py_patch_plotly_show()
 _PRETTY = [True]
 def _emit_df_html(df):
     try:
@@ -7838,6 +7883,11 @@ def _exec_pyodide_block(code, g, show_commands=False, only_last=False):
     som i dag; kun visningen endres. Display policy v2 (spec 2026-07-20):
     _-prefiks-navn, ';'-etterheng og nakne ui.*-kontrollkall dempes i begge
     moduser."""
+    # Billig idempotent guard per blokk-kjøring: plotly kan ha blitt
+    # micropip-installert LAT (etter at preamblets eager-kall lenger oppe
+    # allerede feilet stille via except Exception) — se kommentar ved
+    # _m2py_patch_plotly_show-definisjonen for hvorfor begge kallstedene trengs.
+    _m2py_patch_plotly_show()
     code = (code or "").strip()
     if not code:
         return

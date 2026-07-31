@@ -23,6 +23,14 @@ def make_exec_block(shown):
         "ast": ast,
         "_show_one": shown.append,
         "_m2py_flush_pyplot_figs": lambda: None,
+        # _m2py_patch_plotly_show er (som _m2py_flush_pyplot_figs over)
+        # definert FØR "def _exec_pyodide_block(" i index.html — utenfor
+        # denne extraction-rangen — men kalles fra toppen av
+        # _exec_pyodide_block (lat-last-guard, se index.html-kommentaren
+        # ved kallstedet). Display-policy-testene her bryr seg ikke om
+        # plotly-patchingen i seg selv (den har sin egen test-fil,
+        # test_plotly_show_patch.py) — no-op-stub holder.
+        "_m2py_patch_plotly_show": lambda: None,
     }
     exec(compile(_load_core_src(), "<index.html:_exec_pyodide_block>", "exec"), ns)
     return ns["_exec_pyodide_block"]
