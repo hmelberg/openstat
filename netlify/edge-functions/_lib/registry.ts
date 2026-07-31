@@ -147,7 +147,10 @@ export function isSearchableSource(src: DataSource): boolean {
  *  ider, aldri verdier; styrer om en user-auth-kilde framstår som brukbar. */
 export function renderRegistryBlock(reg: DataSource[], userKeys: string[] = []): string {
   const lines = reg.map((s) => {
-    const bits = [`${s.tilgang}, base ${s.base_url}`];
+    const baseBit = s.kind === "federated"
+      ? `federert (${s.members?.length ?? 0} medlemmer)`
+      : `base ${s.base_url}`;
+    const bits = [`${s.tilgang}, ${baseBit}`];
     if (isSearchableSource(s)) bits.push("søkbar via search_catalog");
     if (s.guide) bits.push("kildeguide følger med første search_catalog/table_metadata-svar");
     if (s.auth?.user && s.auth.valgfri) {

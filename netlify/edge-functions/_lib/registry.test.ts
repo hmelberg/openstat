@@ -180,3 +180,10 @@ Deno.test("parseRegistry: federert kilde uten members avvises", () => {
   assertThrows(() => parseRegistry([{ ...FED_ENTRY, members: [] }]), Error, "members");
   assertThrows(() => parseRegistry([{ ...FED_ENTRY, members: [{ id: "x" }] }]), Error, "id og url");
 });
+
+Deno.test("renderRegistryBlock: federert kilde rendres uten 'base undefined', med medlemsantall", () => {
+  const reg = parseRegistry([FED_ENTRY]);
+  const block = renderRegistryBlock(reg);
+  if (block.includes("undefined")) throw new Error("base undefined lekker inn i prompten:\n" + block);
+  if (!block.includes("federert (3 medlemmer)")) throw new Error("mangler medlemsantall:\n" + block);
+});
