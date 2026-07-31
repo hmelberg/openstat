@@ -146,8 +146,9 @@
   // Kwarg-navn -> internt opts-felt. Hemmeligheten heter secret_key utad,
   // men beholder feltnavnet «key» innvendig, slik at resolve() forblir urørt.
   // `key` som kwarg er BORTE — det ordet betyr nå kun kolonnenavn i ost.create.
-  var PLAIN_KEYS = { secret_key: 'key', exec: 'exec', kind: 'kind', cache: 'cache' };
-  var LOWER_KEYS = { exec: 1, kind: 1, cache: 1 };
+  // format= gjelder KUN federert read — håndheves i parse under.
+  var PLAIN_KEYS = { secret_key: 'key', exec: 'exec', kind: 'kind', cache: 'cache', format: 'format' };
+  var LOWER_KEYS = { exec: 1, kind: 1, cache: 1, format: 1 };
 
   // Ekte Levenshtein: posisjonssammenligning straffer innskudd for hardt og
   // ville foreslått «key» for «yers» (kortere navn vinner på lengdeleddet).
@@ -448,6 +449,7 @@
         if (tooManyArgs()) return;
         if (!it.target) { errors.push('linje ' + it.lineNo + ': ost.connect krever en tilordning — «# <alias> = ost.connect(…)»'); return; }
         if (typeof it.args[0] !== 'string') { errors.push('linje ' + it.lineNo + ': ost.connect krever et mål som streng'); return; }
+        if (opts.format) { errors.push('linje ' + it.lineNo + ': format= støttes bare i federert read — ost.read([<url>, …], format="csv")'); return; }
         connects.push({ target: it.args[0], alias: it.target, options: opts });
         return;
       }
@@ -456,11 +458,20 @@
         if (!it.target) { errors.push('linje ' + it.lineNo + ': read krever en tilordning — «# <navn> = …read(…)»'); return; }
         var tgt;
         if (it.recv === 'ost') {
+          // Federert (spec 2026-07-31-federert-pull §3): liste/dict der én
+          // URL ellers står = union av medlemmene.
+          var fed = fedMembersFrom(it.args[0]);
+          if (fed) {
+            if (fed.error) { errors.push('linje ' + it.lineNo + ': ' + fed.error); return; }
+            loads.push({ verb: 'read', target: null, members: fed.members, alias: it.target, options: opts, line: it.raw });
+            return;
+          }
           if (typeof it.args[0] !== 'string') { errors.push('linje ' + it.lineNo + ': ost.read krever en URL som streng'); return; }
           tgt = it.args[0];
         } else {
           tgt = it.args.length ? (it.recv + '/' + String(it.args[0])) : it.recv;
         }
+        if (opts.format) { errors.push('linje ' + it.lineNo + ': format= støttes bare i federert read (liste/dict av medlemmer)'); return; }
         loads.push({ verb: 'read', target: tgt, alias: it.target, options: opts, line: it.raw });
         return;
       }
@@ -480,6 +491,75 @@
       ? ('# ' + o.alias + ' = ' + o.source + '.read("' + o.table + '")')
       : ('# ' + o.alias + ' = ' + o.source + '.read()');
     return { verb: 'read', target: target, alias: o.alias, options: {}, line: line };
+  }
+
+  // __member-navn for liste-form (spec 2026-07-31-federert-pull §3): filnavn
+  // uten endelse når alle er unike, ellers m1..mN (safestat-default).
+  function memberIdsFor(urls) {
+    var names = urls.map(function (u) {
+      var path = String(u).split(/[?#]/)[0].replace(/\/+$/, '');
+      var last = path.slice(path.lastIndexOf('/') + 1);
+      return last.replace(/\.[A-Za-z0-9]+$/, '');
+    });
+    var seen = {};
+    for (var i = 0; i < names.length; i++) {
+      if (!names[i] || seen[names[i]]) return urls.map(function (_, j) { return 'm' + (j + 1); });
+      seen[names[i]] = 1;
+    }
+    return names;
+  }
+
+  // Liste/dict-argument til ost.read -> {members:[{id,url}]} | {error} | null
+  // (null = ikke federert form). Medlemmer må være URL-strenger — et bart ord
+  // blir {__ref} i parseLiteral og er en skrivefeil, ikke en kilde.
+  function fedMembersFrom(a0) {
+    var isArr = Object.prototype.toString.call(a0) === '[object Array]';
+    var isDict = !!a0 && typeof a0 === 'object' && !isArr && typeof a0.__ref !== 'string';
+    if (!isArr && !isDict) return null;
+    var ids = isArr ? null : Object.keys(a0);
+    var vals = isArr ? a0 : ids.map(function (k) { return a0[k]; });
+    if (!vals.length) return { error: 'federert read krever minst ett medlem i listen' };
+    for (var i = 0; i < vals.length; i++) {
+      if (typeof vals[i] !== 'string' || !vals[i]) {
+        var hva = (vals[i] && typeof vals[i] === 'object' && typeof vals[i].__ref === 'string')
+          ? '«' + vals[i].__ref + '» uten anførselstegn' : typeof vals[i];
+        return { error: 'federert medlem #' + (i + 1) + ' må være en URL-streng (fikk ' + hva + ')' };
+      }
+    }
+    if (isArr) ids = memberIdsFor(vals);
+    return { members: vals.map(function (u, i) { return { id: ids[i], url: u }; }) };
+  }
+
+  // Register-definert federert kilde (spec §3): samme JSON-vokabular som
+  // safestat. Node-/beskyttet-medlemmer hører hjemme i safestat — klar nekt.
+  function federatedFromRegistry(alias, src, rest, opts) {
+    function nekt(msg) { return { alias: alias, url: '', viaProxy: false, error: msg }; }
+    var members = src.members || [];
+    if (!members.length) return nekt('federert kilde «' + src.id + '» har ingen medlemmer');
+    var out = [];
+    for (var i = 0; i < members.length; i++) {
+      var m = members[i];
+      if (m.tier === 'node' || m.api) {
+        return nekt('kilden «' + src.id + '» har node-medlemmer — compute-to-data krever safestat; openstat kjører kun pull+union');
+      }
+      if (m.level && m.level !== 'public') {
+        return nekt('medlem «' + (m.id || 'm' + (i + 1)) + '» i «' + src.id + '» er merket «' + m.level + '» — beskyttede kilder hører hjemme i safestat');
+      }
+      if (m.kind === 'federated' || m.members) {
+        return nekt('federert kilde «' + src.id + '» kan ikke ha federerte medlemmer');
+      }
+      var url = String(m.url || '');
+      if (!url) return nekt('medlem «' + (m.id || 'm' + (i + 1)) + '» i «' + src.id + '» mangler url');
+      // Medlems-url er URL også når den er relativ (safestats explicitUrl-
+      // lærdom) — aldri register-oppslag på den.
+      if (rest) url = url.replace(/\/+$/, '') + '/' + String(rest).replace(/^\/+/, '');
+      out.push({ id: m.id || ('m' + (i + 1)), url: url, key: opts.key, format: opts.format,
+                 viaProxy: !!m.auth || m.cors === false || !!src.auth || src.cors === false });
+    }
+    var item = { alias: alias, federated: out };
+    if (src.overlap) item.overlap = src.overlap;
+    if (src.entity) item.entity = src.entity;
+    return item;
   }
 
   function findRegistrySource(registry, id) {
@@ -516,6 +596,16 @@
     parsed.connects.forEach(function (c) { byAlias[c.alias] = c; });
     return parsed.loads.map(function (l) {
       var lopts = l.options || {};
+      if (l.members) {
+        // Inline federert: medlemmene er eksplisitte URL-er (også relative).
+        if (lopts.format && lopts.format !== 'csv' && lopts.format !== 'parquet') {
+          return { alias: l.alias, url: '', viaProxy: false,
+                   error: '«' + l.alias + '»: format «' + lopts.format + '» støttes ikke for federerte medlemmer (kun csv/parquet)' };
+        }
+        return { alias: l.alias, federated: l.members.map(function (m) {
+          return { id: m.id, url: m.url, key: lopts.key, format: lopts.format };
+        }) };
+      }
       if (isUrlish(l.target)) {
         return { alias: l.alias, url: l.target,
                  viaProxy: l.target.indexOf('/api/hent?') === 0,
@@ -525,7 +615,13 @@
       var head = slash > 0 ? l.target.slice(0, slash) : l.target;
       var rest = slash > 0 ? l.target.slice(slash + 1) : '';
       var conn = byAlias[head];
-      if (!conn) return { alias: l.alias, url: '', viaProxy: false, error: 'ukjent kilde-alias «' + head + '» (mangler connect-linje?)' };
+      if (!conn) {
+        var fsrc = findRegistrySource(registry, head);
+        if (fsrc && (fsrc.kind === 'federated' || fsrc.members)) {
+          return federatedFromRegistry(l.alias, fsrc, rest, { key: lopts.key, format: lopts.format });
+        }
+        return { alias: l.alias, url: '', viaProxy: false, error: 'ukjent kilde-alias «' + head + '» (mangler connect-linje?)' };
+      }
       var copts = conn.options || {};
       var key = lopts.key || copts.key, exec = lopts.exec || copts.exec, kind = lopts.kind || copts.kind;
       var cache = lopts.cache || copts.cache;
@@ -534,6 +630,9 @@
         base = conn.target;
       } else {
         src = findRegistrySource(registry, conn.target);
+        if (src && (src.kind === 'federated' || src.members)) {
+          return federatedFromRegistry(l.alias, src, rest, { key: key, format: lopts.format });
+        }
         if (!src) {
           // Ikke i web-registeret: en registrert Anvil-kilde (spec §1, regel 3).
           return { alias: l.alias, anvil: conn.target, key: key, exec: exec, kind: normalizeKind(kind, null) };

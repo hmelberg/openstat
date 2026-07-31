@@ -205,3 +205,17 @@ Deno.test("meta-direktiv: for dyp sti er feil, // og -- kommentartegn, tom linje
   assertEquals(ok.metas.length, 1);
   assertEquals(ok.metas[0].variable, "a");
 });
+
+Deno.test("federert: liste i ost.read og register-oppslag (spec 2026-07-31)", () => {
+  const fedReg = [{ id: "demo-fed", kind: "federated", overlap: "possible",
+    members: [{ id: "nord", url: "data/f/nord.parquet" }, { id: "vest", url: "data/f/vest.parquet" }] }];
+  const p = DD.parse('# person = ost.read(["data/nord.parquet", "data/vest.parquet"])');
+  assertEquals(p.errors, []);
+  assertEquals(p.loads[0].members, [
+    { id: "nord", url: "data/nord.parquet" },
+    { id: "vest", url: "data/vest.parquet" },
+  ]);
+  const r = DD.resolve(DD.parse('# person = ost.read("demo-fed")'), fedReg);
+  assertEquals(r[0].federated.length, 2);
+  assertEquals(r[0].overlap, "possible");
+});
