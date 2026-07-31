@@ -80,6 +80,40 @@ test('federert: mangler unionExec gir norsk feil', async () => {
   );
 });
 
+function fakeFetchWithFailure(urls, failUrl, status) {
+  return async (url) => {
+    urls.push(url);
+    if (url === failUrl) {
+      return {
+        ok: false, status: status || 404,
+        headers: { get: () => 'text/csv' },
+        arrayBuffer: async () => new TextEncoder().encode('').buffer,
+      };
+    }
+    return {
+      ok: true,
+      headers: { get: () => 'text/csv' },
+      arrayBuffer: async () => new TextEncoder().encode('x,y\n1,2\n').buffer,
+    };
+  };
+}
+
+test('federert: ett medlem feiler -> hele lesingen feiler, feilmeldingen navngir medlemmet (ikke "undefined")', async () => {
+  DL._resetCacheForTests();
+  const urls = [];
+  let threw = null;
+  try {
+    await DL.resolveAndFetchLoads(SCRIPT, {
+      fetchImpl: fakeFetchWithFailure(urls, 'https://vest.no/person.csv', 404),
+      registry: REG,
+      unionExec: async () => ({ bytes: new Uint8Array([1]), format: 'parquet' }),
+    });
+  } catch (e) { threw = e; }
+  assert.ok(threw, 'forventet at hele lesingen feiler når ett medlem feiler (fail-fast)');
+  assert.match(threw.message, /vest/);          // navngir medlemmet, ikke bare kilden
+  assert.ok(!/undefined/.test(threw.message), 'feilmeldingen skal ikke inneholde "undefined": ' + threw.message);
+});
+
 test('federert: node-medlem stoppes allerede i resolve-laget', async () => {
   DL._resetCacheForTests();
   const reg = [{ id: 'f', navn: 'F', kind: 'federated',

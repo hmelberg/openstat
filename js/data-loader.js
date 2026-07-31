@@ -313,9 +313,13 @@
         // presentert som helheten er en korrekthetsfelle.
         if (!deps.unionExec) throw new Error('federert kilde «' + item.alias + '» krever union-motoren (unionExec mangler)');
         var memberLoads = await Promise.all(item.federated.map(async function (mem) {
-          var mf = await fetchBytes(mem);
+          // alias for feilmeldinger: fetchLoadTarget/maybeDecrypt bygger
+          // brukervendt tekst av item.alias — uten dette blir en HTTP-/
+          // dekrypteringsfeil på et medlem «for undefined» (fix round 1).
+          var memItem = Object.assign({}, mem, { alias: item.alias + '/' + mem.id });
+          var mf = await fetchBytes(memItem);
           var mfmt = mem.format || sniffFormat(mf.resp, mem.url, mem.kind);
-          var mdec = await maybeDecrypt(mem, mf.buf, mfmt, deps);
+          var mdec = await maybeDecrypt(memItem, mf.buf, mfmt, deps);
           return { id: mem.id, bytes: mdec.bytes, format: mdec.format };
         }));
         var fedMeta = {};
