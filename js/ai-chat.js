@@ -18,17 +18,6 @@
         get anthropicKey() { return (window.Keys && window.Keys.get('anthropic')) || ''; },
       };
 
-      // Web mode requires a user-supplied Anthropic key (BYOK — the agentic
-      // search then runs on the user's own account), and only makes sense in
-      // python/r/duckdb editor modes (no `# connect`/`# load` story for
-      // microdata). Surfaced only via its own send button
-      // (syncWebBtnVisibility() shows/hides #aiSendWebBtn).
-      function webModeEligible() {
-        const hasByok = !!state.anthropicKey || customProviderReady();
-        const mode = (typeof activeEditorMode !== 'undefined' && activeEditorMode) ? activeEditorMode : 'python';
-        return hasByok && (mode === 'python' || mode === 'r' || mode === 'duckdb');
-      }
-
       const md = (window.markdownit ? window.markdownit({ breaks: true, linkify: true }) : null);
 
       const $ = (id) => document.getElementById(id);
@@ -40,7 +29,6 @@
          'aiSettingsBackdrop','aiCfgAnthropicKey','aiCfgSave','aiCfgCancel',
          'aiCfgByokStored','aiCfgByokRemove','aiCfgSourceKeys',
          'aiCfgProviderType','aiCfgProviderFields','aiCfgProviderUrl','aiCfgProviderModel','aiCfgLlmKey',
-         'aiCfgDepth',
          'sidebarRight','sidebarOpenTab','scriptInput'
         ].forEach(id => { dom[id] = $(id); });
         dom.containers = document.querySelectorAll('.container');
@@ -473,74 +461,6 @@
         return '';
       }
 
-      // Collect db/NAME (or alias/NAME) tokens whose NAME is not in the loaded
-      // catalog — the cheapest, most damaging failure (invented variable names).
-      function findUnknownVarNames(script) {
-        if (!script || typeof microdataVariableNames === 'undefined' || !microdataVariableNames.length) return [];
-        const known = new Set(microdataVariableNames);
-        const re = /\b[a-zA-Z_]\w*\/([A-Z][A-Z0-9_]+)\b/g;
-        const bad = new Set();
-        let m;
-        while ((m = re.exec(script)) !== null) {
-          if (!known.has(m[1])) bad.add(m[1]);
-        }
-        return Array.from(bad);
-      }
-
-      // Turn a validation result + unknown-name list into a compact error string
-      // for the repair prompt. Returns '' when there is nothing to fix.
-      function buildRepairErrors(vr, unknownNames) {
-        const parts = [];
-        if (unknownNames && unknownNames.length) {
-          parts.push('Ukjente variabelnavn (finnes ikke i katalogen): ' + unknownNames.join(', '));
-        }
-        if (vr && !vr.skipped && !vr.passed && Array.isArray(vr.errors)) {
-          for (const e of vr.errors) {
-            const tok = e.token ? (e.token + ': ') : '';
-            parts.push('- ' + tok + (e.message || e.kind || 'feil'));
-          }
-        }
-        return parts.join('\n');
-      }
-
-      // Nivå 1 auto-retting (docs/ROADMAP.md §AI-assistenten): modus-dispatch
-      // for kode-svar-v2-reparasjonssløyfen i runFastQueryV2. Hver oppføring
-      // gir (a) extract(mdText) → kandidatscript eller '' (ingen kodeblokk
-      // funnet — sløyfen kjører da ikke), (b) validate(script) → Promise som
-      // løser til {passed,errors[]} eller {skipped:true}, (c)
-      // unknownNames(mdText, script) → liste over ukjente katalog-variabelnavn.
-      // (microdata-oppføringen er fjernet med kode-svar-flyten 2026-07-24;
-      // python/r-oppføringene står klare til den planlagte klientvalidatoren,
-      // se docs/ROADMAP.md §AI-assistenten.)
-      const _v2Validators = {
-        // Syntaks-sjekk kjører KUN mot en allerede lastet/lastende Pyodide-økt
-        // (validatePythonSyntax under) — den booter aldri en ny 30s-runtime
-        // bare for å validere ett AI-svar. Kolonnenavn-sjekk (df["kol"]) er
-        // BEVISST utelatt her — se rapporten for begrunnelsen (lastDatasetInfo
-        // reflekterer forrige kjørings tilstand, ikke aliasene DENNE
-        // kandidatscripten selv definerer i sin egen #micro-blokk, så en sjekk
-        // mot den ville gitt falske "ukjent kolonne"-feil på gyldige script).
-        // unknownNames scans ONLY the #micro header segment of the candidate
-        // script (via extractLangSegment(script, 'microdata') — a plain reuse
-        // of the same parseHybridScript segmenter the syntax-checks below use,
-        // just asking for the 'microdata' kind instead of 'pyodide'/'r').
-        // import/require statements only legally occur there; scanning the
-        // whole markdown answer (as extractAllCode(mdText) did before) let
-        // ordinary analysis-code tokens like `total/N_OBS` divisions or
-        // `"data/GDP.csv"` path strings false-positive as "unknown variables".
-        python: {
-          extract: function (mdText) { return extractFirstCodeBlock(mdText, 'python'); },
-          validate: validatePythonSyntax,
-          unknownNames: function (_mdText, script) { return findUnknownVarNames(extractLangSegment(script, 'microdata')); },
-        },
-        r: {
-          extract: function (mdText) { return extractFirstCodeBlock(mdText, 'r'); },
-          validate: validateRSyntax,
-          unknownNames: function (_mdText, script) { return findUnknownVarNames(extractLangSegment(script, 'microdata')); },
-        },
-      };
-
-
       // Tolk resultater: strøm en tolkning av output (kommandoer + resultater)
       // inn i en assistent-boble. Speiler runFastQuery, men mot /api/tolk-resultat.
       async function runInterpretQuery(payload, thinkingNode, signal) {
@@ -619,20 +539,12 @@
         state.history.push({ role: 'assistant', meta: { intent: 'tolkning' } });
       }
 
-      // ── Web mode: /api/data-svar (agentic web search + generation, admin-only) ──
-      // SSE contract (netlify/edge-functions/data-svar.ts):
-      //   {type:'progress', text, replace?}  — live tool-call/phase labels; replace:true
-      //     means "update the previous replaceable line in place" (heartbeat ticks
-      //     with a seconds counter while a long API turn is in flight)
-      //   {type:'text', text}      — markdown chunks (explanation + one fenced script)
-      //   {type:'sources', sources:[{url, ok, cors, viaProxy}]} — deterministic probe manifest
-      //   {type:'continue', state, probed} — invocation's turn budget spent; re-POST
-      //     with resume:{state, probed} to keep going (Netlify CPU cap per request)
-      //   {type:'error', message}
+      // ── Ask mode: /api/svar (agentic pipeline — see runSvarLoop below for the
+      // full SSE contract) ──
       // Consume one SSE response, dispatching parsed events to onEvent. Mirrors the
       // inline reader loops in runFastQuery/streamKodeSvarV2/runInterpretQuery above
       // (not factored out into a shared helper there, to avoid touching working code);
-      // this is the equivalent for the new Web-mode path.
+      // this is the equivalent for the /api/svar path.
       async function consumeSse(resp, onEvent) {
         const reader = resp.body.getReader();
         const decoder = new TextDecoder();
@@ -660,154 +572,173 @@
         }
       }
 
-      // One question/repair round-trip to /api/data-svar. Renders progress lines
-      // live, streams markdown into a bubble (reusing streamRenderMd — the same
-      // throttled live-markdown renderer runFastQuery/runFastQueryV2 use), and
-      // appends a ✅/⚠️ source list once the `sources` event arrives. thinkingNode
-      // is the wrap created by appendThinking() — the "assistant bubble" container
-      // pattern already used everywhere else in this file (see runFastQuery et al.).
-      async function runWebAnswer(question, thinkingNode, repair, round, signal) {
-        const t0 = Date.now();
-        thinkingNode.innerHTML = '';
-        const progressBox = document.createElement('div');
-        progressBox.className = 'ai-progress';
-        thinkingNode.appendChild(progressBox);
-        const bubble = document.createElement('div');
-        bubble.className = 'ai-bubble';
-        thinkingNode.appendChild(bubble);
-
-        if (!state.anthropicKey && !customProviderReady()) {
-          throw new Error(T('Web-modus krever egen Anthropic-nøkkel eller en konfigurert AI-leverandør.'));
-        }
-        const mode = (typeof activeEditorMode !== 'undefined' && activeEditorMode) ? activeEditorMode : 'python';
-
-        // Continuation protocol: Netlify caps CPU per edge invocation, so the
-        // server runs ONE API turn per POST and hands back
-        // {type:'continue', state, probed} when it isn't finished; we
-        // immediately re-POST with `resume` until the final answer arrives.
-        // The progress box lives across hops, so the user sees one seamless run.
-        let markdown = '';
-        let sources = null;
-        let _lastRender = 0;
-        let resume = null;
-        // Editor context only rides along when the user ticked "Inkluder
-        // skript fra editor" — matches safestat's sendMessage() (ai-chat.js
-        // ~535). data-svar.ts's questionTurn() only reads this top-level
-        // `script` on round 0 anyway (repair rounds use repair.script
-        // instead), so gating it here can't break the repair loop.
-        const includeScript = dom.aiIncludeScript.checked && dom.scriptInput && dom.scriptInput.value.trim();
-        for (let hop = 0; ; hop++) {
-          if (hop > 40) throw new Error(T('Avbrutt: svaret ble ikke ferdig etter 40 fortsettelses-runder.'));
-          const resp = await fetch('/api/data-svar', {
+      // One full /api/svar run (samlet ask-pipeline). SSE contract
+      // (netlify/edge-functions/svar.ts):
+      //   progress {text, replace?} — process lines (heartbeats replace in place)
+      //   delta {text}              — token delta of the CURRENT assistant turn
+      //   turn_discard {}           — deltas so far were an intermediate
+      //                               (tool-calling) turn; archive them
+      //   run_code {script}         — run client-side, re-POST resume + run_result
+      //   continue {state, probed}  — server turn budget spent; re-POST resume
+      //   sources {sources: [...]}  — deterministic probe manifest
+      //   text {text}               — whole-answer chunk (custom-provider path)
+      //   done {usage} / error {message}
+      // handlers: onRunCode(script)->Promise<string> is required; onDelta(full),
+      // onTurnDiscard(full), onProgress(ev) are optional.
+      async function runSvarLoop(params) {
+        var handlers = params.handlers || {};
+        var mode = params.mode ||
+          ((typeof activeEditorMode !== 'undefined' && activeEditorMode) ? activeEditorMode : 'python');
+        var buffer = '', sources = null, resume = null, runResult = null;
+        for (var hop = 0; ; hop++) {
+          if (hop > 60) throw new Error('Aborted: the answer was not finished after 60 continuation rounds.');
+          var headers = providerAuthHeaders();
+          if (resume) headers['X-Svar-Resume'] = '1';
+          var resp = await fetch('/api/svar', {
             method: 'POST',
-            headers: providerAuthHeaders(),
-            signal: signal,
+            headers: headers,
+            signal: params.signal,
             body: JSON.stringify({
-              question,
-              mode,
-              depth: aiDepth(),
+              question: params.question,
+              route: params.route,
+              mode: mode,
+              depth: params.depth || 'standard',
               available_keys: (window.Keys ? window.Keys.registered() : []),
-              script: includeScript ? scrubScript(dom.scriptInput.value) : undefined,
-              repair: repair ? { script: repair.script, error: repair.error, round } : undefined,
+              script: params.scriptContext || undefined,
               resume: resume || undefined,
+              run_result: runResult == null ? undefined : runResult,
               provider: providerConfig() || undefined,
             }),
           });
+          runResult = null;
           if (resp.status === 401) {
             throw new Error(customProviderReady()
               ? T('AI-leverandøren avviste nøkkelen (401) — sjekk i AI-innstillingene.')
               : T('Ugyldig Anthropic-nøkkel. Sjekk nøkkelen i AI-innstillingene.'));
           }
-          if (resp.status === 403) throw new Error(T('Web-modus krever egen Anthropic-nøkkel.'));
+          if (resp.status === 429) throw new Error('Rate limited — wait a bit and ask again.');
           if (!resp.ok || !resp.body) throw new Error('HTTP ' + resp.status + ' ' + (await resp.text()));
 
-          let cont = null;
-          await consumeSse(resp, (ev) => {
+          var cont = null, pendingRun = null;
+          await consumeSse(resp, function (ev) {
             if (ev.type === 'continue') { cont = { state: ev.state, probed: ev.probed }; return; }
-            handleWebEvent(ev);
+            if (ev.type === 'run_code') { pendingRun = ev.script || ''; return; }
+            if (ev.type === 'delta' || ev.type === 'text') {
+              buffer += ev.text;
+              if (handlers.onDelta) handlers.onDelta(buffer);
+              return;
+            }
+            if (ev.type === 'turn_discard') {
+              if (handlers.onTurnDiscard) handlers.onTurnDiscard(buffer);
+              buffer = '';
+              if (handlers.onDelta) handlers.onDelta('');
+              return;
+            }
+            if (ev.type === 'sources') { sources = ev.sources; return; }
+            if (ev.type === 'progress') { if (handlers.onProgress) handlers.onProgress(ev); return; }
+            if (ev.type === 'error') {
+              var msg = ev.message || 'unknown server error';
+              if (state.anthropicKey && msg.indexOf('Anthropic API error 401') !== -1) {
+                msg = T('Ugyldig Anthropic-nøkkel. Sjekk nøkkelen i AI-innstillingene.');
+              }
+              throw new Error(msg);
+            }
           });
+          if (pendingRun != null) {
+            if (params.signal && params.signal.aborted) {
+              throw Object.assign(new Error('Stopped'), { name: 'AbortError' });
+            }
+            runResult = await handlers.onRunCode(pendingRun);
+            resume = cont;   // run_code ender alltid invokasjonen med en continue
+            continue;
+          }
           if (!cont) break;
           resume = cont;
         }
-
-        function handleWebEvent(ev) {
-          if (ev.type === 'progress') {
-            const last = progressBox.lastElementChild;
-            if (ev.replace && last && last.dataset.replace === '1') {
-              last.textContent = '⏳ ' + ev.text;
-            } else {
-              const line = document.createElement('div');
-              line.className = 'ai-progress-line';
-              if (ev.replace) line.dataset.replace = '1';
-              line.textContent = '⏳ ' + ev.text;
-              progressBox.appendChild(line);
-            }
-            scrollToBottom();
-          } else if (ev.type === 'text') {
-            markdown += ev.text;
-            const _now = Date.now();
-            if (_now - _lastRender > 70) {
-              _lastRender = _now;
-              streamRenderMd(bubble, markdown);   // existing live markdown renderer
-              scrollToBottom();
-            }
-          } else if (ev.type === 'sources') {
-            sources = ev.sources;
-          } else if (ev.type === 'error') {
-            let msg = ev.message || 'ukjent feil';
-            if (state.anthropicKey && msg.indexOf('Anthropic API error 401') !== -1) {
-              msg = T('Ugyldig Anthropic-nøkkel. Sjekk nøkkelen i AI-innstillingene.');
-            }
-            throw new Error(msg);
-          }
-        }
-
-        streamRenderMd(bubble, markdown);
-        attachCodeBlockActions(bubble);
-        bubble._rawMd = markdown;
-        attachResponseInsertBar(thinkingNode, markdown);
-
-        if (sources && sources.length) {
-          const list = document.createElement('div');
-          list.className = 'ai-sources';
-          list.innerHTML = '<b>' + T('Kilder:') + '</b> ' + sources.map(s =>
-            (s.ok ? '✅ ' : '⚠️ ') +
-            '<a href="' + escapeHtml(s.url) + '" target="_blank" rel="noopener">' +
-            escapeHtml(s.url.replace(/^https?:\/\//, '').slice(0, 60)) + '</a>' +
-            (s.viaProxy ? ' (via proxy)' : '')
-          ).join(' · ');
-          thinkingNode.appendChild(list);
-        }
-        return { markdown, latency: Date.now() - t0 };
+        return { markdown: buffer, sources: sources };
       }
 
-      // Pull the first fenced code block matching the current editor mode's
-      // language out of a Web-mode answer (```python / ```r / ```sql — see
-      // MODE_PY/MODE_R/MODE_DUCK svarformat in data-svar-prompt.ts). Falls back
-      // to the first fenced block of any language so an odd/missing tag doesn't
-      // silently drop a real script.
-      const WEB_FENCE_LANGS = { python: ['python', 'py'], r: ['r'], duckdb: ['sql', 'duckdb'] };
-      function extractWebScriptBlock(textMd, mode) {
-        if (!textMd) return '';
-        const wanted = WEB_FENCE_LANGS[mode] || WEB_FENCE_LANGS.python;
-        const re = /```(\w*)\s*\n([\s\S]*?)```/g;
-        let m, fallback = '';
-        while ((m = re.exec(textMd)) !== null) {
-          const lang = (m[1] || '').toLowerCase();
-          const body = (m[2] || '').trim();
-          if (!body) continue;
-          if (wanted.indexOf(lang) >= 0) return body;
-          if (!fallback) fallback = body;
-        }
-        return fallback;
+      // Root cause (E2E gap, task-9-report.md): ParamForms.decorate — the
+      // #@param/#@title/#@markdown DOM renderer — is wired ONLY into the
+      // notebook per-cell render path (js/cells.js docCellNode), which only
+      // runs once window.Cells.active() is true (i.e. #scriptInput has a
+      // '#%%' cell marker AND notebook mode has been entered). An
+      // ask/AI-panel-generated script is inserted as PLAIN code — no
+      // marker — so a live #@param slider in its source was NEVER rendered
+      // in ANY view (browser-verified in ?view=editor too, not an
+      // ask-view-only CSS/mounting bug: #modeGuiBar is an unrelated mode
+      // toolbar, not a ParamForms host).
+      //
+      // A second, independent gap compounds this: insertScriptIntoEditor
+      // sets #scriptInput.value and dispatches a genuine 'input' event (to
+      // drive the existing autosave/highlight listeners) — js/cells.js's
+      // tick() treats any value change accompanied by a same-window 'input'
+      // event as "the user is actively typing" and deliberately refuses to
+      // auto-enter notebook mode for it (only a dormant hint chip appears,
+      // see tick()'s "Per-tikk-attribusjon" comment). So even a
+      // marker-bearing ask script would sit inert until a human clicked
+      // that chip. window.Cells.enter(...) must be called explicitly to
+      // bypass that heuristic for a programmatic run.
+      //
+      // Fix (general — not ask-view-specific, shared by both callers of
+      // this function): when the script about to be inserted actually
+      // contains a #@param/#@title/#@markdown line, prefix it with a
+      // '#%% <mode>' marker and force notebook entry. Scripts without any
+      // such line (the common case) are left byte-for-byte unwrapped and
+      // window.Cells is left/kept inactive — editor-view's plain-script
+      // path is therefore untouched for everything except the exact gap
+      // this closes. Once active, docCellNode/ParamForms build the
+      // '.param-form' strip INSIDE '.nb-output', itself inside
+      // #outputArea — so ask-view.js's mountLiveOutput() (which moves
+      // #outputArea as one unit into the answer card) carries the live
+      // slider along for free, and a slider drag's run:auto re-run
+      // (ParamForms -> Cells.runCell -> window.mdRunNotebookCell) is a
+      // purely local Pyodide re-execution — no network/LLM call, no
+      // billing.
+      //
+      // Pure core (exported below for node tests): takes Cells/ParamForms
+      // as explicit arguments rather than reading window.* itself, so it
+      // is testable without a DOM stub.
+      function computeParamFormsWrap(script, mode, Cells, ParamForms) {
+        if (!Cells || !ParamForms) return null;
+        if (typeof Cells.hasMarkers === 'function' && Cells.hasMarkers(script)) return null; // already a notebook doc
+        if (typeof Cells.supportedMode === 'function' && !Cells.supportedMode(mode)) return null;
+        var lang = typeof Cells.paramLangForType === 'function' ? Cells.paramLangForType(mode) : null;
+        if (!lang) return null; // e.g. duckdb — #@param is out of scope by design (js/cells.js PARAM_LANG_FOR_TYPE)
+        var entries = typeof ParamForms.parse === 'function' ? ParamForms.parse(script, lang) : [];
+        if (!entries || !entries.length) return null; // no #@param/#@title/#@markdown — nothing to render
+        return '#%% ' + mode + '\n' + script;
+      }
+
+      // Mirrors js/cells.js's internal appLayout() (not itself exported) so
+      // a forced Cells.enter() picks the SAME layout the tick()/chip-click
+      // auto-entry path would have chosen.
+      function askNotebookLayout() {
+        if (window.mdIsInputHidden && window.mdIsInputHidden()) return 'output';
+        if (window.mdIsStackedLayout && window.mdIsStackedLayout()) return 'stacked';
+        return 'columns';
       }
 
       // Replace the editor content with the generated script (mirrors the
       // existing "Sett inn" response-action button in attachResponseInsertBar).
       function insertScriptIntoEditor(script) {
         if (!dom.scriptInput) return;
-        dom.scriptInput.value = script;
+        var mode = (typeof activeEditorMode !== 'undefined' && activeEditorMode) ? activeEditorMode : 'python';
+        var wrapped = computeParamFormsWrap(script, mode, window.Cells, window.ParamForms);
+        // Always leave notebook mode before inserting: a PRIOR ask/panel run
+        // may have entered it (this run's script had #@param), and this
+        // run's script may not need it — without this, a plain follow-up
+        // question would inherit stale notebook state (spec requirement:
+        // new-question/unmount must clean up). window.Cells.enter() below
+        // re-enters fresh when this run needs it.
+        if (window.Cells && typeof window.Cells.active === 'function' && window.Cells.active()) {
+          window.Cells.exit();
+        }
+        dom.scriptInput.value = wrapped || script;
         dom.scriptInput.dispatchEvent(new Event('input', { bubbles: true }));
+        if (wrapped && window.Cells && typeof window.Cells.enter === 'function') {
+          window.Cells.enter(askNotebookLayout());
+        }
       }
 
       // Run the script currently in the editor via the SAME path the Kjør
@@ -866,7 +797,7 @@
         const start = Date.now();
         while (window.mdIsScriptRunning() && Date.now() - start < 180000) {
           // Abort avslutter bare OVERVÅKINGEN (selve kjøringen stoppes med
-          // Kjør-knappens egen Avbryt); webAnswerWithRepair sjekker signalet
+          // Kjør-knappens egen Avbryt); panelSvarAnswer sjekker signalet
           // rett etterpå og stopper reparasjonsløkka uten å bruke returverdien.
           if (signal && signal.aborted) return T('Avbrutt.');
           await sleep(150);
@@ -879,7 +810,7 @@
       }
 
       // S2 (docs/REVIEW_2026-07-07.md §3): Web-mode answers can contain a
-      // prompt-injected script (the /api/data-svar backend does agentic web
+      // prompt-injected script (the /api/svar backend does agentic web
       // search — a poisoned page can inject arbitrary instructions), and the
       // app runs it in main-thread Pyodide alongside localStorage secrets
       // (GitHub PAT, API keys). The script is still auto-inserted into the
@@ -941,70 +872,109 @@
         });
       }
 
-      // Auto-run + repair loop (max 3 rounds): extract → insert → confirm →
-      // run → on failure, POST the script+error back as `repair` and try
-      // again. Only the FIRST run of an answer waits on user confirmation
-      // (S2 above) — once the user has opted in for this answer, repair-round
-      // re-runs proceed automatically, since the user already agreed to run
-      // scripts for this question.
-      async function webAnswerWithRepair(question, thinkingNode, signal) {
-        const mode = (typeof activeEditorMode !== 'undefined' && activeEditorMode) ? activeEditorMode : 'python';
-        const aborted = () => signal && signal.aborted;
-        let round = 0, lastError = null, script = null, confirmed = false;
-        let result = await runWebAnswer(question, thinkingNode, null, 0, signal);
-        while (true) {
-          script = extractWebScriptBlock(result.markdown, mode);
-          if (!script) return;   // prose-only answer (e.g. honest "fant ikke data") — already rendered, nothing to run
-          insertScriptIntoEditor(script);
-          if (!confirmed) {
-            const ok = await confirmAutoRun(signal);
-            if (!ok) return;   // user declined (or aborted) — script stays in the editor, nothing runs
-            confirmed = true;
-          }
-          try {
-            lastError = await runScriptAndCaptureError(signal);
-            if (aborted()) return;   // avbrutt under lokal kjøring — ikke start reparasjonsrunde
-            if (!lastError) return;   // success
-          } catch (e) { lastError = (e && e.message) ? e.message : String(e); }
-          if (aborted()) return;
-          round++;
-          if (round > 3) {
-            const giveUp = document.createElement('div');
-            giveUp.className = 'ai-msg ai-msg-assistant';
-            giveUp.innerHTML = '<div class="ai-bubble ai-error"></div>';
-            giveUp.querySelector('.ai-bubble').textContent =
-              T('Kunne ikke få scriptet til å kjøre etter 3 reparasjonsrunder. Siste feil:\n\n{err}\n\nScriptet står i editoren — juster gjerne manuelt.', { err: lastError });
-            dom.aiThread.appendChild(giveUp);
-            scrollToBottom();
-            return;
-          }
-          const roundNote = document.createElement('div');
-          roundNote.className = 'ai-msg ai-msg-assistant';
-          roundNote.innerHTML = '<div class="ai-bubble ai-repair-note"></div>';
-          roundNote.querySelector('.ai-bubble').textContent =
-            T('⚙️ Reparasjonsrunde {round} — retter: {err}', { round: round, err: String(lastError).slice(0, 120) });
-          dom.aiThread.appendChild(roundNote);
-          scrollToBottom();
-          const repairNode = appendThinking();
-          try {
-            result = await runWebAnswer(question, repairNode, { script, error: lastError }, round, signal);
-          } catch (e) {
-            // A thrown error here (401, SSE `error` event, network drop) must land
-            // in THIS round's own bubble (repairNode) — not bubble up to
-            // sendWebMessage's outer catch, which would target thinkingNode
-            // (round 0) and wipe out the already-rendered first answer. Stop the
-            // loop on failure; the previous answer(s) stay intact.
-            if (e && e.name === 'AbortError') appendCancelNote(repairNode);
-            else appendError(repairNode, '✗ ' + ((e && e.message) ? e.message : String(e)));
-            return;
-          }
+      // Dybde for panelets svar-flyt: styres av split-knappens lagrede valg
+      // (md_ask_depth i localStorage — samme nøkkel som ask-visningen bruker),
+      // ikke lenger hardkodet til 'deep'. mdCoerceAskDepth (js/svar-refs.js)
+      // normaliserer til 'deep'/'standard'; en enkel fallback dekker
+      // testmiljøer/tidlige lastesekvenser der den ikke er lastet ennå.
+      function askDepth() {
+        var coerce = window.mdCoerceAskDepth || function (v) { return v === 'deep' ? 'deep' : 'standard'; };
+        try { return coerce(localStorage.getItem('md_ask_depth')); } catch (e) { return 'standard'; }
+      }
+
+      // AI-sidepanelets svar-flyt: samme /api/svar-løp som ask-visningen, men
+      // rendret i chat-bobler. Panelet har ingen ruter — full verktøykasse
+      // (route 'data'); dybden kommer fra askDepth() (split-knappens valg).
+      async function panelSvarAnswer(question, thinkingNode, signal) {
+        thinkingNode.innerHTML = '';
+        const progressBox = document.createElement('div');
+        progressBox.className = 'ai-progress';
+        thinkingNode.appendChild(progressBox);
+        const bubble = document.createElement('div');
+        bubble.className = 'ai-bubble';
+        thinkingNode.appendChild(bubble);
+        if (!state.anthropicKey && !customProviderReady()) {
+          throw new Error(T('Web-modus krever egen Anthropic-nøkkel eller en konfigurert AI-leverandør.'));
+        }
+        let confirmed = false;
+        let _lastRender = 0;
+        // Editor context only rides along when the user ticked "Inkluder
+        // skript fra editor" — matches safestat's sendMessage() (ai-chat.js
+        // ~535). svar.ts's questionTurn() only reads this on round 0 anyway,
+        // so gating it here can't break the run_code/repair loop.
+        const includeScript = dom.aiIncludeScript.checked && dom.scriptInput && dom.scriptInput.value.trim();
+        const res = await runSvarLoop({
+          question: question,
+          route: 'data',
+          depth: askDepth(),
+          scriptContext: includeScript ? scrubScript(dom.scriptInput.value) : undefined,
+          signal: signal,
+          handlers: {
+            onProgress: function (ev) {
+              const last = progressBox.lastElementChild;
+              if (ev.replace && last && last.dataset.replace === '1') {
+                last.textContent = '⏳ ' + ev.text;
+              } else {
+                const line = document.createElement('div');
+                line.className = 'ai-progress-line';
+                if (ev.replace) line.dataset.replace = '1';
+                line.textContent = '⏳ ' + ev.text;
+                progressBox.appendChild(line);
+              }
+              scrollToBottom();
+            },
+            onDelta: function (full) {
+              const now = Date.now();
+              if (now - _lastRender > 70) {
+                _lastRender = now;
+                streamRenderMd(bubble, full);
+                scrollToBottom();
+              }
+            },
+            onTurnDiscard: function (full) {
+              if (full && full.trim()) {
+                const line = document.createElement('div');
+                line.className = 'ai-progress-line';
+                line.textContent = '📝 ' + full.trim().slice(0, 160);
+                progressBox.appendChild(line);
+              }
+              streamRenderMd(bubble, '');
+            },
+            onRunCode: async function (script) {
+              insertScriptIntoEditor(script);
+              if (!confirmed) {
+                const ok = await confirmAutoRun(signal);
+                if (!ok) return 'Brukeren avbrøt kjøringen — skriv sluttsvaret uten kjøring, og si at koden ikke er kjørt.';
+                confirmed = true;
+              }
+              const r = await window.mdAskExecuteScript(script, signal);
+              return r.result;
+            },
+          },
+        });
+        // Panelet har ingen ref-resolver (ask-visningens #askAnswer-slots
+        // finnes ikke her) — strip {{fig:1}}-plassholdere til klammetekst
+        // før visning, samme fallback som ask-visningens feilede kjøringer.
+        const finalMd = window.mdAskStripRefs ? window.mdAskStripRefs(res.markdown) : res.markdown;
+        streamRenderMd(bubble, finalMd);
+        attachCodeBlockActions(bubble);
+        bubble._rawMd = finalMd;
+        if (res.sources && res.sources.length) {
+          const list = document.createElement('div');
+          list.className = 'ai-sources';
+          list.innerHTML = '<b>' + T('Kilder:') + '</b> ' + res.sources.map(s =>
+            (s.ok ? '✅ ' : '⚠️ ') +
+            '<a href="' + escapeHtml(s.url) + '" target="_blank" rel="noopener">' +
+            escapeHtml(s.url.replace(/^https?:\/\//, '').slice(0, 60)) + '</a>' +
+            (s.viaProxy ? ' (via proxy)' : '')
+          ).join(' · ');
+          thinkingNode.appendChild(list);
         }
       }
 
       // Full send flow for Web mode: auth gate, user bubble, thinking node,
-      // then the answer+auto-run+repair loop. Mirrors sendMessage()'s
-      // boilerplate (see above) but dispatches to runWebAnswer/webAnswerWithRepair
-      // instead of the fast API path.
+      // then the answer flow. Mirrors sendMessage()'s boilerplate (see above)
+      // but dispatches to panelSvarAnswer instead of the fast API path.
       async function sendWebMessage() {
         if (state.sending) return;
         const text = dom.aiInput.value.trim();
@@ -1025,12 +995,12 @@
         // Samme avbrytbarhets-mønster som sendMessage()/mdInterpretResults:
         // én controller per sending; Avbryt-knappen (init, aiAbortBtn) kaller
         // state.abortCtrl.abort(). Signalet følger hele web-løpet: fetch/SSE i
-        // runWebAnswer, bekreftelses-boblen og overvåkingen av lokal kjøring.
+        // runSvarLoop, bekreftelses-boblen og overvåkingen av lokal kjøring.
         const ctrl = new AbortController();
         state.abortCtrl = ctrl;
         if (dom.aiAbortBtn) dom.aiAbortBtn.style.display = '';
         try {
-          await webAnswerWithRepair(text, thinkingNode, ctrl.signal);
+          await panelSvarAnswer(text, thinkingNode, ctrl.signal);
           state.history.push({ role: 'assistant', meta: { intent: 'web' } });
         } catch (e) {
           if (e && e.name === 'AbortError') appendCancelNote(thinkingNode);
@@ -1051,121 +1021,6 @@
       // Run the script through a throwaway m2py interpreter on synthetic data
       // (disclosure control off, so only structural/runtime errors surface).
       // Returns {passed, errors:[{kind,message}]} or {skipped:true}.
-
-
-      // Isolate the #python/#r code segment out of a python/r kode-svar-v2
-      // candidate script (which is ALWAYS a single hybrid blob: a `#micro`
-      // directive header followed by a `#r`/`#python` marker + the actual
-      // analysis code — see kode-svar.ts MICRO_IMPORT_BRIDGE). Reuses
-      // index.html's own parseHybridScript segmenter (bare global — same
-      // cross-file convention as activeEditorMode/microdataCatalog elsewhere
-      // in this file) so the split matches EXACTLY how the app itself would
-      // interpret the hybrid script. Falls back to the whole script when
-      // parseHybridScript is unavailable (e.g. the node test harness) or no
-      // segment of the wanted kind was found — better to syntax-check a little
-      // too much (the #micro lines would then fail compile()/parse(), which
-      // just degrades to a reported {passed:false} error, not "skipped" —
-      // compile()/parse() DOES run, it just fails) than to silently skip
-      // validation.
-      const LANG_SEGMENT_KIND = { python: 'pyodide', r: 'r' };
-      function extractLangSegment(script, lang) {
-        if (!script) return '';
-        const wantKind = LANG_SEGMENT_KIND[lang] || lang;
-        if (typeof parseHybridScript !== 'function') return script;
-        let segments;
-        try { segments = parseHybridScript(script, wantKind); } catch (_) { return script; }
-        const parts = (segments || [])
-          .filter(function (s) { return s.kind === wantKind; })
-          .map(function (s) { return s.text; });
-        return parts.length ? parts.join('\n\n') : script;
-      }
-
-      // Nivå 1 python-syntaks-sjekk (docs/ROADMAP.md §AI-assistenten):
-      // compile(...,'exec') via en ALLEREDE lastet/lastende Pyodide-økt.
-      // __pyodidePromise (index.html sin loadPyodideAndM2py-memoisering) er
-      // en bare global, samme mønster som activeEditorMode/microdataCatalog
-      // ellers i denne fila. VIKTIG: vi kaller ALDRI loadPyodideAndM2py() selv
-      // — det ville boot-et en ny ~30s-runtime bare for å validere ett
-      // AI-svar. Vi hekter oss KUN på en økt andre deler av appen allerede har
-      // startet (varmlasting ved modusbytte til python, eller en tidligere
-      // Kjør) — hvis ingen finnes, hopper vi over (skipped:true), aldri boot.
-      // Merk: når en økt ER i ferd med å starte (booting, ikke ferdig), AWAITER
-      // vi den (linjen under) i stedet for å hoppe over — badgen kan derfor
-      // dukke opp et lite øyeblikk etter selve svarteksten, uten at vi noen
-      // gang selv trigget boot-en.
-      async function validatePythonSyntax(script) {
-        if (typeof __pyodidePromise === 'undefined' || !__pyodidePromise) return { skipped: true };
-        let py;
-        try { py = await __pyodidePromise; } catch (_) { return { skipped: true }; }
-        if (!py) return { skipped: true };
-        const pyCode = extractLangSegment(script, 'python');
-        if (!pyCode) return { skipped: true };
-        // Linjenumre er relative til DEN UTTRUKNE python-delen (#micro-linjene
-        // foran er kuttet bort) — det holder fint for reparasjonsrundens
-        // feilmelding, som uansett sender hele kandidatscriptet tilbake til AI-en.
-        const checkCode =
-          'import json\n' +
-          '_src = ' + JSON.stringify(pyCode) + '\n' +
-          'try:\n' +
-          '    compile(_src, "<ai-script>", "exec")\n' +
-          '    _out = json.dumps({"passed": True, "errors": []})\n' +
-          'except SyntaxError as _ex:\n' +
-          '    _out = json.dumps({"passed": False, "errors": [{"kind": "parse", "message": str(_ex.msg) if _ex.msg else str(_ex), "line_no": _ex.lineno}]})\n' +
-          'except Exception as _ex2:\n' +
-          '    _out = json.dumps({"passed": False, "errors": [{"kind": "parse", "message": f"{type(_ex2).__name__}: {_ex2}"}]})\n' +
-          '_out\n';
-        let raw;
-        try { raw = await py.runPythonAsync(checkCode); } catch (_) { return { skipped: true }; }
-        let parsed;
-        try { parsed = JSON.parse(raw); } catch (_) { return { skipped: true }; }
-        // _ex.lineno (line_no over) was captured but never surfaced: buildRepairErrors
-        // only reads e.message/e.kind, so a bare line_no field silently vanished before
-        // ever reaching the repair-round prompt. Fold it into the message itself — R's
-        // parse() error text already embeds "<text>:LINJE:KOLONNE:" on its own, so this
-        // brings python's repair-error string to parity with R's.
-        if (parsed && Array.isArray(parsed.errors)) {
-          parsed.errors = parsed.errors.map(function (e) {
-            if (e && e.line_no != null && e.message) {
-              return Object.assign({}, e, { message: 'linje ' + e.line_no + ': ' + e.message });
-            }
-            return e;
-          });
-        }
-        return parsed;
-      }
-
-      // Nivå 1 R-syntaks-sjekk: parse(text=...) via en ALLEREDE lastet/
-      // lastende webR-økt (webRPromise — samme bare-global-mønster og samme
-      // "aldri boot"-regel som validatePythonSyntax over). Bruker KUN base R
-      // (ingen jsonlite — jsonlite krever en defensiv webr::install() først,
-      // se andre webR-kallsteder i index.html, og det ville også være en
-      // uønsket bivirkning bare for å validere). Feilteksten fra parse()
-      // inneholder selv linje/kolonne på formen "<text>:LINJE:KOLONNE:" —
-      // trekkes ut med et enkelt regex i stedet.
-      async function validateRSyntax(script) {
-        if (typeof webRPromise === 'undefined' || !webRPromise) return { skipped: true };
-        try { await webRPromise; } catch (_) { return { skipped: true }; }
-        if (typeof webRReady === 'undefined' || !webRReady || typeof webR === 'undefined' || !webR) return { skipped: true };
-        const rCode = extractLangSegment(script, 'r');
-        if (!rCode) return { skipped: true };
-        const checkExpr =
-          'tryCatch({ parse(text = ' + JSON.stringify(rCode) + '); "OK" }, ' +
-          'error = function(e) paste0("ERR:", conditionMessage(e)))';
-        let robj;
-        try { robj = await webR.evalR(checkExpr); } catch (_) { return { skipped: true }; }
-        try {
-          const js = await robj.toJs();
-          const result = (js.values || [])[0];
-          if (result === 'OK') return { passed: true, errors: [] };
-          const msg = String(result || '').replace(/^ERR:/, '');
-          const lm = /<text>:(\d+):\d+:/.exec(msg);
-          return { passed: false, errors: [{ kind: 'parse', message: msg, line_no: lm ? parseInt(lm[1], 10) : null }] };
-        } catch (_) {
-          return { skipped: true };
-        } finally {
-          try { await webR.destroy(robj); } catch (_) {}
-        }
-      }
 
       function autoresize() {
         const ta = dom.aiInput;
@@ -1232,14 +1087,6 @@
         });
       }
 
-      // Dybde for Web-modus (data-svar): 'deep' er default (= oppførselen før
-      // parameteren fantes); 'fast' senker budsjettet/ambisjonen serverside.
-      var LS_DEPTH = 'md_ai_depth';
-      function aiDepth() {
-        try { return localStorage.getItem(LS_DEPTH) === 'fast' ? 'fast' : 'deep'; }
-        catch (e) { return 'deep'; }
-      }
-
       // Global AI-leverandør (spec 2026-07-23-llm-provider-tiers A1): type +
       // base-URL + modell i md_llm_provider (ikke hemmelig); nøkkelen i det
       // felles nøkkellageret (js/keys.js, type 'llm').
@@ -1279,7 +1126,6 @@
         if (dom.aiCfgProviderUrl) dom.aiCfgProviderUrl.value = (provRaw && provRaw.base_url) || '';
         if (dom.aiCfgProviderModel) dom.aiCfgProviderModel.value = (provRaw && provRaw.model) || '';
         if (dom.aiCfgLlmKey) dom.aiCfgLlmKey.value = '';
-        if (dom.aiCfgDepth) dom.aiCfgDepth.value = aiDepth();
         syncProviderFields();
         dom.aiSettingsBackdrop.classList.add('open');
       }
@@ -1288,17 +1134,12 @@
         const akey = dom.aiCfgAnthropicKey ? dom.aiCfgAnthropicKey.value.trim() : '';
         if (akey) window.Keys.set('anthropic', akey);
         else window.Keys.remove('anthropic');
-        // BYOK-nøkkelen påvirker Web-knappens synlighet (webModeEligible).
         if (window.mdSyncWebBtnVisibility) window.mdSyncWebBtnVisibility();
         if (dom.aiCfgSourceKeys && window.Keys) {
           dom.aiCfgSourceKeys.querySelectorAll('input[data-source-key-id]').forEach(function (inp) {
             var v = inp.value.trim();
             if (v) window.Keys.set(inp.dataset.sourceKeyId, v);
           });
-        }
-        if (dom.aiCfgDepth) {
-          try { localStorage.setItem(LS_DEPTH, dom.aiCfgDepth.value === 'fast' ? 'fast' : 'deep'); }
-          catch (e) { /* private-modus e.l. — depth forblir deep */ }
         }
         if (dom.aiCfgProviderType) {
           var ptype = dom.aiCfgProviderType.value;
@@ -1348,17 +1189,14 @@
         }
 
         // Send is routed by the active mode: microdata-modus → microdata AI
-        // (kode-svar); otherwise the agentic data-svar flow (search data → script
+        // (kode-svar); otherwise the agentic svar flow (search data → script
         // in the active mode's language → run → revise).
         function sendCurrent() {
           // Microdata-modusen (kode-svar/v2-flyten) er fjernet fra openstat
-          // (2026-07-24) — alle moduser går data-svar-veien.
+          // (2026-07-24) — alle moduser går svar-veien.
           sendWebMessage();
         }
         if (dom.aiSendFastBtn) dom.aiSendFastBtn.addEventListener('click', sendCurrent);
-        if (dom.aiSendV2Btn) dom.aiSendV2Btn.style.display = 'none';
-        // The old Web button is subsumed by the URL-routed Send; keep it hidden.
-        if (dom.aiSendWebBtn) { dom.aiSendWebBtn.style.display = 'none'; dom.aiSendWebBtn.addEventListener('click', () => { sendWebMessage(); }); }
         if (dom.aiAbortBtn) dom.aiAbortBtn.addEventListener('click', () => { if (state.abortCtrl) state.abortCtrl.abort(); });
         dom.aiInput.addEventListener('input', autoresize);
         dom.aiInput.addEventListener('keydown', (e) => {
@@ -1367,16 +1205,6 @@
             sendCurrent();   // Enter = send (modus fra menyen); Shift+Enter = ny linje
           }
         });
-
-        // Shows/hides the dedicated Web send button: admin + python/r/duckdb only.
-        // Called after login/user fetch (refreshUserPanel), on editor-mode changes
-        // (see switchEditorMode() in index.html), and once here at init.
-        function syncWebBtnVisibility() {
-          // The Web button is subsumed by the URL-routed Send; keep it hidden.
-          if (dom.aiSendWebBtn) dom.aiSendWebBtn.style.display = 'none';
-        }
-        window.mdSyncWebBtnVisibility = syncWebBtnVisibility;
-        syncWebBtnVisibility();
 
         // Keyboard shortcut Ctrl+I
         document.addEventListener('keydown', (e) => {
@@ -1439,6 +1267,43 @@
               if (dom.aiInput) dom.aiInput.focus();
             });
         };
+
+        // ── Ask-visningen (js/ask-view.js) ─────────────────────────────
+        // Små, stabile seams så ask-visningen slipper å duplisere BYOK-,
+        // provider- og innstillingslogikken i denne modulen.
+        window.mdAiHasKey = function () {
+          return !!state.anthropicKey || customProviderReady();
+        };
+        window.mdOpenAiSettings = openSettings;
+        window.mdAiAuthHeaders = providerAuthHeaders;
+        window.mdAiProviderConfig = providerConfig;
+
+        // Kjør et script via Kjør-knappens vei og formater run_code-
+        // verktøyresultatet. Innsetting + kjøring + output-lesing i ett —
+        // både ask-visningen og AI-panelet bruker denne.
+        window.mdAskExecuteScript = async function (script, signal) {
+          insertScriptIntoEditor(script);
+          var err = await runScriptAndCaptureError(signal);
+          var out = document.getElementById('outputArea');
+          var outText = ((out && out.innerText) || '').trim();
+          // OUTPUTS-manifest (spec 2026-07-31-ask-svar-referanser §2):
+          // forteller modellen HVA den kan referere med {{fig:1}} osv. —
+          // samme klassifiseringsfunksjon som resolveren bruker, så
+          // nummereringen kan aldri sprike.
+          var manifest = '';
+          if (!err && out && window.mdClassifyAskOutput && window.mdAskManifest) {
+            try { manifest = window.mdAskManifest(window.mdClassifyAskOutput(out)); }
+            catch (e) { manifest = ''; }
+          }
+          return {
+            ok: !err,
+            result: err
+              ? 'FEIL:\n' + String(err).slice(0, 20000)
+              : 'OK. OUTPUT (truncated):\n' + outText.slice(0, 20000) +
+                (manifest ? '\n' + manifest : ''),
+          };
+        };
+        window.mdSvarRun = runSvarLoop;
       }
 
       if (document.readyState === 'loading') {
@@ -1448,20 +1313,14 @@
       }
 
       // Node-testbar seam (samme mønster som js/ui.js, js/cells.js, js/names.js
-      // m.fl.): eksporter et lite, stabilt sett av rene funksjoner + nivå
-      // 1-dispatch-tabellen for tests/js/*.test.js. Resten av modulen (init(),
-      // sendMessage() m.fl.) krever en ekte nettleser-DOM og eksporteres ikke —
-      // se tests/js/ui-dom.test.js for mønsteret dersom det trengs senere.
+      // m.fl.): eksporter et lite, stabilt sett av rene funksjoner for
+      // tests/js/*.test.js. Resten av modulen (init(), sendMessage() m.fl.)
+      // krever en ekte nettleser-DOM og eksporteres ikke — se
+      // tests/js/ui-dom.test.js for mønsteret dersom det trengs senere.
       if (typeof module !== 'undefined' && module.exports) {
         module.exports = {
-          extractFirstCodeBlock: extractFirstCodeBlock,
-          extractLangSegment: extractLangSegment,
           extractAllCode: extractAllCode,
-          findUnknownVarNames: findUnknownVarNames,
-          buildRepairErrors: buildRepairErrors,
-          validatePythonSyntax: validatePythonSyntax,
-          validateRSyntax: validateRSyntax,
-          _v2Validators: _v2Validators,
+          computeParamFormsWrap: computeParamFormsWrap,
         };
       }
     })();
