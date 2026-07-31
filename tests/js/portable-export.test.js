@@ -73,3 +73,43 @@ test('transpile: flerbetingelses-and blir &-kjede i python og R', () => {
   assert.match(PE.transpile(s, 'r', []).code,
     /which\(src_bef\[\["folketall"\]\] > 100 & src_bef\[\["folketall"\]\] < 900\)/);
 });
+
+// Sluttreview-funn 1 (2026-07-31): federerte resolve-items har ingen .url —
+// emitFor(item.federated) kastet TypeError («Cannot read properties of
+// undefined (reading 'indexOf')») før vakten ble lagt til. Dekker inline-
+// liste, register-id og federert connect brukt i montering (emitAssembly).
+const FED_REG = [
+  { id: 'demo-fed', navn: 'Demo', kind: 'federated', overlap: 'possible',
+    members: [
+      { id: 'nord', url: 'data/federert/nord.parquet' },
+      { id: 'vest', url: 'data/federert/vest.parquet' },
+    ] },
+];
+
+test('transpile: federert inline-liste kaster ikke — norsk advarsel, ingen undefined', () => {
+  const s = '# person = ost.read(["a.parquet", "b.parquet"])';
+  const out = PE.transpile(s, 'python', []);
+  assert.match(out.code, /# federert kilde «person» støttes ikke i portabel eksport ennå — last ned medlemmene manuelt/);
+  assert.ok(!/undefined/.test(out.code), out.code);
+  assert.ok(out.warnings.some(w => /federert kilde/.test(w) && /person/.test(w)), JSON.stringify(out.warnings));
+});
+
+test('transpile: federert register-id kaster ikke — norsk advarsel, ingen undefined', () => {
+  const s = '# person = ost.read("demo-fed")';
+  const out = PE.transpile(s, 'python', FED_REG);
+  assert.match(out.code, /# federert kilde «person» støttes ikke i portabel eksport ennå — last ned medlemmene manuelt/);
+  assert.ok(!/undefined/.test(out.code), out.code);
+  assert.ok(out.warnings.some(w => /federert kilde/.test(w)));
+});
+
+test('transpile: federert kilde brukt i montering (emitAssembly) kaster ikke', () => {
+  const s = [
+    '# fed = ost.connect("demo-fed")',
+    '# panel = ost.create(key="kommune")',
+    '# panel.add(fed, ["folketall"])',
+  ].join('\n');
+  const out = PE.transpile(s, 'python', FED_REG);
+  assert.match(out.code, /# federert kilde «src_fed» støttes ikke i portabel eksport ennå — last ned medlemmene manuelt/);
+  assert.match(out.code, /# \(datasettet «panel» kunne ikke eksporteres — se advarslene\)/);
+  assert.ok(!/undefined/.test(out.code), out.code);
+});

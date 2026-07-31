@@ -2324,6 +2324,10 @@
       var files = members.map(function (m, i) {
         return { id: m.id, format: m.format, fileName: 'fed_' + alias + '_' + i + '.' + m.format };
       });
+      // Deklarert FØR try (sluttreview-funn 3, 2026-07-31): unionsfila skal
+      // droppes uansett om COPY under lykkes eller kaster — ellers blir
+      // fed_<alias>_union.parquet stående registrert i duckdb-wasm ved feil.
+      var outName = 'fed_' + alias + '_union.parquet';
       try {
         for (var i = 0; i < members.length; i++) {
           await db.registerFileBuffer(files[i].fileName, members[i].bytes);
@@ -2339,15 +2343,14 @@
         if (meta && meta.overlap === 'possible') {
           console.info('federert «' + alias + '»: medlemmer kan overlappe — tellinger er episodenivå');
         }
-        var outName = 'fed_' + alias + '_union.parquet';
         await conn.query("COPY (" + plan.unionSql + ") TO '" + outName + "' (FORMAT PARQUET)");
         var bytes = await db.copyFileToBuffer(outName);
-        try { await db.dropFile(outName); } catch (e) { /* best-effort */ }
         return { bytes: bytes, format: 'parquet' };
       } finally {
         for (var k = 0; k < files.length; k++) {
           try { await db.dropFile(files[k].fileName); } catch (e) { /* best-effort */ }
         }
+        try { await db.dropFile(outName); } catch (e) { /* best-effort */ }
         await conn.close();
       }
     }

@@ -159,6 +159,16 @@
   // Én kilde → linjer. Task 3 legger nøkkel/ikke-portabel-grener FØRST her.
   function emitFor(item, mode, registry, warnings, needs) {
     var out = { lines: [], needs: needs };
+    // Federert kilde (spec 2026-07-31-federert-pull-design §3-4): item har
+    // .federated (en liste), ikke .url — MÅ sjekkes FØR item.url leses, av
+    // samme grunn som anvil-vakten under (decodeHentUrl(undefined) ville
+    // kastet TypeError). Full transpilering (pd.concat av medlemmene) er
+    // bevisst utsatt (v1) — ikke forsøk det her.
+    if (item.federated) {
+      out.lines.push('# federert kilde «' + item.alias + '» støttes ikke i portabel eksport ennå — last ned medlemmene manuelt');
+      warnings.push('«' + item.alias + '»: federert kilde støttes ikke i portabel eksport ennå — last ned medlemmene manuelt');
+      return out.lines;
+    }
     // Ikke-portable kilder (spec §2): krypterte (key), Anvil/SafeStat, remote.
     // MÅ kjøre FØR noe forsøk på å lese item.url — anvil-oppløste items har
     // ikke noe .url-felt i det hele tatt (se DataDirectives.resolve), så en
@@ -645,7 +655,7 @@
         lines.push('# (kilden «' + key + '» kunne ikke løses: ' + item.error + ')');
         return;
       }
-      if (item.anvil || item.key || item.exec === 'remote' ||
+      if (item.anvil || item.key || item.exec === 'remote' || item.federated ||
           item.kind === 'duckdb' || item.kind === 'sqlite') failed[key] = true;
       lines.push.apply(lines, emitFor(item, mode, registry, warnings, needs));
     });

@@ -534,6 +534,11 @@
   // safestat. Node-/beskyttet-medlemmer hører hjemme i safestat — klar nekt.
   function federatedFromRegistry(alias, src, rest, opts) {
     function nekt(msg) { return { alias: alias, url: '', viaProxy: false, error: msg }; }
+    // kind=/exec= parses fint på federerte reads men hadde null effekt —
+    // stille dropp (finding 2, sluttreview 2026-07-31). kind="csv" er den
+    // naturlige skrivefeilen for format="csv", derfor hintet.
+    if (opts.kind) return nekt('«' + alias + '»: kind= støttes ikke for federerte kilder — mente du format=?');
+    if (opts.exec) return nekt('«' + alias + '»: exec= støttes ikke for federerte kilder (kjøres alltid lokalt)');
     var members = src.members || [];
     if (!members.length) return nekt('federert kilde «' + src.id + '» har ingen medlemmer');
     var out = [];
@@ -553,7 +558,9 @@
       // Medlems-url er URL også når den er relativ (safestats explicitUrl-
       // lærdom) — aldri register-oppslag på den.
       if (rest) url = url.replace(/\/+$/, '') + '/' + String(rest).replace(/^\/+/, '');
-      out.push({ id: m.id || ('m' + (i + 1)), url: url, key: opts.key, format: opts.format,
+      // cache= ARVES av alle medlemmer, som key/format — lastelagets
+      // fetchBytes honorerer item.cache per medlem allerede.
+      out.push({ id: m.id || ('m' + (i + 1)), url: url, key: opts.key, format: opts.format, cache: opts.cache,
                  viaProxy: !!m.auth || m.cors === false || !!src.auth || src.cors === false });
     }
     var item = { alias: alias, federated: out };
@@ -598,12 +605,25 @@
       var lopts = l.options || {};
       if (l.members) {
         // Inline federert: medlemmene er eksplisitte URL-er (også relative).
+        // kind=/exec= parses fint men hadde null effekt — stille dropp
+        // (finding 2, sluttreview 2026-07-31). kind="csv" er den naturlige
+        // skrivefeilen for format="csv", derfor hintet.
+        if (lopts.kind) {
+          return { alias: l.alias, url: '', viaProxy: false,
+                   error: '«' + l.alias + '»: kind= støttes ikke for federerte kilder — mente du format=?' };
+        }
+        if (lopts.exec) {
+          return { alias: l.alias, url: '', viaProxy: false,
+                   error: '«' + l.alias + '»: exec= støttes ikke for federerte kilder (kjøres alltid lokalt)' };
+        }
         if (lopts.format && lopts.format !== 'csv' && lopts.format !== 'parquet') {
           return { alias: l.alias, url: '', viaProxy: false,
                    error: '«' + l.alias + '»: format «' + lopts.format + '» støttes ikke for federerte medlemmer (kun csv/parquet)' };
         }
+        // cache= ARVES av alle medlemmer, som key/format — lastelagets
+        // fetchBytes honorerer item.cache per medlem allerede.
         return { alias: l.alias, federated: l.members.map(function (m) {
-          return { id: m.id, url: m.url, key: lopts.key, format: lopts.format };
+          return { id: m.id, url: m.url, key: lopts.key, format: lopts.format, cache: lopts.cache };
         }) };
       }
       if (isUrlish(l.target)) {
@@ -618,7 +638,8 @@
       if (!conn) {
         var fsrc = findRegistrySource(registry, head);
         if (fsrc && (fsrc.kind === 'federated' || fsrc.members)) {
-          return federatedFromRegistry(l.alias, fsrc, rest, { key: lopts.key, format: lopts.format });
+          return federatedFromRegistry(l.alias, fsrc, rest,
+            { key: lopts.key, format: lopts.format, kind: lopts.kind, exec: lopts.exec, cache: lopts.cache });
         }
         return { alias: l.alias, url: '', viaProxy: false, error: 'ukjent kilde-alias «' + head + '» (mangler connect-linje?)' };
       }
@@ -631,7 +652,8 @@
       } else {
         src = findRegistrySource(registry, conn.target);
         if (src && (src.kind === 'federated' || src.members)) {
-          return federatedFromRegistry(l.alias, src, rest, { key: key, format: lopts.format });
+          return federatedFromRegistry(l.alias, src, rest,
+            { key: key, format: lopts.format, kind: kind, exec: exec, cache: cache });
         }
         if (!src) {
           // Ikke i web-registeret: en registrert Anvil-kilde (spec §1, regel 3).

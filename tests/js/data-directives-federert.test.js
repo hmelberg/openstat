@@ -127,3 +127,50 @@ test('resolve: ukjent id gir fortsatt alias-feilen', () => {
   const r = res1('# person = ost.read("finnes-ikke")');
   assert.ok(/ukjent kilde-alias/.test(r.error), r.error);
 });
+
+// Sluttreview-funn 2 (2026-07-31): kind=/cache=/exec= parses OK men hadde
+// null effekt på federerte reads — stille dropp. kind="csv" er den naturlige
+// skrivefeilen for format="csv".
+test('resolve: kind= på inline federert liste avvises med format=-hint', () => {
+  const r = res1('# person = ost.read(["u1", "u2"], kind="csv")');
+  assert.ok(/kind=/.test(r.error) && /format=/.test(r.error), r.error);
+});
+
+test('resolve: kind= på register-id federert (uten connect) avvises med format=-hint', () => {
+  const r = res1('# person = ost.read("demo-fed", kind="csv")');
+  assert.ok(/kind=/.test(r.error) && /format=/.test(r.error), r.error);
+});
+
+test('resolve: kind= på federert via connect-alias avvises med format=-hint', () => {
+  const p = DD.parse('# h = ost.connect("demo-fed", kind="csv")\n# person = h.read()');
+  assert.deepEqual(p.errors, []);
+  const r = DD.resolve(p, REG)[0];
+  assert.ok(/kind=/.test(r.error) && /format=/.test(r.error), r.error);
+});
+
+test('resolve: exec= på inline federert liste avvises', () => {
+  const r = res1('# person = ost.read(["u1", "u2"], exec="remote")');
+  assert.ok(/exec=/.test(r.error), r.error);
+});
+
+test('resolve: exec= på register-id federert avvises', () => {
+  const r = res1('# person = ost.read("demo-fed", exec="remote")');
+  assert.ok(/exec=/.test(r.error), r.error);
+});
+
+test('resolve: cache= arves av alle medlemmer (inline)', () => {
+  const r = res1('# person = ost.read(["u1", "u2"], cache="30m")');
+  r.federated.forEach(m => assert.equal(m.cache, '30m'));
+});
+
+test('resolve: cache= arves av alle medlemmer (register-id)', () => {
+  const r = res1('# person = ost.read("demo-fed", cache="1h")');
+  r.federated.forEach(m => assert.equal(m.cache, '1h'));
+});
+
+test('resolve: cache= på connect arves av federerte medlemmer', () => {
+  const p = DD.parse('# h = ost.connect("demo-fed", cache="1d")\n# person = h.read()');
+  assert.deepEqual(p.errors, []);
+  const r = DD.resolve(p, REG)[0];
+  r.federated.forEach(m => assert.equal(m.cache, '1d'));
+});
