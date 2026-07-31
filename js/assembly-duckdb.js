@@ -158,5 +158,5 @@
     return { attaches: att.statements, datasetStatements: datasetStatements };
   }
 
-  global.AssemblyDuckdb = { canPushdown: canPushdown, compile: compile, _topoSort: topoSort };
+  global.AssemblyDuckdb = { canPushdown: canPushdown, compile: compile, CSV_OPTS: CSV_OPTS, _topoSort: topoSort };
 })(typeof window !== 'undefined' ? window : globalThis);
