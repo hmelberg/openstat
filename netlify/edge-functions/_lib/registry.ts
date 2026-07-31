@@ -15,9 +15,11 @@ export interface DataSource {
   id: string;
   navn: string;
   utgiver: string;
-  tillit: "offisiell" | "etablert" | "funnet";
+  tillit: "offisiell" | "etablert" | "funnet" | "demo";
   tilgang: "pxweb" | "sdmx" | "rest" | "ckan" | "fil";
   kind?: string;
+  // base_url utelates KUN for kind:"federated" (validert i parseRegistry) —
+  // serveren ruter aldri trafikk til en federert kilde (ikke søkbar).
   base_url: string;
   sok_endepunkt?: string;
   cors: boolean;
@@ -28,16 +30,22 @@ export interface DataSource {
   nokkel_hint?: string;
   quirks?: string;
   guide?: boolean;  // true = data/source-guides/<id>.md finnes; se source-guides.ts
+  // kind:"federated" (spec 2026-07-31-federert-pull §3): pull+union-kilde;
+  // members er delene. partition/overlap/entity passerer uvalidert gjennom.
+  members?: { id: string; url: string }[];
 }
 
-const TILLIT = new Set(["offisiell", "etablert", "funnet"]);
+const TILLIT = new Set(["offisiell", "etablert", "funnet", "demo"]);
 const TILGANG = new Set(["pxweb", "sdmx", "rest", "ckan", "fil"]);
 
 export function parseRegistry(json: unknown): DataSource[] {
   if (!Array.isArray(json)) throw new Error("registeret må være en JSON-liste");
   return json.map((raw, i) => {
     const e = raw as Record<string, unknown>;
-    for (const field of ["id", "navn", "utgiver", "tillit", "tilgang", "base_url"]) {
+    const isFed = e.kind === "federated";
+    const req = ["id", "navn", "utgiver", "tillit", "tilgang"];
+    if (!isFed) req.push("base_url");
+    for (const field of req) {
       if (typeof e[field] !== "string" || !(e[field] as string).trim()) {
         throw new Error(`kilde #${i}: mangler/ugyldig felt '${field}'`);
       }
@@ -45,7 +53,20 @@ export function parseRegistry(json: unknown): DataSource[] {
     if (!TILLIT.has(e.tillit as string)) throw new Error(`kilde ${e.id}: ukjent tillit '${e.tillit}'`);
     if (!TILGANG.has(e.tilgang as string)) throw new Error(`kilde ${e.id}: ukjent tilgang '${e.tilgang}'`);
     if (typeof e.cors !== "boolean") throw new Error(`kilde ${e.id}: 'cors' må være boolsk`);
-    new URL(e.base_url as string); // throws on invalid
+    if (isFed) {
+      const mems = e.members;
+      if (!Array.isArray(mems) || mems.length === 0) {
+        throw new Error(`kilde ${e.id}: federert kilde krever en ikke-tom members-liste`);
+      }
+      for (const m of mems as Record<string, unknown>[]) {
+        if (typeof m.id !== "string" || !(m.id as string).trim() ||
+            typeof m.url !== "string" || !(m.url as string).trim()) {
+          throw new Error(`kilde ${e.id}: federert medlem krever id og url`);
+        }
+      }
+    } else {
+      new URL(e.base_url as string); // throws on invalid
+    }
     if (e.auth !== undefined) {
       const a = e.auth as Record<string, unknown>;
       if (a.type !== "api_key") throw new Error(`kilde ${e.id}: ukjent auth.type '${a.type}'`);

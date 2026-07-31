@@ -158,3 +158,25 @@ Deno.test("isSearchableSource: ecb blir søkbar etter XML-støtte (SDMX_XML_SOUR
   ]);
   assertEquals(isSearchableSource(reg[0]), true);
 });
+
+const FED_ENTRY = {
+  id: "demo-federert", navn: "Demo: federert persontabell (3 deler)",
+  utgiver: "openstat", tillit: "demo", tilgang: "fil",
+  kind: "federated", partition: "horizontal", overlap: "none", cors: true,
+  members: [
+    { id: "nord", url: "data/federert/nord.parquet" },
+    { id: "vest", url: "data/federert/vest.parquet" },
+    { id: "sor", url: "data/federert/sor.parquet" },
+  ],
+};
+
+Deno.test("parseRegistry: federert kilde uten base_url godtas", () => {
+  const reg = parseRegistry([FED_ENTRY]);
+  assertEquals(reg[0].id, "demo-federert");
+  assertEquals(reg[0].members!.length, 3);
+});
+
+Deno.test("parseRegistry: federert kilde uten members avvises", () => {
+  assertThrows(() => parseRegistry([{ ...FED_ENTRY, members: [] }]), Error, "members");
+  assertThrows(() => parseRegistry([{ ...FED_ENTRY, members: [{ id: "x" }] }]), Error, "id og url");
+});

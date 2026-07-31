@@ -283,5 +283,21 @@
     "base_url": "https://github.com/awesomedata/apd-core",
     "cors": false,
     "quirks": "868 datasett-oppføringer (35 kategorier), datasett-nivå kun — ingen kolonneskjema. homepage er ofte en landingsside, ikke en direkte data-URL. Søkes LOKALT mot en forhåndshøstet katalog (data/apd-catalog.json), ingen live GitHub-kall."
+  },
+  {
+    "id": "demo-federert",
+    "navn": "Demo: federert persontabell (3 deler)",
+    "utgiver": "openstat",
+    "tillit": "demo",
+    "tilgang": "fil",
+    "kind": "federated",
+    "partition": "horizontal",
+    "overlap": "none",
+    "cors": true,
+    "members": [
+      { "id": "nord", "url": "data/federert/nord.parquet" },
+      { "id": "vest", "url": "data/federert/vest.parquet" },
+      { "id": "sor", "url": "data/federert/sor.parquet" }
+    ]
   }
 ]
