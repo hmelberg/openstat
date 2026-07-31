@@ -4,6 +4,8 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert');
+const fs = require('node:fs');
+const path = require('node:path');
 require('../../js/api-kinds.js');       // alias-tabellen (global.ApiKinds)
 require('../../js/directive-parser.js');   // data-directives kaller DirectiveParser ved parsing
 require('../../js/data-directives.js');
@@ -156,6 +158,52 @@ test('pxweb/eurostat-grenen er uendret', () => {
   assert.equal(item.table, '05839');
 });
 
+// ── pxweb v2 tables/-fiks (spec-oppdrag 2026-07-31, task 5): base_url for
+// ssb/scb i registeret har ALDRI inneholdt /tables-segmentet (git-historikk
+// sjekket 2026-07-31) — kanonisk registerlesevei (`ssb = ost.connect("ssb")`
+// uten eksplisitt kind()) har derfor aldri fungert for ssb.read("11342") i
+// dette repoet: URL-en ble base+id, som er 404 (live-verifisert; med tables/
+// 200). Fikset i resolve() for kind==='pxweb' ALENE: prepend tables/ til
+// restPath, men kun når base ikke allerede ender på /tables (direkte
+// connect() til en URL som selv inneholder /tables, som i testene over —
+// den eldre formen som FAKTISK har fungert — skal forbli uendret, ellers
+// ville de fått tables/tables/). ─────────────────────────────────────────
+
+test('pxweb v2: ssb.read via registeret setter inn tables/-segmentet (regresjon v2-beta→v2)', () => {
+  const registry = [{ id: 'ssb', base_url: 'https://data.ssb.no/api/pxwebapi/v2/', kind: 'pxweb' }];
+  const item = resolveOne(
+    '# ssb = ost.connect("ssb")\n# bef = ssb.read("11342")', registry);
+  assert.ok(!item.error, item.error);
+  assert.equal(item.url, 'https://data.ssb.no/api/pxwebapi/v2/tables/11342');
+  assert.equal(item.table, '11342');   // bare id — feilmeldingsvennlig (mandatoryErrorMessage)
+});
+
+test('pxweb v2: read("tables/11342") normaliseres — ingen tables/tables/', () => {
+  const registry = [{ id: 'ssb', base_url: 'https://data.ssb.no/api/pxwebapi/v2/', kind: 'pxweb' }];
+  const item = resolveOne(
+    '# ssb = ost.connect("ssb")\n# bef = ssb.read("tables/11342")', registry);
+  assert.ok(!item.error, item.error);
+  assert.equal(item.url, 'https://data.ssb.no/api/pxwebapi/v2/tables/11342');
+  assert.equal(item.table, '11342');
+});
+
+test('pxweb v2: connect-URL som allerede ender på /tables dobles ikke opp', () => {
+  const item = resolveOne(
+    '# ssb = ost.connect("https://data.ssb.no/api/pxwebapi/v2/tables", kind="pxweb")\n' +
+    '# bef = ssb.read("05839")');
+  assert.equal(item.url, 'https://data.ssb.no/api/pxwebapi/v2/tables/05839');
+  assert.equal(item.table, '05839');
+});
+
+test('eurostat-grenen får ikke tables/-segmentet (kun pxweb rammes av fiksen)', () => {
+  const registry = [{ id: 'eu', base_url: 'https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/', kind: 'eurostat' }];
+  const item = resolveOne(
+    '# eu = ost.connect("eu")\n# bnp = eu.read("nama_10_gdp")', registry);
+  assert.ok(!item.error, item.error);
+  assert.equal(item.url, 'https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/nama_10_gdp');
+  assert.equal(item.table, 'nama_10_gdp');
+});
+
 // ── all()-direktiv (spec 2026-07-25/26-all-direktiv-design): last alle
 // verdier av uspesifiserte dimensjoner for pxweb. Ren parser+resolve her —
 // selve async-utvidelsen skjer i lasteren (Task 3). ──────────────────────
@@ -179,4 +227,42 @@ test('all() på ikke-pxweb-kilde → feil', () => {
     '# o = ost.connect("https://sdmx.oecd.org/public/rest/data", kind="oecd")\n' +
     '# le = o.read("OECD.ELS.HD,DSD_HEALTH_STAT@DF_LE/all", all=True)');
   assert.ok(r.error && /all\(\).*pxweb/i.test(r.error), r.error);
+});
+
+// ── kind-avledning fra tilgang (spec-oppdrag 2026-07-31, ssb-mandatory task
+// 5): ssb/scb-oppføringene i data-sources.json har ALDRI hatt et «kind»-felt
+// (kun tilgang: "pxweb") — git-historikken viser ingen tidligere versjon med
+// kind satt. Uten kind falt resolve() rett forbi pxweb-grenen — kanonisk
+// years=/indicators=/regions=-oversettelse OG tables/-sti-fiksen kjørte
+// ALDRI — og ssb.read("11342") ble base+id, som er 404 (live-verifisert).
+// data-sources.json har nå kind: "pxweb" eksplisitt på begge (samme som alle
+// andre kilder), men normalizeKind() avleder også fra tilgang==="pxweb" som
+// sikkerhetsnett mot at feltet mangler igjen — KUN pxweb, ikke andre
+// tilgang-verdier (de skal fortsatt gi kind===undefined og feile synlig et
+// annet sted, ikke late som de er pxweb). ─────────────────────────────────
+
+test('normalizeKind avleder pxweb fra tilgang når kind mangler i registeret (sikkerhetsnett)', () => {
+  const registry = [{ id: 'ssb', tilgang: 'pxweb', base_url: 'https://data.ssb.no/api/pxwebapi/v2/' }];
+  const item = resolveOne(
+    '# ssb = ost.connect("ssb")\n' +
+    '# bef = ssb.read("11342", years="2007:2009", indicators=["Personer"], regions=["0", "30"])', registry);
+  assert.ok(!item.error, item.error);
+  assert.equal(item.kind, 'pxweb');
+  assert.ok(/tables\/11342/.test(item.url), item.url);
+  assert.ok(/valueCodes\[Tid\]=2007,2008,2009/.test(item.url), item.url);
+  assert.ok(/valueCodes\[Region\]=0,30/.test(item.url), item.url);
+  assert.ok(/valueCodes\[ContentsCode\]=Personer/.test(item.url), item.url);
+});
+
+test('normalizeKind avleder IKKE pxweb fra andre tilgang-verdier (tilgang: "rest" uten kind → kind===undefined)', () => {
+  const registry = [{ id: 'x', tilgang: 'rest', base_url: 'https://example.org/api/' }];
+  const item = resolveOne('# x = ost.connect("x")\n# y = x.read("foo")', registry);
+  assert.equal(item.kind, undefined);
+});
+
+test('registerkonsistens: enhver tilgang==="pxweb"-oppføring i data/data-sources.json har kind==="pxweb" (vokter neste migrering)', () => {
+  const raw = fs.readFileSync(path.join(__dirname, '../../data/data-sources.json'), 'utf8');
+  const sources = JSON.parse(raw);
+  const utenKind = sources.filter((s) => s.tilgang === 'pxweb' && s.kind !== 'pxweb').map((s) => s.id);
+  assert.deepEqual(utenKind, [], 'pxweb-oppføringer uten kind: "pxweb": ' + utenKind.join(', '));
 });

@@ -241,3 +241,43 @@ test('typemetaTsvFromText: søppel og separator-koder gir ERR, aldri kast', () =
   const evil = JSON.stringify(evil_obj);
   assert.match(PX.typemetaTsvFromText(evil), /^ERR:/);
 });
+
+// ── obligatoriske dimensjoner / 400-oversettelse (spec 2026-07-31-ssb-mandatory-variabler §3) ──
+test('missingMandatory: finner mandatory-dimensjoner uten valg i URL-en', () => {
+  const meta = {
+    role: { time: ['Tid'] },
+    dimension: {
+      Region: { label: 'region', category: { index: { '0301': 0 }, label: { '0301': 'Oslo' } }, extension: { elimination: true } },
+      ContentsCode: { label: 'statistikkvariabel', category: { index: { Folkemengde: 0 }, label: { Folkemengde: 'Personer' } }, extension: { elimination: false } },
+      Tid: { label: 'år', category: { index: { 2024: 0 }, label: { 2024: '2024' } }, extension: { elimination: false } },
+    },
+  };
+  const url = 'https://data.ssb.no/api/pxwebapi/v2/tables/11342?valueCodes[Region]=0301&valueCodes[Tid]=from(2015)';
+  const missing = PX.missingMandatory(url, meta);
+  assert.strictEqual(missing.length, 1);
+  assert.strictEqual(missing[0].dim, 'ContentsCode');
+  assert.deepStrictEqual(missing[0].codes, [{ code: 'Folkemengde', label: 'Personer' }]);
+});
+
+test('missingMandatory: elimination mangler → fallback ContentsCode+tid; alt valgt → tom', () => {
+  const meta = {
+    role: { time: ['Tid'] },
+    dimension: {
+      ContentsCode: { label: 'v', category: { index: { A: 0 }, label: { A: 'a' } } },
+      Tid: { label: 'år', category: { index: { 2024: 0 }, label: {} } },
+    },
+  };
+  assert.strictEqual(PX.missingMandatory('https://x/t?x=1', meta).length, 2);
+  assert.strictEqual(PX.missingMandatory(
+    'https://x/t?valueCodes[ContentsCode]=A&valueCodes[Tid]=top(5)', meta).length, 0);
+});
+
+test('mandatoryErrorMessage: nevner dim, read-syntaks og koder', () => {
+  const msg = PX.mandatoryErrorMessage('11342', [
+    { dim: 'ContentsCode', label: 'statistikkvariabel', codes: [{ code: 'Folkemengde', label: 'Personer' }] },
+  ]);
+  assert.match(msg, /11342/);
+  assert.match(msg, /ContentsCode/);
+  assert.match(msg, /indicators=/);
+  assert.match(msg, /Folkemengde \(Personer\)/);
+});

@@ -328,7 +328,23 @@
           if (expA.error) throw new Error(expA.error);
           item = Object.assign({}, item, { url: expA.url });
         }
-        var fetchedPx = await fetchBytes(Object.assign({}, item, { url: PX.dataUrlFor(item.kind, item.url) }));
+        var fetchedPx;
+        try {
+          fetchedPx = await fetchBytes(Object.assign({}, item, { url: PX.dataUrlFor(item.kind, item.url) }));
+        } catch (ePx) {
+          // 400-oversettelse (spec 2026-07-31): «Missing selection» er den
+          // målte hovedfeilen — oversett til en reparérbar melding med
+          // gyldige koder, KUN på feilveien (én ekstra metadata-henting).
+          var er400 = item.kind === 'pxweb' && /(HTTP|proxy) 400 /.test(String(ePx && ePx.message));
+          if (!er400) throw ePx;
+          var missingPx = [];
+          try {
+            var mBytes = await fetchBytes(Object.assign({}, item, { url: PX.metadataUrl(item.url) }));
+            missingPx = PX.missingMandatory(item.url, JSON.parse(new TextDecoder().decode(mBytes.buf)));
+          } catch (eMeta) { throw ePx; }   // metadata-feil → original feil
+          if (!missingPx.length) throw ePx;
+          throw new Error(PX.mandatoryErrorMessage(item.table || item.alias, missingPx));
+        }
         var dsPx = JSON.parse(new TextDecoder().decode(fetchedPx.buf));
         var csvPx = PX.columnsToCsv(PX.columnsFromJsonStat(dsPx));
         // Typet kanonisk vei (plan 2026-07-27): CSV-en mister typesystemet

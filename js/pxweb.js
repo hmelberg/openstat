@@ -322,13 +322,58 @@
     return null;
   }
 
+  // Obligatoriske dimensjoner (spec 2026-07-31-ssb-mandatory-variabler):
+  // PxWeb v2 400-er på filtrerte spørringer uten valg for alle
+  // elimination=false-dimensjoner. Ren analyse av tabell-URL + metadata —
+  // node-testet; data-loader bruker den KUN på 400-feilveien.
+  function missingMandatory(url, meta) {
+    var q = String(url || '');
+    var chosen = {};
+    var re = /[?&]valueCodes\[([^\]]+)\]=/g;
+    var m;
+    while ((m = re.exec(q))) chosen[m[1]] = true;
+    var timeDims = ((meta || {}).role || {}).time || [];
+    var dims = (meta || {}).dimension || {};
+    var out = [];
+    Object.keys(dims).forEach(function (id) {
+      if (chosen[id]) return;
+      var d = dims[id] || {};
+      var elim = (d.extension || {}).elimination;
+      var mandatory = elim === undefined
+        ? (id === 'ContentsCode' || timeDims.indexOf(id) >= 0)
+        : elim === false;
+      if (!mandatory) return;
+      var labels = (d.category || {}).label || {};
+      var codes = categoryCodes(d).slice(0, 10).map(function (c) {
+        return { code: c, label: labels[c] || c };
+      });
+      out.push({ dim: id, label: d.label || id, codes: codes });
+    });
+    return out;
+  }
+
+  function mandatoryErrorMessage(table, missing) {
+    var deler = (missing || []).map(function (mm) {
+      var syntaks = mm.dim === 'ContentsCode' ? 'indicators=["<kode>"]'
+        : mm.dim === 'Tid' ? 'years="<fra:til>"'
+        : 'filters={"' + mm.dim + '": "<kode>"}';
+      var koder = mm.codes.map(function (c) {
+        return c.code === c.label ? c.code : c.code + ' (' + c.label + ')';
+      }).join(', ');
+      return mm.dim + ' [' + mm.label + '] — bruk ' + syntaks + '; gyldige koder: ' + koder;
+    });
+    return 'PxWeb-tabell ' + table + ' krever valg for obligatoriske dimensjoner ' +
+      '(400 Missing selection). Legg til i read-linjen: ' + deler.join(' | ');
+  }
+
   var api = { dataUrl: dataUrl, metadataUrl: metadataUrl,
               eurostatDataUrl: eurostatDataUrl, dataUrlFor: dataUrlFor,
               columnsFromJsonStat: columnsFromJsonStat, columnsToCsv: columnsToCsv,
               PXWEB_ALL_MAX_CELLS: PXWEB_ALL_MAX_CELLS, expandAllUrl: expandAllUrl,
               typeMetaFromJsonStat: typeMetaFromJsonStat, pyApplyTypemetaSource: pyApplyTypemetaSource,
               metaUrlFor: metaUrlFor, typemetaTsvFromText: typemetaTsvFromText,
-              recognizeUrl: recognizeUrl };
+              recognizeUrl: recognizeUrl,
+              missingMandatory: missingMandatory, mandatoryErrorMessage: mandatoryErrorMessage };
   global.PxWeb = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
