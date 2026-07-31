@@ -1761,8 +1761,12 @@
       var si = document.getElementById('scriptInput');
       var script = (si && si.value || '').trim().slice(0, 20000);
       var lang = (typeof activeEditorMode !== 'undefined' && activeEditorMode) ? activeEditorMode : 'auto';
+      var outputsLine = '';
+      if (outEl && window.mdClassifyAskOutput && window.mdAskManifest) {
+        try { outputsLine = window.mdAskManifest(window.mdClassifyAskOutput(outEl)); } catch (e) {}
+      }
       if (typeof window.mdInterpretResults === 'function') {
-        window.mdInterpretResults({ script: script, output: outText, lang: lang });
+        window.mdInterpretResults({ script: script, output: outText, lang: lang, outputs: outputsLine });
       }
     }
     (function initTolkResultat() {

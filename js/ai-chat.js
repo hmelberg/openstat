@@ -449,6 +449,7 @@
           body: JSON.stringify({
             script: payload.script || '',
             output: payload.output || '',
+            outputs: payload.outputs || '',
             språk: payload.lang || 'auto',
             ui_lang: (window.M2PY_LANG === 'en') ? 'en' : 'no',
             provider: providerConfig() || undefined,
