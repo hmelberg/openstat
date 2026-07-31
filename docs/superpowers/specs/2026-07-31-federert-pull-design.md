@@ -67,6 +67,8 @@ slettet fra openstat; safestat eier den delen.
 - Nesting (federert medlem i federert kilde) avvises.
 - Registermedlemmer med `tier:"node"` avvises med melding som peker til
   safestat («node-medlemmer krever safestat — openstat kjører kun pull»).
+  Det samme gjelder medlemmer merket `level` ≠ `public` — openstat har ingen
+  beskyttelsesnivåer, så en beskyttet-merking er en feilplassert kilde.
 - `overlap`/`entity`/`partition` i registeroppføringer aksepteres og sendes
   gjennom (fremtidssikring, samme som safestat fase 0 — `overlap:"possible"`
   gir kun console.info).
@@ -85,11 +87,15 @@ forkastet: gevinst kun i duckdb-modus, og safestat-pariteten ryker.
 | `js/directive-parser.js` | **Ingen endring** — lister/dicts parses allerede av `parseLiteral`. |
 | `js/data-directives.js` | Resolve-gren: (a) liste/dict som read-target → `{alias, federated:[medlemmer]}`; (b) registeroppføring med `kind:"federated"`/`members` (sjekkes FØR anvil-fallthrough ~linje 536-540); medlemsnavn-regel; node-tier-nekt; nesting-nekt; `secret_key`-arv til medlemmer. |
 | `js/data-loader.js` | Ny gren i `fetchResolvedItems` (før pxweb-grenen ~linje 314): hvert medlem hentes gjennom eksisterende fetch/cache-vei, deretter `deps.unionExec(alias, memberLoads, fedMeta)` → `{alias, bytes, format:'parquet', federated:true}`. Mangler `unionExec` → kast. `resolveSourcesOnly` ~linje 578: `|| r.federated` i pushdown-ekskluderingen. |
-| `index.html` | `__federatedUnion(alias, members, meta)` ved siden av `__ensureDuckDB` (~linje 2170-2380): `registerFileBuffer` per medlem → `Federate.planUnion` → DESCRIBE-runde → `Federate.checkSchemas` → `COPY (unionSql) TO parquet` → `copyFileToBuffer`; `finally` rydder filer + lukker connection. Injiseres som `deps.unionExec` på alle 8 DataLoader-kallstedene (linje ~2779, 2854, 2919, 8097, 9577, 10797, 11318, 12384). `<script src="js/federate.js">`-tag. |
+| `index.html` | `__federatedUnion(alias, members, meta)` ved siden av `__ensureDuckDB` (~linje 2170-2380): `registerFileBuffer` per medlem → `Federate.planUnion` → DESCRIBE-runde → `Federate.checkSchemas` → `COPY (unionSql) TO parquet` → `copyFileToBuffer`; `finally` rydder filer + lukker connection. Injiseres som `deps.unionExec` på alle 9 DataLoader-kallstedene (linje ~2780, 2855, 2920, 8097, 8677, 9577, 10797, 11318, 12384 — identisk deps-objekt alle steder). `<script src="js/federate.js">`-tag. |
 
-Ingen serverendringer: `tilgang:"fil"` er allerede gyldig i
-`netlify/edge-functions/_lib/registry.ts` sin lukkede TILGANG-mengde, og
-federerte kilder skal ikke være søkbare i v1.
+Én liten serverendring: `parseRegistry` i
+`netlify/edge-functions/_lib/registry.ts` krever i dag `base_url` (gyldig URL)
+på alle oppføringer og kjenner ikke `tillit:"demo"` — validatoren utvides til å
+godta `kind:"federated"`-oppføringer uten `base_url` (med ikke-tom
+`members`-liste av `{id, url}` i stedet) og `"demo"` i TILLIT-mengden.
+`tilgang:"fil"` er allerede gyldig, og federerte kilder skal ikke være søkbare
+i v1 (utenfor SEARCHABLE_KINDS).
 
 ## 5. Feilhåndtering (paritet med safestat)
 
