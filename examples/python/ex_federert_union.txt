@@ -1,0 +1,9 @@
+# label: Federert kilde — tre deler som ett datasett
+# Federert kilde (pull+union): tre deler hostes hver for seg, men analyseres
+# som ETT datasett. __member-kolonnen viser hvilken del hver rad kom fra.
+
+# person = ost.read("demo-federert")
+
+print(len(person))
+print(person["__member"].value_counts())
+person.groupby("__member")["income"].describe()

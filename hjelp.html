@@ -524,6 +524,27 @@ df.columns = list(df.columns[:-1]) + ["verdi"]</code></pre>
     </div>
 
     <p>Gammel syntaks (<code># read &lt;url&gt; as &lt;navn&gt;</code>, <code># connect X as ssb, key(ask)</code>, <code># require …</code>) er fjernet uten aliaser og gir en feilmelding med forslag til den nye formen.</p>
+
+    <h3 id="hjelp-federert">Federerte kilder — flere deler som ett datasett</h3>
+    <p>Når samme tabell er delt over flere filer/URL-er (regioner, år, land),
+    kan du lese dem som ÉN kilde: openstat henter alle medlemmene, sjekker at
+    skjemaene er like og unioner dem. Kolonnen <code>__member</code> viser
+    hvilken del hver rad kom fra.</p>
+    <pre># person = ost.read(["data/nord.parquet", "data/vest.parquet"])
+# person = ost.read({"nord": "data/nord.parquet", "vest": "data/vest.parquet"})
+# person = ost.read("demo-federert")   # register-definert federert kilde</pre>
+    <ul>
+      <li>Liste: medlemsnavn i <code>__member</code> tas fra filnavnet (uten
+      endelse) når de er unike — ellers m1, m2, …. Dict: nøklene blir navn.</li>
+      <li>Kun csv/parquet-medlemmer; ulike kolonnesett avvises med klar
+      melding (medlem + manglende/ekstra kolonner).</li>
+      <li>Feiler ett medlem, feiler hele lesingen — aldri stille delresultater.</li>
+      <li><code>secret_key=</code> på linjen gjelder alle medlemmene;
+      <code>format="csv"</code> når URL-ene mangler filendelse.</li>
+      <li>I montering (<code>ost.create</code>/<code>add</code>): bruk
+      register-formen via <code>ost.connect("<i>id</i>")</code> — inline-liste
+      støttes ikke som monteringskilde ennå.</li>
+    </ul>
   </section>
 
   <!-- ── LAGRE OG DELE ── -->

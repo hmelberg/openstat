@@ -354,6 +354,11 @@
       "group": null
     },
     {
+      "file": "python/ex_federert_union.txt",
+      "label": "Federert kilde — tre deler som ett datasett",
+      "group": null
+    },
+    {
       "file": "python/ex_meta_oecd.txt",
       "label": "«# meta» + OECD — data og metadata fra kilden",
       "group": null

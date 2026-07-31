@@ -524,6 +524,29 @@ df.columns = list(df.columns[:-1]) + ["verdi"]</code></pre>
     </div>
 
     <p>The old syntax (<code># read &lt;url&gt; as &lt;name&gt;</code>, <code># connect X as ssb, key(ask)</code>, <code># require …</code>) has been removed without aliases and gives an error message suggesting the new form.</p>
+
+    <h3 id="hjelp-federert">Federated sources — several parts as one dataset</h3>
+    <p>When the same table is split across several files/URLs (regions, years,
+    countries), you can read them as ONE source: openstat fetches every member,
+    checks that the schemas match, and unions them. The <code>__member</code>
+    column shows which part each row came from.</p>
+    <pre># person = ost.read(["data/north.parquet", "data/west.parquet"])
+# person = ost.read({"north": "data/north.parquet", "west": "data/west.parquet"})
+# person = ost.read("demo-federert")   # registry-defined federated source</pre>
+    <ul>
+      <li>List: member names in <code>__member</code> come from the file name
+      (without extension) when unique — otherwise m1, m2, …. Dict: the keys
+      become the names.</li>
+      <li>csv/parquet members only; differing column sets are refused with a
+      clear message (member + missing/extra columns).</li>
+      <li>If one member fails, the whole read fails — never silent partial
+      results.</li>
+      <li><code>secret_key=</code> on the line applies to every member;
+      <code>format="csv"</code> when the URLs lack a file extension.</li>
+      <li>In assembly (<code>ost.create</code>/<code>add</code>): use the
+      registry form via <code>ost.connect("<i>id</i>")</code> — inline lists are
+      not yet supported as assembly sources.</li>
+    </ul>
   </section>
 
   <!-- ── LAGRE OG DELE ── -->
