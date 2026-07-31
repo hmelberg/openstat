@@ -87,6 +87,28 @@ Deno.test("mapToMetaInfo med TableMeta: tom variables-liste er OK", () => {
   assertEquals(mi.variabler, []);
 });
 
+// Federerte oppføringer (kind:"federated") har ingen base_url — mapToMetaInfo
+// bygde tidligere lenker: [{label:"Kilde", url: undefined}] ubetinget, som
+// JSON.stringify stille droppet (kontraktsbrudd mot MetaLenke.url: string).
+const FED_SRC = parseRegistry([{
+  id: "demo-federert", navn: "Demo: federert persontabell (3 deler)",
+  utgiver: "openstat", tillit: "demo", tilgang: "fil",
+  kind: "federated", partition: "horizontal", overlap: "none", cors: true,
+  members: [
+    { id: "nord", url: "data/federert/nord.parquet" },
+    { id: "vest", url: "data/federert/vest.parquet" },
+    { id: "sor", url: "data/federert/sor.parquet" },
+  ],
+}])[0];
+
+Deno.test("mapToMetaInfo: federert kilde uten base_url gir ingen Kilde-lenke (aldri url:undefined i responsen)", () => {
+  const mi = mapToMetaInfo(FED_SRC, null);
+  assertEquals(mi.lenker, []);
+  for (const l of mi.lenker) assertEquals(typeof l.url, "string");
+  const json = JSON.stringify(mi);
+  if (json.includes("undefined")) throw new Error("undefined lekker inn i JSON-responsen:\n" + json);
+});
+
 // isValidTableId — SSRF-gate for /api/metadata sin `table`-parameter (§4):
 // må godta de reelle id-formene på tvers av adaptere, og avvise alt som kan
 // overstyre src.base_url via new URL(tableId, base_url) i statfin-adapteren.

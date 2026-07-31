@@ -80,15 +80,18 @@ function mapVariable(v: TableVariable): MetaVariabel {
  * (register-nivå-fakta) er alltid med, uavhengig av tm.
  */
 export function mapToMetaInfo(src: DataSource, tm: TableMeta | null): MetaInfo {
+  // Federerte oppføringer (kind:"federated") mangler base_url med hensikt
+  // (registry.ts: ikke søkbar, serveren ruter aldri dit) — bygg Kilde-lenken
+  // kun når den finnes, ellers ville MetaLenke.url (påkrevd string) blitt
+  // undefined og stille droppet av JSON.stringify.
+  const lenker: MetaLenke[] = src.base_url ? [{ label: "Kilde", url: src.base_url }] : [];
   return {
     tittel: tm ? tm.title : src.navn,
     felter: [
       { label: "Utgiver", verdi: src.utgiver },
       { label: "Tillit", verdi: src.tillit },
     ],
-    lenker: [
-      { label: "Kilde", url: src.base_url },
-    ],
+    lenker,
     variabler: tm ? tm.variables.map(mapVariable) : [],
   };
 }
