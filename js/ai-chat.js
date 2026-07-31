@@ -439,28 +439,6 @@
         return out.join('\n');
       }
 
-      // Generalizes extractFirstMicrodataBlock's fence-scanning for a single,
-      // explicitly-tagged language (used by the python/r nivå 1-validatorer,
-      // see docs/ROADMAP.md §AI-assistenten). Unlike extractFirstMicrodataBlock
-      // (which sniffs untagged fences for microdata-looking syntax),
-      // kode-svar-v2's python/r svarformat ALWAYS tags its one code fence with
-      // the language (see netlify/edge-functions/kode-svar.ts OUTPUT_PY/OUTPUT_R)
-      // — so a plain tag match is enough, no sniffing needed.
-      const CODE_FENCE_LANGS = { python: ['python', 'py'], r: ['r'] };
-      function extractFirstCodeBlock(textMd, lang) {
-        if (!textMd) return '';
-        const wanted = CODE_FENCE_LANGS[lang] || [lang];
-        const re = /```(\w*)\s*\n([\s\S]*?)```/g;
-        let m;
-        while ((m = re.exec(textMd)) !== null) {
-          const l = (m[1] || '').toLowerCase();
-          if (wanted.indexOf(l) < 0) continue;
-          const body = (m[2] || '').trim();
-          if (body) return body;
-        }
-        return '';
-      }
-
       // Tolk resultater: strøm en tolkning av output (kommandoer + resultater)
       // inn i en assistent-boble. Speiler runFastQuery, men mot /api/tolk-resultat.
       async function runInterpretQuery(payload, thinkingNode, signal) {
