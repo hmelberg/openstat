@@ -690,6 +690,12 @@
         let sources = null;
         let _lastRender = 0;
         let resume = null;
+        // Editor context only rides along when the user ticked "Inkluder
+        // skript fra editor" — matches safestat's sendMessage() (ai-chat.js
+        // ~535). data-svar.ts's questionTurn() only reads this top-level
+        // `script` on round 0 anyway (repair rounds use repair.script
+        // instead), so gating it here can't break the repair loop.
+        const includeScript = dom.aiIncludeScript.checked && dom.scriptInput && dom.scriptInput.value.trim();
         for (let hop = 0; ; hop++) {
           if (hop > 40) throw new Error(T('Avbrutt: svaret ble ikke ferdig etter 40 fortsettelses-runder.'));
           const resp = await fetch('/api/data-svar', {
@@ -701,7 +707,7 @@
               mode,
               depth: aiDepth(),
               available_keys: (window.Keys ? window.Keys.registered() : []),
-              script: scrubScript((dom.scriptInput && dom.scriptInput.value) || ''),
+              script: includeScript ? scrubScript(dom.scriptInput.value) : undefined,
               repair: repair ? { script: repair.script, error: repair.error, round } : undefined,
               resume: resume || undefined,
               provider: providerConfig() || undefined,
