@@ -222,8 +222,11 @@ async function sdmxMetadata(src: DataSource, dataflowKey: string, f: typeof fetc
     if (SDMX_XML_SOURCES.has(src.id)) return ecbMetadata(src, dataflowKey, f, find);
     throw new Error(`sdmx-strukturspørringer er ikke støttet for '${src.id}' ennå (kun XML) — bruk web_search + probe`);
   }
-  const [agencyID, dataflowId] = dataflowKey.split("/");
-  if (!agencyID || !dataflowId) throw new Error(`sdmx table_id må være '<agencyID>/<dataflowId>', fikk '${dataflowKey}'`);
+  // Komma-form er kanonisk (flowRef-en read() tar); slash-form godtas fortsatt
+  // for gamle treff/modell-hukommelse. Ev. versjonsledd (NB,EXR,1.0) ignoreres
+  // — strukturspørringen bruker /latest uansett.
+  const [agencyID, dataflowId] = dataflowKey.split(/[,/]/);
+  if (!agencyID || !dataflowId) throw new Error(`sdmx table_id må være '<agencyID>,<dataflowId>', fikk '${dataflowKey}'`);
   const url = `${src.base_url.replace(/data\/$/, "")}dataflow/${agencyID}/${dataflowId}/latest?references=all`;
   // Verifisert 2026-07-25 (live smoke-test, oppdaget FØR push): OECDs
   // ?references=all svarer 500 "languageTag1" på Denos fetch UTEN en
@@ -271,8 +274,8 @@ async function sdmxMetadata(src: DataSource, dataflowKey: string, f: typeof fetc
 }
 
 async function ecbMetadata(src: DataSource, dataflowKey: string, f: typeof fetch, find?: string): Promise<TableMeta> {
-  const [agencyID, dataflowId] = dataflowKey.split("/");
-  if (!agencyID || !dataflowId) throw new Error(`sdmx table_id må være '<agencyID>/<dataflowId>', fikk '${dataflowKey}'`);
+  const [agencyID, dataflowId] = dataflowKey.split(/[,/]/);
+  if (!agencyID || !dataflowId) throw new Error(`sdmx table_id må være '<agencyID>,<dataflowId>', fikk '${dataflowKey}'`);
   const url = `${src.base_url.replace(/data\/$/, "")}dataflow/${agencyID}/${dataflowId}/latest?references=all`;
   const res = await f(url, { headers: { Accept: "application/xml" } });
   if (!res.ok) throw new Error(`sdmx (xml) metadata for ${dataflowKey} feilet: HTTP ${res.status}`);

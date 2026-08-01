@@ -4,6 +4,7 @@
 // docs/superpowers/specs/2026-07-25-apd-catalog-design.md). Andre tilgang-
 // verdier nås via web_search + probe (prompt-regel).
 import { findSource, isSearchableSource, SDMX_STRUCTURE_ACCEPT, SDMX_XML_SOURCES, type DataSource } from "../registry.ts";
+import { queryWords, scoreSubstring } from "./catalogs/static-catalog.ts";
 import { XMLParser } from "https://esm.sh/fast-xml-parser@4";
 
 export interface CatalogHit {
@@ -248,16 +249,35 @@ async function sdmxSearch(src: DataSource, query: string, f: typeof fetch): Prom
   if (!res.ok) throw new Error(`sdmx dataflow-liste for ${src.id} feilet: HTTP ${res.status}`);
   const json = await res.json();
   const flows = (json?.data?.dataflows ?? []) as Record<string, unknown>[];
-  const q = query.toLowerCase();
+  // Ordbasert scoring (2026-08-01): frase-substring ga 0 treff for naturlige
+  // flerords-spørringer («health spending»-klassen) — samme modell som
+  // worldbankSearch. Id-en er flowRef-en på KOMMA-form (<agency>,<flow>) —
+  // det read() faktisk tar; slash-formen 404-er hos OECD (målt live).
+  return rankFlows(flows, query, (d) => String(d.name ?? "")).map((d) => ({
+    source: src.id,
+    id: `${d.agencyID},${d.id}`,
+    title: String(d.name ?? ""),
+    url: new URL(`${d.agencyID},${d.id}`, src.base_url).toString(),
+  }));
+}
+
+function rankFlows(
+  flows: Record<string, unknown>[],
+  query: string,
+  name: (d: Record<string, unknown>) => string,
+): Record<string, unknown>[] {
+  const words = queryWords(query);
+  const q = query.trim().toLowerCase();
+  // Kortords-spørringer («ai»): queryWords filtrerer alt bort — fall tilbake
+  // til hel-frase-substring i stedet for å returnere blankt.
+  const score = (d: Record<string, unknown>) =>
+    words.length ? scoreSubstring(name(d), words) : (name(d).toLowerCase().includes(q) ? 1 : 0);
   return flows
-    .filter((d) => String(d.name ?? "").toLowerCase().includes(q))
+    .map((d) => ({ d, s: score(d) }))
+    .filter(({ s }) => s > 0)
+    .sort((a, b) => b.s - a.s)
     .slice(0, MAX_HITS)
-    .map((d) => ({
-      source: src.id,
-      id: `${d.agencyID}/${d.id}`,
-      title: String(d.name ?? ""),
-      url: new URL(`${d.agencyID}/${d.id}`, src.base_url).toString(),
-    }));
+    .map(({ d }) => d);
 }
 
 async function ecbSearch(src: DataSource, query: string, f: typeof fetch): Promise<CatalogHit[]> {
@@ -267,14 +287,10 @@ async function ecbSearch(src: DataSource, query: string, f: typeof fetch): Promi
   const xml = await res.text();
   const doc = xmlParser.parse(xml);
   const flows = asArray(doc?.["mes:Structure"]?.["mes:Structures"]?.["str:Dataflows"]?.["str:Dataflow"]) as Record<string, unknown>[];
-  const q = query.toLowerCase();
-  return flows
-    .filter((d) => xmlText(d["com:Name"]).toLowerCase().includes(q))
-    .slice(0, MAX_HITS)
-    .map((d) => ({
-      source: src.id,
-      id: `${d.agencyID}/${d.id}`,
-      title: xmlText(d["com:Name"]),
-      url: new URL(`${d.agencyID}/${d.id}`, src.base_url).toString(),
-    }));
+  return rankFlows(flows, query, (d) => xmlText(d["com:Name"])).map((d) => ({
+    source: src.id,
+    id: `${d.agencyID},${d.id}`,
+    title: xmlText(d["com:Name"]),
+    url: new URL(`${d.agencyID},${d.id}`, src.base_url).toString(),
+  }));
 }

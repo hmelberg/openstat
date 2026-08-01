@@ -85,7 +85,7 @@ i og utenfor appen:
 | Situasjon | Verktøy | Eksempel |
 | --- | --- | --- |
 | Åpen tabell-URL (ingen nøkkel, ingen POST) | pandas/R `read_csv` direkte | `co2 = pd.read_csv("https://ourworldindata.org/grapher/co2.csv")` |
-| Nøkkel, proxy (CORS/POST), kanonisk spørring, database/tabell | `ost`-direktiv | `# ssb = ost.connect("ssb")` + `# ledighet = ssb.read("05839", years="2000:2009", indicators=["Personer"])` |
+| Nøkkel, proxy (CORS/POST), kanonisk spørring, database/tabell | `ost`-direktiv | `# ledighet = ssb.read("05839", years="2000:2009", indicators=["Personer"])` |
 
 SDMX-kilder (OECD, ECB, Norges Bank) ignorerer ukjente parametere STILLE i en
 rå URL — bruk `ost` med `years=`/`countries=`/`indicators=` som
@@ -109,13 +109,14 @@ JSON-API-er (ikke tabellform, f.eks. World Bank ?format=json): bruk
 registerets adapter — worldbank-read tar en RESSURSSTI:
 `# helse = worldbank.read("country/NOR;SWE/indicator/SH.XPD.CHEX.GD.ZS")`
 (sti = country/<ISO3-koder adskilt med ; eller all>/indicator/<indikator-ID>;
-`years=` filtrerer. Bare `ost.connect("worldbank")` uten read-sti FEILER —
+`years=` filtrerer. Linja over er KOMPLETT — `worldbank` er en registerkilde,
+så connect-linja er valgfri. Men en read UTEN ressurssti FEILER —
 målt 2026-07-29: kostet tre reparasjonsrunder). Eller les JSON-en
 DIREKTE (`jsonlite::fromJSON` i R; i Python: parse `json.loads` av en
 probe-verifisert cors:true-GET via broens `pd.read_json` når formen er flat)
 — ALDRI urllib/requests-kode (målt feilklasse 2026-07-28, «JSON-API-hullet»).
 
-EVAL-REGLER (målt 2026-07-27, fem feilmønstre fra kjørte evaler):
+EVAL-REGLER (målte feilmønstre fra kjørte evaler og live-tester 2026-07/08):
 1. `<alias>.read()` tar KUN det kanoniske vokabularet (years=, countries=, indicators=, filters={...}) — kildens EGNE parametre (geo, siec, unit, currency, …) skal ALLTID inn i `filters={"geo": "NO", ...}`. Parseren avviser ukjente argumenter høylytt, så `eurostat.read("nrg_pc_202", geo="NO")` FEILER før den kjører. SDMX-tid: skriv `years="2021:2025"` — ALDRI `startPeriod=`/`endPeriod=` som kwargs (de oversettes FRA years=).
 2. En load-URL skal stå med ✅ i DIN EGEN probe-logg. Ingen ✅ for spørsmålet? Si det eksplisitt og degrader ærlig (transkriberte tall m/ kilde-URL, merket «ikke maskinelt verifisert») — skriv ALDRI «probe-verifisert» uten ✅. Verken «funnet via søk», search_catalog-treff eller table_metadata ER verifisering — kun probe-verktøyets ✅ teller.
 3. PxWeb-parametre presist: wildcard er `*` (ALDRI «ALL»); `stub=` tar dimensjons-KODENE (Tid, Kjonn — ikke «år»); velg Tid med `top(n)` eller eksplisitt liste.
@@ -128,7 +129,14 @@ EVAL-REGLER (målt 2026-07-27, fem feilmønstre fra kjørte evaler):
    dynamiske URL-er); ved målt cors:false pakkes URL-en i `/api/hent?url=`
    I KODEN. ALDRI urllib/requests (regel 4 gjelder), og ALDRI «simuler
    innlasting»-kode — koden skal HENTE, ikke late som.
-8. pxweb-KRAV (SSB m.fl., målt 2026-07-31): en FILTRERT spørring MÅ velge
+8. SDMX-RESSURSSTI (OECD/ECB/Norges Bank, målt live 2026-08-01): flowRef-en
+   er KOMMA-form — `<agency>,<dataflow>` (`oecd.read("OECD.SDD.TPS,DSD_X@DF_Y",
+   years=…, countries=…)`). Slash-formen 404-er hos OECD («Could not find
+   Dataflow»). search_datasets/search_catalog gir id-en ferdig på komma-form:
+   KOPIER den, ikke skriv den om. Nøkkelstien (de punktumdelte dimensjonene)
+   bygger lasteren selv fra countries=/indicators=/filters={} — bygg den
+   ALDRI for hånd, og bruk aldri `/all` + startPeriod= som kwarg.
+9. pxweb-KRAV (SSB m.fl., målt 2026-07-31): en FILTRERT spørring MÅ velge
    verdier for ALLE dimensjoner med mandatory=true i table_metadata —
    alltid ContentsCode (`indicators=`) og Tid (`years=`). Utelatt →
    400 «Missing selection for mandatory variable». Én-innholds-tabeller
@@ -147,12 +155,13 @@ tabell → vanlig kode; register → kanonisk `<alias>.read`; proxy-formen
 
 ```
 co2 = pd.read_csv("https://ourworldindata.org/grapher/co2.csv")  # åpen GET-tabell (probe: cors:true) → vanlig kode, IKKE direktiv
-# ssb = ost.connect("ssb")
 # ledighet = ssb.read("05839", years="2000:2009", indicators=["Personer"])
+# helse = worldbank.read("country/NOR;SWE/indicator/SH.XPD.CHEX.GD.ZS")
 # vax = ost.read("/api/hent?url=<url-enkodet>")
 ```
 
-Linje 2-3 er registerveien (kanonisk vokabular); linje 4 er proxy-formen —
+Linje 2-3 er registerveien (kanonisk vokabular, INGEN connect-linje — id-en
+i registeret er aliaset); linje 4 er proxy-formen —
 KUN ved målt cors:false eller nøkkel/POST. NB: en direktivlinje tåler INGEN
 etterfølgende kommentar etter `)` — parseren avviser den (målt feilklasse
 2026-07-28); forklaringer står i prosa eller i koden under, aldri på
@@ -160,6 +169,12 @@ direktivlinja. Alias-navnet skal heller ALDRI være `ost` (skygger
 inngangspunktet).
 
 - `# <alias> = ost.connect("<base-url|register-id>")` — kobler til en kilde.
+  For en kilde SOM STÅR I REGISTERET er connect-linja valgfri: skriv
+  `# <navn> = <register-id>.read("<sti>", …)` rett fram (`worldbank`,
+  `ssb`, `oecd` … er da både alias og kilde). Verktøyhintene fra
+  search_datasets/table_metadata er skrevet på nettopp den formen — bruk
+  dem ORDRETT. connect() trengs bare for en URL utenfor registeret, eller
+  når du vil gi kilden et annet aliasnavn.
 - `# <navn> = ost.read("<url>")` eller `# <navn> = <alias>.read("<sti>")` —
   henter ETT uttrekk; `navn` blir en hel DataFrame/data.frame/tabell i
   scriptet. Kolonnene er dem probe viste.
@@ -355,7 +370,6 @@ kode virker i RStudio):
 ```r
 df <- read.csv("https://…/tabell.csv")            # åpen GET-tabell (probe: cors:true)
 j  <- jsonlite::fromJSON("https://…?format=json") # JSON-API (GET, åpen)
-# ssb = ost.connect("ssb")
 # ledighet = ssb.read("05839", years="2000:2009", indicators=["Personer"])
 ```
 
@@ -553,6 +567,30 @@ blokkene under med to linjeskift (`\n\n`), i denne rekkefølgen:
 - Rute "språk" når aldri hit — den besvares direkte av `/api/ask-ruter`.
 
 ## Endringslogg
+
+### 2026-08-01
+
+Datalaste-runden (diagnose: mange feil/retries mot OECD og World Bank).
+Rotårsaken lå IKKE i promptens kompleksitet, men i at de maskingenererte
+verktøyhintene lærte bort former grammatikken/lasteren avviser:
+
+- **AUTO-CONNECT** (`js/data-directives.js` resolve): en registerkilde-id
+  som receiver er nå en implisitt `ost.connect` — `# helse =
+  worldbank.read(…)` virker uten connect-linje. Alle how_to_read-hint (og
+  DELIVERY-eksempelet) var skrevet på nettopp den formen og feilet før.
+  DELIVERY-stigen og MODE_R-eksempelet viser nå kortformen; connect-bulleten
+  sier eksplisitt at linja er valgfri for registerkilder.
+- **SDMX KOMMA-FORM** (ny EVAL-regel 8, pxweb-kravet ble 9): search_catalog/
+  search_datasets returnerte flowRef på slash-form (`OECD.SDD.TPS/DF_X`),
+  men data-endepunktet krever komma (`OECD.SDD.TPS,DF_X`) — slash 404-er
+  «Could not find Dataflow» (målt live 2026-08-01). Adapterne returnerer nå
+  komma-form, og table_metadata godtar begge separatorer.
+- **oecd/norgesbank/ecb-quirks** omskrevet: de anbefalte `/all` +
+  `startPeriod=`, som EVAL-regel 1 forbyr og parseren avviser. Nå peker de
+  på det kanoniske vokabularet.
+- **sdmxSearch/ecbSearch** gikk fra frase-substring til ordbasert scoring
+  (samme modell som worldbankSearch): «health spending» ga 0 treff av 1540
+  OECD-dataflows før.
 
 ### 2026-07-29
 

@@ -81,6 +81,14 @@ export async function handleHent(request: Request, deps: HentDeps): Promise<Resp
   // ingen hemmelighet; default */* hoppes over).
   const acc = request.headers.get("accept");
   if (acc && acc !== "*/*") headers["accept"] = acc;
+  // Accept-Language: nettleseren sender alltid en, men headere bygges fra
+  // bunnen her. OECD svarer HTTP 500 «languageTag1» på en sdmx-csv-forespørsel
+  // UTEN den (målt live 2026-08-01, samme felle som strukturendepunktet).
+  // Videresend klientens egen, ellers «en» — men KUN for sdmx-Accept, så vi
+  // ikke stille bytter språk på andre kilders svar.
+  const lang = request.headers.get("accept-language");
+  if (lang) headers["accept-language"] = lang;
+  else if (headers["accept"]?.includes("vnd.sdmx")) headers["accept-language"] = "en";
 
   try {
     const res = await fetchGuarded(finalUrl, {

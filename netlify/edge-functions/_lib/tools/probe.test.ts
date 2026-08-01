@@ -92,3 +92,53 @@ Deno.test("probe no ACAO still counts as CORS:false", async () => {
   });
   assertEquals(r.cors, false);
 });
+
+// --- SDMX-representasjon og XML-vern (2026-08-01, funnet i live smoke-test) ---
+
+const SDMX_REG = [
+  { id: "oecd", navn: "OECD SDMX", utgiver: "OECD", tillit: "offisiell",
+    tilgang: "sdmx", kind: "sdmx", base_url: "https://sdmx.oecd.org/public/rest/data/", cors: true },
+];
+
+Deno.test("probe: sdmx-kilde får CSV-Accept + Accept-Language (samme representasjon som lasteren)", async () => {
+  // Uten Accept svarer OECD med SDMX-ML (XML) — probe rapporterte da et
+  // «skjema» lasteren aldri ser, og OECD 500-er («languageTag1») uten
+  // Accept-Language på Denos fetch. Målt live 2026-08-01.
+  const sett: Record<string, string>[] = [];
+  const fetchImpl = ((_i: string | URL | Request, init?: RequestInit) => {
+    sett.push((init?.headers ?? {}) as Record<string, string>);
+    return Promise.resolve(new Response("DATAFLOW,REF_AREA,TIME_PERIOD,OBS_VALUE\nX,NOR,2020,1.5\n", {
+      status: 200, headers: { "content-type": "application/vnd.sdmx.data+csv" },
+    }));
+  }) as typeof fetch;
+  const r = await probeUrl("https://sdmx.oecd.org/public/rest/data/OECD.X,DF_Y?startPeriod=2020", {
+    fetchImpl, registry: SDMX_REG as never,
+  });
+  assertEquals(sett[0]["Accept"], "application/vnd.sdmx.data+csv;labels=id");
+  assertEquals(sett[0]["Accept-Language"], "en");
+  assertEquals(r.columns, ["DATAFLOW", "REF_AREA", "TIME_PERIOD", "OBS_VALUE"]);
+});
+
+Deno.test("probe: ikke-sdmx URL får ikke sdmx-Accept (uendret oppførsel)", async () => {
+  const sett: Record<string, string>[] = [];
+  const fetchImpl = ((_i: string | URL | Request, init?: RequestInit) => {
+    sett.push((init?.headers ?? {}) as Record<string, string>);
+    return Promise.resolve(new Response("a,b\n1,2\n", { status: 200, headers: { "content-type": "text/csv" } }));
+  }) as typeof fetch;
+  await probeUrl("https://ourworldindata.org/grapher/co2.csv", { fetchImpl, registry: SDMX_REG as never });
+  assertEquals(sett[0]["Accept"], undefined);
+});
+
+Deno.test("probe: XML-svar rapporteres som XML, ikke som én gigantisk CSV-kolonne", async () => {
+  // Målt live: 85 000 tegn SDMX-ML havnet i ÉN columns-oppføring rett inn i
+  // modellens kontekst, med ok:true og note «CSV» — verre enn en ærlig feil.
+  const xml = `<?xml version="1.0" encoding="utf-8"?><message:GenericData xmlns:message="urn:x"><message:DataSet>${"<generic:Obs/>".repeat(50)}</message:DataSet></message:GenericData>`;
+  const r = await probeUrl("https://x.example/data", {
+    fetchImpl: fakeFetch(xml, { "content-type": "application/xml" }),
+  });
+  assertEquals(r.columns, []);
+  assertEquals(r.sampleRows, []);
+  assertEquals(r.ok, false);
+  assertEquals(typeof r.note, "string");
+  assertEquals(r.note!.includes("XML"), true);
+});

@@ -107,3 +107,14 @@ Deno.test("buildSvarSystem(beregning): ingen META_SEARCH/KODEBOK", () => {
   assert(!s.includes("search_datasets"));
   assert(!s.includes("Kodebok"));
 });
+
+Deno.test("buildSvarSystem(data): DELIVERY dokumenterer auto-connect (registerid rett som receiver)", () => {
+  // Kodekontrakt siden 2026-08-01 (DataDirectives.resolve): en registerkilde-id
+  // som receiver er en implisitt connect. Verktøyhintene viser bare read-linja,
+  // så prompten MÅ si at den formen er gyldig — ellers legger modellen til en
+  // overflødig connect-linje eller tror hintet er feil.
+  const s = buildSvarSystem("data", "python", "REG");
+  assert(s.includes("connect-linja er valgfri"));
+  // SDMX-flowRef er komma-form (slash 404-er hos OECD, målt live 2026-08-01)
+  assert(s.includes("<agency>,<dataflow>"));
+});

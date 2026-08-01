@@ -166,6 +166,15 @@ Deno.test("sdmx metadata: kodeliste koblet via enumeration-URN, tidsdimensjon fr
   assertEquals(calls[1], "en");
 });
 
+Deno.test("sdmx metadata: komma-form id (som search_catalog nå returnerer) godtas likt", async () => {
+  // search_catalog gir flowRef-en på komma-form («NB,EXR» — det read() tar);
+  // strukturendepunktet trenger agency/flow som separate path-segmenter.
+  const calls: string[] = [];
+  const meta = await tableMetadata("norgesbank", "NB,EXR", { registry: REG, fetchImpl: fakeSdmxFetch(NB_EXR_DSD_FIXTURE, calls) });
+  assertEquals(meta.title, "Exchange rates");
+  assertEquals(calls[0], "https://data.norges-bank.no/api/dataflow/NB/EXR/latest?references=all");
+});
+
 // --- ecb adapter (XML, Task 1) ---
 
 const ECB_EXR_DSD_XML = `<?xml version='1.0' encoding='UTF-8'?><mes:Structure xmlns:mes="http://www.sdmx.org/resources/sdmxml/schemas/v2_1/message" xmlns:str="http://www.sdmx.org/resources/sdmxml/schemas/v2_1/structure" xmlns:com="http://www.sdmx.org/resources/sdmxml/schemas/v2_1/common"><mes:Structures><str:DataStructures><str:DataStructure agencyID="ECB" id="ECB_EXR1"><com:Name xml:lang="en">Exchange Rates</com:Name><str:DataStructureComponents><str:DimensionList><str:Dimension id="CURRENCY"><str:LocalRepresentation><str:Enumeration><Ref agencyID="ECB" id="CL_CURRENCY" version="1.0" package="codelist"/></str:Enumeration></str:LocalRepresentation></str:Dimension><str:TimeDimension id="TIME_PERIOD"/></str:DimensionList></str:DataStructureComponents></str:DataStructure></str:DataStructures><str:Codelists><str:Codelist id="CL_CURRENCY"><str:Code id="NOK"><com:Name xml:lang="en">Norwegian krone</com:Name></str:Code><str:Code id="USD"><com:Name xml:lang="en">US dollar</com:Name></str:Code></str:Codelist></str:Codelists></mes:Structures></mes:Structure>`;

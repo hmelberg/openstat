@@ -62,7 +62,7 @@
       "LOCATION (ISO3)",
       "TIME_PERIOD"
     ],
-    "quirks": "SDMX 2.1; ressurssti = <agency>,<dataflow>[,<versjon>]/<nøkkel> — nøkkelen er punktumdelt med ett ledd per dimensjon (422-teksten sier antallet, f.eks. «expecting 13»); /all + startPeriod=/endPeriod= virker alltid. Adapteren henter CSV via Accept-header (application/vnd.sdmx.data+csv;labels=id — verifisert 2026-07-25); c[DIM]=filtre ignoreres STILLE (SDMX 3.0-syntaks, API-et er 2.1) — bruk nøkkelstien. CORS: reflektert origin.",
+    "quirks": "SDMX 2.1; ressurssti = <agency>,<dataflow> på KOMMA-form (slash-form 404-er: «Could not find Dataflow», målt 2026-08-01) — search_catalog/search_datasets gir id-en ferdig på denne formen. Utvalg skrives ALLTID med det kanoniske vokabularet (years=/countries=/indicators=/filters={}); lasteren bygger den punktumdelte nøkkelen selv fra kildens egen CSV-header. Skriv ALDRI startPeriod=/endPeriod= som kwarg (parseren avviser dem — years= oversettes til dem) og bygg ikke nøkkelstien for hånd. Adapteren henter CSV via Accept-header (application/vnd.sdmx.data+csv;labels=id — verifisert 2026-07-25); c[DIM]=filtre ignoreres STILLE (SDMX 3.0-syntaks, API-et er 2.1). CORS: reflektert origin.",
     "kind": "sdmx"
   },
   {
@@ -124,7 +124,7 @@
     "join_nokler": [
       "TIME_PERIOD"
     ],
-    "quirks": "SDMX 2.1; ressurssti = <flow>/<nøkkel> (f.eks. EXR/B.USD.NOK.SP) + startPeriod=. Verifisert 2026-07-25: kun Accept application/vnd.sdmx.data+csv;labels=id gir komma-CSV med rene koder — format=csv gir semikolon+labels, Accept text/csv gir XML. Adapteren håndterer dette.",
+    "quirks": "SDMX 2.1; ressurssti = <flow>/<nøkkel> (f.eks. EXR/B.USD.NOK.SP); komma-formen fra search_catalog (NB,EXR) virker også (målt 2026-08-01). Tid og utvalg skrives med det kanoniske vokabularet (years=/countries=/filters={}) — ALDRI startPeriod= som kwarg (parseren avviser den; years= oversettes til den). Verifisert 2026-07-25: kun Accept application/vnd.sdmx.data+csv;labels=id gir komma-CSV med rene koder — format=csv gir semikolon+labels, Accept text/csv gir XML. Adapteren håndterer dette.",
     "kind": "sdmx"
   },
   {
@@ -139,7 +139,7 @@
     "join_nokler": [
       "TIME_PERIOD"
     ],
-    "quirks": "SDMX 2.1; ressurssti = <flow>/<nøkkel> (f.eks. EXR/D.USD.EUR.SP00.A) + startPeriod=. Verifisert 2026-07-25: 406 på sdmx-csv-Accept — adapterens format=csvdata-fallback tar den. CORS *."
+    "quirks": "SDMX 2.1; ressurssti = <flow>/<nøkkel> (f.eks. EXR/D.USD.EUR.SP00.A); komma-formen fra search_catalog (ECB,EXR) virker også (målt 2026-08-01). Tid og utvalg skrives med det kanoniske vokabularet (years=/countries=/filters={}) — ALDRI startPeriod= som kwarg (parseren avviser den; years= oversettes til den). Verifisert 2026-07-25: 406 på sdmx-csv-Accept — adapterens format=csvdata-fallback tar den. CORS *."
   },
   {
     "id": "datanorge",

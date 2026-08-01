@@ -636,12 +636,15 @@
       var rest = slash > 0 ? l.target.slice(slash + 1) : '';
       var conn = byAlias[head];
       if (!conn) {
-        var fsrc = findRegistrySource(registry, head);
-        if (fsrc && (fsrc.kind === 'federated' || fsrc.members)) {
-          return federatedFromRegistry(l.alias, fsrc, rest,
-            { key: lopts.key, format: lopts.format, kind: lopts.kind, exec: lopts.exec, cache: lopts.cache });
+        // Auto-connect (2026-08-01): en registerkilde-id direkte som receiver
+        // er en implisitt «# <id> = ost.connect("<id>")». Feilklassen var målt:
+        // how_to_read-hintene og DELIVERY-eksemplene viser bare read-linja.
+        // Federert håndteres av fellesveien under (findRegistrySource-sjekken).
+        if (findRegistrySource(registry, head)) {
+          conn = { target: head, alias: head, options: {} };
+        } else {
+          return { alias: l.alias, url: '', viaProxy: false, error: 'ukjent kilde-alias «' + head + '» (mangler connect-linje?)' };
         }
-        return { alias: l.alias, url: '', viaProxy: false, error: 'ukjent kilde-alias «' + head + '» (mangler connect-linje?)' };
       }
       var copts = conn.options || {};
       var key = lopts.key || copts.key, exec = lopts.exec || copts.exec, kind = lopts.kind || copts.kind;

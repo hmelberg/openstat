@@ -167,3 +167,33 @@ Deno.test("handleHent: valgfri kilde MED nøkkel → Basic som før", async () =
   await handleHent(reqWithKey("url=" + url, "bruker:K1"), d);
   assertEquals(log[0].headers["authorization"], "Basic " + btoa("bruker:K1"));
 });
+
+Deno.test("hent: sdmx-Accept utløser Accept-Language (OECD 500-fella via proxy)", async () => {
+  // Målt live 2026-08-01: OECD svarer HTTP 500 «languageTag1» på en Deno-fetch
+  // med sdmx-csv-Accept men uten Accept-Language. Nettleseren sender alltid en;
+  // proxyen bygger headere fra bunnen og mistet den.
+  const log: { url: string; headers: Record<string, string> }[] = [];
+  const req = new Request("https://app.test/api/hent?url=" +
+    encodeURIComponent("https://sdmx.oecd.org/public/rest/data/OECD.X,DF_Y"), {
+    headers: { accept: "application/vnd.sdmx.data+csv;labels=id" },
+  });
+  await handleHent(req, { registry: REG, getEnv: () => undefined, fetchImpl: headerLoggingFetch(log) });
+  assertEquals(log[0].headers["accept"], "application/vnd.sdmx.data+csv;labels=id");
+  assertEquals(log[0].headers["accept-language"], "en");
+});
+
+Deno.test("hent: klientens egen accept-language vinner, og vanlig accept gir ingen", async () => {
+  const log: { url: string; headers: Record<string, string> }[] = [];
+  const req = new Request("https://app.test/api/hent?url=" +
+    encodeURIComponent("https://sdmx.oecd.org/public/rest/data/OECD.X,DF_Y"), {
+    headers: { accept: "application/vnd.sdmx.data+csv;labels=id", "accept-language": "nb" },
+  });
+  await handleHent(req, { registry: REG, getEnv: () => undefined, fetchImpl: headerLoggingFetch(log) });
+  assertEquals(log[0].headers["accept-language"], "nb");
+
+  const log2: { url: string; headers: Record<string, string> }[] = [];
+  const req2 = new Request("https://app.test/api/hent?url=" +
+    encodeURIComponent("https://example.org/t.csv"), { headers: { accept: "text/csv" } });
+  await handleHent(req2, { registry: REG, getEnv: () => undefined, fetchImpl: headerLoggingFetch(log2) });
+  assertEquals(log2[0].headers["accept-language"], undefined);
+});

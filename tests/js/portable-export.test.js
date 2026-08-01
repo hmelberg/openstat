@@ -4,6 +4,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 require('../../js/directive-parser.js');
+require('../../js/api-kinds.js');   // lastes før data-directives i appen (kind-normalisering)
 require('../../js/data-directives.js');
 require('../../js/assembly-duckdb.js');
 require('../../js/portable-export.js');
@@ -112,4 +113,32 @@ test('transpile: federert kilde brukt i montering (emitAssembly) kaster ikke', (
   assert.match(out.code, /# federert kilde «src_fed» støttes ikke i portabel eksport ennå — last ned medlemmene manuelt/);
   assert.match(out.code, /# \(datasettet «panel» kunne ikke eksporteres — se advarslene\)/);
   assert.ok(!/undefined/.test(out.code), out.code);
+});
+
+// Auto-connect (2026-08-01): en registerkilde-id som receiver uten connect-
+// linje skal eksportere like fullstendig som den eksplisitte formen — ellers
+// ville hint-formen gitt kjørbar app-kode, men brukket portabelt script.
+const AUTOCONNECT_REG = [
+  { id: 'worldbank', navn: 'World Bank Open Data', utgiver: 'Verdensbanken',
+    tillit: 'offisiell', tilgang: 'rest', kind: 'worldbank',
+    base_url: 'https://api.worldbank.org/v2/', cors: true },
+];
+
+test('transpile: auto-connect (registerid uten connect-linje) gir samme kode som eksplisitt connect', () => {
+  const auto = PE.transpile(
+    '# helse = worldbank.read("country/NOR/indicator/SH.XPD.CHEX.GD.ZS")\nhelse',
+    'python', AUTOCONNECT_REG);
+  const eksplisitt = PE.transpile([
+    '# worldbank = ost.connect("worldbank")',
+    '# helse = worldbank.read("country/NOR/indicator/SH.XPD.CHEX.GD.ZS")',
+    'helse',
+  ].join('\n'), 'python', AUTOCONNECT_REG);
+  assert.deepEqual(auto.errors || [], []);
+  assert.ok(!/undefined/.test(auto.code), auto.code);
+  assert.match(auto.code, /api\.worldbank\.org\/v2\/country\/NOR\/indicator\/SH\.XPD\.CHEX\.GD\.ZS/);
+  // Identisk lastekode; eneste forskjell er den gjengitte connect-kommentaren
+  // (som ikke finnes i auto-formen fordi brukeren aldri skrev den).
+  const lastelinje = (out) => out.code.split('\n').find((l) => l.startsWith('helse = '));
+  assert.equal(lastelinje(auto), lastelinje(eksplisitt));
+  assert.ok(lastelinje(auto), auto.code);
 });

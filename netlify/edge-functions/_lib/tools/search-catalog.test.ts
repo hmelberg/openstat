@@ -286,15 +286,27 @@ function fakeSdmxFetch(payload: unknown, capture: { accept: string; lang: string
 
 Deno.test("sdmxSearch: filtrerer dataflow-navn, bruker kilde-spesifikk Accept-versjon + Accept-Language", async () => {
   const calls: { accept: string; lang: string }[] = [];
-  // NB: "exchange" alene ville også truffet ANN_FX_SPU ("foreign exchange
-  // transactions") — "exchange rates" er spesifikk nok til å skille de to.
+  // Ordscoring rangerer i stedet for å frase-filtrere: "exchange rates" gir
+  // EXR (2 ordtreff) foran ANN_FX_SPU ("foreign exchange…", 1 ordtreff).
   const hits = await searchCatalog("norgesbank", "exchange rates", { registry: REG, origin: "https://app.test", fetchImpl: fakeSdmxFetch(NB_DATAFLOW_FIXTURE, calls) });
-  assertEquals(hits.length, 1);
-  assertEquals(hits[0].id, "NB/EXR");
+  assertEquals(hits.length, 2);
+  // Komma-form (2026-08-01): id-en er flowRef-en read() faktisk tar
+  // (<agency>,<flow> — slash-formen 404-er hos OECD, målt live).
+  assertEquals(hits[0].id, "NB,EXR");
+  assertEquals(hits[0].url, "https://data.norges-bank.no/api/data/NB,EXR");
   assertEquals(calls[0].accept, "application/vnd.sdmx.structure+json;version=1.0.0");
   // Verifisert 2026-07-25: OECDs strukturendepunkt svarer 500 uten denne
   // headeren (Denos fetch, ikke curl) — sendes derfor alltid, for alle sdmx-kilder.
   assertEquals(calls[0].lang, "en");
+});
+
+Deno.test("sdmxSearch: ordbasert scoring — flerords-spørring uten eksakt frasetreff finner riktig flow", async () => {
+  // Frase-substring ga 0 treff for naturlige flerords-spørringer («health
+  // spending»-klassen, målt 2026-08-01) — ordscoring rangerer i stedet.
+  const hits = await searchCatalog("norgesbank", "exchange announcement spu", { registry: REG, origin: "https://app.test", fetchImpl: fakeSdmxFetch(NB_DATAFLOW_FIXTURE) });
+  assertEquals(hits.length, 2);
+  assertEquals(hits[0].id, "NB,ANN_FX_SPU");   // 3 ordtreff, foran EXR (1)
+  assertEquals(hits[1].id, "NB,EXR");
 });
 
 // --- ecb adapter (XML, Task 1) ---
@@ -312,7 +324,7 @@ Deno.test("ecbSearch: parser XML-dataflow-liste, filtrerer på navn, bruker appl
   const calls: { url: string; accept: string }[] = [];
   const hits = await searchCatalog("ecb", "exchange", { registry: REG, origin: "https://app.test", fetchImpl: fakeEcbXmlFetch(ECB_DATAFLOW_XML, calls) });
   assertEquals(hits.length, 1);
-  assertEquals(hits[0].id, "ECB/EXR");
+  assertEquals(hits[0].id, "ECB,EXR");
   assertEquals(hits[0].title, "Exchange Rates");
   assertEquals(hits[0].source, "ecb");
   assertEquals(calls[0].accept, "application/xml");

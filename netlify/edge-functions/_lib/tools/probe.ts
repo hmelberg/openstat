@@ -1,6 +1,12 @@
 // probe tool: the grounding step. Verifies an endpoint exists and reports
 // OBSERVED schema (columns) + CORS, so generation never guesses.
 import { fetchGuarded, isPublicHttpUrl } from "../ssrf.ts";
+import { sourceForUrl, type DataSource } from "../registry.ts";
+
+// Samme Accept som js/api-kinds.js sender ved faktisk lasting. Probe MÅ se den
+// representasjonen lasteren får: uten denne svarer OECD med SDMX-ML, og probe
+// rapporterte et «skjema» (XML-en som én kolonne) scriptet aldri møter.
+const SDMX_DATA_ACCEPT = "application/vnd.sdmx.data+csv;labels=id";
 
 export interface ProbeResult {
   ok: boolean;
@@ -19,7 +25,7 @@ const PROBE_ORIGIN = "https://openstat.app";
 
 export async function probeUrl(
   url: string,
-  deps: { fetchImpl?: typeof fetch } = {},
+  deps: { fetchImpl?: typeof fetch; registry?: DataSource[] } = {},
 ): Promise<ProbeResult> {
   const empty: ProbeResult = {
     ok: false, status: 0, contentType: "", cors: false,
@@ -28,14 +34,23 @@ export async function probeUrl(
   if (!isPublicHttpUrl(url)) {
     return { ...empty, note: "blokkert: ikke en offentlig http(s)-URL" };
   }
+  // DST-klassen av kilder sender ACAO kun når forespørselen har Origin-header.
+  // Uten denne sender vi ingen Origin, så betinget-ACAO-kilder rapporterer falsk cors:false.
+  const headers: Record<string, string> = { Origin: PROBE_ORIGIN };
+  const src = deps.registry ? sourceForUrl(deps.registry, url) : null;
+  if (src?.tilgang === "sdmx") {
+    headers["Accept"] = SDMX_DATA_ACCEPT;
+    // Målt live 2026-08-01: OECDs data-endepunkt svarer HTTP 500 «languageTag1»
+    // på Denos fetch uten en eksplisitt Accept-Language (samme felle som
+    // strukturendepunktet, se search-catalog.ts). Harmløs for de andre.
+    headers["Accept-Language"] = "en";
+  }
   let res;
   try {
     res = await fetchGuarded(url, {
       maxBytes: MAX_PROBE_BYTES,
       timeoutMs: PROBE_TIMEOUT_MS,
-      // DST-klassen av kilder sender ACAO kun når forespørselen har Origin-header.
-      // Uten denne sender vi ingen Origin, så betinget-ACAO-kilder rapporterer falsk cors:false.
-      headers: { Origin: PROBE_ORIGIN },
+      headers,
       fetchImpl: deps.fetchImpl,
     });
   } catch (e) {
@@ -48,11 +63,28 @@ export async function probeUrl(
     return { ...empty, status: res.status, contentType, cors, note: `HTTP ${res.status}` };
   }
   const text = new TextDecoder().decode(res.body);
+  // XML er ALDRI et lastbart tabellskjema her. Uten denne vakten havnet hele
+  // SDMX-ML-dokumentet (målt: 85 000 tegn) i ÉN columns-oppføring, med
+  // ok:true og note «CSV» — modellen fikk ✅ på et skjema den ikke kan bruke,
+  // og konteksten ble spist opp. En ærlig ok:false er langt bedre.
+  if (looksXml(text, contentType)) {
+    return {
+      ...empty, status: res.status, contentType, cors,
+      note: "svaret er XML, ikke en lastbar tabell — be om CSV/JSON " +
+        "(SDMX-kilder: bruk registerets <kilde>.read(...) i stedet for en rå URL)",
+    };
+  }
   const { columns, sampleRows, note } = inferSchema(text, contentType);
   return {
     ok: true, status: res.status, contentType, cors,
     columns, sampleRows, truncated: res.truncated, note,
   };
+}
+
+function looksXml(text: string, contentType: string): boolean {
+  const t = text.trimStart();
+  if (/\b(xml)\b/i.test(contentType) && !contentType.includes("json")) return true;
+  return t.startsWith("<?xml") || /^<[a-zA-Z_][\w.-]*:[\w.-]+[\s>]/.test(t);
 }
 
 function inferSchema(text: string, contentType: string): {

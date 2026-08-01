@@ -186,7 +186,9 @@ export default async (request: Request): Promise<Response> => {
     }
     if (name === "probe") {
       const url = String(input.url ?? "");
-      const r = await probeUrl(url);
+      // registry: probe må sende samme Accept som lasteren for sdmx-kilder,
+      // ellers observerer den XML der scriptet får CSV (målt 2026-08-01).
+      const r = await probeUrl(url, { registry: registry ?? undefined });
       probed.push({ url, ok: r.ok, cors: r.cors, viaProxy: r.ok && !r.cors });
       return JSON.stringify(r);
     }
