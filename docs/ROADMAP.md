@@ -485,6 +485,104 @@ prøve fra PyPI eller GitHub. Nivåene:
         lav relevans). openstat konsumerer uansett ikke Claude Skills —
         alt må bli adapter + registeroppføring + promptregel.
 
+- [ ] **DSL vs. LLM-vaner: skal `ost`-flaten krympe? (diskutert 2026-08-02)**
+      Hans' spørsmål: er en del av datalasteproblemet at vi har funnet opp ETT
+      verktøy som skal passe alle kilder, mens modellene har lært å laste data
+      med standardverktøy (`pd.read_csv`, wbgapi, pandasdmx, requests+json) —
+      så de må «avlære» vaner for å bruke vårt?
+
+      **Diagnose: delvis ja — men det var IKKE årsaken til august-feilene.**
+      - FOR hypotesen (målt, i vår EGEN evallogg): «JSON-API-hullet»
+        (worldbank-JSON løst m/urllib), R-modus-re-fetch (2/2 kjøringer
+        ignorerte direktivvariabelen og hentet på nytt m/read.csv),
+        «simuler innlasting»-forkledningen, og at EVAL-regel 4 (ingen
+        requests/urllib, heller ikke som try/except-fallback) i det hele tatt
+        MÅTTE skrives. Signaturen er tydelig: **eksempler slår regler**, og et
+        nytt eksempel kan vekke vanen i en NABOregel. Slik oppfører en lært
+        vane seg — ikke slik en misforståelse oppfører seg.
+      - MOT at det var årsaken NÅ: alle fem feilene i c1e6f6d/b41147f var
+        interne SELVMOTSIGELSER (hint i slash-form mot laster i komma-form,
+        hint uten connect-linje, quirks mot EVAL-regel 1, dbnomics-feil som
+        pekte på en umulig vei, probe som meldte XML som «CSV»). En modell
+        UTEN vaner, som kun leste dokumentasjonen vår, ville feilet likt —
+        ofte NETTOPP fordi den fulgte instruksjonen.
+
+      **Strukturtallet som rammer inn valget:** 15 av 20 registerkilder er
+      CORS-åpne UTEN nøkkel, altså i prinsippet lesbare med ren pandas over
+      broen. Kun 5 (fred, wikipedia, kaggle, statfin, apd) trenger proxy/
+      nøkkel. For 3/4 av registeret er `ost`-begrunnelsen dermed ikke
+      TRANSPORT, men SEMANTIKK: SDMX 2.1 ignorerer ukjente parametre stille
+      (HTTP 200 med feil data), PxWeb-default-CSV er bred, worldbank/dbnomics
+      er ikke-tabulær JSON. Sikkerhetsegenskapen er reell og skal beholdes —
+      spørsmålet er om den må håndheves med EGEN SYNTAKS, eller om den kan
+      ligge i BROEN.
+
+      **Fire retninger vurdert (Hans' forslag):**
+      1. **Shims for requests/urllib/pyjstat.** Mekanismen er ALLEREDE bevist
+         hos oss: `js/read-bridge.js` monkeypatcher `pd.read_csv`/`read_json`
+         og R-ens `read.csv`/`read.csv2`/`fromJSON` mot
+         `ReadBridge.forPyodideSync`; `pyodide-http` gjør det samme oppstrøms
+         for urllib/requests. MEN en shim gir SYNTAKS, ikke KAPABILITET —
+         CORS gjelder fortsatt, så den virker for de 15 og feiler for de 5.
+         Og broen vår er BEVISST en transport-shim, ikke en policy-motor (se
+         kommentaren i read-bridge: `pd.read_csv` skal være byte-lik naken
+         pandas — overraskelsesprinsippet). Stille proxy-/nøkkelinjeksjon i en
+         requests-shim ville brutt både det og portabiliteten. Tre utveier:
+         (a) transport-only, proxy forblir eksplisitt i koden; (b) policy i
+         shimen + `portable-export` skriver om ved eksport (presedens finnes —
+         vi transpilerer alt direktiver); (c) **shimen kaster en HØYLYTT,
+         handlingsrettet feil** når policy trengs («denne verten krever proxy,
+         skriv X»). (c) er mest i tråd med august-lærdommen: modellen klarer
+         seg når FEILEN navngir en gyldig vei.
+      2. **Ekte spesialbiblioteker i pyodide (wbgapi/pandasdmx/eurostat).**
+         Best vanetreff av alt — det er bokstavelig talt det treningsdataene
+         inneholder. Sterkere argument enn promptgevinsten: **pandasdmx ville
+         ERSTATTE vår håndrullede SDMX-nøkkelbygging** (henter DSD-en og
+         bygger nøkkelen riktig — nøyaktig beskyttelsen `sdmxKeyDims`/
+         `sdmxKeyPath` gir, og som brakk i august-runden). Vedlikeholds-
+         gevinst, ikke bare promptgevinst. **Den gamle forkastingen bør
+         revurderes:** «kjører ikke i wasm-motorene» kan være utdatert hvis
+         http-patchen virker, og «ville brutt eksport-paritet» ser INVERTERT
+         ut — et wbgapi-script kjører UENDRET utenfor appen, altså BEDRE
+         paritet enn et direktiv som må transpileres. Billigste
+         høyverdi-eksperiment: én spike (micropip wbgapi + patchet requests +
+         ett ekte World Bank-kall).
+      3. **Bare gjøre ost-reglene bedre.** Gulvet uansett hva vi velger: hint
+         og feilmeldinger må navngi veier grammatikken FAKTISK tar — det var
+         hele august-runden.
+      4. **Hierarki/eskalering (prøv standard først, fall tilbake til ost).**
+         Den STATISKE varianten finnes alt: grenseregelen + probe. Den
+         DYNAMISKE har en spesifikk brist: den virker for HØYLYTTE feil (404,
+         CORS) og ikke i det hele tatt for STILLE — SDMX svarer 200 med feil
+         data når filtrene ignoreres, ingenting kaster, så try/except-stigen
+         utløses ALDRI. Altså svakest nøyaktig der `ost` tjener til livets
+         opphold (og EVAL-regel 4 forbyr try/except-fallback av en målt
+         grunn). Konklusjon: hold eskalering KUNNSKAPSDREVET (register +
+         probe), aldri UNNTAKSDREVET. Forbedringen som finnes er finere
+         granularitet — avgjøre per FORESPØRSEL om vern trengs, ikke per
+         kildetype (i dag tvinges hele sdmx-familien inn i DSL-en).
+
+      **Foreslått rekkefølge:** spike (2) først — billig, og svaret omformer
+      resten → (1) som generell mekanisme med høylytte lærefeil → (3) som
+      gulv. Gevinsten om (2) holder: for python-modus krymper `ost` mot sin
+      irreduserbare kjerne (de 5 proxy/nøkkelkildene + POST) — liten nok flate
+      til at vanen slutter å slåss.
+
+      **Kostnaden som må veies: MODUS-ASYMMETRI.** Python-bibliotek gjør
+      ingenting for r/duckdb/brython/micropython. Direktivlaget er i dag det
+      ENESTE som oppfører seg likt i alle sju motorene — den uniformiteten er
+      en reell verdi vi ville handlet bort. Henger direkte sammen med
+      «Modustilpassede AI-svar» over: vi ville utdype forskjellen mellom
+      moduser samtidig som vi prøver å gjøre AI-svarene modusbevisste. **De to
+      punktene bør planlegges SAMMEN.** (askstat har kun python/r/duckdb, så
+      asymmetrikostnaden er mindre der.)
+
+      **Hva som ville avgjort spørsmålet empirisk:** tagg hver evalfeil som
+      VANE-KONFLIKT (brukte requests/urllib/en pakke som ikke finnes i wasm/
+      re-fetchet en direktivvariabel) vs. INTERN INKONSISTENS (fulgte et hint
+      eller en feilmelding som var feil). Forholdstallet bestemmer fiksen —
+      i dag resonnerer vi anekdotisk i begge retninger.
+
 ## Output-rendering (lagt til 2026-07-30)
 
 - [ ] **`//`-linjer forsvinner stille fra output** — `formatPreBlockWithCommandHighlight`
