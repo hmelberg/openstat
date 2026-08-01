@@ -198,6 +198,23 @@ i småting-batchen.*
       ikke av URL-en
       (i dag går de til data-svar som er admin-gated — bevisst valg 9/7, men verdt
       å revurdere hvis vanlige brukere trenger AI-hjelp uten egen nøkkel)
+- [ ] **Modustilpassede AI-svar (notert 2026-07-31, etter svar-porten):**
+      `/api/svar` prompter i dag alt som ikke er r/duckdb som python
+      (`coerceDataMode`, `_lib/svar-prompt.ts:6-8`). Tre tilpasninger ønskes:
+      1. **javascript-modus:** egen MODE_JS-blokk slik at svaret kommer som
+         kjørbar js-kode når man spør fra js-modus (i dag får man python
+         som js-motoren ikke kan kjøre).
+      2. **brython/micropython:** variant av python-blokken som sier mer om
+         begrensningene — man har litt av pandas m.m., men ikke alt
+         (micropython smalest); modellen skal ikke anta full pyodide.
+      3. **pyodide (python-modus):** tillegg om at man faktisk kan
+         installere flere bibliotek enn de forhåndslastede hvis det
+         hjelper (micropip: pyodide-pakkelista + rene wheels fra PyPI) —
+         med liste eller lenke,
+         https://pyodide.org/en/stable/usage/packages-in-pyodide.html.
+      Husk speilkravet svar-prompt.ts ↔ prompts/svar.md. askstat har kun
+      python/r/duckdb-moduser, så runden er openstat-spesifikk (men
+      brython/mpy-motorfellene er dokumentert i brython-engine-notatene).
 
 ## Pakkeinstallasjon (python/r)
 
