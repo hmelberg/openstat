@@ -74,7 +74,10 @@ export async function tableMetadata(
         // worldbank/dbnomics har et annet metadata-skjema (ingen
         // dimensjonsliste) — TableMetas indekssignatur gjør castet trygt.
         case "worldbank": return worldbankMetadata(tableId, f) as unknown as Promise<TableMeta>;
-        case "dbnomics": return dbnomicsMetadata(tableId, f) as unknown as Promise<TableMeta>;
+        // find= gjelder også her: dbnomics-dimensjoner kan ha hundrevis av
+        // verdier (weo-country: 196), og uten søk faller landkoden utenfor
+        // taket — da kan modellen ikke bygge filters= (målt live 2026-08-01).
+        case "dbnomics": return dbnomicsMetadata(tableId, f, deps.find) as unknown as Promise<TableMeta>;
         default:
           throw new Error(
             `table_metadata støtter ikke '${sourceId}' ennå — bruk probe på data-URL-en for å se kolonner`,

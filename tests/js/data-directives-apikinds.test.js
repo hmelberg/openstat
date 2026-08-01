@@ -138,16 +138,19 @@ test('sdmx kanonisk: years → startPeriod/endPeriod; countries/filters → need
   assert.ok(/startPeriod=2020/.test(medLand.url));
 });
 
-test('dbnomics kanonisk: years → klient-filter; countries → hard feil med maske-hint', () => {
+test('dbnomics kanonisk: years → klient-filter; countries → hard feil som peker på filters=', () => {
   const aar = resolveOne(
     '# dbn = ost.connect("https://api.db.nomics.world/v22/series", kind="dbnomics")\n' +
     '# vekst = dbn.read("IMF/WEO:latest/NOR.NGDP_RPCH", years="2020:2026")');
   assert.ok(!aar.error, aar.error);
   assert.deepEqual(aar.clientYears, { from: '2020', to: '2026' });
+  // Endret 2026-08-01: feilen pekte før på serie-masken «i stien» — en vei
+  // grammatikken ikke tar. Nå peker den på filters=, som FINNES (dimensions=).
   const land = resolveOne(
     '# dbn = ost.connect("https://api.db.nomics.world/v22/series", kind="dbnomics")\n' +
     '# vekst = dbn.read("IMF/WEO:latest/NOR.NGDP_RPCH", countries=["NOR"])');
-  assert.ok(/mask/.test(land.error) || /stien/.test(land.error), land.error);
+  assert.match(land.error, /filters=/);
+  assert.ok(!/i stien/.test(land.error), land.error);
 });
 
 test('pxweb/eurostat-grenen er uendret', () => {

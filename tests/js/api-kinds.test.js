@@ -96,6 +96,13 @@ test('dbnomicsColumns: num_found > docs → ærlig norsk feil', () => {
   assert.throws(() => AK.dbnomicsColumns(DBN.overflow), /1500 serier/);
 });
 
+// Feilmeldingen MÅ peke på en vei grammatikken faktisk har (2026-08-01):
+// «snevre inn med dimensjonsfiltre i stien» ba om noe parseren avviser.
+test('dbnomicsColumns: overflow-feilen peker på filters=, ikke på serie-masken i stien', () => {
+  assert.throws(() => AK.dbnomicsColumns(DBN.overflow), /filters=/);
+  assert.throws(() => AK.dbnomicsColumns(DBN.overflow), (e) => !/i stien/.test(e.message));
+});
+
 // ── sdmx CSV-header-introspeksjon (spec §3, fase 2): nøkkeldimensjonene er
 // kolonnene mellom prefikset (DATAFLOW | STRUCTURE,STRUCTURE_ID,ACTION | KEY)
 // og TIME_PERIOD — ekte headere fra probene 2026-07-25. ─────────────────────

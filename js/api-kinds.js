@@ -138,7 +138,8 @@
     var docs = series.docs || [];
     if (series.num_found > docs.length) {
       throw new Error('DBnomics-spørringen traff ' + series.num_found + ' serier, men API-et ' +
-        'leverer maks ' + (series.limit || docs.length) + ' — snevre inn med dimensjonsfiltre i stien');
+        'leverer maks ' + (series.limit || docs.length) + ' — snevre inn med ' +
+        'filters={"<dimensjon>": "<kode>"} (table_metadata gir dimensjonskodene)');
     }
     // dimensjonskolonner: union over docs, sortert for stabil orden på tvers
     // av JS/Python (objektnøkkel-orden er ellers innsettingsavhengig)

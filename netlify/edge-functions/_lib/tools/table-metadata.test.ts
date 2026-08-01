@@ -319,3 +319,31 @@ Deno.test("pxwebMetadata: find tømmer IKKE en kort mandatory-dimensjon (Content
   assertEquals(contents.values.length, 4);
   assertEquals(contents.valuesTruncated, false);
 });
+
+Deno.test("dbnomicsMetadata: gir dimensjonsKODER + verdikoder (grunnlaget for filters=)", async () => {
+  // Før returnerte adapteren {lesbar etikett: antall verdier} — modellen kunne
+  // dermed IKKE bygge filters={"weo-country": ["NOR"]}, som er den eneste veien
+  // til et uttrekk under 1000-serie-taket (målt live 2026-08-01).
+  const f = (() => Promise.resolve(new Response(JSON.stringify({
+    datasets: { docs: [{
+      code: "WEO", name: "World Economic Outlook", provider_code: "IMF",
+      dimensions_codes_order: ["weo-country", "weo-subject"],
+      dimensions_labels: { "weo-country": "Country", "weo-subject": "Subject" },
+      dimensions_values_labels: {
+        "weo-country": { NOR: "Norway", SWE: "Sweden" },
+        "weo-subject": { NGDP_RPCH: "GDP growth" },
+      },
+    }] },
+  }), { status: 200 }))) as unknown as typeof fetch;
+  const reg = parseRegistry([{ id: "dbnomics", navn: "DBnomics", utgiver: "Cepremap",
+    tillit: "etablert", tilgang: "rest", kind: "dbnomics",
+    base_url: "https://api.db.nomics.world/v22/series/", cors: true }]);
+  const m = await tableMetadata("dbnomics", "IMF/WEO", { registry: reg, fetchImpl: f }) as Record<string, unknown>;
+
+  const dims = m.dimensjoner as { kode: string; navn: string; verdier: { code: string; label: string }[] }[];
+  assertEquals(dims[0].kode, "weo-country");          // KODEN, ikke etiketten
+  assertEquals(dims[0].navn, "Country");
+  assertEquals(dims[0].verdier[0], { code: "NOR", label: "Norway" });
+  // lesing-hintet skal vise filters=-veien, ikke serie-masken
+  assertEquals(String(m.lesing).includes("filters="), true);
+});

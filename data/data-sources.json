@@ -271,7 +271,7 @@
       "period",
       "series_code"
     ],
-    "quirks": "Ressurssti = <provider>/<dataset>/<serie-maske> (f.eks. IMF/WEO:latest/NOR.NGDP_RPCH); :latest 302-redirecter til versjonert dataset (fetch følger). Adapteren tvinger observations=1 og flater til langt format (series_code + dimensjoner + period + value); maks 1000 serier per kall — flere gir norsk feil med hint. Datafriskhet avhenger av DBnomics' høsting. Utenfor openstat: python-pakken dbnomics, R-pakken rdbnomics."
+    "quirks": "Ressurssti = <provider>/<dataset> (f.eks. IMF/WEO:latest) med filters={\"<dimensjon>\": \"<kode>\"} — oversettes til ?dimensions=<url-enkodet JSON> (verifisert live 2026-08-01: IMF/WEO ufiltrert = 8624 serier mot 1000-taket → hard feil; med filters={\"weo-country\": \"NOR\"} = 44). Dimensjons- og verdikodene kommer fra table_metadata. Serie-masken (IMF/WEO:latest/NOR.NGDP_RPCH) virker fortsatt når man kjenner den eksakte koden. :latest 302-redirecter til versjonert dataset (fetch følger). Adapteren tvinger observations=1 og flater til langt format (series_code + dimensjoner + period + value). years= filtreres KLIENT-side (API-et har ingen tidsvindu-parametre). Datafriskhet avhenger av DBnomics' høsting. Utenfor openstat: python-pakken dbnomics, R-pakken rdbnomics."
   },
   {
     "id": "apd",

@@ -675,3 +675,45 @@ test('resolve: eksplisitt connect-alias vinner over registerid', () => {
   const items = DD.resolve(p, AUTOCONNECT_REG);
   assert.equal(items[0].url, 'https://example.org/annet/sti');
 });
+
+// dbnomics dimensions= (2026-08-01): API-et STØTTER dimensjonsfiltrering via
+// ?dimensions=<url-enkodet JSON med lister>. Før avviste translateCanonical
+// filters= og ba modellen «snevre inn med dimensjonsfiltre i stien» — en
+// instruks grammatikken ikke tillot. Målt live: uten filter traff IMF/WEO
+// 8624 serier mot 1000-taket (hard feil); med filter 44, alle levert.
+const DBN_REG = [{
+  id: 'dbnomics', navn: 'DBnomics', utgiver: 'Cepremap', tillit: 'etablert',
+  tilgang: 'rest', kind: 'dbnomics', base_url: 'https://api.db.nomics.world/v22/series/', cors: true,
+}];
+
+test('translateCanonical dbnomics: filters blir dimensions=<url-enkodet JSON>', () => {
+  const t = DD.translateCanonical('dbnomics', 'IMF/WEO:latest',
+    { filters: { 'weo-country': ['NOR', 'SWE'] } });
+  assert.equal(t.error, undefined);
+  assert.equal(t.params.length, 1);
+  const val = decodeURIComponent(t.params[0].replace(/^dimensions=/, ''));
+  assert.deepEqual(JSON.parse(val), { 'weo-country': ['NOR', 'SWE'] });
+});
+
+test('translateCanonical dbnomics: enkeltverdi pakkes som liste (API-et krever array)', () => {
+  const t = DD.translateCanonical('dbnomics', 'IMF/WEO:latest', { filters: { 'weo-country': 'NOR' } });
+  const val = decodeURIComponent(t.params[0].replace(/^dimensions=/, ''));
+  assert.deepEqual(JSON.parse(val), { 'weo-country': ['NOR'] });
+});
+
+test('translateCanonical dbnomics: countries/indicators peker til filters, ikke til stien', () => {
+  const t = DD.translateCanonical('dbnomics', 'IMF/WEO:latest', { countries: ['NOR'] });
+  assert.ok(t.error, 'countries skal fortsatt avvises (dimensjonsnavn varierer per datasett)');
+  assert.match(t.error, /filters=/);
+  assert.ok(!/i stien/.test(t.error), 'skal IKKE lenger be om noe grammatikken forbyr: ' + t.error);
+});
+
+test('resolve dbnomics: filters + years gir dimensions i URL og klient-årsfilter', () => {
+  const p = DD.parse('# w = dbnomics.read("IMF/WEO:latest", filters={"weo-country": ["NOR"]}, years="2015:2020")');
+  assert.deepEqual(p.errors, []);
+  const item = DD.resolve(p, DBN_REG)[0];
+  assert.equal(item.error, undefined);
+  assert.match(item.url, /^https:\/\/api\.db\.nomics\.world\/v22\/series\/IMF\/WEO:latest\?dimensions=/);
+  assert.deepEqual(JSON.parse(decodeURIComponent(item.url.split('dimensions=')[1])), { 'weo-country': ['NOR'] });
+  assert.deepEqual(item.clientYears, { from: '2015', to: '2020' });
+});
