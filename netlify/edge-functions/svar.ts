@@ -1,7 +1,7 @@
 // /api/svar — samlet ask-pipeline: ETT agentisk løp med run_code som
 // klientutført verktøy. Erstatter data-svar + tolk-ask.
 // Spec: docs/superpowers/specs/2026-07-29-samlet-ask-pipeline-design.md
-import { adminGate, extractByokKey, extractLlmKey } from "./_lib/auth.ts";
+import { adminGate, extractByokKey, extractLlmKey, type IpContext } from "./_lib/auth.ts";
 import { type AgenticResumeState, runAgenticStream } from "./_lib/anthropic.ts";
 import { loadRegistry, renderRegistryBlock } from "./_lib/registry.ts";
 import { makeGuideAttacher } from "./_lib/source-guides.ts";
@@ -52,7 +52,7 @@ function validResumeState(s: AgenticResumeState | undefined): s is AgenticResume
   return typeof s.usage === "object" && s.usage !== null;
 }
 
-export default async (request: Request): Promise<Response> => {
+export default async (request: Request, context: IpContext): Promise<Response> => {
   // Ratelimiten teller SPØRSMÅL: continuation-hops er samme spørsmål, derfor
   // hoppes den over når klienten hevder å fortsette en påbegynt kjøring. Denne
   // avgjørelsen tas FØR body er lest, så den kan ikke selv sjekke at det
@@ -70,7 +70,7 @@ export default async (request: Request): Promise<Response> => {
     allowByok: true,
     allowLlmKey: true,
     skipRateLimit: svarResumeHeader,
-  });
+  }, context);
   if (gateResp) return gateResp;
 
   let body: RequestBody;

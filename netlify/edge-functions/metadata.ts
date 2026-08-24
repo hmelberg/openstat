@@ -5,12 +5,12 @@
 // ingen SSRF-flate utover de allerede registrerte kildene selv.
 // Spec: docs/superpowers/specs/2026-07-25-metadata-sidebar-design.md §4.
 import { checkRateLimit } from "./_lib/rate-limit.ts";
-import { clientIp } from "./_lib/auth.ts";
+import { clientIp, type IpContext } from "./_lib/auth.ts";
 import { findSource, isSearchableSource, loadRegistry, type DataSource } from "./_lib/registry.ts";
 import { tableMetadata, type TableMeta } from "./_lib/tools/table-metadata.ts";
 import { isValidTableId, mapToMetaInfo } from "./_lib/meta-info-map.ts";
 
-export default async (request: Request): Promise<Response> => {
+export default async (request: Request, context: IpContext): Promise<Response> => {
   if (request.method !== "GET") return new Response("Method not allowed", { status: 405 });
 
   const rate = await checkRateLimit("metadata", clientIp(request));
