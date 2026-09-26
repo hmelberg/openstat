@@ -158,3 +158,21 @@ def test_prosa_roeres_ikke(tmp_path):
         "",
     ])
     assert run(tmp_path, src) == src
+
+
+def test_meta_slaas_ikke_sammen_paa_tvers_av_eksempelblokker(tmp_path):
+    # .md/.html har mange uavhengige eksempler: hvert <pre><code>/```-blokk
+    # er sitt eget script. Sammenslåing på tvers slettet senere linjer —
+    # inkludert HTML-taggene rundt dem.
+    out = run(tmp_path, "\n".join([
+        "<pre><code># meta iris første</code></pre>",
+        "Tekst mellom eksemplene.",
+        "<pre><code># meta iris andre</code></pre>",
+        "```",
+        "# meta iris tredje",
+        "```",
+    ]))
+    assert '<pre><code># meta.iris.note = "første"</code></pre>' in out
+    assert '<pre><code># meta.iris.note = "andre"</code></pre>' in out
+    assert '# meta.iris.note = "tredje"' in out
+    assert out.count("meta.iris.note") == 3

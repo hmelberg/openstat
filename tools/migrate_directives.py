@@ -286,12 +286,23 @@ def migrate_text(text: str, warn) -> tuple[str, int]:
     out: list[str | None] = list(lines)
     changed = 0
 
-    # Runde 1: alt bortsett fra meta, som må slås sammen på tvers av linjer.
-    meta_groups: dict[tuple[str, str | None, str], list] = {}
-    meta_first: dict[tuple[str, str | None, str], int] = {}
-    meta_order: list[tuple[str, str | None, str]] = []
+    # Runde 1: alt bortsett fra meta, som må slås sammen på tvers av linjer —
+    # men bare innenfor SAMME scriptblokk. .md/.html-dokumenter har mange
+    # uavhengige eksempler; å slå sammen på tvers av dem flyttet notater til
+    # feil eksempel og slettet de senere linjene (med <pre><code>-taggene).
+    meta_groups: dict[tuple[int, str, str | None, str], list] = {}
+    meta_first: dict[tuple[int, str, str | None, str], int] = {}
+    meta_order: list[tuple[int, str, str | None, str]] = []
 
+    block = 0
     for i, line in enumerate(lines):
+        low = line.lower()
+        fence = line.lstrip().startswith(('```', '~~~'))
+        if fence or '<pre' in low or '<code' in low:
+            block += 1
+        cur_block = block
+        if fence or '</pre>' in low or '</code>' in low:
+            block += 1
         parts = split_line(line)
         if not parts:
             continue
@@ -302,7 +313,7 @@ def migrate_text(text: str, warn) -> tuple[str, int]:
         mm = META_RE.match(body)
         if mm:
             target, variable, kind, payload = parse_meta(mm)
-            key = (target, variable, kind)
+            key = (cur_block, target, variable, kind)
             if key not in meta_groups:
                 meta_groups[key] = []
                 meta_first[key] = i
@@ -326,7 +337,7 @@ def migrate_text(text: str, warn) -> tuple[str, int]:
 
     # Runde 2: én meta-linje per (mål, variabel, kind), der den første sto.
     for key in meta_order:
-        target, variable, kind = key
+        _, target, variable, kind = key
         i = meta_first[key]
         prefix, _, trail = split_line(lines[i])
         path = target if variable is None else '%s.%s' % (target, variable)
