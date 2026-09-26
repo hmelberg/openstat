@@ -930,7 +930,7 @@
                activeFlag: false, lastSerialized: null,
                plan: [], runSinks: null, runPlan: null, trailing: null, chip: null,
                tickHandle: null, lastUserInput: 0,
-               lastTickValue: null, lastTickTime: 0, htmlTrusted: true,
+               lastTickValue: null, lastTickTime: 0, htmlTrusted: true, docGen: 0,
                // Fase B1 Task 5: per-celle kjøring — "endret siden sist kjørt"
                // (stale) og "har kjørt OK minst én gang" (ranOk), keyet på
                // celleindeks. Sesjonschip/Restart-knapp (NB.sessionChip/
@@ -977,6 +977,9 @@
     // Uten flagget (lokalt/eksempler i repoen) er dokumentet brukerens eget og
     // fullt betrodd. Nytt dokument erstatter forrige tillitstilstand.
     C.contentLoaded = function (opts) {
+      // Nytt dokument: kjøringer startet i det forrige skal ikke skrive
+      // resultatet sitt inn i en celle med samme indeks her (se runCell).
+      NB.docGen++;
       // Nytt dokument → gammel sesjon er ugyldig (final-review F1): en celle
       // kjørt i dokument B skal aldri kunne gjenbruke e/_g/loads fra
       // dokument A. Må kalles FØR render()/exit() under, ellers rekker en
@@ -2067,13 +2070,17 @@
       // videre). Deaktiverte tidligere OGSÅ Restart-knappen (setNbButtonsDisabled)
       // og oppdaterte sesjonschippen — begge fjernet 2026-07-17.
       setRunningUi(idx, true);
+      var gen = NB.docGen;
       return global.mdRunNotebookCell(payload).then(function (res) {
+        if (gen !== NB.docGen) return;
         renderCellResult(idx, out, res);
         C._afterCellRun(idx, !(res && res.error));
       }, function (err) {
+        if (gen !== NB.docGen) return;
         renderCellResult(idx, out, { error: (err && err.message) || String(err) });
         C._afterCellRun(idx, false);
       }).then(function () {
+        if (gen !== NB.docGen) return;
         setRunningUi(idx, false);
         // Skjema-stripe-rekkefølge (widget-plassering-fasen): IKKE lenger en
         // reorder-reassert her — js/param-forms.js og js/ui.js setter nå

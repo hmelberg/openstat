@@ -363,11 +363,14 @@
   }
 
   // Kontrakt: resolver ALLTID {text, error} — aldri reject (som Brython).
+  // loads === null: ikke bind datasett (notatbok-celler — ensure() har
+  // allerede bundet dem én gang, slik Brython/MicroPython gjør; å binde på
+  // nytt per celle nullstilte f.eks. «df = df.filter(…)» fra forrige celle).
   async function runIn(scope, script, loads) {
     var buf = [], restore = null;
     try {
       await ensureLibs(scanLibs(script));
-      await bindLoads(scope, loads);
+      if (loads !== null) await bindLoads(scope, loads);
       await bindDuckUses(scope, script);
       var code = prepass(script);
       restore = captureConsole(buf);
@@ -391,8 +394,13 @@
     // DuckDB-pushdownen bindes som arquero-tabeller, samme vei som # load.
     var _extra = (opts && opts.extraDatasets) || null;
     if (_extra && Object.keys(_extra).length) {
-      await ensureLibs(['aq']);
-      for (var _ek in _extra) scope.vars[_ek] = tableFromSpec({ kind: 'columns', payload: _extra[_ek] });
+      // Samme kontrakt som runIn: resolve {text, error}, aldri reject.
+      try {
+        await ensureLibs(['aq']);
+        for (var _ek in _extra) scope.vars[_ek] = tableFromSpec({ kind: 'columns', payload: _extra[_ek] });
+      } catch (e) {
+        return { text: '', error: (e && e.message) || String(e) };
+      }
     }
     return runIn(scope, script, (opts && opts.loads) || []);
   }
@@ -410,7 +418,7 @@
     if (!__nb.live) {
       return { text: '', error: 'notebookSession.ensure() må kalles før runCell()' };
     }
-    return runIn(__nb.scope, source, []);
+    return runIn(__nb.scope, source, null);
   }
   async function nbReset() { __nb.live = false; __nb.scope = null; }
   function nbInvalidate() { __nb.live = false; __nb.scope = null; }

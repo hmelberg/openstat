@@ -31,6 +31,46 @@ def _as_list(x):
     return list(x)
 
 
+_NAN_MSG = ('NaNs were detected in the dataset. Try using pd.isnull to find '
+            'the problematic values.')
+
+
+def _is_missing(v):
+    if v is None:
+        return True
+    if type(v).__name__ in ('NAType', 'NaTType'):
+        return True
+    try:
+        return isinstance(v, float) and math.isnan(v)
+    except TypeError:
+        return False
+
+
+def _durations(values):
+    """Varigheter som float — NaN/inf avvises som i lifelines (en NaN ble
+    ellers sitt eget «tidspunkt» i den sorterte tabellen)."""
+    out = []
+    for t in _as_list(values):
+        if _is_missing(t):
+            raise TypeError(_NAN_MSG)
+        f = float(t)
+        if math.isnan(f) or math.isinf(f):
+            raise TypeError(_NAN_MSG)
+        out.append(f)
+    return out
+
+
+def _events(values):
+    """Hendelsesflagg som 0/1 — en NaN er sann i Python og ble talt som
+    observert hendelse."""
+    out = []
+    for e in _as_list(values):
+        if _is_missing(e):
+            raise TypeError(_NAN_MSG)
+        out.append(1 if e else 0)
+    return out
+
+
 # ---- numerikk -----------------------------------------------------------
 
 def _norm_ppf(p):
@@ -181,11 +221,11 @@ def _inv(A):
 def _survival_table(durations, events):
     """Rader per unikt tidspunkt (med t=0-entrance-raden, som lifelines):
     {'t','removed','observed','censored','entrance','at_risk'}."""
-    T = [float(t) for t in _as_list(durations)]
+    T = _durations(durations)
     if events is None:
         E = [1] * len(T)
     else:
-        E = [1 if e else 0 for e in _as_list(events)]
+        E = _events(events)
     if len(T) != len(E):
         raise ValueError('durations og event_observed har ulik lengde')
     agg = {}
@@ -421,10 +461,10 @@ class StatisticalResult:
 
 
 def multivariate_logrank_test(event_durations, groups, event_observed=None):
-    T = [float(t) for t in _as_list(event_durations)]
+    T = _durations(event_durations)
     G = _as_list(groups)
     E = ([1] * len(T) if event_observed is None
-         else [1 if e else 0 for e in _as_list(event_observed)])
+         else _events(event_observed))
     labels = []
     for g in G:
         if g not in labels:
@@ -530,8 +570,8 @@ class CoxPHFitter:
             raise ValueError('duration_col og event_col må oppgis')
         cols, data = _df_to_columns(df)
         covs = [c for c in cols if c != duration_col and c != event_col]
-        T = [float(t) for t in data[duration_col]]
-        E = [1 if e else 0 for e in data[event_col]]
+        T = _durations(data[duration_col])
+        E = _events(data[event_col])
         n = len(T)
         p = len(covs)
         X = []
@@ -545,6 +585,8 @@ class CoxPHFitter:
                     raise ValueError('Kovariaten «' + str(c) + '» er ikke '
                                      'numerisk — dummy-kod kategoriske '
                                      'kolonner først (f.eks. 0/1)')
+                if math.isnan(float(v)) or math.isinf(float(v)):
+                    raise TypeError(_NAN_MSG)
                 row.append(float(v))
             X.append(row)
         # mean-sentrering for numerisk stabilitet (Cox er lokasjonsinvariant)

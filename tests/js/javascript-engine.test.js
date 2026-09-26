@@ -198,6 +198,24 @@ test('bindLoads: csv-load blir arquero-tabell i scopet (stubbet aq)', async () =
   } finally { delete globalThis.aq; delete globalThis.op; }
 });
 
+test('notebookSession: datasett bindes én gang — celle 2 ser celle 1s omtilordning', async () => {
+  globalThis.aq = {
+    fromCSV: (txt) => ({ _csv: txt, toHTML: () => '', objects: () => [], numRows: () => 1 }),
+    from: (rows) => ({ rows }), table: (cols) => ({ cols }), op: {}
+  };
+  // Publisert dokument: datasettet ligger innbakt som jsdata_-tag.
+  globalThis.document = { querySelectorAll: () => [
+    { id: 'jsdata_df', textContent: JSON.stringify({ kind: 'csv', payload: 'a\n1' }) }] };
+  const sess = E.notebookSession;
+  try {
+    await sess.ensure([]);
+    await sess.runCell('df = "filtrert";');
+    const r = await sess.runCell('df');
+    assert.strictEqual(r.error, null);
+    assert.strictEqual(r.text, 'filtrert');
+  } finally { await sess.reset(); delete globalThis.aq; delete globalThis.op; delete globalThis.document; }
+});
+
 // ── Publisering: datasett-spec-cache + innbakte jsdata_-tags ──────────────
 
 test('getLastDatasetSpec: caches csv-load fra siste kjøring', async () => {

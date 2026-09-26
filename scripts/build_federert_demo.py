@@ -7,7 +7,9 @@ import pathlib
 import pandas as pd
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-df = pd.read_csv(ROOT / "data" / "person_year_sample.csv")
+# kommune er en kode ("0230"), ikke et tall — uten dtype ble den float64 og
+# mistet ledende null (0230 -> 230.0).
+df = pd.read_csv(ROOT / "data" / "person_year_sample.csv", dtype={"kommune": str})
 out = ROOT / "data" / "federert"
 out.mkdir(parents=True, exist_ok=True)
 n = len(df)
