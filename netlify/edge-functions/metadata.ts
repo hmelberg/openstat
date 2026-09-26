@@ -13,7 +13,7 @@ import { isValidTableId, mapToMetaInfo } from "./_lib/meta-info-map.ts";
 export default async (request: Request, context: IpContext): Promise<Response> => {
   if (request.method !== "GET") return new Response("Method not allowed", { status: 405 });
 
-  const rate = await checkRateLimit("metadata", clientIp(request));
+  const rate = await checkRateLimit("metadata", clientIp(request, context));
   if (!rate.allowed) {
     return new Response("Rate limited", {
       status: 429,
