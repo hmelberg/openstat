@@ -8114,10 +8114,10 @@ async def _run_duck_sql(_sql, _fresh=True):
             if _sql.strip():
                 await _duck_js.__duck.exec(_sql)
             if _preview:
-                _cnt = (await _duck_js.__duck.query("SELECT count(*) AS n FROM (" + _preview + "\n) _q")).to_py()
+                _cnt = (await _duck_js.__duck.query("SELECT count(*) AS n FROM (" + _preview + "\\n) _q")).to_py()
                 _nlist = _cnt.get("n") or [0]
                 _total = int(_nlist[0]) if _nlist else 0
-                _cols = (await _duck_js.__duck.query("SELECT * FROM (" + _preview + "\n) _q LIMIT 400")).to_py()
+                _cols = (await _duck_js.__duck.query("SELECT * FROM (" + _preview + "\\n) _q LIMIT 400")).to_py()
                 _pv = pd.DataFrame(_cols)
                 _out.append(_pv.to_string(index=False) if len(_pv) else "(0 rader)")
                 if _total > 400:
