@@ -160,7 +160,7 @@ Deno.test("runGate: expired cache entry triggers re-validation", async () => {
 });
 
 // Admin gate tests
-import { makeAnvilUserFetcher, runAdminGate, type AdminGateDeps } from "./auth.ts";
+import { makeAnvilUserFetcher, makeAnvilValidator, runAdminGate, type AdminGateDeps } from "./auth.ts";
 
 function adminDeps(over: Partial<AdminGateDeps> = {}): AdminGateDeps & { calls: { fetchUser: number } } {
   const calls = { fetchUser: 0 };
@@ -212,6 +212,17 @@ Deno.test("makeAnvilUserFetcher maps /auth/me shape", async () => {
   assertEquals(await mk({ user: { is_admin: false } })("t"), { ok: true, isAdmin: false });
   assertEquals(await mk({ user: {} })("t"), { ok: true, isAdmin: false });
   assertEquals(await mk({}, 401)("t"), { ok: false, isAdmin: false });
+});
+
+Deno.test("makeAnvilValidator: user/service_token ok, anonymous principal avvises", async () => {
+  const mk = (payload: unknown, status = 200) =>
+    makeAnvilValidator("https://anvil.test/auth/me", 1000,
+      (() => Promise.resolve(new Response(JSON.stringify(payload), { status }))) as typeof fetch);
+  assertEquals(await mk({ user: { email: "a@b.no" } })("t"), true);
+  assertEquals(await mk({ principal_kind: "service_token" })("t"), true);
+  assertEquals(await mk({ principal_kind: "anonymous" })("t"), false);
+  assertEquals(await mk({ principal_kind: "anonymous", user: null })("t"), false);
+  assertEquals(await mk({ user: { email: "a@b.no" } }, 401)("t"), false);
 });
 
 // ── BYOK: user-supplied Anthropic key ──

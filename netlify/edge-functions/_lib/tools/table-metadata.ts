@@ -5,6 +5,7 @@ import { XMLParser } from "https://esm.sh/fast-xml-parser@4";
 import { worldbankMetadata } from "./catalogs/worldbank.ts";
 import { dbnomicsMetadata } from "./catalogs/dbnomics.ts";
 import { isValidTableId } from "../meta-info-map.ts";
+import { guardedFetchImpl } from "../ssrf.ts";
 
 export interface TableVariable {
   code: string;
@@ -67,7 +68,8 @@ export async function tableMetadata(
   // table_id rett hit): adapterne bygger URL-er av id-en, og en absolutt/
   // protokoll-relativ id ville overstyrt vertsnavnet.
   if (!isValidTableId(tableId)) throw new Error(`ugyldig table_id '${tableId.slice(0, 80)}'`);
-  const f = deps.fetchImpl ?? fetch;
+  // Timeout + byte-tak + SSRF-sjekk per hop (se guardedFetchImpl i ssrf.ts).
+  const f = guardedFetchImpl(deps.fetchImpl ?? fetch);
   switch (src.tilgang) {
     case "pxweb": return pxwebMetadata(src, tableId, f, deps.find);
     case "sdmx": return sdmxMetadata(src, tableId, f, deps.find);

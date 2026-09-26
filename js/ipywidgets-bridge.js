@@ -152,6 +152,14 @@
       return true;
     }
 
+    // discardPending(commId) — dropp en eventuell bufret comm_msg-kø STILLE
+    // (ingen advarsel). Brukes når en comm_close kom før comm_open-håndteringen
+    // rakk å opprette shimmen, og åpningen derfor droppes helt (se
+    // openCommAsync under) — køen ville ellers ligget igjen for alltid.
+    function discardPending(commId) {
+      if (pending[commId]) delete pending[commId];
+    }
+
     function reset() {
       shims = {};
       pending = {};
@@ -172,6 +180,7 @@
       onClose: onClose,
       route: route,
       close: close,
+      discardPending: discardPending,
       reset: reset,
       targetOf: targetOf,
       ids: ids
@@ -197,6 +206,96 @@
   }
 
   IpwBridge._closeAllComms = closeAllComms;
+
+  // ---------- ren halvdel: comm_open-sekvensering ----------
+  // comm_open håndteres ASYNKRONT (ensure().then → handle_comm_open), mens
+  // comm_close/reset() er SYNKRONE. Uten bokføring ble (a) en comm_close som
+  // kom før åpningen var ferdig tapt («ukjent comm_id» — modellen lekket), og
+  // (b) en reset() mens en åpning ventet lot den gamle widgeten registrere
+  // seg i den NYE manageren. Trackeren holder de pågående åpningene
+  // (commId → rec) og en generasjonsteller som reset() bumper.
+  function createOpenTracker() {
+    var gen = 0;
+    var inflight = {}; // commId -> { commId, gen, closed, closeMsg }
+
+    function begin(commId) {
+      var rec = { commId: commId, gen: gen, closed: false, closeMsg: null };
+      inflight[commId] = rec;
+      return rec;
+    }
+    // markClosed → true hvis en åpning pågår for commId (lukkingen utsettes
+    // da til åpningen er ferdig); false ellers (kalleren lukker som vanlig).
+    function markClosed(commId, msg) {
+      var rec = Object.prototype.hasOwnProperty.call(inflight, commId) ? inflight[commId] : null;
+      if (!rec) return false;
+      rec.closed = true;
+      rec.closeMsg = msg;
+      return true;
+    }
+    function isStale(rec) {
+      return rec.gen !== gen;
+    }
+    function settle(rec) {
+      if (inflight[rec.commId] === rec) delete inflight[rec.commId];
+    }
+    function reset() {
+      gen++;
+      inflight = {};
+    }
+    function pendingIds() {
+      return Object.keys(inflight);
+    }
+    return { begin: begin, markClosed: markClosed, isStale: isStale, settle: settle, reset: reset, pendingIds: pendingIds };
+  }
+
+  // openCommAsync(tracker, registry, commId, getManager, doOpen) → Promise<model|null>.
+  // getManager() → Promise<manager>; doOpen(manager) → (Promise<>)model — i
+  // browseren _makeShim + manager.handle_comm_open. Ren (injiserte avhengig-
+  // heter), så sekvenseringen er node-testbar:
+  //   - reset() før manageren er klar → åpningen droppes (aldri inn i ny manager).
+  //   - comm_close før manageren er klar → åpningen droppes, bufrede
+  //     comm_msg kastes stille.
+  //   - comm_close MENS doOpen pågår → registry.close kjøres når modellen
+  //     finnes (dens on_close-lytter er da registrert, så den rydder seg selv).
+  //   - reset() MENS doOpen pågår → modellen lukkes lokalt (close(true):
+  //     comm-en er allerede død, ingen melding til kernel).
+  function openCommAsync(tracker, registry, commId, getManager, doOpen) {
+    var rec = tracker.begin(commId);
+    var opened = false;
+    return Promise.resolve().then(getManager).then(function (manager) {
+      if (tracker.isStale(rec)) return null;
+      if (rec.closed) {
+        tracker.settle(rec);
+        registry.discardPending(commId);
+        return null;
+      }
+      opened = true;
+      return Promise.resolve(doOpen(manager)).then(function (model) {
+        if (tracker.isStale(rec)) {
+          if (model && typeof model.close === 'function') {
+            try { model.close(true); } catch (e) {}
+          }
+          return null;
+        }
+        tracker.settle(rec);
+        if (rec.closed) registry.close(commId, rec.closeMsg);
+        return model;
+      });
+    }).catch(function (err) {
+      if (!tracker.isStale(rec)) {
+        tracker.settle(rec);
+        if (rec.closed) {
+          if (opened && registry.has(commId)) registry.close(commId, rec.closeMsg);
+          else registry.discardPending(commId);
+        }
+      }
+      throw err;
+    });
+  }
+
+  IpwBridge._createOpenTracker = createOpenTracker; // fabrikk: friske instanser til testing
+  IpwBridge._opens = createOpenTracker(); // den levende singletonen broen selv bruker
+  IpwBridge._openCommAsync = openCommAsync;
 
   // IpwBridge._toKernel(commId, dataJson, buffers) — Python→JS-dispatch-
   // funksjonen, bundet av pyodide/ipw_setup.py sitt oppsett (Task 2). Satt
@@ -449,7 +548,9 @@
           console.warn('IpwBridge: comm_open uten comm_id — ignorerer');
           return;
         }
-        IpwBridge.ensure().then(function (manager) {
+        // Sekvensert via _opens (se openCommAsync): en comm_close som kommer
+        // før åpningen er ferdig, og en reset() i mellomtiden, håndteres.
+        openCommAsync(IpwBridge._opens, IpwBridge._registry, commId, IpwBridge.ensure, function (manager) {
           var shim = _makeShim(commId, content.target_name);
           return manager.handle_comm_open(shim, { content: content, metadata: metadata, buffers: buffers });
         }).catch(function (err) {
@@ -458,7 +559,10 @@
       } else if (msgType === 'comm_msg') {
         IpwBridge._registry.route(content.comm_id, { content: content, buffers: buffers });
       } else if (msgType === 'comm_close') {
-        IpwBridge._registry.close(content.comm_id, { content: content, buffers: buffers });
+        var closeMsg = { content: content, buffers: buffers };
+        // Åpning pågår fortsatt → lukkingen utføres når den er ferdig.
+        if (IpwBridge._opens.markClosed(content.comm_id, closeMsg)) return;
+        IpwBridge._registry.close(content.comm_id, closeMsg);
       } else {
         console.warn('IpwBridge: ukjent msgType fra kernel: ' + msgType);
       }
@@ -513,6 +617,9 @@
     IpwBridge.reset = function () {
       var mgr = _manager;
       _manager = null;
+      // Pågående comm_open-er tilhører den gamle økta: bump generasjonen så
+      // de droppes (eller lukkes) i stedet for å registrere seg i den nye.
+      IpwBridge._opens.reset();
       var staleIds = IpwBridge._registry.ids();
       try {
         IpwBridge._closeAllComms(IpwBridge._registry);

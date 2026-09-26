@@ -1,4 +1,5 @@
 import type { DatasetHit } from "./static-catalog.ts";
+import { guardedFetchImpl } from "../../ssrf.ts";
 
 const MAX = 8;
 
@@ -8,7 +9,7 @@ export async function dataciteSearch(
 ): Promise<DatasetHit[]> {
   const url = `https://api.datacite.org/dois?query=${encodeURIComponent(query)}` +
     `&resource-type-id=dataset&page%5Bsize%5D=${MAX}`;
-  const resp = await fetchImpl(url);
+  const resp = await guardedFetchImpl(fetchImpl)(url);
   if (!resp.ok) throw new Error(`datacite-søk ${resp.status}`);
   const json = await resp.json();
   const rows = (json?.data ?? []) as { id: string; attributes: Record<string, unknown> }[];

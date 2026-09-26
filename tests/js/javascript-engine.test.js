@@ -265,3 +265,37 @@ test('eksplisitt # load vinner over innbakt tag med samme navn', async () => {
     assert.strictEqual(r.text, 'NY');
   } finally { delete globalThis.aq; delete globalThis.op; delete globalThis.document; }
 });
+
+// Overlappende kjøringer (to celler på tvers av en await): den gamle LIFO-
+// lagringen per kjøring lot console.log forbli kapret når A ble ferdig før B.
+async function overlappingRuns(finishFirst) {
+  const before = console.log;
+  let openA, openB;
+  globalThis.__gateA = new Promise(r => { openA = r; });
+  globalThis.__gateB = new Promise(r => { openB = r; });
+  const pA = E._runIn(E._makeScope(), 'console.log("a1");\nawait __gateA;\nconsole.log("a2");\n1', []);
+  await new Promise(r => setImmediate(r));   // la A installere fangsten
+  const pB = E._runIn(E._makeScope(), 'console.log("b1");\nawait __gateB;\n2', []);
+  await new Promise(r => setImmediate(r));
+  let rA, rB;
+  if (finishFirst === 'A') { openA(); rA = await pA; openB(); rB = await pB; }
+  else { openB(); rB = await pB; openA(); rA = await pA; }
+  delete globalThis.__gateA; delete globalThis.__gateB;
+  return { before, rA, rB };
+}
+
+test('runIn: overlappende kjøringer, A ferdig først — console gjenopprettes', async () => {
+  const { before, rA, rB } = await overlappingRuns('A');
+  assert.strictEqual(console.log, before);
+  assert.strictEqual(rA.error, null); assert.strictEqual(rB.error, null);
+  assert.ok(rA.text.startsWith('a1'));
+  assert.ok(rB.text.startsWith('b1'));
+});
+
+test('runIn: overlappende kjøringer, B ferdig først — console gjenopprettes', async () => {
+  const { before, rA, rB } = await overlappingRuns('B');
+  assert.strictEqual(console.log, before);
+  assert.strictEqual(rA.error, null); assert.strictEqual(rB.error, null);
+  // Etter at B er ferdig er A eneste aktive kjøring: a2 havner hos A.
+  assert.strictEqual(rA.text, 'a1\na2\n1');
+});

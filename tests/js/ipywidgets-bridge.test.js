@@ -294,3 +294,118 @@ test('IpwBridge._registry is a live singleton independent from freshly created r
   // cleanup so this test is order-independent w.r.t. the module-level singleton
   IpwBridge._registry.close('shared-singleton-probe', { content: { data: {} } });
 });
+
+// ---------- comm_open-sekvensering (openCommAsync + open-tracker) ----------
+function deferred() {
+  let resolve, reject;
+  const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+}
+const tick = () => new Promise((r) => setImmediate(r));
+
+// doOpen som speiler browser-stien: oppretter shimmen i registeret og en
+// «modell» som registrerer on_close (slik WidgetModel gjør i konstruktøren).
+function fakeDoOpen(reg, commId, log, gate) {
+  return function (manager) {
+    reg.open(commId, 'jupyter.widget');
+    const model = {
+      manager,
+      closedWith: null,
+      close(commClosed) { this.closedWith = commClosed; log.push('model.close'); }
+    };
+    reg.onClose(commId, () => log.push('on_close'));
+    return gate ? gate.promise.then(() => model) : model;
+  };
+}
+
+test('openCommAsync: normal flow opens the comm and settles the tracker', async () => {
+  const reg = IpwBridge._createRegistry();
+  const tr = IpwBridge._createOpenTracker();
+  const log = [];
+  const model = await IpwBridge._openCommAsync(tr, reg, 'c1', () => Promise.resolve('M'), fakeDoOpen(reg, 'c1', log));
+  assert.strictEqual(model.manager, 'M');
+  assert.ok(reg.has('c1'));
+  assert.deepStrictEqual(tr.pendingIds(), []);
+  assert.strictEqual(tr.markClosed('c1', {}), false); // ikke lenger pågående
+});
+
+test('openCommAsync: comm_close before the manager is ready drops the open and its buffered msgs', async () => {
+  const reg = IpwBridge._createRegistry();
+  const tr = IpwBridge._createOpenTracker();
+  const log = [];
+  const mgr = deferred();
+  const p = IpwBridge._openCommAsync(tr, reg, 'c1', () => mgr.promise, fakeDoOpen(reg, 'c1', log));
+  reg.route('c1', { content: { data: 'buffered' } });
+  assert.strictEqual(tr.markClosed('c1', { content: { comm_id: 'c1' } }), true);
+  mgr.resolve('M');
+  assert.strictEqual(await p, null);
+  assert.strictEqual(reg.has('c1'), false);
+  // Den bufrede meldingen ble kastet: en senere open+on_msg får ingen replay.
+  reg.open('c1', 't');
+  const got = [];
+  reg.onMsg('c1', (m) => got.push(m));
+  assert.deepStrictEqual(got, []);
+  assert.deepStrictEqual(log, []);
+});
+
+test('openCommAsync: comm_close while handle_comm_open is in flight closes once the model exists', async () => {
+  const reg = IpwBridge._createRegistry();
+  const tr = IpwBridge._createOpenTracker();
+  const log = [];
+  const gate = deferred();
+  const p = IpwBridge._openCommAsync(tr, reg, 'c1', () => Promise.resolve('M'), fakeDoOpen(reg, 'c1', log, gate));
+  await tick();
+  assert.ok(reg.has('c1'));
+  assert.strictEqual(tr.markClosed('c1', { content: { comm_id: 'c1' } }), true);
+  assert.deepStrictEqual(log, []); // ikke lukket ennå
+  gate.resolve();
+  await p;
+  assert.deepStrictEqual(log, ['on_close']);
+  assert.strictEqual(reg.has('c1'), false);
+});
+
+test('openCommAsync: reset() before the manager is ready drops the stale open (never reaches the new manager)', async () => {
+  const reg = IpwBridge._createRegistry();
+  const tr = IpwBridge._createOpenTracker();
+  const log = [];
+  const mgr = deferred();
+  let opened = false;
+  const p = IpwBridge._openCommAsync(tr, reg, 'c1', () => mgr.promise, (m) => { opened = true; return fakeDoOpen(reg, 'c1', log)(m); });
+  tr.reset(); reg.reset();
+  mgr.resolve('NEW');
+  assert.strictEqual(await p, null);
+  assert.strictEqual(opened, false);
+  assert.strictEqual(reg.has('c1'), false);
+});
+
+test('openCommAsync: reset() while handle_comm_open is in flight closes the stale model locally', async () => {
+  const reg = IpwBridge._createRegistry();
+  const tr = IpwBridge._createOpenTracker();
+  const log = [];
+  const gate = deferred();
+  let model = null;
+  const doOpen = fakeDoOpen(reg, 'c1', log, gate);
+  const p = IpwBridge._openCommAsync(tr, reg, 'c1', () => Promise.resolve('OLD'), (m) => {
+    const r = doOpen(m);
+    r.then((x) => { model = x; });
+    return r;
+  });
+  await tick();
+  tr.reset(); reg.reset();
+  // En comm_close etter reset gjelder ikke den gamle åpningen.
+  assert.strictEqual(tr.markClosed('c1', {}), false);
+  gate.resolve();
+  assert.strictEqual(await p, null);
+  assert.strictEqual(model.closedWith, true);
+  assert.deepStrictEqual(log, ['model.close']);
+});
+
+test('openCommAsync: a failing open still settles the tracker and propagates the error', async () => {
+  const reg = IpwBridge._createRegistry();
+  const tr = IpwBridge._createOpenTracker();
+  await assert.rejects(
+    IpwBridge._openCommAsync(tr, reg, 'c1', () => Promise.resolve('M'), () => { throw new Error('boom'); }),
+    /boom/
+  );
+  assert.deepStrictEqual(tr.pendingIds(), []);
+});

@@ -1,4 +1,5 @@
 import { type DatasetHit, loadStaticCatalog, queryWords, scoreSubstring } from "./static-catalog.ts";
+import { guardedFetchImpl } from "../../ssrf.ts";
 
 interface WbCatalog {
   indicators: { id: string; name: string; unit?: string; src?: string; note?: string }[];
@@ -41,7 +42,7 @@ export async function worldbankMetadata(
   fetchImpl: typeof fetch = fetch,
 ): Promise<Record<string, unknown>> {
   const url = `https://api.worldbank.org/v2/indicator/${encodeURIComponent(indicatorId)}?format=json`;
-  const resp = await fetchImpl(url);
+  const resp = await guardedFetchImpl(fetchImpl)(url);
   if (!resp.ok) throw new Error(`worldbank metadata ${resp.status} for ${indicatorId}`);
   const json = await resp.json();
   const row = Array.isArray(json) && Array.isArray(json[1]) ? json[1][0] : null;

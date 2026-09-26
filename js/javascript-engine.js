@@ -240,21 +240,47 @@
     return fn(scope.proxy);
   }
 
+  // Console-fangst som tåler overlappende kjøringer (to celler på tvers av en
+  // await): ÉN installert wrapper per nøkkel + en stack av aktive buffere.
+  // Den gamle LIFO-lagringen per kjøring (orig = det som sto der da kjøringen
+  // startet) kunne, når A avsluttes før B, la B «gjenopprette» A sin wrapper
+  // — console.log var da kapret for resten av økta. Nå lagres den EKTE
+  // originalen én gang, og settes tilbake først når siste aktive kjøring er ferdig.
+  // Utskrift havner i den sist startede fortsatt aktive kjøringens buffer
+  // (uten async-kontekst kan vi ikke vite hvilken celle som logget).
+  var CONSOLE_KEYS = ['log', 'info', 'warn', 'error'];
+  var __consoleCap = { active: [], orig: null, wrappers: null };
   function captureConsole(buf) {
-    var keys = ['log', 'info', 'warn', 'error'];
-    var orig = {};
-    keys.forEach(function (k) {
-      orig[k] = console[k];
-      console[k] = function () {
-        var parts = [];
-        for (var i = 0; i < arguments.length; i++) {
-          parts.push(typeof arguments[i] === 'string' ? arguments[i] : prettyPrint(arguments[i]));
-        }
-        buf.push(parts.join(' '));
-        try { orig[k].apply(console, arguments); } catch (e) {}
-      };
-    });
-    return function restore() { keys.forEach(function (k) { console[k] = orig[k]; }); };
+    var cap = __consoleCap;
+    if (!cap.active.length) {
+      cap.orig = {}; cap.wrappers = {};
+      CONSOLE_KEYS.forEach(function (k) {
+        var orig = cap.orig[k] = console[k];
+        console[k] = cap.wrappers[k] = function () {
+          var parts = [];
+          for (var i = 0; i < arguments.length; i++) {
+            parts.push(typeof arguments[i] === 'string' ? arguments[i] : prettyPrint(arguments[i]));
+          }
+          var top = cap.active[cap.active.length - 1];
+          if (top) top.push(parts.join(' '));
+          try { orig.apply(console, arguments); } catch (e) {}
+        };
+      });
+    }
+    var done = false;
+    cap.active.push(buf);
+    return function restore() {
+      if (done) return;   // idempotent
+      done = true;
+      var i = cap.active.lastIndexOf(buf);
+      if (i !== -1) cap.active.splice(i, 1);
+      if (cap.active.length) return;
+      CONSOLE_KEYS.forEach(function (k) {
+        // Noen andre har byttet ut console[k] etter oss — ikke klobb deres.
+        if (console[k] === cap.wrappers[k]) console[k] = cap.orig[k];
+      });
+      cap.orig = null; cap.wrappers = null;
+    };
   }
 
   var __jsLoaded = {};   // url → Promise (delt på tvers av registernøkler)

@@ -1,4 +1,5 @@
 import type { DatasetHit } from "./static-catalog.ts";
+import { guardedFetchImpl } from "../../ssrf.ts";
 
 const MAX = 8;
 
@@ -14,7 +15,7 @@ export async function dataeuropaSearch(
   fetchImpl: typeof fetch = fetch,
 ): Promise<DatasetHit[]> {
   const url = `https://data.europa.eu/api/hub/search/search?q=${encodeURIComponent(query)}&limit=${MAX}`;
-  const resp = await fetchImpl(url);
+  const resp = await guardedFetchImpl(fetchImpl)(url);
   if (!resp.ok) throw new Error(`data.europa.eu-søk ${resp.status}`);
   const json = await resp.json();
   const rows = (json?.result?.results ?? []) as Record<string, unknown>[];

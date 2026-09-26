@@ -291,11 +291,12 @@ export function makeAnvilValidator(
       });
       if (!resp.ok) return false;
       const data = await resp.json();
-      // /auth/me returns { principal_kind, user, ... }. Accept any successful
-      // response — Anvil's whitelist gates who can log in.
+      // /auth/me returns { principal_kind, user, ... }. Accept a real user or
+      // a service token — Anvil's whitelist gates who can log in. An
+      // "anonymous" principal is NOT authenticated (same rule as
+      // makeAnvilUserFetcher).
       return !!(data &&
-        (data.user || data.principal_kind === "service_token" ||
-          data.principal_kind === "anonymous"));
+        (data.user || data.principal_kind === "service_token"));
     } catch (_e) {
       // network error / timeout -> treat as unauthorized rather than crashing
       return false;

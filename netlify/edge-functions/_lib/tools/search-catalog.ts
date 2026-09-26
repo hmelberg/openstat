@@ -6,6 +6,7 @@
 import { findSource, isSearchableSource, SDMX_STRUCTURE_ACCEPT, SDMX_XML_SOURCES, type DataSource } from "../registry.ts";
 import { queryWords, scoreSubstring } from "./catalogs/static-catalog.ts";
 import { XMLParser } from "https://esm.sh/fast-xml-parser@4";
+import { guardedFetchImpl } from "../ssrf.ts";
 
 export interface CatalogHit {
   source: string;
@@ -30,7 +31,8 @@ export async function searchCatalog(
 ): Promise<CatalogHit[]> {
   const src = findSource(deps.registry, sourceId);
   if (!src) throw new Error(`ukjent kilde '${sourceId}' — bruk en id fra kilderegisteret`);
-  const f = deps.fetchImpl ?? fetch;
+  // Timeout + byte-tak + SSRF-sjekk per hop (se guardedFetchImpl i ssrf.ts).
+  const f = guardedFetchImpl(deps.fetchImpl ?? fetch);
   // sdmx-tilgang hopper over denne blanke sperren: sdmxSearch har sin egen,
   // mer presise SDMX_STRUCTURE_ACCEPT-sjekk (f.eks. ecb → "ikke støttet ennå
   // (kun XML)") — isSearchableSource sin blanke "ikke søkbar" ville ellers
@@ -106,7 +108,9 @@ export function clearApdCatalogCache(): void { _apdCache = null; }
 
 async function loadApdCatalog(origin: string, f: typeof fetch): Promise<ApdCatalogEntry[]> {
   if (_apdCache) return _apdCache;
-  const res = await f(new URL("/data/apd-catalog.json", origin).toString());
+  // Katalogfila ligger på vårt eget origin (localhost under netlify dev).
+  const own = new URL(origin).origin;
+  const res = await guardedFetchImpl(f, { trustedOrigin: own })(new URL("/data/apd-catalog.json", own).toString());
   if (!res.ok) throw new Error(`kunne ikke hente apd-katalog: HTTP ${res.status}`);
   _apdCache = await res.json() as ApdCatalogEntry[];
   return _apdCache;

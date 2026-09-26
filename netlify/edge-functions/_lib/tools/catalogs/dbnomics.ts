@@ -1,4 +1,5 @@
 import type { DatasetHit } from "./static-catalog.ts";
+import { guardedFetchImpl } from "../../ssrf.ts";
 
 const SEARCH = "https://api.db.nomics.world/v22/search";
 const MAX = 8;
@@ -28,7 +29,7 @@ function pickDimValues(
 interface DbnDoc { code: string; name: string; provider_code: string; provider_name: string; nb_series?: number }
 
 async function runSearch(q: string, fetchImpl: typeof fetch): Promise<DbnDoc[]> {
-  const resp = await fetchImpl(`${SEARCH}?q=${encodeURIComponent(q)}&limit=${MAX}`);
+  const resp = await guardedFetchImpl(fetchImpl)(`${SEARCH}?q=${encodeURIComponent(q)}&limit=${MAX}`);
   if (!resp.ok) throw new Error(`dbnomics-søk ${resp.status}`);
   const json = await resp.json();
   return (json?.results?.docs ?? []) as DbnDoc[];
@@ -83,7 +84,7 @@ export async function dbnomicsMetadata(
   ) {
     throw new Error(`dbnomics-referanse skal være PROVIDER/DATASETT, fikk: ${ref}`);
   }
-  const resp = await fetchImpl(
+  const resp = await guardedFetchImpl(fetchImpl)(
     `https://api.db.nomics.world/v22/datasets/${encodeURIComponent(providerTrim)}/${encodeURIComponent(datasetTrim)}`,
   );
   if (!resp.ok) throw new Error(`dbnomics metadata ${resp.status} for ${ref}`);
