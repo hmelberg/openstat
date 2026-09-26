@@ -67,7 +67,18 @@ def _records_and_columns(data):
 
 
 def _json_safe_cell(v):
+    # numpy-skalarer (int64 o.l.) er ikke int/float — uten .item() ble de
+    # str()-et og sortert som tekst ("10" før "9").
+    if not isinstance(v, (bool, int, float, str)) and hasattr(v, 'item'):
+        try:
+            v = v.item()
+        except Exception:
+            pass
     if _is_nan(v):
+        return None
+    # inf gir «Infinity» i json.dumps — ugyldig JSON, JSON.parse i
+    # frontend kaster og tabellen rendres ikke.
+    if isinstance(v, float) and (v == float('inf') or v == float('-inf')):
         return None
     if isinstance(v, (bool, int, float, str)):
         return v

@@ -152,10 +152,31 @@
     });
   }
 
+  // ipywidgets-broen laster require.js, som legger en global AMD-«define» på
+  // siden for resten av økta. UMD-biblioteker (arquero, d3, vega …) kaller da
+  // define() i stedet for å sette sin window-global. Skjul define mens vi
+  // laster (delt teller på window, så parallelle lastinger i flere motorer
+  // ikke gjenoppretter den for tidlig).
+  function withoutAmd(start) {
+    var st = global.__mdAmdHide || (global.__mdAmdHide = { n: 0, saved: null });
+    if (st.n === 0) {
+      if (typeof global.define !== 'function' || !global.define.amd) return start();
+      st.saved = global.define;
+      global.define = undefined;
+    }
+    st.n++;
+    function done() {
+      if (--st.n === 0 && st.saved) { global.define = st.saved; st.saved = null; }
+    }
+    var p = start();
+    p.then(done, done);
+    return p;
+  }
+
   function loadJsDep(dep) {
     if (global[dep.global]) return Promise.resolve();
     if (!__jsLoaded[dep.url]) {
-      __jsLoaded[dep.url] = addScript(dep.url).catch(function (e) {
+      __jsLoaded[dep.url] = withoutAmd(function () { return addScript(dep.url); }).catch(function (e) {
         delete __jsLoaded[dep.url];
         throw e;
       });

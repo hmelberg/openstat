@@ -201,6 +201,21 @@
   // navn — akseptert, analysescripts bruker sjelden typeof-guards). set
   // skriver alltid til scope-objektet — det er persistensen mellom celler.
   var LIB_HINT = ' — bibliotekglobalene i JavaScript-modus er aq, op, ss, jStat, ML, Plot og Plotly';
+  // Et bart kall som fetch(url) inne i with(proxy) får proxyen som this, og
+  // nettleserens innebygde funksjoner kaster da «Illegal invocation». Globale
+  // funksjoner UTEN prototype (fetch, setTimeout, atob, alert …) bindes derfor
+  // til global; konstruktører (Date, Array, Promise — har prototype) returneres
+  // urørt så statiske egenskaper som Date.now fortsatt virker. Cachet, så
+  // samme funksjon gir samme referanse (removeEventListener o.l.).
+  var __boundGlobals = typeof WeakMap === 'function' ? new WeakMap() : null;
+  function globalValue(k) {
+    var v = global[k];
+    if (typeof v !== 'function' || v.prototype !== undefined || !__boundGlobals) return v;
+    var b = __boundGlobals.get(v);
+    if (!b) { b = v.bind(global); __boundGlobals.set(v, b); }
+    return b;
+  }
+
   function makeScope() {
     var vars = Object.create(null);
     var proxy = new Proxy(vars, {
@@ -208,7 +223,7 @@
       get: function (t, k) {
         if (k === Symbol.unscopables) return undefined;
         if (k in t) return t[k];
-        if (k in global) return global[k];
+        if (k in global) return globalValue(k);
         throw new ReferenceError(String(k) + ' er ikke definert' +
           (LIB_REGISTRY[k] || k === 'op' ? LIB_HINT : ''));
       },
@@ -252,10 +267,31 @@
       document.head.appendChild(s);
     });
   }
+  // ipywidgets-broen laster require.js, som legger en global AMD-«define» på
+  // siden for resten av økta. UMD-biblioteker (arquero, d3, vega …) kaller da
+  // define() i stedet for å sette sin window-global. Skjul define mens vi
+  // laster (delt teller på window, så parallelle lastinger i flere motorer
+  // ikke gjenoppretter den for tidlig).
+  function withoutAmd(start) {
+    var st = global.__mdAmdHide || (global.__mdAmdHide = { n: 0, saved: null });
+    if (st.n === 0) {
+      if (typeof global.define !== 'function' || !global.define.amd) return start();
+      st.saved = global.define;
+      global.define = undefined;
+    }
+    st.n++;
+    function done() {
+      if (--st.n === 0 && st.saved) { global.define = st.saved; st.saved = null; }
+    }
+    var p = start();
+    p.then(done, done);
+    return p;
+  }
+
   function loadJsDep(dep) {
     if (global[dep.global]) return Promise.resolve();
     if (!__jsLoaded[dep.url]) {
-      __jsLoaded[dep.url] = addScript(dep.url).catch(function (e) {
+      __jsLoaded[dep.url] = withoutAmd(function () { return addScript(dep.url); }).catch(function (e) {
         delete __jsLoaded[dep.url];
         throw e;
       });

@@ -139,6 +139,18 @@ test('S5 syncXhr: proxy-retryen bærer auth-headere', () => {
   assert.equal(seen[1][1]['X-Anthropic-Key'], 'K2');
 });
 
+test('syncXhr: en URL som allerede er /api/hent? bærer auth på første forsøk', () => {
+  RB._reset();
+  RB.configure(() => ({ anthropicKey: 'K3' }));
+  const seen = [];
+  RB._setXhr((u, headers) => { seen.push([u, headers || {}]); return { status: 200, bytes: new Uint8Array([3]) }; });
+  const r = RB.forPyodideSync('/api/hent?url=' + encodeURIComponent('https://x/d.csv'));
+  RB.configure(null);
+  assert.equal(r.error, null);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0][1]['X-Anthropic-Key'], 'K3');
+});
+
 test('M2 ensureText: charset fra Content-Type respekteres (latin-1-fella)', async () => {
   RB._reset();
   // «kjønn» i iso-8859-1: ø = 0xF8 — ugyldig som utf-8

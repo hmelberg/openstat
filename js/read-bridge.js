@@ -126,6 +126,14 @@
   var xhrImpl = null;
   function xhr(url, headers) { return (xhrImpl || syncXhr)(url, headers); }
 
+  // Auth-headere for /api/hent, flettet over evt. custom-headere (auth vinner).
+  function proxyAuthHeaders(hdrs) {
+    var d = currentDeps() || {};
+    var ph = (global.DataLoader && global.DataLoader.proxyHeaders)
+      ? global.DataLoader.proxyHeaders(d.authToken, d.anthropicKey) : {};
+    return hdrs ? Object.assign({}, hdrs, ph) : ph;
+  }
+
   function forPyodideSync(url, headersJson) {
     // Runtime-ost (plan 2026-07-28): valgfri headers-JSON fra openstat.py
     // (_fetch_bytes, SDMX-Accept). JSON-streng, ikke objekt — en Python-dict
@@ -149,7 +157,11 @@
     if (!canXhr) {
       return { bytes: null, error: (c && c.error) || ('ingen cache-oppføring og ingen XHR for ' + url) };
     }
-    var r = xhr(url, hdrs || undefined);
+    // En URL som ALLEREDE går via proxyen (/api/hent?url=…) er auth-portet —
+    // send auth-headerne på første forsøk (retry-grenen under hopper over
+    // slike URL-er, så de fikk ellers alltid 401).
+    var isProxyUrl = url.indexOf('/api/hent?') === 0;
+    var r = xhr(url, isProxyUrl ? proxyAuthHeaders(hdrs) : (hdrs || undefined));
     // Proxy KUN ved status 0 (CORS/nettverk) — samme konvensjon som
     // fetchRawUrl/fetchLoadTarget. En ekte 404 er like ekte via proxyen,
     // og «HTTP 404» er en klarere melding enn «proxy 404».
@@ -159,11 +171,7 @@
       // api-kinds-spec §4.4 — andre custom-headere dør i proxyen, dokumentert
       // i runtime-ost-spec §1). Auth VINNER kollisjoner (slutt-review): en
       // caller-«Authorization» skal aldri stille slå ut nøkkelen mot porten.
-      var d = currentDeps() || {};
-      var ph = (global.DataLoader && global.DataLoader.proxyHeaders)
-        ? global.DataLoader.proxyHeaders(d.authToken, d.anthropicKey) : {};
-      if (hdrs) ph = Object.assign({}, hdrs, ph);
-      r = xhr('/api/hent?url=' + encodeURIComponent(url), ph);
+      r = xhr('/api/hent?url=' + encodeURIComponent(url), proxyAuthHeaders(hdrs));
     }
     // x-hent-truncated (R-URL-bro-oppfølging §2): dekker begge legg
     // (direkte OG proxy-retry) — en avkortet CSV er feil data og skal

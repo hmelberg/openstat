@@ -40,7 +40,15 @@ def _is_nan(v):
 def _json_safe(obj):
     """Rekursivt JSON-trygt: nan->None (vega-lite håndterer null),
     tupler->lister, datetime->isoformat, ukjente objekter->str."""
+    if not isinstance(obj, (bool, int, float, str, dict, list, tuple)) and hasattr(obj, 'item'):
+        try:
+            obj = obj.item()   # numpy-skalar -> Python-tall
+        except Exception:
+            pass
     if _is_nan(obj):
+        return None
+    # inf -> «Infinity» i json.dumps er ugyldig JSON (JSON.parse kaster).
+    if isinstance(obj, float) and (obj == float('inf') or obj == float('-inf')):
         return None
     if isinstance(obj, dict):
         out = {}
