@@ -3565,14 +3565,22 @@
     // uteblir naturlig (innholdet matcher ikke lenger eksempelteksten).
     const DRAFT_PREFIX = 'md_draft_' + (window.M2PY_APP || 'app') + '_';
     function draftKey(mode) { return DRAFT_PREFIX + mode; }
+    // Utkast av et utrygt dokument (delt lenke/GitHub) bærer et flagg, så
+    // html-cellene ikke blir live-rendret bare fordi siden lastes på nytt.
+    function draftUntrustedKey(mode) { return draftKey(mode) + '__untrusted'; }
+    var _restoredUntrustedDraft = false;
     (function restoreDrafts() {
       try {
         Object.keys(editorContent).forEach(function (m) {
           var d = localStorage.getItem(draftKey(m));
-          if (d && d.trim() && !editorContent[m]) editorContent[m] = d;
+          if (d && d.trim() && !editorContent[m]) {
+            editorContent[m] = d;
+            if (localStorage.getItem(draftUntrustedKey(m))) _restoredUntrustedDraft = true;
+          }
         });
         var bootDraft = localStorage.getItem(draftKey(activeEditorMode));
         if (bootDraft && bootDraft.trim() && !scriptInput.value.trim()) {
+          if (localStorage.getItem(draftUntrustedKey(activeEditorMode))) _restoredUntrustedDraft = true;
           scriptInput.value = bootDraft;
           if (window.updateLineNumbers) window.updateLineNumbers();
           setStatus(leftStatus, t('Gjenopprettet ulagret utkast.'));
@@ -3584,11 +3592,14 @@
       // Fang modus OG innhold ved tastetrykket: et modusbytte i debounce-
       // vinduet ville ellers lagret NY modus sitt innhold på gammel nøkkel.
       var _m = activeEditorMode, _v = scriptInput.value;
+      var _untrusted = !!(window.Cells && window.Cells.isHtmlTrusted && !window.Cells.isHtmlTrusted());
       if (_draftTimer) clearTimeout(_draftTimer);
       _draftTimer = setTimeout(function () {
         try {
           if (_v && _v.trim()) localStorage.setItem(draftKey(_m), _v);
           else localStorage.removeItem(draftKey(_m));
+          if (_untrusted && _v && _v.trim()) localStorage.setItem(draftUntrustedKey(_m), '1');
+          else localStorage.removeItem(draftUntrustedKey(_m));
         } catch (e) { /* full/utilgjengelig — stille */ }
       }, 800);
     });
@@ -3606,6 +3617,7 @@
     scriptInput.selectionStart = scriptInput.selectionEnd = 0;
     scriptInput.focus();
     if (window.Cells) window.Cells.init(activeEditorMode);
+    if (_restoredUntrustedDraft && window.Cells && window.Cells.markHtmlUntrusted) window.Cells.markHtmlUntrusted();
 
     let explainAbortRef = null;
     let explainRunActive = false;

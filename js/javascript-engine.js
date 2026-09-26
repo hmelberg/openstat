@@ -160,7 +160,22 @@
     if (typeof v.toHTML === 'function' && typeof v.objects === 'function') {
       var n = null;
       try { n = typeof v.numRows === 'function' ? v.numRows() : v.numRows; } catch (e) {}
-      var html = v.toHTML({ limit: TABLE_LIMIT });
+      // arquero.toHTML escaper celleverdier, men IKKE kolonnenavn — og de
+      // kan komme fra en ekstern CSV-header. Gi escapede navn før rendring.
+      var t = v;
+      try {
+        var names = typeof v.columnNames === 'function' ? v.columnNames() : [];
+        var ren = {}, needs = false;
+        names.forEach(function (c) {
+          var e = String(c).replace(/[&<>"']/g, function (ch) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch];
+          });
+          ren[c] = e;
+          if (e !== c) needs = true;
+        });
+        if (needs && typeof v.rename === 'function') t = v.rename(ren);
+      } catch (e) {}
+      var html = t.toHTML({ limit: TABLE_LIMIT });
       if (typeof n === 'number' && n > TABLE_LIMIT) {
         html += '<div class="output-note">… viser ' + TABLE_LIMIT + ' av ' + n + ' rader</div>';
       }

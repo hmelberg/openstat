@@ -108,9 +108,6 @@ export interface GateOptions {
    * bypass. Never set this on an endpoint that doesn't perform that check.
    */
   allowLlmKey?: boolean;
-  // Continuation-hops i /api/svar bærer allerede en påbegynt kjøring —
-  // ratelimiten skal telle SPØRSMÅL, ikke hops (spec 2026-07-29).
-  skipRateLimit?: boolean;
 }
 
 export interface GateDeps {
@@ -178,20 +175,53 @@ async function runBaseChecks(
   }
 
   // 4. rate-limit BEFORE the expensive Anvil validation (no amplification)
-  if (!opts.skipRateLimit) {
-    const rate = await checkRateLimit(opts.endpoint, clientIp(request, context));
-    if (!rate.allowed) {
-      return {
-        presentedToken,
-        failure: new Response("Rate limited", {
-          status: 429,
-          headers: { "Retry-After": String(rate.retryAfterSeconds) },
-        }),
-      };
-    }
+  const rate = await checkRateLimit(opts.endpoint, clientIp(request, context));
+  if (!rate.allowed) {
+    return {
+      presentedToken,
+      failure: new Response("Rate limited", {
+        status: 429,
+        headers: { "Retry-After": String(rate.retryAfterSeconds) },
+      }),
+    };
   }
 
   return { presentedToken, failure: null };
+}
+
+/**
+ * Read and parse a JSON body, aborting once more than maxBytes have arrived.
+ * The content-length guard in runBaseChecks only sees the header — a chunked
+ * body (no content-length) would otherwise be buffered in full by
+ * request.json(). Returns null on oversize or invalid JSON; `tooLarge` tells
+ * the caller which status to send.
+ */
+export async function readJsonCapped(
+  request: Request,
+  maxBytes: number,
+): Promise<{ ok: true; value: unknown } | { ok: false; tooLarge: boolean }> {
+  if (!request.body) return { ok: false, tooLarge: false };
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => {});
+      return { ok: false, tooLarge: true };
+    }
+    chunks.push(value);
+  }
+  const buf = new Uint8Array(total);
+  let off = 0;
+  for (const c of chunks) { buf.set(c, off); off += c.byteLength; }
+  try {
+    return { ok: true, value: JSON.parse(new TextDecoder().decode(buf)) };
+  } catch {
+    return { ok: false, tooLarge: false };
+  }
 }
 
 /**

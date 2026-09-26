@@ -1,6 +1,6 @@
 import { detectLanguage } from "./_lib/parse-script-context.ts";
 import { streamAnthropic } from "./_lib/anthropic.ts";
-import { extractByokKey, extractLlmKey, gate, upstreamErrorResponse, type IpContext } from "./_lib/auth.ts";
+import { extractByokKey, extractLlmKey, gate, readJsonCapped, upstreamErrorResponse, type IpContext } from "./_lib/auth.ts";
 import { parseProviderConfig } from "./_lib/providers/config.ts";
 import { messageOpenAiCompat } from "./_lib/providers/openai-compat.ts";
 import { messageOpenAiResponses } from "./_lib/providers/openai-responses.ts";
@@ -93,12 +93,13 @@ export default async (request: Request, context: IpContext): Promise<Response> =
   }, context);
   if (gateResp) return gateResp;
 
-  let body: RequestBody;
-  try {
-    body = await request.json();
-  } catch (_) {
-    return new Response("Invalid JSON", { status: 400 });
+  const parsed = await readJsonCapped(request, 120_000);
+  if (!parsed.ok) {
+    return parsed.tooLarge
+      ? new Response("Payload too large", { status: 413 })
+      : new Response("Invalid JSON", { status: 400 });
   }
+  const body = (parsed.value ?? {}) as RequestBody;
   if (!body.output || typeof body.output !== "string" || !body.output.trim()) {
     return new Response("Missing output", { status: 400 });
   }

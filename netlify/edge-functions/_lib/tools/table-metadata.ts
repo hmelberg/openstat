@@ -4,6 +4,7 @@ import { findSource, SDMX_STRUCTURE_ACCEPT, SDMX_XML_SOURCES, type DataSource } 
 import { XMLParser } from "https://esm.sh/fast-xml-parser@4";
 import { worldbankMetadata } from "./catalogs/worldbank.ts";
 import { dbnomicsMetadata } from "./catalogs/dbnomics.ts";
+import { isValidTableId } from "../meta-info-map.ts";
 
 export interface TableVariable {
   code: string;
@@ -62,6 +63,10 @@ export async function tableMetadata(
 ): Promise<TableMeta> {
   const src = findSource(deps.registry, sourceId);
   if (!src) throw new Error(`ukjent kilde '${sourceId}'`);
+  // SSRF-vakt for ALLE kallere (svar sin table_metadata-tool gir modellens
+  // table_id rett hit): adapterne bygger URL-er av id-en, og en absolutt/
+  // protokoll-relativ id ville overstyrt vertsnavnet.
+  if (!isValidTableId(tableId)) throw new Error(`ugyldig table_id '${tableId.slice(0, 80)}'`);
   const f = deps.fetchImpl ?? fetch;
   switch (src.tilgang) {
     case "pxweb": return pxwebMetadata(src, tableId, f, deps.find);

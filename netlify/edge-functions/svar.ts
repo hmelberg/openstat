@@ -1,7 +1,7 @@
 // /api/svar — samlet ask-pipeline: ETT agentisk løp med run_code som
 // klientutført verktøy. Erstatter data-svar + tolk-ask.
 // Spec: docs/superpowers/specs/2026-07-29-samlet-ask-pipeline-design.md
-import { adminGate, extractByokKey, extractLlmKey, type IpContext } from "./_lib/auth.ts";
+import { adminGate, extractByokKey, extractLlmKey, type IpContext, readJsonCapped } from "./_lib/auth.ts";
 import { type AgenticResumeState, runAgenticStream } from "./_lib/anthropic.ts";
 import { loadRegistry, renderRegistryBlock } from "./_lib/registry.ts";
 import { makeGuideAttacher } from "./_lib/source-guides.ts";
@@ -53,28 +53,28 @@ function validResumeState(s: AgenticResumeState | undefined): s is AgenticResume
 }
 
 export default async (request: Request, context: IpContext): Promise<Response> => {
-  // Ratelimiten teller SPØRSMÅL: continuation-hops er samme spørsmål, derfor
-  // hoppes den over når klienten hevder å fortsette en påbegynt kjøring. Denne
-  // avgjørelsen tas FØR body er lest, så den kan ikke selv sjekke at det
-  // faktisk foreligger et resume-objekt — det håndheves nedenfor, rett etter
-  // JSON-parsingen, så en FERSK spørring med kun headeren (+ en velformet
-  // nøkkel) ikke slipper forbi ratelimiten. Merk: resume-state er fortsatt
-  // usignert (ingen HMAC) — en klient som SENDER et resume-objekt kan
-  // fremdeles forfalske det for å hoppe over ratelimiten på et nytt
-  // spørsmål; det er en dokumentert gjenværende risiko (roadmap: HMAC over
-  // state).
+  // Ratelimiten teller SPØRSMÅL i "svar"-bøtta: continuation-hops er samme
+  // spørsmål og telles i en egen, rausere "svar-hop"-bøtte (rate-limit.ts).
+  // Hops kan ikke hoppe helt over limiten: resume-state er usignert (ingen
+  // HMAC), så en forfalsket resume-body ville ellers gitt ubegrenset
+  // verktøykjøring. At en fersk spørring med kun headeren ikke slipper inn
+  // i hop-bøtta håndheves rett etter JSON-parsingen nedenfor.
   const svarResumeHeader = request.headers.get("x-svar-resume") === "1";
   const gateResp = await adminGate(request, {
-    endpoint: "svar",
+    endpoint: svarResumeHeader ? "svar-hop" : "svar",
     maxBodyBytes: MAX_BODY_BYTES,
     allowByok: true,
     allowLlmKey: true,
-    skipRateLimit: svarResumeHeader,
   }, context);
   if (gateResp) return gateResp;
 
-  let body: RequestBody;
-  try { body = await request.json(); } catch { return new Response("Invalid JSON", { status: 400 }); }
+  const parsed = await readJsonCapped(request, MAX_BODY_BYTES);
+  if (!parsed.ok) {
+    return parsed.tooLarge
+      ? new Response("Payload too large", { status: 413 })
+      : new Response("Invalid JSON", { status: 400 });
+  }
+  const body = (parsed.value ?? {}) as RequestBody;
   if (svarResumeHeader && !body.resume) {
     return new Response("X-Svar-Resume krever resume-state", { status: 400 });
   }

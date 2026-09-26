@@ -5,6 +5,11 @@ const WINDOW_MS = 60 * 60 * 1000;
 // Generous on purpose: these are interactive endpoints, and 10/hour ran out
 // mid-session. This is an abuse guard, not a quota.
 const MAX_CALLS = 60;
+// Per-endpoint overrides. svar-hop: continuation-hops i /api/svar teller i
+// en egen, rausere bøtte — én kjøring er flere hops, men hops må fortsatt
+// telles: resume-state er usignert, så uten tak kunne en forfalsket
+// resume-body gi ubegrenset verktøykjøring (review 2026-09-26).
+const ENDPOINT_MAX_CALLS: Record<string, number> = { "svar-hop": 600 };
 
 interface RateRecord {
   calls: number[];
@@ -41,7 +46,7 @@ export async function checkRateLimit(
     const record = (await store.get(key, { type: "json" })) as RateRecord ??
       { calls: [] };
     record.calls = record.calls.filter((t) => now - t < WINDOW_MS);
-    if (record.calls.length >= MAX_CALLS) {
+    if (record.calls.length >= (ENDPOINT_MAX_CALLS[endpoint] ?? MAX_CALLS)) {
       const oldest = record.calls[0];
       const retryAfter = Math.ceil((WINDOW_MS - (now - oldest)) / 1000);
       return { allowed: false, retryAfterSeconds: retryAfter };

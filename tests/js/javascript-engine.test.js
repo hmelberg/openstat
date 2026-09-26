@@ -85,6 +85,18 @@ test('valueToOutput: arquero-aktig tabell → tablehtml-embed med radgrense', ()
   assert.ok(out.endsWith('__micro_transform_end__'));
 });
 
+test('valueToOutput: kolonnenavn escapes før toHTML (XSS fra CSV-header)', () => {
+  const mk = (cols) => ({
+    columnNames: () => cols,
+    rename: (m) => mk(cols.map((c) => m[c])),
+    toHTML: () => '<table><tr>' + cols.map((c) => '<th>' + c + '</th>').join('') + '</tr></table>',
+    objects: () => [], numRows: () => 0,
+  });
+  const out = E._valueToOutput(mk(['ok', '<img src=x onerror=alert(1)>']));
+  assert.ok(!out.includes('<img'), out);
+  assert.ok(out.includes('&lt;img src=x onerror=alert(1)&gt;'), out);
+});
+
 test('valueToOutput: plotly-aktig objekt → figure-embed', () => {
   const out = E._valueToOutput({ data: [{ x: [1], y: [2] }], layout: { title: 't' } });
   assert.ok(out.startsWith('__micro_transform_start_figure__\n'));

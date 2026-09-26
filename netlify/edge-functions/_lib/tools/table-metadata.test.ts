@@ -63,6 +63,17 @@ Deno.test("non-pxweb source throws with probe guidance", async () => {
   if (!threw.includes("probe")) throw new Error("ventet probe-henvisning: " + threw);
 });
 
+Deno.test("table_id som ville overstyrt vertsnavnet avvises før fetch", async () => {
+  for (const [src, id] of [["statfin", "http://10.0.0.5/admin"], ["statfin", "//evil.example/x"], ["fhi", "http:evil/1"]]) {
+    let fetched = false;
+    const fetchImpl = (() => { fetched = true; return Promise.resolve(new Response("{}")); }) as typeof fetch;
+    let threw = "";
+    try { await tableMetadata(src, id, { registry: REG, fetchImpl }); } catch (e) { threw = String(e); }
+    if (!threw.includes("ugyldig table_id")) throw new Error(`${src}/${id}: ventet avvisning, fikk '${threw}'`);
+    if (fetched) throw new Error(`${src}/${id}: fetch ble kalt`);
+  }
+});
+
 Deno.test("fhi metadata: kode fra categories[].value, ingen tids-flagg", async () => {
   const fetchImpl = ((input: string | URL | Request) => {
     if (String(input).includes("daar/table/754/dimension")) {

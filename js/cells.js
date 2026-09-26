@@ -1661,6 +1661,15 @@
     // Idempotent tillitsinnvilgelse: setter flagget true og re-rendrer HELE
     // notatboken (alle html-celler blir live) kun hvis det var false. Kalles
     // fra Vis HTML-knappen og fra Kjør-stien (kjøring dominerer HTML-rendring).
+    C.isHtmlTrusted = function () { return NB.htmlTrusted; };
+    // Motsatt vei: et gjenopprettet utkast av et utrygt dokument (delt lenke/
+    // GitHub) skal ikke bli betrodd bare fordi siden ble lastet på nytt.
+    C.markHtmlUntrusted = function () {
+      if (!NB.htmlTrusted) return;
+      NB.htmlTrusted = false;
+      if (NB.activeFlag && NB.root) docRender();
+    };
+
     C.grantHtmlTrust = function () {
       if (NB.htmlTrusted) return;
       NB.htmlTrusted = true;

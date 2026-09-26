@@ -197,3 +197,11 @@ Deno.test("hent: klientens egen accept-language vinner, og vanlig accept gir ing
   await handleHent(req2, { registry: REG, getEnv: () => undefined, fetchImpl: headerLoggingFetch(log2) });
   assertEquals(log2[0].headers["accept-language"], undefined);
 });
+
+Deno.test("handleHent: envKeysAllowed=false injiserer aldri site-nøkkel (BYOK)", async () => {
+  const log: string[] = [];
+  const d = { registry: REG, getEnv: (k: string) => ({ FRED_API_KEY: "SECRET" } as Record<string, string>)[k], fetchImpl: fakeFetch(log), envKeysAllowed: false };
+  const r = await handleHent(req("url=" + encodeURIComponent("https://api.stlouisfed.org/fred/series?series_id=UNRATE")), d);
+  assertEquals(r.status, 403);
+  assertEquals(log.length, 0);
+});

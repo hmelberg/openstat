@@ -55,3 +55,12 @@ Deno.test("checkRateLimit: separate IPs have separate budgets", async () => {
   const otherIp = await checkRateLimit("ep", "b", getStoreImpl);
   assertEquals(otherIp.allowed, true);
 });
+
+Deno.test("checkRateLimit: svar-hop har egen, rausere bøtte", async () => {
+  const store = fakeStore();
+  const getStoreImpl = () => store;
+  for (let i = 0; i < LIMIT; i++) await checkRateLimit("svar-hop", "1.2.3.4", getStoreImpl);
+  assertEquals((await checkRateLimit("svar-hop", "1.2.3.4", getStoreImpl)).allowed, true);
+  for (let i = 0; i < 600; i++) await checkRateLimit("svar-hop", "1.2.3.4", getStoreImpl);
+  assertEquals((await checkRateLimit("svar-hop", "1.2.3.4", getStoreImpl)).allowed, false);
+});

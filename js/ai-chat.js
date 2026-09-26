@@ -941,12 +941,17 @@
         if (res.sources && res.sources.length) {
           const list = document.createElement('div');
           list.className = 'ai-sources';
-          list.innerHTML = '<b>' + T('Kilder:') + '</b> ' + res.sources.map(s =>
-            (s.ok ? '✅ ' : '⚠️ ') +
-            '<a href="' + escapeHtml(s.url) + '" target="_blank" rel="noopener">' +
-            escapeHtml(s.url.replace(/^https?:\/\//, '').slice(0, 60)) + '</a>' +
-            (s.viaProxy ? ' (via proxy)' : '')
-          ).join(' · ');
+          // s.url er det modellen sendte til probe — kan være prompt-injisert.
+          // escapeHtml stopper ikke javascript:-URLer, så bare http(s) blir lenke.
+          list.innerHTML = '<b>' + T('Kilder:') + '</b> ' + res.sources.map(s => {
+            const url = String(s.url || '');
+            const label = escapeHtml(url.replace(/^https?:\/\//, '').slice(0, 60));
+            return (s.ok ? '✅ ' : '⚠️ ') +
+              (/^https?:\/\//i.test(url)
+                ? '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener">' + label + '</a>'
+                : label) +
+              (s.viaProxy ? ' (via proxy)' : '');
+          }).join(' · ');
           thinkingNode.appendChild(list);
         }
       }

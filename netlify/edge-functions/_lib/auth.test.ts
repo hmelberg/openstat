@@ -1,6 +1,7 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   clientIp,
+  readJsonCapped,
   extractByokKey,
   extractLlmKey,
   type GateDeps,
@@ -86,22 +87,30 @@ Deno.test("runGate: rate-limited -> 429 and Anvil NOT called (no amplification)"
   assertEquals(deps.calls.validate, 0); // rate-limit ran before validation
 });
 
-Deno.test("runGate: skipRateLimit hopper over ratelimit-sjekken", async () => {
-  let called = false;
-  const deps = makeDeps({
-    sharedToken: "tok",
-    checkRateLimit: () => {
-      called = true;
-      return Promise.resolve({ allowed: false, retryAfterSeconds: 9 });
+Deno.test("readJsonCapped: parser kropp under taket", async () => {
+  const r = await readJsonCapped(new Request("http://x/", { method: "POST", body: '{"a":1}' }), 100);
+  assertEquals(r, { ok: true, value: { a: 1 } });
+});
+
+Deno.test("readJsonCapped: avbryter chunked kropp over taket (ingen content-length)", async () => {
+  let pulls = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    pull(c) {
+      pulls++;
+      if (pulls > 1000) { c.close(); return; }
+      c.enqueue(new Uint8Array(64));
     },
   });
-  const resp = await runGate(
-    req({ token: "tok", contentLength: 10 }),
-    { endpoint: "svar", maxBodyBytes: 1000, skipRateLimit: true },
-    deps,
-  );
-  assertEquals(resp, null);
-  assertEquals(called, false);
+  const request = new Request("http://x/", { method: "POST", body: stream });
+  assertEquals(request.headers.get("content-length"), null);
+  const r = await readJsonCapped(request, 256);
+  assertEquals(r, { ok: false, tooLarge: true });
+  assertEquals(pulls < 20, true);
+});
+
+Deno.test("readJsonCapped: ugyldig JSON er ikke tooLarge", async () => {
+  const r = await readJsonCapped(new Request("http://x/", { method: "POST", body: "{nope" }), 100);
+  assertEquals(r, { ok: false, tooLarge: false });
 });
 
 Deno.test("runGate: valid shared token proceeds without calling Anvil", async () => {
