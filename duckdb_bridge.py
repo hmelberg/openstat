@@ -311,7 +311,7 @@ def df_to_parquet_bytes(df):
         import pandas as pd
         fixed = df.copy()
         for c in fixed.columns:
-            if fixed[c].dtype == object:
+            if fixed[c].dtype == object or pd.api.types.is_string_dtype(fixed[c].dtype):
                 fixed[c] = fixed[c].map(lambda v: None if pd.isna(v) else str(v))
         buf = io.BytesIO()
         fixed.to_parquet(buf, engine="pyarrow", index=False)

@@ -353,7 +353,8 @@ def convert_dtypes(df, meta=None):
 
     for col in df.columns:
         s = df[col]
-        if s.dtype != object:
+        # pandas 3 (pyodide v314) gir tekstkolonner dtype "str", ikke object
+        if not (s.dtype == object or pd.api.types.is_string_dtype(s.dtype)):
             continue
         vals = s.dropna()
         if vals.empty:

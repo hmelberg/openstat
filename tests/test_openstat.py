@@ -14,6 +14,10 @@ import openstat as ost
 FIX = json.loads((pathlib.Path(__file__).parent / "fixtures" / "pxweb_dataset.json").read_text())
 
 
+def _er_tekst(s):
+    """Tekstkolonne uansett pandas-versjon: object (pandas 2) eller "str" (pandas 3, pyodide v314)."""
+    return s.dtype == object or pd.api.types.is_string_dtype(s.dtype)
+
 def test_data_url_defaults():
     assert ost.data_url("https://x/tables/05839") == \
         "https://x/tables/05839/data?lang=no&outputFormat=json-stat2"
@@ -543,7 +547,7 @@ def test_apply_meta_usetexts_etiketter_typles_ikke(monkeypatch):
     monkeypatch.setattr(ost, "_typemeta_for", lambda *a: tm)
     df = pd.DataFrame({"Region": ["Oslo", "Stavanger"], "Tid": ["2023", "2024"]})
     out = ost.apply_meta(df, "https://data.ssb.no/api/pxwebapi/v2/tables/05839/data")
-    assert str(out["Region"].dtype) == "object"       # etikett-verdier: aldri dtype-endring
+    assert _er_tekst(out["Region"])       # etikett-verdier: aldri dtype-endring
     assert "ost_typemeta" in out.attrs                 # men attrs settes (panel)
 
 
@@ -691,7 +695,7 @@ def test_convert_dtypes_heuristikk_0301_kolonne_forblir_str():
     # numerisk-konverteres av heuristikken (0301->301-fella igjen).
     df = pd.DataFrame({"kommune": ["0301", "1103", "0104"]})
     out = ost.convert_dtypes(df)
-    assert str(out["kommune"].dtype) == "object"
+    assert _er_tekst(out["kommune"])
     assert list(out["kommune"]) == ["0301", "1103", "0104"]
 
 
@@ -713,7 +717,7 @@ def test_convert_dtypes_heuristikk_blandet_soppel_urort():
     # kardinalitet til category (alle unike) — skal forbli helt urørt.
     df = pd.DataFrame({"rot": ["7xk2", "abc-2024", "?!", "3.14.15", "siste"]})
     out = ost.convert_dtypes(df)
-    assert str(out["rot"].dtype) == "object"
+    assert _er_tekst(out["rot"])
     assert list(out["rot"]) == ["7xk2", "abc-2024", "?!", "3.14.15", "siste"]
 
 

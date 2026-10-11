@@ -20,5 +20,5 @@ def test_federert_demo_shards_union_equals_source():
 
 def test_federert_demo_kommune_beholder_ledende_null():
     p = pd.read_parquet(ROOT / "data" / "federert" / "nord.parquet")
-    assert p["kommune"].dtype == object
+    assert p["kommune"].dtype == object or pd.api.types.is_string_dtype(p["kommune"].dtype)
     assert p["kommune"].dropna().str.len().eq(4).all()

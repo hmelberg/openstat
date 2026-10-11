@@ -99,7 +99,7 @@ def test_parquet_roundtrip_preserves_dtypes_and_nulls():
     assert isinstance(out, (bytes, bytearray))
     back = pd.read_parquet(io.BytesIO(out))
     assert list(back.columns) == ["i", "f", "s"]
-    assert back["s"].tolist() == ["a", None, "c"]
+    assert [None if pd.isna(v) else v for v in back["s"]] == ["a", None, "c"]
     assert back["f"].tolist() == [1.5, 2.5, 3.0]
 
 
@@ -129,7 +129,7 @@ def test_df_to_parquet_blandet_objektkolonne_blir_tekst():
     import pandas as pd
     df = pd.DataFrame({"x": [1, "x", None]})
     back = pd.read_parquet(io.BytesIO(df_to_parquet_bytes(df)))
-    assert back.x.tolist() == ["1", "x", None]
+    assert [None if pd.isna(v) else v for v in back.x] == ["1", "x", None]
 
 
 def test_split_dropper_rene_kommentarbiter():
