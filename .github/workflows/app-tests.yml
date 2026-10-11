@@ -36,7 +36,7 @@ jobs:
           python-version: '3.12'
       - name: Install dependencies
         # pandas = det Pyodide v314 leverer (3.0.2); bump sammen med Pyodide
-        run: pip install pytest 'pandas==3.0.2' numpy pyarrow
+        run: pip install pytest 'pandas==3.0.2' numpy pyarrow plotly pyyaml duckdb polars
       - name: Run app suite
         run: python -m pytest tests/ -q
   node:
